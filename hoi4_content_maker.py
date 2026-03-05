@@ -1,0 +1,16588 @@
+# =================================================================
+#  Content Maker for Hearts of Iron 4
+#  HOI4 Content Maker
+#  Version 2.0  |  Author: Blazer
+# =================================================================
+#
+#  COPYRIGHT NOTICE
+#  Copyright (c) 2025 Blazer. All Rights Reserved.
+#
+#  This software, including all source code, assets, and
+#  associated files, is the exclusive intellectual property
+#  of Blazer ("the Author").
+#
+#  PROPRIETARY LICENCE — ALL RIGHTS RESERVED
+#
+#  This software is NOT open-source and is NOT free to use
+#  without explicit written permission from the Author.
+#
+#  Without prior written authorisation you may NOT:
+#    - Copy, reproduce, or redistribute this software
+#      or any portion of its source code
+#    - Modify, adapt, or create derivative works
+#    - Use this software commercially or include it in
+#      any other project, product, or distribution
+#    - Share, upload, or publish this software in source
+#      or compiled form on any platform
+#
+#  Permitted use is limited to:
+#    - Personal, private, non-commercial use by the
+#      individual who obtained the software directly
+#      from the Author
+#
+#  Unauthorised use, duplication, or distribution of this
+#  software, in whole or in part, is strictly prohibited
+#  and may result in civil and/or criminal penalties under
+#  applicable copyright law.
+#
+#  CONTACT
+#  For licensing enquiries, permissions, or general contact:
+#    ThatGuyBlazer@gmail.com
+#
+# =================================================================
+
+"""
+Content Maker for Hearts of Iron 4
+HOI4 Content Maker  —  v2.0  |  by Blazer
+
+Copyright (c) 2025 Blazer. All Rights Reserved.
+Contact : ThatGuyBlazer@gmail.com
+
+Wiki    : https://hoi4.paradoxwikis.com/National_focus_modding
+Requires: Python 3.9+  (tkinter built-in, no pip install needed)
+Run     : python hoi4_focus_maker.py
+
+Controls:
+  Right-click canvas   = place a new focus
+  Left-click + drag    = move a focus
+  Ctrl + drag / MMB    = pan the canvas
+  Scroll wheel         = zoom in / out
+  Ctrl + Z             = undo last action
+"""
+import tkinter as tk
+from tkinter import messagebox, filedialog, ttk
+import json, os, re, threading, sys, subprocess
+
+# ── Persistent config ────────────────────────────────────────────────
+CONFIG_PATH = os.path.join(os.path.expanduser("~"), ".hoi4_focus_maker.json")
+
+def _cfg_load():
+    """Load saved config dict, return {} on any error."""
+    try:
+        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+def _cfg_save(data):
+    """Merge data into existing config and write to disk."""
+    try:
+        existing = _cfg_load()
+        existing.update(data)
+        with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+            json.dump(existing, f, indent=2)
+    except Exception:
+        pass
+
+
+
+def _append_scripted_loc(sloc_path, blocks, saved, errs, mod_root=None):
+    """Append defined_text blocks to a scripted_localisation .txt file.
+    
+    blocks: list of dicts with keys:
+        name        - the defined_text name (e.g. "GET_TAG_spirit_name")
+        text        - list of (trigger_str, localization_key) tuples,
+                      or just a single string for a simple unconditional text
+        default     - optional default text string
+    """
+    if not sloc_path or not blocks:
+        return
+    os.makedirs(os.path.dirname(sloc_path), exist_ok=True)
+    try:
+        existing = ""
+        if os.path.isfile(sloc_path):
+            with open(sloc_path, "r", encoding="utf-8", errors="replace") as f:
+                existing = f.read()
+        new_blocks = []
+        for blk in blocks:
+            name = blk.get("name","")
+            if not name: continue
+            # Skip if already defined
+            if re.search(r'\bdefined_text\s*=\s*\{[^}]*\bname\s*=\s*' + re.escape(name), existing):
+                continue
+            lines = ["defined_text = {", f"\tname = {name}"]
+            for trigger, loc_key in blk.get("texts", []):
+                lines.append("\ttext = {")
+                if trigger:
+                    lines.append(f"\t\ttrigger = {{ {trigger} }}")
+                lines.append(f"\t\tlocalization_key = {loc_key}")
+                lines.append("\t}")
+            if blk.get("default"):
+                lines.append("\ttext = {")
+                lines.append(f"\t\tlocalization_key = {blk['default']}")
+                lines.append("\t}")
+            lines.append("}")
+            new_blocks.append("\n".join(lines))
+        if new_blocks:
+            sep = "\n\n" if existing.strip() else ""
+            with open(sloc_path, "a", encoding="utf-8") as f:
+                f.write(sep + "\n\n".join(new_blocks) + "\n")
+            rel = os.path.relpath(sloc_path, mod_root) if mod_root else sloc_path
+            saved.append(rel + f"  (+{len(new_blocks)} scripted_loc blocks)")
+    except Exception as e:
+        errs.append("Scripted Loc: " + str(e))
+
+# ── Auto-install Pillow if missing ───────────────────────────────────
+try:
+    from PIL import Image as _PILImage, ImageTk as _PILImageTk
+    _PIL_OK = True
+except ImportError:
+    _PIL_OK = False
+    try:
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "Pillow"],
+                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        from PIL import Image as _PILImage, ImageTk as _PILImageTk
+        _PIL_OK = True
+    except Exception:
+        _PIL_OK = False
+
+# Shared image cache registry — wizards register their caches here for invalidation on mod reload
+_app_img_caches = []
+
+# ── Dark Professional Theme ──────────────────────────────────────────
+
+# ── Colour palette ────────────────────────────────────────────────
+BG_DARK   = "#0d1117"    # deepest dark  (topbar / chrome)
+BG_PANEL  = "#161b27"    # dark navy     (sidebar bg)
+BG_CARD   = "#1e2435"    # card / input bg
+CANVAS_BG = "#111827"    # canvas dark
+GOLD      = "#f0c040"    # cost text yellow
+GOLD_DIM  = "#6b7280"    # dimmed
+GOLD_LT   = "#f9fafb"    # bright white text
+TEXT      = "#e2e8f0"    # near-white primary text
+TEXT_DIM  = "#6b7280"    # muted grey labels
+BORDER    = "#2d3748"    # subtle border
+BORDER_G  = "#374151"    # slightly brighter border
+RED       = "#ef4444"    # delete / error
+GREEN     = "#22c55e"    # save / ok
+BLUE      = "#3b82f6"    # primary accent (prereqs / connect)
+ORANGE    = "#f97316"    # mutex
+SEL_BG    = "#1d4ed8"    # selection bg
+TEAL      = "#2dd4bf"    # teal accent
+PURPLE    = "#a78bfa"    # purple accent
+BG_HOVER  = "#1a2030"    # hover bg for menu items
+YELLOW    = "#fbbf24"    # tree name / warning accent
+
+# ── Focus card colours ────────────────────────────────────────────
+FC_BG     = "#1a2035"    # dark card body
+FC_SEL    = "#1e3a6e"    # selected card (blue tint)
+FC_BORDER = "#374151"    # subtle card border
+FC_SEL_BD = "#3b82f6"    # selected border (bright blue)
+
+# ── Connection line colours ───────────────────────────────────────
+PREREQ_COL = "#3b82f6"   # blue arrow  (prerequisite)
+MUTEX_COL  = "#f97316"   # orange dashed (mutually exclusive)
+
+# ── Grid / layout ─────────────────────────────────────────────────
+XGRID = 96     # hoi4modutilities exact: xGridSize=96
+YGRID = 130    # yGridSize=130
+BOX   = 52     # focus card rendered size
+
+# ── Icon list ─────────────────────────────────────────────────────
+ICONS = ["⚔","🛡","🏭","🌾","💰","🔬","⚙","🗺","✊","🏛","★","⚡","🐉","🎖","📜","🔔","🌊","🔥","❄","☠"]
+
+
+# ── Effect & modifier data tables ────────────────────────────────
+# ── EFFECT DEFINITIONS (from official wiki) ──────────────────────
+# Each effect: "key": { "label", "category", "fields": [(name, widget, default, hint)] }
+# widget types: "entry", "multiline", "dropdown:a,b,c"
+
+EFFECT_DEFS = {
+  # ── POLITICAL ─────────────────────────────────────────────────────────────
+  "add_political_power":      {"label":"Add Political Power",          "cat":"Political",
+    "fields":[("amount","entry","100","Integer. Negative removes PP.")]},
+  "set_political_power":      {"label":"Set Political Power",          "cat":"Political",
+    "fields":[("value","entry","100","Set PP to exact value.")]},
+  "add_scaled_political_power":{"label":"Add Scaled Political Power",  "cat":"Political",
+    "fields":[("value","entry","0.1","Fraction of base PP (0.1=10%).")]},
+  "add_stability":            {"label":"Add Stability",                "cat":"Political",
+    "fields":[("amount","entry","0.05","Float 0.05=+5%. Range -1 to 1.")]},
+  "set_stability":            {"label":"Set Stability",                "cat":"Political",
+    "fields":[("value","entry","0.5","Set stability 0.0-1.0.")]},
+  "add_war_support":          {"label":"Add War Support",              "cat":"Political",
+    "fields":[("amount","entry","0.05","Float 0.05=+5%.")]},
+  "set_war_support":          {"label":"Set War Support",              "cat":"Political",
+    "fields":[("value","entry","0.5","Set war support 0.0-1.0.")]},
+  "add_popularity":           {"label":"Add Ideology Popularity",      "cat":"Political",
+    "fields":[("ideology","dropdown:democratic,fascism,communism,neutrality","democratic","Target ideology."),
+              ("popularity","entry","0.05","Float 0.05=+5%.")]},
+  "set_popularities":         {"label":"Set All Party Popularities",   "cat":"Political",
+    "fields":[("democratic","entry","25","Democratic %."),
+              ("fascism","entry","25","Fascism %."),
+              ("communism","entry","25","Communism %."),
+              ("neutrality","entry","25","Neutrality %.")]},
+  "set_politics":             {"label":"Set Politics",                 "cat":"Political",
+    "fields":[("ruling_party","dropdown:democratic,fascism,communism,neutrality","democratic","New ruling ideology."),
+              ("elections_allowed","dropdown:yes,no","no","Allow elections?")]},
+  "set_political_party":      {"label":"Set Political Party",          "cat":"Political",
+    "fields":[("ideology","dropdown:democratic,fascism,communism,neutrality","fascism","Ideology to set."),
+              ("popularity","entry","0.2","Initial popularity 0.0-1.0.")]},
+  "hold_election":            {"label":"Hold Election",                "cat":"Political",
+    "fields":[("value","dropdown:yes,no","yes","Immediately hold election.")]},
+  "add_ideas":                {"label":"Add National Spirit / Idea",   "cat":"Political",
+    "fields":[("idea_name","entry","my_spirit","ID defined in common/ideas/")]},
+  "remove_ideas":             {"label":"Remove Idea / Spirit",         "cat":"Political",
+    "fields":[("idea_name","entry","my_spirit","ID of idea to remove.")]},
+  "remove_ideas_with_trait":  {"label":"Remove Ideas With Trait",      "cat":"Political",
+    "fields":[("trait","entry","my_trait","Remove all ideas that have this trait.")]},
+  "swap_ideas":               {"label":"Swap Ideas",                   "cat":"Political",
+    "fields":[("remove_idea","entry","old_spirit","Idea to remove."),
+              ("add_idea","entry","new_spirit","Idea to add.")]},
+  "add_timed_idea":           {"label":"Add Timed Idea",               "cat":"Political",
+    "fields":[("idea","entry","my_spirit","Idea ID."),
+              ("days","entry","180","Duration in days.")]},
+  "modify_timed_idea":        {"label":"Modify Timed Idea Duration",   "cat":"Political",
+    "fields":[("idea","entry","my_spirit","Idea ID."),
+              ("days","entry","30","Days to add/subtract.")]},
+  "show_ideas_tooltip":       {"label":"Show Ideas Tooltip",           "cat":"Political",
+    "fields":[("idea","entry","my_spirit","Idea ID to show tooltip for.")]},
+  "set_cosmetic_tag":         {"label":"Set Cosmetic Tag",             "cat":"Political",
+    "fields":[("tag","entry","TAG","Country tag to copy appearance from.")]},
+  "drop_cosmetic_tag":        {"label":"Drop Cosmetic Tag",            "cat":"Political",
+    "fields":[("value","dropdown:yes,no","yes","Remove current cosmetic tag.")]},
+  "change_tag_from":          {"label":"Change Tag From (player)",     "cat":"Political",
+    "fields":[("tag","entry","TAG","Move player from this tag to current country.")]},
+  "kill_country_leader":      {"label":"Kill Country Leader",          "cat":"Political",
+    "fields":[("value","dropdown:yes,no","yes","Kill current country leader.")]},
+  "kill_ideology_leader":     {"label":"Kill Ideology Leader",         "cat":"Political",
+    "fields":[("ideology","dropdown:democratic,fascism,communism,neutrality","fascism","Ideology whose leader to kill.")]},
+  "retire_country_leader":    {"label":"Retire Country Leader",        "cat":"Political",
+    "fields":[("value","dropdown:yes,no","yes","Retire current leader.")]},
+  "retire_ideology_leader":   {"label":"Retire Ideology Leader",       "cat":"Political",
+    "fields":[("ideology","dropdown:democratic,fascism,communism,neutrality","fascism","Ideology whose leader to retire.")]},
+  "retire_character":         {"label":"Retire Character",             "cat":"Political",
+    "fields":[("character","entry","TAG_Character_Token","Character token to un-assign from all roles.")]},
+  "create_country_leader":    {"label":"Create Country Leader",        "cat":"Political",
+    "fields":[("name","entry","John Smith","Leader name."),
+              ("desc","entry","","Description key (optional)."),
+              ("picture","entry","GFX_portrait_TAG_leader","Portrait GFX key."),
+              ("expire","entry","1965.1.1","Expiry date."),
+              ("ideology","dropdown:democratic,fascism,communism,neutrality","fascism","Ideology sub-type.")]},
+  "add_country_leader_trait": {"label":"Add Leader Trait",             "cat":"Political",
+    "fields":[("trait","entry","war_hero","Trait ID from common/country_leader/")]},
+  "remove_country_leader_trait":{"label":"Remove Leader Trait",        "cat":"Political",
+    "fields":[("trait","entry","war_hero","Trait ID to remove.")]},
+  "swap_country_leader_traits":{"label":"Swap Leader Traits",          "cat":"Political",
+    "fields":[("remove_trait","entry","old_trait","Trait to remove."),
+              ("add_trait","entry","new_trait","Trait to add.")]},
+  "swap_ruler_traits":        {"label":"Swap Ruler Traits",            "cat":"Political",
+    "fields":[("remove_trait","entry","old_trait","Trait to remove from current ruler."),
+              ("add_trait","entry","new_trait","Trait to add.")]},
+  "add_country_leader_role":  {"label":"Add Country Leader Role",      "cat":"Political",
+    "fields":[("character","entry","TAG_character","Character ID."),
+              ("ideology","dropdown:democratic,fascism,communism,neutrality","fascism","Ideology.")]},
+  "remove_country_leader_role":{"label":"Remove Country Leader Role",  "cat":"Political",
+    "fields":[("character","entry","TAG_character","Character ID."),
+              ("ideology","dropdown:democratic,fascism,communism,neutrality","fascism","Ideology.")]},
+  "set_country_leader_ideology":{"label":"Set Leader Ideology",        "cat":"Political",
+    "fields":[("ideology","dropdown:democratic,fascism,communism,neutrality","fascism","New ideology.")]},
+  "set_country_leader_name":  {"label":"Set Leader Name",              "cat":"Political",
+    "fields":[("name","entry","loc_key_name","Localisation key for new name.")]},
+  "set_country_leader_description":{"label":"Set Leader Description",  "cat":"Political",
+    "fields":[("desc","entry","loc_key_desc","Localisation key for description.")]},
+  "set_country_leader_portrait":{"label":"Set Leader Portrait",        "cat":"Political",
+    "fields":[("large","entry","GFX_portrait_TAG_leader","Large portrait GFX key.")]},
+  "set_character_name":       {"label":"Set Character Name",           "cat":"Political",
+    "fields":[("character","entry","TAG_character","Character token (optional if in char scope)."),
+              ("name","entry","loc_key_or_name","Localisation key or direct name string.")]},
+  "set_portraits":            {"label":"Set Character Portraits",      "cat":"Political",
+    "fields":[("character","entry","TAG_character","Character ID."),
+              ("large","entry","GFX_portrait_TAG_large","Large portrait GFX."),
+              ("small","entry","GFX_portrait_TAG_small","Small portrait GFX.")]},
+  "promote_character":        {"label":"Promote Character",            "cat":"Political",
+    "fields":[("character","entry","TAG_character","Character ID to promote.")]},
+  "recruit_character":        {"label":"Recruit Character",            "cat":"Political",
+    "fields":[("character","entry","TAG_character","Character ID to recruit.")]},
+  "generate_character":       {"label":"Generate Character",           "cat":"Political",
+    "fields":[("token","entry","TAG_generated_char","Character token."),
+              ("ideology","dropdown:democratic,fascism,communism,neutrality","fascism","Ideology.")]},
+  "become_exiled_in":         {"label":"Become Exiled In",             "cat":"Political",
+    "fields":[("target","entry","TAG","Host country tag."),
+              ("legitimacy","entry","50","Starting legitimacy 0-100 (optional).")]},
+  "end_exile":                {"label":"End Exile",                    "cat":"Political",
+    "fields":[("value","dropdown:yes,no","yes","End the exile of current country.")]},
+  "add_legitimacy":           {"label":"Add Legitimacy",               "cat":"Political",
+    "fields":[("value","entry","10","Legitimacy to add (exile govt).")]},
+  "set_legitimacy":           {"label":"Set Legitimacy",               "cat":"Political",
+    "fields":[("value","entry","50","Set legitimacy to exact value.")]},
+  "set_party_name":           {"label":"Set Party Name",               "cat":"Political",
+    "fields":[("ideology","dropdown:democratic,fascism,communism,neutrality","fascism","Ideology."),
+              ("long_name","entry","The Party","Localisation key for long name."),
+              ("name","entry","Party","Localisation key for short name.")]},
+  "set_party_rule":           {"label":"Set Party Rule",               "cat":"Political",
+    "fields":[("ideology","dropdown:democratic,fascism,communism,neutrality","fascism","Ideology."),
+              ("rule","entry","can_be_ruling_party","Rule ID.")]},
+  "set_rule":                 {"label":"Set Country Rule",             "cat":"Political",
+    "fields":[("rule","entry","can_not_declare_war","Rule key."),
+              ("value","dropdown:yes,no","yes","Enable or disable the rule.")]},
+  "clear_rule":               {"label":"Clear Country Rule",           "cat":"Political",
+    "fields":[("value","dropdown:yes,no","yes","Clear all manually set rules.")]},
+  "activate_decision":        {"label":"Activate Decision",            "cat":"Political",
+    "fields":[("decision","entry","my_decision","Decision ID to activate.")]},
+  "activate_targeted_decision":{"label":"Activate Targeted Decision",  "cat":"Political",
+    "fields":[("target","entry","TAG","Country tag."),
+              ("decision","entry","my_decision","Decision ID.")]},
+  "remove_decision":          {"label":"Remove Decision",              "cat":"Political",
+    "fields":[("decision","entry","my_decision","Decision ID to remove.")]},
+  "remove_targeted_decision": {"label":"Remove Targeted Decision",     "cat":"Political",
+    "fields":[("target","entry","TAG","Country tag."),
+              ("decision","entry","my_decision","Decision ID to remove.")]},
+  "remove_decision_on_cooldown":{"label":"Remove Decision On Cooldown","cat":"Political",
+    "fields":[("decision","entry","my_decision","Decision ID to reactivate/remove from cooldown.")]},
+  "activate_mission":         {"label":"Activate Mission",             "cat":"Political",
+    "fields":[("mission","entry","my_mission","Mission ID to activate.")]},
+  "activate_mission_tooltip": {"label":"Activate Mission Tooltip",     "cat":"Political",
+    "fields":[("mission","entry","my_mission","Mission ID — shows tooltip only, activation manual.")]},
+  "remove_mission":           {"label":"Remove Mission",               "cat":"Political",
+    "fields":[("mission","entry","my_mission","Mission ID to remove.")]},
+  "add_days_mission_timeout": {"label":"Add Days Mission Timeout",     "cat":"Political",
+    "fields":[("mission","entry","my_mission","Mission ID."),
+              ("days","entry","30","Days to add to mission timeout.")]},
+  "add_days_remove":          {"label":"Add Days Remove (Decision)",   "cat":"Political",
+    "fields":[("decision","entry","my_decision","Decision ID."),
+              ("days","entry","30","Days to add/remove from days_remove value.")]},
+  "unlock_decision_tooltip":  {"label":"Unlock Decision Tooltip",      "cat":"Political",
+    "fields":[("decision","entry","my_decision","Decision ID to show unlock tooltip for.")]},
+  "unlock_decision_category_tooltip":{"label":"Unlock Decision Category Tooltip","cat":"Political",
+    "fields":[("category","entry","my_decision_category","Decision category ID.")]},
+  "load_focus_tree":          {"label":"Load Focus Tree",              "cat":"Political",
+    "fields":[("tree","entry","TAG_focus_tree","Focus tree ID to switch to."),
+              ("keep_completed","dropdown:yes,no","yes","Keep completed focuses?")]},
+  "complete_national_focus":  {"label":"Complete Another Focus",       "cat":"Political",
+    "fields":[("focus_id","entry","TAG_focus_name","ID of focus to instantly complete.")]},
+  "unlock_national_focus":    {"label":"Unlock National Focus",        "cat":"Political",
+    "fields":[("focus","entry","TAG_focus_name","Focus ID to make available.")]},
+  "uncomplete_national_focus":{"label":"Uncomplete National Focus",    "cat":"Political",
+    "fields":[("focus","entry","TAG_focus_name","Focus ID to uncomplete."),
+              ("uncomplete_children","dropdown:yes,no","no","Also uncomplete child focuses?")]},
+  "reduce_focus_completion_cost":{"label":"Reduce Focus Completion Cost","cat":"Political",
+    "fields":[("focus","entry","TAG_focus_name","Focus ID."),
+              ("cost","entry","35","Days to reduce from completion cost.")]},
+  "activate_shine_on_focus":  {"label":"Activate Shine on Focus",      "cat":"Political",
+    "fields":[("focus","entry","TAG_focus_name","Focus ID to add shine effect to.")]},
+  "deactivate_shine_on_focus":{"label":"Deactivate Shine on Focus",    "cat":"Political",
+    "fields":[("focus","entry","TAG_focus_name","Focus ID to remove shine effect from.")]},
+  "mark_focus_tree_layout_dirty":{"label":"Mark Focus Tree Layout Dirty","cat":"Political",
+    "fields":[("value","dropdown:yes,no","yes","Force refresh of focus tree layout.")]},
+  "mark_technology_tree_layout_dirty":{"label":"Mark Tech Tree Layout Dirty","cat":"Political",
+    "fields":[("value","dropdown:yes,no","yes","Force refresh of hidden technologies.")]},
+  "set_major":                {"label":"Set Major Status",             "cat":"Political",
+    "fields":[("value","dropdown:yes,no","yes","Make country a major power?")]},
+  "activate_advisor":         {"label":"Activate Advisor",             "cat":"Political",
+    "fields":[("advisor","entry","my_advisor_id","Advisor character ID.")]},
+  "deactivate_advisor":       {"label":"Deactivate Advisor",           "cat":"Political",
+    "fields":[("advisor","entry","my_advisor_id","Advisor character ID.")]},
+  "add_advisor_role":         {"label":"Add Advisor Role",             "cat":"Political",
+    "fields":[("character","entry","TAG_Character_Token","Character token."),
+              ("slot","dropdown:political_advisor,air_chief,army_chief,navy_chief,high_command,theorist","political_advisor","Advisor slot."),
+              ("idea_token","entry","TAG_advisor_idea","Idea token for this role."),
+              ("cost","entry","50","PP cost to hire."),
+              ("activate","dropdown:yes,no","no","Hire immediately?")]},
+  "remove_advisor_role":      {"label":"Remove Advisor Role",          "cat":"Political",
+    "fields":[("character","entry","TAG_Character_Token","Character token."),
+              ("slot","dropdown:political_advisor,air_chief,army_chief,navy_chief,high_command,theorist","political_advisor","Advisor slot to remove.")]},
+  "add_to_tech_sharing_group":{"label":"Add to Tech Sharing Group",    "cat":"Political",
+    "fields":[("group","entry","my_tech_group","Sharing group ID.")]},
+  "remove_from_tech_sharing_group":{"label":"Remove from Tech Sharing Group","cat":"Political",
+    "fields":[("group","entry","my_tech_group","Sharing group ID.")]},
+  "reserve_dynamic_country":  {"label":"Reserve Dynamic Country",      "cat":"Political",
+    "fields":[("tag","entry","D00","Dynamic country tag to reserve so it won't be recycled.")]},
+  "create_dynamic_country":   {"label":"Create Dynamic Country",       "cat":"Political",
+    "fields":[("effect","entry","set_capital = { state_id = 1 }","Effects to run in the new dynamic country scope.")]},
+  "career_profile_step_missiolini":{"label":"Career Profile Step (Mussolini)","cat":"Political",
+    "fields":[("value","dropdown:yes,no","yes","Step completed Mussolini missions by one.")]},
+
+  # ── RESEARCH ──────────────────────────────────────────────────────────────
+  "add_tech_bonus":           {"label":"Add Tech Research Bonus",      "cat":"Research",
+    "fields":[("name","entry","TAG_bonus_name","Unique bonus name."),
+              ("bonus","entry","0.5","Speed bonus — 0.5=50% faster."),
+              ("uses","entry","1","How many techs this applies to."),
+              ("category","entry","infantry_weapons","Tech category ID.")]},
+  "add_research_slot":        {"label":"Add Research Slot",            "cat":"Research",
+    "fields":[("value","entry","1","Slots to add. Cannot exceed 5 total.")]},
+  "set_research_slots":       {"label":"Set Research Slots",           "cat":"Research",
+    "fields":[("value","entry","3","Set exact number of research slots.")]},
+  "set_technology":           {"label":"Set Technology",               "cat":"Research",
+    "fields":[("tech_id","entry","infantry_weapons1","Technology ID."),
+              ("researched","dropdown:yes,no","yes","Grant or remove?")]},
+  "modify_tech_sharing_bonus":{"label":"Modify Tech Sharing Bonus",    "cat":"Research",
+    "fields":[("group","entry","my_group","Tech sharing group ID."),
+              ("value","entry","0.1","Bonus modifier.")]},
+  "steal_random_tech_bonus":  {"label":"Steal Random Tech Bonus",      "cat":"Research",
+    "fields":[("target","entry","TAG","Country to steal from."),
+              ("uses","entry","1","Number of uses."),
+              ("category","entry","infantry_weapons","Technology category.")]},
+  "inherit_technology":       {"label":"Inherit Technology",           "cat":"Research",
+    "fields":[("target","entry","TAG","Country to inherit all tech from.")]},
+  "add_doctrine_cost_reduction":{"label":"Add Doctrine Cost Reduction","cat":"Research",
+    "fields":[("name","entry","TAG_doctrine_bonus","Bonus ID."),
+              ("cost_reduction","entry","0.5","Reduction 0.0-1.0."),
+              ("uses","entry","1","Number of uses."),
+              ("category","dropdown:land_doctrine,air_doctrine,naval_doctrine","land_doctrine","Doctrine category.")]},
+  "add_equipment_bonus":      {"label":"Add Equipment Bonus",          "cat":"Research",
+    "fields":[("equipment","entry","fighter_equipment","Equipment archetype."),
+              ("bonus_type","dropdown:reliability_factor,defense,attack,air_attack,naval_speed","reliability_factor","Bonus type."),
+              ("value","entry","0.1","Bonus value."),
+              ("temporary","dropdown:yes,no","no","Temporary?")]},
+  "add_design_template_bonus":{"label":"Add Design Template Bonus",    "cat":"Research",
+    "fields":[("equipment_type","entry","medium_tank_equipment","Equipment type for free design discount."),
+              ("uses","entry","1","Number of uses."),
+              ("cost_factor","entry","0.4","Discount factor e.g. 0.4 = 40% off.")]},
+  "select_tech_tree_icon_origin":{"label":"Select Tech Tree Icon Origin","cat":"Research",
+    "fields":[("tag","entry","TAG","Country whose tech icons to use in the tech tree.")]},
+  "unlock_tactic":            {"label":"Unlock Combat Tactic",         "cat":"Research",
+    "fields":[("tactic","entry","tactic_masterful_blitz","Combat tactic ID from common/combat_tactics/")]},
+  "set_grand_doctrine":       {"label":"Set Grand Doctrine",           "cat":"Research",
+    "fields":[("doctrine","entry","mobile_warfare","Grand doctrine ID.")]},
+  "set_sub_doctrine":         {"label":"Set Sub Doctrine",             "cat":"Research",
+    "fields":[("doctrine","entry","mobile_infantry","Sub-doctrine ID.")]},
+  "add_mastery":              {"label":"Add Doctrine Mastery",         "cat":"Research",
+    "fields":[("amount","entry","100","Amount of mastery to add."),
+              ("folder","dropdown:land,air,naval","land","Folder to filter by (optional)."),
+              ("grand_doctrine","entry","mobile_warfare","Grand doctrine to filter by (optional).")]},
+  "add_mastery_bonus":        {"label":"Add Mastery Bonus (Temporary)","cat":"Research",
+    "fields":[("bonus","entry","0.1","Bonus factor e.g. 0.1=+10%."),
+              ("days","entry","90","Days to apply the bonus."),
+              ("name","entry","MY_BONUS_LOC","Loc key for tooltip description.")]},
+  "add_daily_mastery":        {"label":"Add Daily Mastery",            "cat":"Research",
+    "fields":[("amount","entry","0.1","Mastery to add per day."),
+              ("days","entry","90","Number of days."),
+              ("name","entry","MY_DAILY_LOC","Loc key for tooltip description.")]},
+  "add_breakthrough_points":  {"label":"Add Breakthrough Points",      "cat":"Research",
+    "fields":[("specialization","entry","all","Specialization ID or 'all'."),
+              ("value","entry","3","Breakthrough points to add.")]},
+  "add_breakthrough_progress":{"label":"Add Breakthrough Progress",    "cat":"Research",
+    "fields":[("specialization","entry","all","Specialization ID or 'all'."),
+              ("value","entry","0.1","Progress to add as fraction 0.0-1.0.")]},
+
+  # ── INDUSTRY ──────────────────────────────────────────────────────────────
+  "add_building_construction":{"label":"Build Construction",           "cat":"Industry",
+    "fields":[("type","dropdown:industrial_complex,arms_factory,dockyard,air_base,naval_base,bunker,coastal_bunker,anti_air_building,radar_station,rocket_site,nuclear_reactor,fuel_silo,synthetic_refinery,infrastructure","industrial_complex","Building type."),
+              ("level","entry","1","Levels to build."),
+              ("instant_build","dropdown:yes,no","no","Build instantly?")]},
+  "set_building_level":       {"label":"Set Building Level",           "cat":"Industry",
+    "fields":[("type","dropdown:industrial_complex,arms_factory,dockyard,air_base,naval_base,bunker,coastal_bunker,anti_air_building,radar_station,rocket_site,nuclear_reactor,fuel_silo,synthetic_refinery,infrastructure","industrial_complex","Building type."),
+              ("level","entry","3","Level to set."),
+              ("instant_build","dropdown:yes,no","yes","Build instantly?")]},
+  "remove_building":          {"label":"Remove Building",              "cat":"Industry",
+    "fields":[("type","dropdown:industrial_complex,arms_factory,dockyard,air_base,naval_base,bunker,coastal_bunker,anti_air_building,radar_station,rocket_site,nuclear_reactor,fuel_silo,synthetic_refinery,infrastructure","industrial_complex","Building type."),
+              ("level","entry","1","Levels to remove.")]},
+  "damage_building":          {"label":"Damage Building",              "cat":"Industry",
+    "fields":[("type","dropdown:industrial_complex,arms_factory,dockyard,air_base,naval_base,infrastructure","industrial_complex","Building type."),
+              ("damage","entry","1","Levels of damage.")]},
+  "construct_building_in_random_province":{"label":"Construct Building in Random Province","cat":"Industry",
+    "fields":[("type","dropdown:industrial_complex,arms_factory,dockyard,air_base,naval_base,bunker,coastal_bunker,anti_air_building,radar_station","industrial_complex","Building type."),
+              ("level","entry","1","Levels to construct."),
+              ("country","entry","ROOT","Country scope for the construction.")]},
+  "add_extra_state_shared_building_slots":{"label":"Add Shared Building Slots","cat":"Industry",
+    "fields":[("value","entry","1","Extra shared building slots to add.")]},
+  "add_offsite_building":     {"label":"Add Offsite Building",         "cat":"Industry",
+    "fields":[("type","dropdown:industrial_complex,arms_factory,dockyard","industrial_complex","Building type."),
+              ("level","entry","1","Levels to add offsite.")]},
+  "build_railway":            {"label":"Build Railway",                "cat":"Industry",
+    "fields":[("level","dropdown:1,2,3","1","Railway level."),
+              ("path","entry","{ 1 2 3 }","Province IDs for the path.")]},
+  "add_resource":             {"label":"Add State Resource",           "cat":"Industry",
+    "fields":[("type","dropdown:oil,steel,aluminium,rubber,tungsten,chromium","steel","Resource type."),
+              ("amount","entry","8","Amount to add.")]},
+  "modify_building_resources":{"label":"Modify Building Resources",    "cat":"Industry",
+    "fields":[("building","dropdown:industrial_complex,arms_factory,dockyard,radar_station,synthetic_refinery","radar_station","Building type."),
+              ("resource","dropdown:oil,steel,aluminium,rubber,tungsten,chromium","oil","Resource type."),
+              ("amount","entry","2","Amount to modify.")]},
+  "add_equipment_to_stockpile":{"label":"Add Equipment to Stockpile",  "cat":"Industry",
+    "fields":[("type","entry","infantry_equipment_1","Archetype ID."),
+              ("amount","entry","500","Quantity."),
+              ("producer","entry","","(Optional) Producer country tag.")]},
+  "add_equipment_production": {"label":"Add Equipment Production Line","cat":"Industry",
+    "fields":[("type","entry","infantry_equipment_1","Equipment type ID."),
+              ("requested_factories","entry","1","Factories assigned."),
+              ("progress","entry","0.0","Starting progress 0.0-1.0.")]},
+  "send_equipment":           {"label":"Send Equipment",               "cat":"Industry",
+    "fields":[("type","entry","infantry_equipment","Equipment type."),
+              ("amount","entry","500","Quantity."),
+              ("target","entry","TAG","Recipient country tag.")]},
+  "send_equipment_fraction":  {"label":"Send Equipment Fraction",      "cat":"Industry",
+    "fields":[("type","entry","infantry_equipment","Equipment type."),
+              ("fraction","entry","0.1","Fraction 0.0-1.0."),
+              ("target","entry","TAG","Recipient.")]},
+  "add_equipment_subsidy":    {"label":"Add Equipment Subsidy",        "cat":"Industry",
+    "fields":[("cic","entry","100","CIC amount for the subsidy."),
+              ("equipment_type","entry","support_equipment","Target equipment archetype."),
+              ("seller_tags","entry","ENG FRA","Space-separated seller country tags.")]},
+  "create_production_license":{"label":"Create Production License",    "cat":"Industry",
+    "fields":[("target","entry","TAG","Country to receive the license."),
+              ("equipment","entry","fighter_equipment_1","Equipment type."),
+              ("cost_factor","entry","1.0","Cost factor for production (optional).")]},
+  "create_equipment_variant": {"label":"Create Equipment Variant",     "cat":"Industry",
+    "fields":[("name","entry","My Tank Design","Variant name."),
+              ("type","entry","medium_tank_equipment_2","Base equipment type."),
+              ("parent_version_id","entry","1","Parent variant ID.")]},
+  "set_equipment_fraction":   {"label":"Set Equipment Fraction",       "cat":"Industry",
+    "fields":[("fraction","entry","0.5","Modify all equipment by this factor 0.0-1.0.")]},
+  "set_equipment_version_number":{"label":"Set Equipment Version Number","cat":"Industry",
+    "fields":[("equipment","entry","infantry_equipment","Equipment archetype."),
+              ("version","entry","1","Version number to set.")]},
+  "add_fuel":                 {"label":"Add Fuel",                     "cat":"Industry",
+    "fields":[("amount","entry","100","Fuel amount to add.")]},
+  "set_fuel":                 {"label":"Set Fuel",                     "cat":"Industry",
+    "fields":[("amount","entry","500","Set fuel to exact amount.")]},
+  "set_fuel_ratio":           {"label":"Set Fuel Ratio",               "cat":"Industry",
+    "fields":[("ratio","entry","0.5","Set fuel ratio 0.0-1.0.")]},
+  "add_nuclear_bombs":        {"label":"Add Nuclear Bombs",            "cat":"Industry",
+    "fields":[("amount","entry","1","Nukes to add.")]},
+  "launch_nuke":              {"label":"Launch Nuclear Strike",        "cat":"Industry",
+    "fields":[("province","entry","42","Target province ID.")]},
+  "add_cic":                  {"label":"Add Civilian Industry (CIC)",  "cat":"Industry",
+    "fields":[("value","entry","5","Civilian factory levels.")]},
+  "create_import":            {"label":"Create Import",                "cat":"Industry",
+    "fields":[("resource","dropdown:oil,steel,aluminium,rubber,tungsten,chromium","oil","Resource to trade."),
+              ("amount","entry","10","Amount."),
+              ("from","entry","TAG","Exporting country tag.")]},
+  "give_market_access":       {"label":"Give Market Access",           "cat":"Industry",
+    "fields":[("target","entry","TAG","Country to give mutual market access to.")]},
+  "give_resource_rights":     {"label":"Give Resource Rights",         "cat":"Industry",
+    "fields":[("receiver","entry","TAG","Country receiving the resource rights."),
+              ("state","entry","1","State ID."),
+              ("resources","entry","oil rubber","Space-separated resource names (optional).")]},
+  "remove_resource_rights":   {"label":"Remove Resource Rights",       "cat":"Industry",
+    "fields":[("state_id","entry","1","State ID to remove resource rights from.")]},
+  "create_purchase_contract": {"label":"Create Purchase Contract",     "cat":"Industry",
+    "fields":[("seller","entry","ENG","Selling country tag."),
+              ("buyer","entry","RAJ","Buying country tag."),
+              ("civilian_factories","entry","2","Number of factories."),
+              ("equipment_type","entry","infantry_equipment","Equipment type."),
+              ("equipment_amount","entry","600","Equipment amount.")]},
+
+  # ── MILITARY ──────────────────────────────────────────────────────────────
+  "add_manpower":             {"label":"Add Manpower",                 "cat":"Military",
+    "fields":[("value","entry","10000","Men to add. Negative removes.")]},
+  "add_command_power":        {"label":"Add Command Power",            "cat":"Military",
+    "fields":[("amount","entry","25","Command power amount.")]},
+  "army_experience":          {"label":"Add Army Experience",          "cat":"Military",
+    "fields":[("value","entry","25","Army XP amount.")]},
+  "navy_experience":          {"label":"Add Navy Experience",          "cat":"Military",
+    "fields":[("value","entry","25","Navy XP amount.")]},
+  "air_experience":           {"label":"Add Air Experience",           "cat":"Military",
+    "fields":[("value","entry","25","Air XP amount.")]},
+  "add_victory_points":       {"label":"Add Victory Points",           "cat":"Military",
+    "fields":[("province","entry","42","Province ID."),
+              ("value","entry","5","VP to add.")]},
+  "set_victory_points":       {"label":"Set Victory Points",           "cat":"Military",
+    "fields":[("province","entry","42","Province ID."),
+              ("value","entry","5","VP to set.")]},
+  "division_template":        {"label":"Create Division Template",     "cat":"Military",
+    "fields":[("name","entry","Infantry Division","Template name."),
+              ("regiments","entry","infantry = { x = 0 y = 0 }","Regiment layout.")]},
+  "add_units_to_division_template":{"label":"Add Units to Division Template","cat":"Military",
+    "fields":[("template_name","entry","My Template","Template name."),
+              ("regiments","entry","infantry = 0","Regiment type and count.")]},
+  "change_division_template": {"label":"Change Division Template",     "cat":"Military",
+    "fields":[("template","entry","My Template Name","New template name for scoped division.")]},
+  "set_division_template_cap":{"label":"Set Division Template Cap",    "cat":"Military",
+    "fields":[("division_template","entry","My Template","Template name."),
+              ("division_cap","entry","1","Maximum number of divisions allowed.")]},
+  "set_division_template_lock":{"label":"Set Division Template Lock",  "cat":"Military",
+    "fields":[("division_template","entry","My Template","Template name."),
+              ("is_locked","dropdown:yes,no","yes","Lock or unlock the template.")]},
+  "clear_division_template_cap":{"label":"Clear Division Template Cap","cat":"Military",
+    "fields":[("value","dropdown:yes,no","yes","Clear division cap for all templates.")]},
+  "set_division_force_allow_recruiting":{"label":"Force Allow Division Recruiting","cat":"Military",
+    "fields":[("division_template","entry","My Template","Template name."),
+              ("value","dropdown:yes,no","yes","Force allow or disallow recruiting.")]},
+  "country_lock_all_division_template":{"label":"Lock All Division Templates","cat":"Military",
+    "fields":[("value","dropdown:yes,no","yes","Lock all templates at country level.")]},
+  "create_colonial_division_template":{"label":"Create Colonial Division Template","cat":"Military",
+    "fields":[("subject","entry","TAG","Subject country tag for the overlord."),
+              ("division_template","entry","{ name = 'Colonial Div' regiments = { infantry = { x=0 y=0 } } }","Template definition block.")]},
+  "delete_unit":              {"label":"Delete Unit",                  "cat":"Military",
+    "fields":[("division_template","entry","Template Name","Template to filter (optional)."),
+              ("state","entry","1","State ID to filter (optional).")]},
+  "delete_unit_template_and_units":{"label":"Delete Unit Template & Units","cat":"Military",
+    "fields":[("division_template","entry","Template Name","Template to delete."),
+              ("disband","dropdown:yes,no","yes","Disband units?")]},
+  "delete_units":             {"label":"Delete Units By Template",     "cat":"Military",
+    "fields":[("division_template","entry","Template Name","Template name."),
+              ("disband","dropdown:yes,no","no","Return equipment to stockpile?")]},
+  "create_unit":              {"label":"Create Unit",                  "cat":"Military",
+    "fields":[("division","entry","TAG_infantry_division","Division template name."),
+              ("owner","entry","TAG","Owner country tag."),
+              ("state","entry","1","State ID to spawn in.")]},
+  "load_oob":                 {"label":"Load OOB File",                "cat":"Military",
+    "fields":[("file","entry","TAG_1936","OOB file name in /history/units/.")]},
+  "set_oob":                  {"label":"Set OOB (game start)",         "cat":"Military",
+    "fields":[("file","entry","TAG_1936","OOB file name to register for country at game start.")]},
+  "set_keyed_oob":            {"label":"Set Keyed OOB",                "cat":"Military",
+    "fields":[("key","entry","my_oob_key","Key for this OOB."),
+              ("file","entry","TAG_1936","OOB file name.")]},
+  "set_air_oob":              {"label":"Set Air OOB",                  "cat":"Military",
+    "fields":[("file","entry","TAG_air_1936","Air OOB file name.")]},
+  "set_naval_oob":            {"label":"Set Naval OOB",                "cat":"Military",
+    "fields":[("file","entry","TAG_naval_1936","Naval OOB file name.")]},
+  "add_ace":                  {"label":"Add Ace Pilot",                "cat":"Military",
+    "fields":[("name","entry","Werner Molders","Ace name."),
+              ("surname","entry","","Surname (optional)."),
+              ("type","dropdown:fighter_genius,naval_strike_expert,CAS_expert,bomber_interdictor,heavy_air_killer","fighter_genius","Ace skill type.")]},
+  "add_volunteers_to_ally":   {"label":"Send Volunteers to Ally",      "cat":"Military",
+    "fields":[("target","entry","TAG","Ally country tag."),
+              ("type","entry","infantry","Division type."),
+              ("value","entry","3","Number of divisions.")]},
+  "recall_volunteers_from":   {"label":"Recall Volunteers",            "cat":"Military",
+    "fields":[("target","entry","TAG","Country to recall from.")]},
+  "supply_units":             {"label":"Supply Units",                 "cat":"Military",
+    "fields":[("value","entry","0.5","Supply ratio 0.0-1.0.")]},
+  "add_mines":                {"label":"Add Naval Mines",              "cat":"Military",
+    "fields":[("province","entry","1","Province ID."),
+              ("value","entry","10","Number of mines.")]},
+  "damage_units":             {"label":"Damage Units",                 "cat":"Military",
+    "fields":[("damage","entry","0.5","Fraction of strength to remove 0.0-1.0."),
+              ("state","entry","","(Optional) State ID.")]},
+  "teleport_armies":          {"label":"Teleport Armies",              "cat":"Military",
+    "fields":[("target","entry","TAG","Country whose capital to teleport to.")]},
+  "teleport_railway_guns_to_deploy_province":{"label":"Teleport Railway Guns","cat":"Military",
+    "fields":[("value","dropdown:yes,no","yes","Teleport railway guns to deploy province.")]},
+  "transfer_units_fraction":  {"label":"Transfer Units Fraction",      "cat":"Military",
+    "fields":[("target","entry","TAG","Recipient country."),
+              ("size","entry","0.4","Fraction of units 0.0-1.0."),
+              ("stockpile_ratio","entry","0.3","Equipment stockpile fraction.")]},
+  "add_temporary_buff_to_units":{"label":"Add Temporary Buff to Units","cat":"Military",
+    "fields":[("name","entry","my_buff","Buff modifier ID."),
+              ("timeout_effect","entry","","Effect when buff expires (optional).")]},
+  "add_to_war":               {"label":"Add Country to War",           "cat":"Military",
+    "fields":[("targeted_alliance","entry","TAG","Country side to join."),
+              ("enemy","entry","TAG","Country to declare war on."),
+              ("hostility_reason","dropdown:asked_to_join,call_to_arms,asked_to_join_with_wargoal","asked_to_join","Join reason.")]},
+  "add_decryption":           {"label":"Add Decryption",               "cat":"Military",
+    "fields":[("value","entry","1","Decryption level to add.")]},
+  "add_intel":                {"label":"Add Intel",                    "cat":"Military",
+    "fields":[("target","entry","TAG","Target country."),
+              ("amount","entry","10","Intel amount."),
+              ("type","dropdown:army,navy,air,civilian","army","Intel type.")]},
+  "upgrade_intelligence_agency":{"label":"Upgrade Intelligence Agency","cat":"Military",
+    "fields":[("value","dropdown:yes,no","yes","Upgrade agency one level.")]},
+  "create_intelligence_agency":{"label":"Create Intelligence Agency",  "cat":"Military",
+    "fields":[("value","dropdown:yes,no","yes","Create an intelligence agency.")]},
+  "create_operative_leader":  {"label":"Create Operative Leader",      "cat":"Military",
+    "fields":[("bypass_recruitment","dropdown:yes,no","no","Add directly without recruitment?"),
+              ("available_to_spy_master","dropdown:yes,no","yes","Recruitable by spy master?"),
+              ("name","entry","","Operative name (optional).")]},
+  "capture_operative":        {"label":"Capture Operative",            "cat":"Military",
+    "fields":[("operative","entry","PREV","Operative scope keyword or tag.")]},
+  "kill_operative":           {"label":"Kill Operative",               "cat":"Military",
+    "fields":[("operative","entry","PREV","Operative scope keyword or tag.")]},
+  "free_operative":           {"label":"Free Operative",               "cat":"Military",
+    "fields":[("captured_by","entry","TAG","Country that captured the operative (optional).")]},
+  "free_random_operative":    {"label":"Free Random Operative",        "cat":"Military",
+    "fields":[("captured_by","entry","TAG","Country that captured."),
+              ("of_tag","entry","TAG","Nationality of operative to free.")]},
+  "turn_operative":           {"label":"Turn Operative",               "cat":"Military",
+    "fields":[("target","entry","TAG","Country that receives the turned operative.")]},
+  "harm_operative_leader":    {"label":"Harm Operative Leader",        "cat":"Military",
+    "fields":[("value","entry","12","Harm value (subject to modifiers).")]},
+  "force_operative_leader_into_hiding":{"label":"Force Operative Into Hiding","cat":"Military",
+    "fields":[("value","dropdown:yes,no","yes","Prevent operative from performing missions.")]},
+  "add_operation_token":      {"label":"Add Operation Token",          "cat":"Military",
+    "fields":[("tag","entry","TAG","Target country."),
+              ("token","entry","my_op_token","Operation token ID.")]},
+  "remove_operation_token":   {"label":"Remove Operation Token",       "cat":"Military",
+    "fields":[("tag","entry","TAG","Target country."),
+              ("token","entry","my_op_token","Operation token ID.")]},
+  "add_civil_war_target":     {"label":"Add Civil War Target",         "cat":"Military",
+    "fields":[("target","entry","TAG","Country to add as civil war target.")]},
+  "remove_civil_war_target":  {"label":"Remove Civil War Target",      "cat":"Military",
+    "fields":[("target","entry","TAG","Country to remove as civil war target.")]},
+
+  # ── CHARACTERS ────────────────────────────────────────────────────────────
+  "add_field_marshal_role":   {"label":"Add Field Marshal Role",       "cat":"Characters",
+    "fields":[("character","entry","TAG_general_name","Character ID.")]},
+  "add_corps_commander_role": {"label":"Add Corps Commander Role",     "cat":"Characters",
+    "fields":[("character","entry","TAG_char","Character token."),
+              ("skill","entry","2","Skill level 1-5."),
+              ("attack_skill","entry","2","Attack skill."),
+              ("defense_skill","entry","2","Defense skill."),
+              ("planning_skill","entry","2","Planning skill."),
+              ("logistics_skill","entry","2","Logistics skill.")]},
+  "add_naval_commander_role": {"label":"Add Naval Commander Role",     "cat":"Characters",
+    "fields":[("character","entry","TAG_char","Character token."),
+              ("skill","entry","2","Skill level 1-5."),
+              ("attack_skill","entry","2","Attack skill."),
+              ("defense_skill","entry","2","Defense skill."),
+              ("maneuvering_skill","entry","2","Maneuvering skill."),
+              ("coordination_skill","entry","2","Coordination skill.")]},
+  "create_field_marshal":     {"label":"Create Field Marshal",         "cat":"Characters",
+    "fields":[("name","entry","General Name","Name."),
+              ("picture","entry","GFX_portrait_TAG_army_general","Portrait GFX."),
+              ("skill","entry","2","Skill level 1-5.")]},
+  "create_corps_commander":   {"label":"Create Corps Commander",       "cat":"Characters",
+    "fields":[("name","entry","General Name","Name."),
+              ("picture","entry","GFX_portrait_TAG_army_general","Portrait GFX."),
+              ("skill","entry","2","Skill level 1-5.")]},
+  "create_navy_leader":       {"label":"Create Navy Leader",           "cat":"Characters",
+    "fields":[("name","entry","Admiral Name","Name."),
+              ("picture","entry","GFX_portrait_TAG_navy","Portrait GFX."),
+              ("skill","entry","2","Skill level 1-5.")]},
+  "remove_unit_leader":       {"label":"Remove Unit Leader",           "cat":"Characters",
+    "fields":[("id","entry","TAG_general_name","Unit leader ID to remove.")]},
+  "remove_unit_leader_role":  {"label":"Remove Unit Leader Role",      "cat":"Characters",
+    "fields":[("character","entry","TAG_char","Character token."),
+              ("role","dropdown:field_marshal,corps_commander,navy_leader","corps_commander","Role to remove.")]},
+  "add_skill_level":          {"label":"Add Skill Level",              "cat":"Characters",
+    "fields":[("value","entry","1","Skill levels to add.")]},
+  "gain_xp":                  {"label":"Gain XP (Unit Leader)",        "cat":"Characters",
+    "fields":[("value","entry","5","XP to grant. Promotes if enough.")]},
+  "promote_leader":           {"label":"Promote General to Field Marshal","cat":"Characters",
+    "fields":[("value","dropdown:yes,no","yes","Promote scoped general.")]},
+  "demote_leader":            {"label":"Demote Field Marshal to General","cat":"Characters",
+    "fields":[("value","dropdown:yes,no","yes","Demote scoped field marshal.")]},
+  "promote_officer_to_general":{"label":"Promote Officer to General",  "cat":"Characters",
+    "fields":[("value","dropdown:yes,no","yes","Promote the officer of the scoped division.")]},
+  "boost_planning":           {"label":"Boost Planning",               "cat":"Characters",
+    "fields":[("value","entry","0.5","Planning boost factor for units in army group.")]},
+  "add_attack":               {"label":"Add Attack (Leader)",          "cat":"Characters",
+    "fields":[("value","entry","1","Attack skill to add.")]},
+  "add_defense":              {"label":"Add Defense (Leader)",         "cat":"Characters",
+    "fields":[("value","entry","1","Defense skill to add.")]},
+  "add_planning":             {"label":"Add Planning (Leader)",        "cat":"Characters",
+    "fields":[("value","entry","1","Planning skill to add.")]},
+  "add_logistics":            {"label":"Add Logistics (Leader)",       "cat":"Characters",
+    "fields":[("value","entry","1","Logistics skill to add.")]},
+  "add_coordination":         {"label":"Add Coordination (Leader)",    "cat":"Characters",
+    "fields":[("value","entry","1","Coordination skill to add.")]},
+  "add_maneuver":             {"label":"Add Maneuver (Leader)",        "cat":"Characters",
+    "fields":[("value","entry","1","Maneuver skill to add.")]},
+  "add_unit_leader_trait":    {"label":"Add Unit Leader Trait",        "cat":"Characters",
+    "fields":[("trait","entry","trait_cautious","Trait ID from common/unit_leader/")]},
+  "remove_unit_leader_trait": {"label":"Remove Unit Leader Trait",     "cat":"Characters",
+    "fields":[("trait","entry","trait_cautious","Trait ID to remove.")]},
+  "replace_unit_leader_trait":{"label":"Replace Unit Leader Trait",    "cat":"Characters",
+    "fields":[("remove_trait","entry","old_trait","Trait to remove."),
+              ("add_trait","entry","new_trait","Trait to add.")]},
+  "add_timed_unit_leader_trait":{"label":"Add Timed Unit Leader Trait","cat":"Characters",
+    "fields":[("trait","entry","trait_cautious","Trait ID."),
+              ("days","entry","180","Duration in days.")]},
+  "add_random_trait":         {"label":"Add Random Trait (Leader)",    "cat":"Characters",
+    "fields":[("traits","entry","old_guard brilliant_strategist inflexible_strategist","Space-separated list of traits to randomly pick from.")]},
+  "add_random_valid_trait_from_unit":{"label":"Add Random Valid Trait From Unit","cat":"Characters",
+    "fields":[("value","dropdown:yes,no","yes","Add a random valid trait from the unit to the character.")]},
+  "add_max_trait":            {"label":"Add Max Trait Slot (General)", "cat":"Characters",
+    "fields":[("value","entry","1","Extra assignable trait slots to add.")]},
+  "add_trait":                {"label":"Add Trait to Character",       "cat":"Characters",
+    "fields":[("character","entry","TAG_char","Character token (optional in char scope)."),
+              ("trait","entry","brilliant_strategist","Trait ID."),
+              ("slot","entry","political_advisor","Required slot for advisor trait.")]},
+  "remove_trait":             {"label":"Remove Trait from Character",  "cat":"Characters",
+    "fields":[("character","entry","TAG_char","Character token (optional in char scope)."),
+              ("trait","entry","brilliant_strategist","Trait ID.")]},
+  "add_divisional_commander_xp":{"label":"Add Divisional Commander XP","cat":"Characters",
+    "fields":[("value","entry","10","XP to add to divisional commander.")]},
+  "set_leader_name":          {"label":"Set Leader Name (Unit)",       "cat":"Characters",
+    "fields":[("name","entry","New Name","New name for unit leader (no tooltip).")]},
+  "set_leader_description":   {"label":"Set Leader Description (Unit)","cat":"Characters",
+    "fields":[("desc","entry","","New description for unit leader (no tooltip).")]},
+  "set_leader_portrait":      {"label":"Set Leader Portrait (Unit)",   "cat":"Characters",
+    "fields":[("large","entry","GFX_portrait_TAG","New portrait GFX (no tooltip).")]},
+  "set_nationality":          {"label":"Set Nationality",              "cat":"Characters",
+    "fields":[("target","entry","TAG","Transfer character to this country.")]},
+  "add_nationality":          {"label":"Add Nationality (Operative)",  "cat":"Characters",
+    "fields":[("nationality","entry","FRA","Country tag for the added nationality.")]},
+  "retire":                   {"label":"Retire Character (char scope)","cat":"Characters",
+    "fields":[("value","dropdown:yes,no","yes","Retire the character in scope.")]},
+  "set_can_be_fired_in_advisor_role":{"label":"Set Can Be Fired in Advisor Role","cat":"Characters",
+    "fields":[("value","dropdown:yes,no","yes","Whether this advisor can be fired.")]},
+  "generate_scientist_character":{"label":"Generate Scientist Character","cat":"Characters",
+    "fields":[("portrait","entry","","Portrait GFX (optional, random by default)."),
+              ("portrait_tag_override","entry","","Country tag for portrait pool (optional).")]},
+  "add_scientist_role":       {"label":"Add Scientist Role",           "cat":"Characters",
+    "fields":[("character","entry","TAG_char","Character token."),
+              ("role","entry","scientist_role_physics","Scientist role ID.")]},
+  "remove_scientist_role":    {"label":"Remove Scientist Role",        "cat":"Characters",
+    "fields":[("character","entry","TAG_char","Character token.")]},
+  "add_scientist_trait":      {"label":"Add Scientist Trait",          "cat":"Characters",
+    "fields":[("trait","entry","my_scientist_trait","Scientist trait token.")]},
+  "add_scientist_xp":         {"label":"Add Scientist XP",             "cat":"Characters",
+    "fields":[("specialization","entry","land","Specialization to add XP to."),
+              ("value","entry","10","XP amount.")]},
+  "add_scientist_level":      {"label":"Add Scientist Level",          "cat":"Characters",
+    "fields":[("value","entry","1","Levels to add to scientist.")]},
+  "injure_scientist_for_days":{"label":"Injure Scientist",             "cat":"Characters",
+    "fields":[("days","entry","12","Days to injure the scientist.")]},
+  "add_unit_bonus":           {"label":"Add Unit Bonus",               "cat":"Characters",
+    "fields":[("category","entry","category_light_infantry","Subunit category."),
+              ("stat","entry","soft_attack","Stat name e.g. soft_attack, defense."),
+              ("value","entry","0.05","Bonus value."),
+              ("name","entry","MY_BONUS_LOC","Optional loc key for the bonus name.")]},
+  "unit_leader_event":        {"label":"Unit Leader Event",            "cat":"Characters",
+    "fields":[("id","entry","my_event.1","Event ID to fire for unit leader owner.")]},
+  "operative_leader_event":   {"label":"Operative Leader Event",       "cat":"Characters",
+    "fields":[("id","entry","my_event.1","Event ID to fire for operative owner.")]},
+  "set_unit_leader_flag":     {"label":"Set Unit Leader Flag",         "cat":"Characters",
+    "fields":[("flag","entry","my_leader_flag","Unit leader flag ID.")]},
+  "clr_unit_leader_flag":     {"label":"Clear Unit Leader Flag",       "cat":"Characters",
+    "fields":[("flag","entry","my_leader_flag","Unit leader flag ID to clear.")]},
+  "modify_unit_leader_flag":  {"label":"Modify Unit Leader Flag",      "cat":"Characters",
+    "fields":[("flag","entry","my_leader_flag","Flag ID."),
+              ("value","entry","1","Value to add.")]},
+  "reseed_division_commander":{"label":"Reseed Division Commander",    "cat":"Characters",
+    "fields":[("value","entry","9999","Seed value (debug).")]},
+
+  # ── SHIPS ─────────────────────────────────────────────────────────────────
+  "create_ship":              {"label":"Create Ship",                  "cat":"Ships",
+    "fields":[("type","entry","ship_hull_submarine_1","Ship hull type."),
+              ("equipment_variant","entry","S Class","Equipment variant name."),
+              ("name","entry","","Ship name (optional)."),
+              ("creator","entry","","Creator country tag (optional).")]},
+  "destroy_ships":            {"label":"Destroy Ships",                "cat":"Ships",
+    "fields":[("type","dropdown:ship_hull_submarine,ship_hull_light,ship_hull_cruiser,ship_hull_heavy,ship_hull_carrier","ship_hull_light","Ship type."),
+              ("count","entry","all","Number to destroy or 'all'.")]},
+  "transfer_ship":            {"label":"Transfer Ship",                "cat":"Ships",
+    "fields":[("prefer_name","entry","HMS Achilles","Ship name to prefer."),
+              ("type","dropdown:light_cruiser,destroyer,submarine,heavy_cruiser,carrier,battleship","light_cruiser","Ship type."),
+              ("target","entry","TAG","Recipient country."),
+              ("exclude_refitting","dropdown:no,yes","no","Exclude ships being refit?")]},
+  "transfer_navy":            {"label":"Transfer Entire Navy",         "cat":"Ships",
+    "fields":[("target","entry","TAG","Recipient country."),
+              ("is_government_in_exile","dropdown:no,yes","no","Tag transferred navy as exile?")]},
+  "create_railway_gun":       {"label":"Create Railway Gun",           "cat":"Ships",
+    "fields":[("equipment","entry","railway_gun_equipment_1","Equipment ID."),
+              ("name","entry","","Name (optional)."),
+              ("location","entry","","Province ID (optional, defaults to capital).")]},
+
+  # ── DIPLOMACY ─────────────────────────────────────────────────────────────
+  "declare_war_on":           {"label":"Declare War On",               "cat":"Diplomacy",
+    "fields":[("target","entry","TAG","Target country tag."),
+              ("type","dropdown:annex_everything,puppet_wargoal,take_claimed_state,take_core_state,liberate_wargoal,topple_government","annex_everything","War goal type.")]},
+  "create_wargoal":           {"label":"Create War Goal",              "cat":"Diplomacy",
+    "fields":[("type","dropdown:annex_everything,puppet_wargoal,take_claimed_state,take_core_state,liberate_wargoal,topple_government","annex_everything","War goal type."),
+              ("target","entry","TAG","Target country tag.")]},
+  "remove_wargoal":           {"label":"Remove War Goal",              "cat":"Diplomacy",
+    "fields":[("target","entry","TAG","Country to remove wargoal against."),
+              ("type","dropdown:annex_everything,puppet_wargoal,take_claimed_state,take_core_state","annex_everything","Wargoal type.")]},
+  "annex_country":            {"label":"Annex Country",                "cat":"Diplomacy",
+    "fields":[("target","entry","TAG","Country to annex."),
+              ("transfer_troops","dropdown:no,yes","no","Transfer their troops?")]},
+  "puppet":                   {"label":"Puppet Country",               "cat":"Diplomacy",
+    "fields":[("target","entry","TAG","Country to puppet.")]},
+  "end_puppet":               {"label":"End Puppet",                   "cat":"Diplomacy",
+    "fields":[("target","entry","TAG","Release from puppet status.")]},
+  "set_autonomy":             {"label":"Set Autonomy Level",           "cat":"Diplomacy",
+    "fields":[("target","entry","TAG","Subject country."),
+              ("autonomous_state","dropdown:autonomy_free,autonomy_puppet,autonomy_dominion,autonomy_integrated_puppet,autonomy_colony,autonomy_personal_union","autonomy_puppet","Level."),
+              ("freedom_level","entry","","Optional override 0.0-1.0.")]},
+  "add_autonomy_ratio":       {"label":"Add Autonomy Ratio",           "cat":"Diplomacy",
+    "fields":[("value","entry","0.1","Amount to add (0.1=10%)."),
+              ("localization","entry","","Optional tooltip loc key.")]},
+  "add_autonomy_score":       {"label":"Add Autonomy Score",           "cat":"Diplomacy",
+    "fields":[("value","entry","10","Score to add."),
+              ("localization","entry","","Tooltip loc key.")]},
+  "release":                  {"label":"Release Country",              "cat":"Diplomacy",
+    "fields":[("target","entry","TAG","Country to release.")]},
+  "release_puppet":           {"label":"Release As Puppet",            "cat":"Diplomacy",
+    "fields":[("target","entry","TAG","Country to release as puppet.")]},
+  "release_autonomy":         {"label":"Release With Autonomy",        "cat":"Diplomacy",
+    "fields":[("target","entry","TAG","Country to release."),
+              ("autonomy_state","dropdown:autonomy_free,autonomy_puppet,autonomy_dominion,autonomy_integrated_puppet,autonomy_colony","autonomy_dominion","Autonomy level."),
+              ("freedom_level","entry","0.5","Freedom level 0.0-1.0.")]},
+  "release_on_controlled":    {"label":"Release On Controlled States", "cat":"Diplomacy",
+    "fields":[("target","entry","TAG","Country to release using owned/controlled states.")]},
+  "release_puppet_on_controlled":{"label":"Release Puppet on Controlled","cat":"Diplomacy",
+    "fields":[("target","entry","TAG","Country to release as puppet using controlled states.")]},
+  "add_to_faction":           {"label":"Add to Faction",               "cat":"Diplomacy",
+    "fields":[("target","entry","TAG","Country to invite.")]},
+  "remove_from_faction":      {"label":"Remove from Faction",          "cat":"Diplomacy",
+    "fields":[("target","entry","TAG","Country to remove.")]},
+  "leave_faction":            {"label":"Leave Faction",                "cat":"Diplomacy",
+    "fields":[("value","dropdown:yes,no","yes","Current country leaves its faction.")]},
+  "create_faction":           {"label":"Create Faction",               "cat":"Diplomacy",
+    "fields":[("name","entry","my_faction","Faction name loc key.")]},
+  "dismantle_faction":        {"label":"Dismantle Faction",            "cat":"Diplomacy",
+    "fields":[("value","dropdown:yes,no","yes","Dismantle faction (must be leader).")]},
+  "create_faction_from_template":{"label":"Create Faction from Template","cat":"Diplomacy",
+    "fields":[("template","entry","my_faction_template","Faction template ID."),
+              ("name","entry","","Optional name override loc key.")]},
+  "set_faction_name":         {"label":"Set Faction Name",             "cat":"Diplomacy",
+    "fields":[("name","entry","NEW_FACTION_LOC","Loc key for new faction name.")]},
+  "set_faction_leader":       {"label":"Set Faction Leader",           "cat":"Diplomacy",
+    "fields":[("value","dropdown:yes,no","yes","Make current country faction leader.")]},
+  "set_faction_spymaster":    {"label":"Set Faction Spymaster",        "cat":"Diplomacy",
+    "fields":[("value","dropdown:yes,no","yes","Make current country faction spymaster.")]},
+  "set_faction_rule":         {"label":"Set Faction Rule",             "cat":"Diplomacy",
+    "fields":[("rule","entry","rule_id","Faction rule ID.")]},
+  "set_faction_upgrade":      {"label":"Set Faction Upgrade",          "cat":"Diplomacy",
+    "fields":[("token","entry","faction_upgrade_token","Faction upgrade token.")]},
+  "set_faction_manifest":     {"label":"Set Faction Manifest",         "cat":"Diplomacy",
+    "fields":[("manifest","entry","faction_goal_id","Faction manifest/goal ID.")]},
+  "set_faction_member_upgrade_min":{"label":"Set Faction Member Upgrade Min","cat":"Diplomacy",
+    "fields":[("upgrade","entry","TOKEN_TO_FACTION_MEMBER_UPGRADE","Faction member upgrade token.")]},
+  "add_faction_goal":         {"label":"Add Faction Goal",             "cat":"Diplomacy",
+    "fields":[("goal","entry","faction_goal_id","Faction goal ID.")]},
+  "remove_faction_goal":      {"label":"Remove Faction Goal",          "cat":"Diplomacy",
+    "fields":[("goal","entry","faction_goal_id","Faction goal ID to remove.")]},
+  "add_faction_initiative":   {"label":"Add Faction Initiative",       "cat":"Diplomacy",
+    "fields":[("value","entry","10","Initiative points to add.")]},
+  "add_faction_influence_score":{"label":"Add Faction Influence Score","cat":"Diplomacy",
+    "fields":[("value","entry","100","Influence score to add.")]},
+  "add_faction_influence_ratio":{"label":"Add Faction Influence Ratio","cat":"Diplomacy",
+    "fields":[("value","entry","0.1","Fraction of total faction influence to add.")]},
+  "add_faction_power_projection":{"label":"Add Faction Power Projection","cat":"Diplomacy",
+    "fields":[("value","entry","100","Power projection to add.")]},
+  "add_faction_goal_slot":    {"label":"Add Faction Goal Slot",        "cat":"Diplomacy",
+    "fields":[("category","entry","economic","Faction goal category for extra slot."),
+              ("value","entry","1","Number of slots to add.")]},
+  "white_peace":              {"label":"White Peace",                  "cat":"Diplomacy",
+    "fields":[("target","entry","TAG","Country to white peace with.")]},
+  "start_peace_conference":   {"label":"Start Peace Conference",       "cat":"Diplomacy",
+    "fields":[("target","entry","TAG","War target country.")]},
+  "give_guarantee":           {"label":"Give Guarantee",               "cat":"Diplomacy",
+    "fields":[("target","entry","TAG","Country to guarantee.")]},
+  "add_opinion_modifier":     {"label":"Add Opinion Modifier",         "cat":"Diplomacy",
+    "fields":[("target","entry","TAG","Country tag."),
+              ("modifier","entry","my_opinion_mod","Modifier ID from common/opinion_modifiers/")]},
+  "remove_opinion_modifier":  {"label":"Remove Opinion Modifier",      "cat":"Diplomacy",
+    "fields":[("target","entry","TAG","Country tag."),
+              ("modifier","entry","my_opinion_mod","Modifier ID to remove.")]},
+  "reverse_add_opinion_modifier":{"label":"Reverse Add Opinion Modifier","cat":"Diplomacy",
+    "fields":[("target","entry","TAG","Country that gets opinion of us."),
+              ("modifier","entry","my_opinion_mod","Modifier ID.")]},
+  "add_named_threat":         {"label":"Add Named Threat",             "cat":"Diplomacy",
+    "fields":[("threat","entry","my_threat_key","Threat loc key."),
+              ("value","entry","3.0","World tension added.")]},
+  "add_threat":               {"label":"Add World Tension",            "cat":"Diplomacy",
+    "fields":[("value","entry","3.0","World tension amount (negative removes).")]},
+  "diplomatic_relation":      {"label":"Set Diplomatic Relation",      "cat":"Diplomacy",
+    "fields":[("country","entry","TAG","Target country."),
+              ("relation","dropdown:guarantee,military_access,non_aggression_pact","guarantee","Relation type."),
+              ("active","dropdown:yes,no","yes","Enable or disable?")]},
+  "give_military_access":     {"label":"Give Military Access",         "cat":"Diplomacy",
+    "fields":[("target","entry","TAG","Country to grant access to.")]},
+  "recall_attache":           {"label":"Recall Attache",               "cat":"Diplomacy",
+    "fields":[("target","entry","TAG","Country to recall attache from.")]},
+  "break_embargo":            {"label":"Break Embargo",                "cat":"Diplomacy",
+    "fields":[("target","entry","TAG","Country to break embargo with.")]},
+  "send_embargo":             {"label":"Send Embargo",                 "cat":"Diplomacy",
+    "fields":[("target","entry","TAG","Country to embargo.")]},
+  "add_relation_modifier":    {"label":"Add Relation Modifier",        "cat":"Diplomacy",
+    "fields":[("target","entry","TAG","Target country."),
+              ("modifier","entry","my_relation_mod","Relation modifier ID.")]},
+  "remove_relation_modifier": {"label":"Remove Relation Modifier",     "cat":"Diplomacy",
+    "fields":[("target","entry","TAG","Target country."),
+              ("modifier","entry","my_relation_mod","Modifier ID.")]},
+  "add_relation_rule_override":{"label":"Add Relation Rule Override",  "cat":"Diplomacy",
+    "fields":[("target","entry","TAG","Target country."),
+              ("rule","entry","can_access_market","Rule to override."),
+              ("value","dropdown:yes,no","yes","Override value.")]},
+  "remove_relation_rule_override":{"label":"Remove Relation Rule Override","cat":"Diplomacy",
+    "fields":[("target","entry","TAG","Target country."),
+              ("rule","entry","can_access_market","Rule to remove override for.")]},
+  "add_state_claim":          {"label":"Add State Claim",              "cat":"Diplomacy",
+    "fields":[("state_id","entry","1","State ID.")]},
+  "remove_state_claim":       {"label":"Remove State Claim",           "cat":"Diplomacy",
+    "fields":[("state_id","entry","1","State ID.")]},
+  "add_claim_by":             {"label":"Add Claim By (state scope)",   "cat":"Diplomacy",
+    "fields":[("country","entry","TAG","Country that claims this state.")]},
+  "remove_claim_by":          {"label":"Remove Claim By (state scope)","cat":"Diplomacy",
+    "fields":[("country","entry","TAG","Country whose claim to remove.")]},
+  "add_state_core":           {"label":"Add State Core",               "cat":"Diplomacy",
+    "fields":[("state_id","entry","1","State ID.")]},
+  "remove_state_core":        {"label":"Remove State Core",            "cat":"Diplomacy",
+    "fields":[("state_id","entry","1","State ID.")]},
+  "add_core_of":              {"label":"Add Core Of (state scope)",    "cat":"Diplomacy",
+    "fields":[("country","entry","TAG","Country to add core for.")]},
+  "remove_core_of":           {"label":"Remove Core Of (state scope)", "cat":"Diplomacy",
+    "fields":[("country","entry","TAG","Country to remove core for.")]},
+  "transfer_state":           {"label":"Transfer State",               "cat":"Diplomacy",
+    "fields":[("state_id","entry","1","State ID to transfer to current country.")]},
+  "transfer_state_to":        {"label":"Transfer State To Country",    "cat":"Diplomacy",
+    "fields":[("target","entry","TAG","Recipient country (state scope).")]},
+  "set_capital":              {"label":"Set Capital",                  "cat":"Diplomacy",
+    "fields":[("state_id","entry","1","State ID — biggest city becomes capital.")]},
+  "set_state_owner":          {"label":"Set State Owner",              "cat":"Diplomacy",
+    "fields":[("tag","entry","TAG","New owner country tag.")]},
+  "set_state_owner_to":       {"label":"Set State Owner To (state scope)","cat":"Diplomacy",
+    "fields":[("tag","entry","TAG","New owner country tag.")]},
+  "set_state_controller":     {"label":"Set State Controller",         "cat":"Diplomacy",
+    "fields":[("tag","entry","TAG","New controller country tag.")]},
+  "set_state_controller_to":  {"label":"Set State Controller To",      "cat":"Diplomacy",
+    "fields":[("tag","entry","TAG","New controller country tag (state scope).")]},
+  "set_state_name":           {"label":"Set State Name",               "cat":"Diplomacy",
+    "fields":[("name","entry","my_state_name_loc","Loc key for new state name.")]},
+  "reset_state_name":         {"label":"Reset State Name",             "cat":"Diplomacy",
+    "fields":[("value","dropdown:yes,no","yes","Reset to default state name.")]},
+  "set_state_category":       {"label":"Set State Category",           "cat":"Diplomacy",
+    "fields":[("category","dropdown:wasteland,enclave,tiny_island,small_island,pastoral,rural,town,large_town,city,large_city,metropolis,megalopolis","town","State category.")]},
+  "set_province_controller":  {"label":"Set Province Controller",      "cat":"Diplomacy",
+    "fields":[("province","entry","42","Province ID."),
+              ("tag","entry","TAG","New controller country tag.")]},
+  "set_province_name":        {"label":"Set Province Name",            "cat":"Diplomacy",
+    "fields":[("id","entry","42","Province ID."),
+              ("name","entry","My Province Name","New name string.")]},
+  "reset_province_name":      {"label":"Reset Province Name",          "cat":"Diplomacy",
+    "fields":[("id","entry","42","Province ID to reset to loc name.")]},
+  "start_civil_war":          {"label":"Start Civil War",              "cat":"Diplomacy",
+    "fields":[("ideology","dropdown:democratic,fascism,communism,neutrality","communism","Rebel ideology."),
+              ("size","entry","0.5","Rebel fraction 0.0-1.0.")]},
+  "set_truce":                {"label":"Set Truce",                    "cat":"Diplomacy",
+    "fields":[("target","entry","TAG","Country to truce with."),
+              ("days","entry","365","Truce duration in days.")]},
+  "add_contested_owner":      {"label":"Add Contested Owner",          "cat":"Diplomacy",
+    "fields":[("tag","entry","TAG","Country to add as contested owner.")]},
+  "remove_contested_owner":   {"label":"Remove Contested Owner",       "cat":"Diplomacy",
+    "fields":[("tag","entry","TAG","Country to remove as contested owner.")]},
+
+  # ── OCCUPATION ────────────────────────────────────────────────────────────
+  "add_compliance":           {"label":"Add Compliance",               "cat":"Occupation",
+    "fields":[("value","entry","30","Compliance to add. Negative removes.")]},
+  "set_compliance":           {"label":"Set Compliance",               "cat":"Occupation",
+    "fields":[("value","entry","50","Set compliance exact value.")]},
+  "add_resistance":           {"label":"Add Resistance",               "cat":"Occupation",
+    "fields":[("value","entry","30","Resistance to add. Negative removes.")]},
+  "set_resistance":           {"label":"Set Resistance",               "cat":"Occupation",
+    "fields":[("value","entry","20","Set resistance exact value.")]},
+  "add_collaboration":        {"label":"Add Collaboration",            "cat":"Occupation",
+    "fields":[("target","entry","TAG","Country to add collaboration with."),
+              ("value","entry","0.3","Collaboration value 0.0-1.0.")]},
+  "set_collaboration":        {"label":"Set Collaboration",            "cat":"Occupation",
+    "fields":[("target","entry","TAG","Country to set collaboration with."),
+              ("value","entry","0.3","Collaboration value 0.0-1.0.")]},
+  "set_occupation_law":       {"label":"Set Occupation Law",           "cat":"Occupation",
+    "fields":[("law","dropdown:occupation_law_civilian_oversight,occupation_law_local_police_force,occupation_law_harsh_quotas,occupation_law_closed_borders,occupation_law_brutal_oppression","occupation_law_civilian_oversight","Occupation law ID.")]},
+  "set_occupation_law_where_available":{"label":"Set Occupation Law (Where Available)","cat":"Occupation",
+    "fields":[("law","dropdown:occupation_law_civilian_oversight,occupation_law_local_police_force,occupation_law_harsh_quotas,occupation_law_closed_borders,occupation_law_brutal_oppression","occupation_law_civilian_oversight","Law ID.")]},
+  "start_resistance":         {"label":"Start Resistance",             "cat":"Occupation",
+    "fields":[("value","dropdown:yes,no","yes","Start resistance in state.")]},
+  "cancel_resistance":        {"label":"Cancel Resistance",            "cat":"Occupation",
+    "fields":[("value","dropdown:yes,no","yes","Cancel resistance activity for a core country.")]},
+  "force_enable_resistance":  {"label":"Force Enable Resistance",      "cat":"Occupation",
+    "fields":[("value","dropdown:yes,no","yes","Force resistance on.")]},
+  "force_disable_resistance": {"label":"Force Disable Resistance",     "cat":"Occupation",
+    "fields":[("value","dropdown:yes,no","yes","Force resistance off.")]},
+  "add_resistance_target":    {"label":"Add Resistance Target",        "cat":"Occupation",
+    "fields":[("amount","entry","10","Resistance target amount."),
+              ("id","entry","","Optional ID for later removal.")]},
+  "remove_resistance_target": {"label":"Remove Resistance Target",     "cat":"Occupation",
+    "fields":[("id","entry","42","Resistance target ID to remove.")]},
+  "set_demilitarized_zone":   {"label":"Set Demilitarized Zone",       "cat":"Occupation",
+    "fields":[("value","dropdown:yes,no","yes","Set/unset demilitarized status for state.")]},
+  "set_garrison_strength":    {"label":"Set Garrison Strength",        "cat":"Occupation",
+    "fields":[("value","entry","0.5","Initial garrison strength 0.0-1.0.")]},
+  "add_state_modifier":       {"label":"Add State Modifier",           "cat":"Occupation",
+    "fields":[("modifier","entry","local_non_core_manpower = 0.2","Modifier block contents.")]},
+  "add_state_resistance_compliance_modifier":{"label":"Add Resistance/Compliance Modifier","cat":"Occupation",
+    "fields":[("modifier","entry","resistance_growth = -0.05","Modifier contents."),
+              ("days","entry","180","Duration in days (optional).")]},
+  "remove_state_resistance_compliance_modifier":{"label":"Remove Resistance/Compliance Modifier","cat":"Occupation",
+    "fields":[("modifier","entry","my_modifier_id","Modifier ID to remove.")]},
+  "add_province_modifier":    {"label":"Add Province Modifier",        "cat":"Occupation",
+    "fields":[("province","entry","42","Province ID."),
+              ("modifier","entry","my_province_mod","Modifier ID."),
+              ("days","entry","-1","Duration in days (-1=permanent).")]},
+  "remove_province_modifier": {"label":"Remove Province Modifier",     "cat":"Occupation",
+    "fields":[("province","entry","42","Province ID."),
+              ("modifier","entry","my_province_mod","Modifier ID.")]},
+  "strategic_state_location": {"label":"Strategic State Location",     "cat":"Occupation",
+    "fields":[("area","entry","my_strategic_area","Strategic area ID."),
+              ("province","entry","42","Province ID.")]},
+  "strategic_province_location":{"label":"Strategic Province Location","cat":"Occupation",
+    "fields":[("area","entry","my_strategic_area","Strategic area ID."),
+              ("province","entry","42","Province ID.")]},
+
+  # ── BORDER WARS ───────────────────────────────────────────────────────────
+  "start_border_war":         {"label":"Start Border War",             "cat":"Border Wars",
+    "fields":[("change_state_after_war","dropdown:yes,no","no","Transfer state after war?"),
+              ("combat_width","entry","80","Combat width for border war."),
+              ("minimum_duration_in_days","entry","14","Minimum duration in days."),
+              ("attacker_state","entry","1","Attacker state ID."),
+              ("defender_state","entry","2","Defender state ID.")]},
+  "finalize_border_war":      {"label":"Finalize Border War",          "cat":"Border Wars",
+    "fields":[("attacker_wins","dropdown:yes,no","yes","Attacker wins? (no = cancel)")]},
+  "cancel_border_war":        {"label":"Cancel Border War",            "cat":"Border Wars",
+    "fields":[("attacker_state","entry","1","Attacker state ID."),
+              ("defender_state","entry","2","Defender state ID.")]},
+  "set_border_war":           {"label":"Set Border War (state scope)", "cat":"Border Wars",
+    "fields":[("value","dropdown:yes,no","yes","Start border war on neighbouring state.")]},
+  "set_border_war_data":      {"label":"Set Border War Data",          "cat":"Border Wars",
+    "fields":[("combat_width","entry","80","New combat width."),
+              ("minimum_duration_in_days","entry","14","New minimum duration.")]},
+
+  # ── POWER BALANCE ─────────────────────────────────────────────────────────
+  "add_power_balance_value":  {"label":"Add Power Balance Value",      "cat":"Power Balance",
+    "fields":[("id","entry","power_balance_id","Power balance ID."),
+              ("value","entry","0.42","Value to add to current balance."),
+              ("tooltip_side","entry","","Optional side ID for tooltip.")]},
+  "add_power_balance_modifier":{"label":"Add Power Balance Modifier",  "cat":"Power Balance",
+    "fields":[("id","entry","power_balance_id","Power balance ID."),
+              ("modifier","entry","static_modifier_id","Static modifier to add.")]},
+  "remove_power_balance_modifier":{"label":"Remove Power Balance Modifier","cat":"Power Balance",
+    "fields":[("id","entry","power_balance_id","Power balance ID."),
+              ("modifier","entry","static_modifier_id","Static modifier to remove.")]},
+  "remove_all_power_balance_modifiers":{"label":"Remove All Power Balance Modifiers","cat":"Power Balance",
+    "fields":[("id","entry","power_balance_id","Power balance ID.")]},
+  "set_power_balance":        {"label":"Set Power Balance",            "cat":"Power Balance",
+    "fields":[("id","entry","power_balance_id","Power balance ID."),
+              ("left_side","entry","left_side_id","Left side ID."),
+              ("right_side","entry","right_side_id","Right side ID."),
+              ("set_value","entry","0.0","Initial value (optional).")]},
+  "remove_power_balance":     {"label":"Remove Power Balance",         "cat":"Power Balance",
+    "fields":[("id","entry","power_balance_id","Power balance ID to remove from country.")]},
+  "set_power_balance_gfx":    {"label":"Set Power Balance GFX",        "cat":"Power Balance",
+    "fields":[("id","entry","power_balance_id","Power balance ID."),
+              ("side","entry","left_side_id","Side ID."),
+              ("gfx","entry","GFX_my_icon","GFX key for the side icon.")]},
+
+  # ── MIO (Military Industrial Organisation) ───────────────────────────────
+  "add_mio_size":             {"label":"Add MIO Size",                 "cat":"MIO",
+    "fields":[("value","entry","2","Size levels to add (cannot be negative).")]},
+  "add_mio_funds":            {"label":"Add MIO Funds",                "cat":"MIO",
+    "fields":[("value","entry","100","Funds to add. Negative subtracts.")]},
+  "add_mio_research_bonus":   {"label":"Add MIO Research Bonus",       "cat":"MIO",
+    "fields":[("value","entry","0.1","Bonus to add (cannot go below 0).")]},
+  "add_mio_task_capacity":    {"label":"Add MIO Task Capacity",        "cat":"MIO",
+    "fields":[("value","entry","1","Capacity to add (cannot go below 0).")]},
+  "add_mio_design_team_assign_cost":{"label":"Add MIO Design Team Assign Cost","cat":"MIO",
+    "fields":[("value","entry","0.1","Percentage to add to daily PP cost for research.")]},
+  "add_mio_design_team_change_cost":{"label":"Add MIO Design Team Change Cost","cat":"MIO",
+    "fields":[("value","entry","0.1","Percentage to add to XP cost for changing MIO.")]},
+  "add_mio_industrial_manufacturer_assign_cost":{"label":"Add MIO Manufacturer Assign Cost","cat":"MIO",
+    "fields":[("value","entry","0.1","Percentage to add to daily PP cost for production.")]},
+  "add_mio_funds_gain_factor":{"label":"Add MIO Funds Gain Factor",    "cat":"MIO",
+    "fields":[("value","entry","0.1","Factor to add for funds gained.")]},
+  "add_mio_size_up_requirement_factor":{"label":"Add MIO Size-Up Requirement Factor","cat":"MIO",
+    "fields":[("value","entry","0.1","Factor for funds required to size up.")]},
+  "add_mio_policy_cost":      {"label":"Add MIO Policy Cost",          "cat":"MIO",
+    "fields":[("policy","entry","my_policy_token","Policy token."),
+              ("value","entry","10","PP cost to add.")]},
+  "add_mio_policy_cooldown":  {"label":"Add MIO Policy Cooldown",      "cat":"MIO",
+    "fields":[("policy","entry","my_policy_token","Policy token."),
+              ("value","entry","30","Days to add to cooldown.")]},
+  "set_mio_name_key":         {"label":"Set MIO Name Key",             "cat":"MIO",
+    "fields":[("key","entry","MY_NEW_MIO_NAME_KEY","Localisation key for MIO name.")]},
+  "set_mio_icon":             {"label":"Set MIO Icon",                 "cat":"MIO",
+    "fields":[("gfx","entry","MY_NEW_MIO_ICON_GFX","GFX key for MIO icon.")]},
+  "set_mio_flag":             {"label":"Set MIO Flag",                 "cat":"MIO",
+    "fields":[("flag","entry","my_flag","MIO flag ID."),
+              ("value","entry","1","Value (optional, default=1)."),
+              ("days","entry","0","Expiry in days (optional, 0=permanent).")]},
+  "clr_mio_flag":             {"label":"Clear MIO Flag",               "cat":"MIO",
+    "fields":[("flag","entry","my_flag","MIO flag ID to clear.")]},
+  "modify_mio_flag":          {"label":"Modify MIO Flag",              "cat":"MIO",
+    "fields":[("flag","entry","my_flag","MIO flag ID."),
+              ("value","entry","1","Value to add.")]},
+  "set_mio_funds":            {"label":"Set MIO Funds",                "cat":"MIO",
+    "fields":[("value","entry","500","Set funds to exact amount.")]},
+  "set_mio_funds_gain_factor":{"label":"Set MIO Funds Gain Factor",    "cat":"MIO",
+    "fields":[("value","entry","1.0","Set exact factor for funds gained.")]},
+  "set_mio_research_bonus":   {"label":"Set MIO Research Bonus",       "cat":"MIO",
+    "fields":[("value","entry","0.15","Set exact research bonus.")]},
+  "set_mio_task_capacity":    {"label":"Set MIO Task Capacity",        "cat":"MIO",
+    "fields":[("value","entry","3","Set exact max task capacity.")]},
+  "set_mio_design_team_assign_cost":{"label":"Set MIO Design Team Assign Cost","cat":"MIO",
+    "fields":[("value","entry","1.0","Set daily PP cost to assign to research.")]},
+  "set_mio_design_team_change_cost":{"label":"Set MIO Design Team Change Cost","cat":"MIO",
+    "fields":[("value","entry","1.0","Set XP cost to change MIO in equipment designer.")]},
+  "set_mio_industrial_manufacturer_assign_cost":{"label":"Set MIO Manufacturer Assign Cost","cat":"MIO",
+    "fields":[("value","entry","1.0","Set daily PP cost to assign to production.")]},
+  "set_mio_policy_cost":      {"label":"Set MIO Policy Cost",          "cat":"MIO",
+    "fields":[("policy","entry","my_policy_token","Policy token."),
+              ("value","entry","50","Set base PP cost.")]},
+  "set_mio_policy_cooldown":  {"label":"Set MIO Policy Cooldown",      "cat":"MIO",
+    "fields":[("policy","entry","my_policy_token","Policy token."),
+              ("value","entry","90","Set base cooldown in days.")]},
+  "set_mio_size_up_requirement_factor":{"label":"Set MIO Size-Up Requirement Factor","cat":"MIO",
+    "fields":[("value","entry","1.0","Set exact factor for size-up funds required.")]},
+  "complete_mio_trait":       {"label":"Complete MIO Trait",           "cat":"MIO",
+    "fields":[("trait","entry","my_trait_token","Trait token to complete (bypasses tree).")]},
+  "unlock_mio_trait_tooltip": {"label":"Unlock MIO Trait Tooltip",     "cat":"MIO",
+    "fields":[("trait","entry","my_trait_token","Trait token to show unlock tooltip for.")]},
+  "unlock_mio_policy_tooltip":{"label":"Unlock MIO Policy Tooltip",    "cat":"MIO",
+    "fields":[("policy","entry","my_policy_token","Policy token."),
+              ("show_modifiers","dropdown:yes,no","yes","Show bonuses in tooltip?")]},
+  "show_mio_tooltip":         {"label":"Show MIO Tooltip",             "cat":"MIO",
+    "fields":[("mio","entry","my_mio_token","MIO token to show tooltip for.")]},
+  "unlock_military_industrial_organization_tooltip":{"label":"Unlock MIO Tooltip","cat":"MIO",
+    "fields":[("mio","entry","mio:my_mio_token","MIO token (use mio: prefix).")]},
+
+  # ── SPECIAL PROJECTS ─────────────────────────────────────────────────────
+  "complete_special_project": {"label":"Complete Special Project",     "cat":"Special Projects",
+    "fields":[("project","entry","my_special_project","Special project ID to complete.")]},
+  "add_project_progress_ratio":{"label":"Add Project Progress Ratio",  "cat":"Special Projects",
+    "fields":[("value","entry","0.1","Progress as fraction of total needed 0.0-1.0.")]},
+  "complete_prototype_reward_option":{"label":"Complete Prototype Reward Option","cat":"Special Projects",
+    "fields":[("option","entry","my_reward_option","Prototype reward option ID.")]},
+  "set_project_flag":         {"label":"Set Project Flag",             "cat":"Special Projects",
+    "fields":[("flag","entry","my_project_flag","Project flag ID.")]},
+  "clr_project_flag":         {"label":"Clear Project Flag",           "cat":"Special Projects",
+    "fields":[("flag","entry","my_project_flag","Project flag ID to clear.")]},
+  "modify_project_flag":      {"label":"Modify Project Flag",          "cat":"Special Projects",
+    "fields":[("flag","entry","my_project_flag","Project flag ID."),
+              ("value","entry","1","Value to add.")]},
+  "raid_add_unit_experience": {"label":"Raid Add Unit Experience",     "cat":"Special Projects",
+    "fields":[("value","entry","10","XP to give units performing the raid.")]},
+  "raid_damage_units":        {"label":"Raid Damage Units",            "cat":"Special Projects",
+    "fields":[("value","entry","0.1","Damage fraction to inflict on raiding units.")]},
+  "raid_reduce_project_progress_ratio":{"label":"Raid Reduce Project Progress","cat":"Special Projects",
+    "fields":[("value","entry","0.05","Fraction of progress to reduce.")]},
+  "add_history_entry":        {"label":"Add History Entry",            "cat":"Special Projects",
+    "fields":[("key","entry","my_history_entry","History entry key."),
+              ("date","entry","1939.9.1","Date for the entry.")]},
+  "add_raid_history_entry":   {"label":"Add Raid History Entry",       "cat":"Special Projects",
+    "fields":[("key","entry","my_raid_entry","Raid history entry key.")]},
+
+  # ── FLAGS ─────────────────────────────────────────────────────────────────
+  "set_country_flag":         {"label":"Set Country Flag",             "cat":"Flags",
+    "fields":[("flag","entry","my_flag","Flag ID.")]},
+  "clr_country_flag":         {"label":"Clear Country Flag",           "cat":"Flags",
+    "fields":[("flag","entry","my_flag","Flag ID to clear.")]},
+  "modify_country_flag":      {"label":"Modify Country Flag (value)",  "cat":"Flags",
+    "fields":[("flag","entry","my_counter","Flag ID (numeric)."),
+              ("value","entry","1","Value to add.")]},
+  "set_global_flag":          {"label":"Set Global Flag",              "cat":"Flags",
+    "fields":[("flag","entry","my_global_flag","Global flag ID.")]},
+  "clr_global_flag":          {"label":"Clear Global Flag",            "cat":"Flags",
+    "fields":[("flag","entry","my_global_flag","Flag to clear.")]},
+  "modify_global_flag":       {"label":"Modify Global Flag (value)",   "cat":"Flags",
+    "fields":[("flag","entry","my_global_counter","Flag ID."),
+              ("value","entry","1","Value to add.")]},
+  "clear_global_event_target":{"label":"Clear Global Event Target",    "cat":"Flags",
+    "fields":[("name","entry","my_global_target","Event target name to clear.")]},
+  "clear_global_event_targets":{"label":"Clear All Global Event Targets","cat":"Flags",
+    "fields":[("value","dropdown:yes,no","yes","Clear all global event targets.")]},
+  "set_state_flag":           {"label":"Set State Flag",               "cat":"Flags",
+    "fields":[("flag","entry","my_state_flag","State flag ID.")]},
+  "clr_state_flag":           {"label":"Clear State Flag",             "cat":"Flags",
+    "fields":[("flag","entry","my_state_flag","State flag to clear.")]},
+  "modify_state_flag":        {"label":"Modify State Flag (value)",    "cat":"Flags",
+    "fields":[("flag","entry","my_state_counter","Flag ID."),
+              ("value","entry","1","Value to add.")]},
+  "set_character_flag":       {"label":"Set Character Flag",           "cat":"Flags",
+    "fields":[("flag","entry","my_char_flag","Character flag ID.")]},
+  "clr_character_flag":       {"label":"Clear Character Flag",         "cat":"Flags",
+    "fields":[("flag","entry","my_char_flag","Flag ID to clear.")]},
+  "modify_character_flag":    {"label":"Modify Character Flag",        "cat":"Flags",
+    "fields":[("flag","entry","my_char_flag","Flag ID."),
+              ("value","entry","1","Value to add.")]},
+  "set_variable":             {"label":"Set Variable",                 "cat":"Flags",
+    "fields":[("var","entry","my_variable","Variable name."),
+              ("value","entry","1","Value to set.")]},
+  "add_to_variable":          {"label":"Add to Variable",              "cat":"Flags",
+    "fields":[("var","entry","my_variable","Variable name."),
+              ("value","entry","1","Value to add.")]},
+  "subtract_from_variable":   {"label":"Subtract from Variable",       "cat":"Flags",
+    "fields":[("var","entry","my_variable","Variable name."),
+              ("value","entry","1","Value to subtract.")]},
+  "multiply_variable":        {"label":"Multiply Variable",            "cat":"Flags",
+    "fields":[("var","entry","my_variable","Variable name."),
+              ("value","entry","2","Multiplier.")]},
+  "divide_variable":          {"label":"Divide Variable",              "cat":"Flags",
+    "fields":[("var","entry","my_variable","Variable name."),
+              ("value","entry","2","Divisor.")]},
+  "modulo_variable":          {"label":"Modulo Variable",              "cat":"Flags",
+    "fields":[("var","entry","my_variable","Variable to modulo."),
+              ("value","entry","10","Divisor for modulo.")]},
+  "round_variable":           {"label":"Round Variable",               "cat":"Flags",
+    "fields":[("var","entry","my_variable","Variable name to round.")]},
+  "clamp_variable":           {"label":"Clamp Variable",               "cat":"Flags",
+    "fields":[("var","entry","my_variable","Variable name."),
+              ("min","entry","0","Minimum value (optional)."),
+              ("max","entry","100","Maximum value (optional).")]},
+  "set_variable_to_random":   {"label":"Set Variable to Random",       "cat":"Flags",
+    "fields":[("var","entry","my_variable","Variable name."),
+              ("max","entry","10","Max value (min is 0).")]},
+  "randomize_variable":       {"label":"Randomize Variable",           "cat":"Flags",
+    "fields":[("var","entry","my_variable","Variable name."),
+              ("max","entry","10","Max value.")]},
+  "clear_variable":           {"label":"Clear Variable",               "cat":"Flags",
+    "fields":[("var","entry","my_variable","Variable name to clear/delete.")]},
+  "set_temp_variable":        {"label":"Set Temp Variable",            "cat":"Flags",
+    "fields":[("var","entry","my_temp_var","Temp variable name."),
+              ("value","entry","1","Value.")]},
+  "add_to_temp_variable":     {"label":"Add to Temp Variable",         "cat":"Flags",
+    "fields":[("var","entry","my_temp_var","Temp variable name."),
+              ("value","entry","1","Value to add.")]},
+  "subtract_from_temp_variable":{"label":"Subtract from Temp Variable","cat":"Flags",
+    "fields":[("var","entry","my_temp_var","Temp variable name."),
+              ("value","entry","1","Value to subtract.")]},
+  "multiply_temp_variable":   {"label":"Multiply Temp Variable",       "cat":"Flags",
+    "fields":[("var","entry","my_temp_var","Temp variable name."),
+              ("value","entry","2","Multiplier.")]},
+  "divide_temp_variable":     {"label":"Divide Temp Variable",         "cat":"Flags",
+    "fields":[("var","entry","my_temp_var","Temp variable name."),
+              ("value","entry","2","Divisor.")]},
+  "modulo_temp_variable":     {"label":"Modulo Temp Variable",         "cat":"Flags",
+    "fields":[("var","entry","my_temp_var","Variable to modulo."),
+              ("value","entry","10","Divisor.")]},
+  "round_temp_variable":      {"label":"Round Temp Variable",          "cat":"Flags",
+    "fields":[("var","entry","my_temp_var","Temp variable name to round.")]},
+  "clamp_temp_variable":      {"label":"Clamp Temp Variable",          "cat":"Flags",
+    "fields":[("var","entry","my_temp_var","Temp variable name."),
+              ("min","entry","0","Minimum value."),
+              ("max","entry","100","Maximum value.")]},
+  "set_temp_variable_to_random":{"label":"Set Temp Variable to Random","cat":"Flags",
+    "fields":[("var","entry","my_temp_var","Temp variable name."),
+              ("max","entry","10","Max value.")]},
+  "randomize_temp_variable":  {"label":"Randomize Temp Variable",      "cat":"Flags",
+    "fields":[("var","entry","my_temp_var","Temp variable name."),
+              ("max","entry","10","Max value.")]},
+  "add_to_array":             {"label":"Add to Array",                 "cat":"Flags",
+    "fields":[("array","entry","my_array","Array name."),
+              ("value","entry","42","Value to add (optional, else adds scope)."),
+              ("index","entry","","Index position (optional, default = end).")]},
+  "add_to_temp_array":        {"label":"Add to Temp Array",            "cat":"Flags",
+    "fields":[("array","entry","my_temp_array","Temp array name."),
+              ("value","entry","42","Value to add.")]},
+  "remove_from_array":        {"label":"Remove from Array",            "cat":"Flags",
+    "fields":[("array","entry","my_array","Array name."),
+              ("value","entry","42","Value to remove (or use index).")]},
+  "remove_from_temp_array":   {"label":"Remove from Temp Array",       "cat":"Flags",
+    "fields":[("array","entry","my_temp_array","Temp array name."),
+              ("value","entry","42","Value to remove.")]},
+  "clear_array":              {"label":"Clear Array",                  "cat":"Flags",
+    "fields":[("array","entry","my_array","Array name to clear.")]},
+  "clear_temp_array":         {"label":"Clear Temp Array",             "cat":"Flags",
+    "fields":[("array","entry","my_temp_array","Temp array name to clear.")]},
+  "resize_array":             {"label":"Resize Array",                 "cat":"Flags",
+    "fields":[("array","entry","my_array","Array name."),
+              ("size","entry","10","New size."),
+              ("value","entry","0","Default value for new elements.")]},
+  "resize_temp_array":        {"label":"Resize Temp Array",            "cat":"Flags",
+    "fields":[("array","entry","my_temp_array","Temp array name."),
+              ("size","entry","10","New size.")]},
+  "save_event_target_as":     {"label":"Save Event Target As",         "cat":"Flags",
+    "fields":[("name","entry","my_target","Event target name.")]},
+  "save_global_event_target_as":{"label":"Save Global Event Target As","cat":"Flags",
+    "fields":[("name","entry","my_global_target","Global event target name.")]},
+
+  # ── EVENTS ────────────────────────────────────────────────────────────────
+  "country_event":            {"label":"Fire Country Event",           "cat":"Events",
+    "fields":[("id","entry","my_mod.1","Event ID from /events/"),
+              ("days","entry","0","Delay in days.")]},
+  "news_event":               {"label":"Fire News Event",              "cat":"Events",
+    "fields":[("id","entry","my_news.1","News event ID."),
+              ("days","entry","0","Delay in days.")]},
+  "state_event":              {"label":"Fire State Event",             "cat":"Events",
+    "fields":[("id","entry","my_state_event.1","State event ID."),
+              ("days","entry","0","Delay in days.")]},
+  "hidden_effect":            {"label":"Hidden Effect (no tooltip)",   "cat":"Events",
+    "fields":[("effect","entry","add_political_power = 100","Effect hidden from tooltip.")]},
+  "custom_effect_tooltip":    {"label":"Custom Tooltip Text",          "cat":"Events",
+    "fields":[("key","entry","my_tooltip_key","Loc key shown in tooltip.")]},
+  "effect_tooltip":           {"label":"Effect Tooltip Only (no exec)","cat":"Events",
+    "fields":[("effect","entry","add_political_power = 100","Shown in tooltip but not run.")]},
+  "custom_override_tooltip":  {"label":"Custom Override Tooltip",      "cat":"Events",
+    "fields":[("key","entry","my_override_key","Loc key."),
+              ("effect","entry","add_political_power = 100","Effect to execute (tooltip overrides).")]},
+  "event_option_tooltip":     {"label":"Event Option Tooltip",         "cat":"Events",
+    "fields":[("event","entry","my_event.1","Event ID."),
+              ("option","entry","a","Option letter.")]},
+  "sound_effect":             {"label":"Play Sound Effect",            "cat":"Events",
+    "fields":[("id","entry","event:/SFX/Events/political/civil_war","Sound event path.")]},
+  "scoped_sound_effect":      {"label":"Scoped Sound Effect (player only)","cat":"Events",
+    "fields":[("id","entry","event:/SFX/Events/political/civil_war","Sound event path.")]},
+  "play_song":                {"label":"Play Song",                    "cat":"Events",
+    "fields":[("song","entry","my_song_key","Song database key.")]},
+  "scoped_play_song":         {"label":"Scoped Play Song (player only)","cat":"Events",
+    "fields":[("song","entry","my_song_key","Song database key.")]},
+  "ai_message":               {"label":"AI Message",                   "cat":"Events",
+    "fields":[("type","entry","peace","AI message type."),
+              ("id","entry","my_message_id","Message ID.")]},
+  "log":                      {"label":"Log Message",                  "cat":"Events",
+    "fields":[("text","entry","Debug message here","Text to print to game.log.")]},
+  "print_variables":          {"label":"Print Variables to File",      "cat":"Events",
+    "fields":[("file","entry","log_file","Output file name."),
+              ("text","entry","header","Header text."),
+              ("append","dropdown:yes,no","yes","Append to file?")]},
+  "meta_effect":              {"label":"Meta Effect (dynamic scripting)","cat":"Events",
+    "fields":[("text","entry","[COUNTRY] = { add_political_power = [POW] }","Effect template with tokens."),
+              ("COUNTRY","entry","GER","Token replacement value."),
+              ("POW","entry","100","Token replacement value.")]},
+
+  # ── SCOPES ────────────────────────────────────────────────────────────────
+  "if":                       {"label":"If Block (conditional)",       "cat":"Scopes",
+    "fields":[("limit","entry","has_war = yes","Trigger inside limit = { }."),
+              ("effect","entry","add_political_power = 100","Effect if condition true.")]},
+  "every_country":            {"label":"Every Country",                "cat":"Scopes",
+    "fields":[("limit","entry","is_major = yes","Filter trigger."),
+              ("effect","entry","add_political_power = 50","Effect on each.")]},
+  "every_state":              {"label":"Every State",                  "cat":"Scopes",
+    "fields":[("limit","entry","is_controlled_by = ROOT","Filter trigger."),
+              ("effect","entry","add_building_construction = { type = infrastructure level = 1 instant_build = yes }","State effect.")]},
+  "every_ally":               {"label":"Every Ally",                   "cat":"Scopes",
+    "fields":[("limit","entry","","Filter trigger."),
+              ("effect","entry","add_political_power = 25","Effect.")]},
+  "every_enemy_country":      {"label":"Every Enemy Country",          "cat":"Scopes",
+    "fields":[("limit","entry","","Filter trigger."),
+              ("effect","entry","add_threat = 1","Effect.")]},
+  "every_faction_member":     {"label":"Every Faction Member",         "cat":"Scopes",
+    "fields":[("limit","entry","","Filter trigger."),
+              ("effect","entry","add_political_power = 25","Effect.")]},
+  "every_subject_country":    {"label":"Every Subject Country",        "cat":"Scopes",
+    "fields":[("limit","entry","","Filter trigger."),
+              ("effect","entry","add_political_power = 25","Effect.")]},
+  "every_neighbor_country":   {"label":"Every Neighbor Country",       "cat":"Scopes",
+    "fields":[("limit","entry","","Filter trigger."),
+              ("effect","entry","add_political_power = 10","Effect.")]},
+  "every_allied_country":     {"label":"Every Allied Country",         "cat":"Scopes",
+    "fields":[("limit","entry","","Filter trigger."),
+              ("effect","entry","add_political_power = 25","Effect.")]},
+  "every_other_country":      {"label":"Every Other Country",          "cat":"Scopes",
+    "fields":[("limit","entry","","Filter trigger."),
+              ("effect","entry","add_political_power = 10","Effect.")]},
+  "every_occupied_country":   {"label":"Every Occupied Country",       "cat":"Scopes",
+    "fields":[("limit","entry","","Filter trigger."),
+              ("effect","entry","add_political_power = 10","Effect.")]},
+  "every_possible_country":   {"label":"Every Possible Country (incl. not spawned)","cat":"Scopes",
+    "fields":[("limit","entry","","Filter trigger."),
+              ("effect","entry","add_political_power = 10","Effect.")]},
+  "every_controlled_state":   {"label":"Every Controlled State",       "cat":"Scopes",
+    "fields":[("limit","entry","","Filter trigger."),
+              ("effect","entry","add_building_construction = { type = industrial_complex level = 1 instant_build = yes }","State effect.")]},
+  "every_owned_state":        {"label":"Every Owned State",            "cat":"Scopes",
+    "fields":[("limit","entry","","Filter trigger."),
+              ("effect","entry","add_building_construction = { type = infrastructure level = 1 instant_build = yes }","State effect.")]},
+  "every_core_state":         {"label":"Every Core State",             "cat":"Scopes",
+    "fields":[("limit","entry","","Filter trigger."),
+              ("effect","entry","add_building_construction = { type = infrastructure level = 1 instant_build = yes }","State effect.")]},
+  "every_neighbor_state":     {"label":"Every Neighbor State",         "cat":"Scopes",
+    "fields":[("limit","entry","","Filter trigger."),
+              ("effect","entry","add_building_construction = { type = infrastructure level = 1 instant_build = yes }","State effect.")]},
+  "every_army_leader":        {"label":"Every Army Leader",            "cat":"Scopes",
+    "fields":[("limit","entry","","Filter trigger."),
+              ("effect","entry","add_skill_level = 1","Effect on each.")]},
+  "every_navy_leader":        {"label":"Every Navy Leader",            "cat":"Scopes",
+    "fields":[("limit","entry","","Filter trigger."),
+              ("effect","entry","add_skill_level = 1","Effect on each.")]},
+  "every_unit_leader":        {"label":"Every Unit Leader",            "cat":"Scopes",
+    "fields":[("limit","entry","","Filter trigger."),
+              ("effect","entry","add_skill_level = 1","Effect on each.")]},
+  "every_character":          {"label":"Every Character",              "cat":"Scopes",
+    "fields":[("limit","entry","","Filter trigger."),
+              ("effect","entry","add_skill_level = 1","Effect on each.")]},
+  "every_operative":          {"label":"Every Operative",              "cat":"Scopes",
+    "fields":[("limit","entry","","Filter trigger."),
+              ("effect","entry","gain_xp = 5","Effect on each.")]},
+  "every_country_division":   {"label":"Every Country Division",       "cat":"Scopes",
+    "fields":[("limit","entry","","Filter trigger."),
+              ("effect","entry","add_temporary_buff_to_units = { name = my_buff }","Effect on each division.")]},
+  "every_state_division":     {"label":"Every State Division",         "cat":"Scopes",
+    "fields":[("limit","entry","","Filter trigger."),
+              ("effect","entry","add_temporary_buff_to_units = { name = my_buff }","Effect on each division.")]},
+  "every_active_scientist":   {"label":"Every Active Scientist",       "cat":"Scopes",
+    "fields":[("limit","entry","","Filter trigger."),
+              ("effect","entry","add_scientist_xp = { specialization = land value = 10 }","Effect on each.")]},
+  "every_scientist":          {"label":"Every Scientist",              "cat":"Scopes",
+    "fields":[("limit","entry","","Filter trigger."),
+              ("effect","entry","add_scientist_xp = { specialization = land value = 10 }","Effect on each.")]},
+  "every_military_industrial_organization":{"label":"Every MIO",       "cat":"Scopes",
+    "fields":[("limit","entry","","Filter trigger."),
+              ("effect","entry","add_mio_size = 1","Effect on each MIO.")]},
+  "every_purchase_contract":  {"label":"Every Purchase Contract",      "cat":"Scopes",
+    "fields":[("limit","entry","","Filter trigger."),
+              ("effect","entry","cancel_purchase_contract = yes","Effect on each.")]},
+  "every_country_with_original_tag":{"label":"Every Country With Original Tag","cat":"Scopes",
+    "fields":[("tag","entry","GER","Original tag to filter by."),
+              ("effect","entry","add_political_power = 50","Effect on each.")]},
+  "every_collection_element": {"label":"Every Collection Element",     "cat":"Scopes",
+    "fields":[("collection","entry","game:all_countries","Collection to iterate."),
+              ("effect","entry","add_political_power = 10","Effect on each element.")]},
+  "random_country":           {"label":"Random Country",               "cat":"Scopes",
+    "fields":[("limit","entry","is_major = yes","Filter trigger."),
+              ("effect","entry","add_political_power = 50","Effect.")]},
+  "random_state":             {"label":"Random State",                 "cat":"Scopes",
+    "fields":[("limit","entry","is_controlled_by = ROOT","Filter trigger."),
+              ("effect","entry","add_building_construction = { type = industrial_complex level = 1 instant_build = yes }","Effect.")]},
+  "random_owned_controlled_state":{"label":"Random Owned/Controlled State","cat":"Scopes",
+    "fields":[("limit","entry","","Filter trigger."),
+              ("effect","entry","add_building_construction = { type = industrial_complex level = 1 instant_build = yes }","Effect.")]},
+  "random_owned_state":       {"label":"Random Owned State",           "cat":"Scopes",
+    "fields":[("limit","entry","","Filter trigger."),
+              ("effect","entry","add_building_construction = { type = infrastructure level = 1 instant_build = yes }","Effect.")]},
+  "random_controlled_state":  {"label":"Random Controlled State",      "cat":"Scopes",
+    "fields":[("limit","entry","","Filter trigger."),
+              ("effect","entry","add_building_construction = { type = industrial_complex level = 1 instant_build = yes }","Effect.")]},
+  "random_core_state":        {"label":"Random Core State",            "cat":"Scopes",
+    "fields":[("limit","entry","","Filter trigger."),
+              ("effect","entry","add_building_construction = { type = infrastructure level = 1 instant_build = yes }","Effect.")]},
+  "random_neighbor_country":  {"label":"Random Neighbor Country",      "cat":"Scopes",
+    "fields":[("limit","entry","","Filter trigger."),
+              ("effect","entry","add_political_power = 25","Effect.")]},
+  "random_neighbor_state":    {"label":"Random Neighbor State",        "cat":"Scopes",
+    "fields":[("limit","entry","","Filter trigger."),
+              ("effect","entry","add_building_construction = { type = infrastructure level = 1 instant_build = yes }","Effect.")]},
+  "random_allied_country":    {"label":"Random Allied Country",        "cat":"Scopes",
+    "fields":[("limit","entry","","Filter trigger."),
+              ("effect","entry","add_political_power = 25","Effect.")]},
+  "random_other_country":     {"label":"Random Other Country",         "cat":"Scopes",
+    "fields":[("limit","entry","","Filter trigger."),
+              ("effect","entry","add_political_power = 10","Effect.")]},
+  "random_enemy_country":     {"label":"Random Enemy Country",         "cat":"Scopes",
+    "fields":[("limit","entry","","Filter trigger."),
+              ("effect","entry","add_threat = 1","Effect.")]},
+  "random_occupied_country":  {"label":"Random Occupied Country",      "cat":"Scopes",
+    "fields":[("limit","entry","","Filter trigger."),
+              ("effect","entry","add_political_power = 10","Effect.")]},
+  "random_subject_country":   {"label":"Random Subject Country",       "cat":"Scopes",
+    "fields":[("limit","entry","","Filter trigger."),
+              ("effect","entry","add_political_power = 25","Effect.")]},
+  "random_army_leader":       {"label":"Random Army Leader",           "cat":"Scopes",
+    "fields":[("limit","entry","","Filter trigger."),
+              ("effect","entry","add_skill_level = 1","Effect.")]},
+  "random_navy_leader":       {"label":"Random Navy Leader",           "cat":"Scopes",
+    "fields":[("limit","entry","","Filter trigger."),
+              ("effect","entry","add_skill_level = 1","Effect.")]},
+  "random_unit_leader":       {"label":"Random Unit Leader",           "cat":"Scopes",
+    "fields":[("limit","entry","","Filter trigger."),
+              ("effect","entry","add_skill_level = 1","Effect.")]},
+  "random_character":         {"label":"Random Character",             "cat":"Scopes",
+    "fields":[("limit","entry","","Filter trigger."),
+              ("effect","entry","add_skill_level = 1","Effect.")]},
+  "random_operative":         {"label":"Random Operative",             "cat":"Scopes",
+    "fields":[("limit","entry","","Filter trigger."),
+              ("effect","entry","gain_xp = 5","Effect.")]},
+  "random_active_scientist":  {"label":"Random Active Scientist",      "cat":"Scopes",
+    "fields":[("limit","entry","","Filter trigger."),
+              ("effect","entry","add_scientist_xp = { specialization = land value = 10 }","Effect.")]},
+  "random_scientist":         {"label":"Random Scientist",             "cat":"Scopes",
+    "fields":[("limit","entry","","Filter trigger."),
+              ("effect","entry","add_scientist_xp = { specialization = land value = 10 }","Effect.")]},
+  "random_military_industrial_organization":{"label":"Random MIO",     "cat":"Scopes",
+    "fields":[("limit","entry","","Filter trigger."),
+              ("effect","entry","add_mio_size = 1","Effect.")]},
+  "random_purchase_contract": {"label":"Random Purchase Contract",     "cat":"Scopes",
+    "fields":[("limit","entry","","Filter trigger."),
+              ("effect","entry","cancel_purchase_contract = yes","Effect.")]},
+  "random_country_division":  {"label":"Random Country Division",      "cat":"Scopes",
+    "fields":[("limit","entry","","Filter trigger."),
+              ("effect","entry","add_temporary_buff_to_units = { name = my_buff }","Effect.")]},
+  "random_state_division":    {"label":"Random State Division",        "cat":"Scopes",
+    "fields":[("limit","entry","","Filter trigger."),
+              ("effect","entry","add_temporary_buff_to_units = { name = my_buff }","Effect.")]},
+  "random_country_with_original_tag":{"label":"Random Country With Original Tag","cat":"Scopes",
+    "fields":[("tag","entry","GER","Original tag."),
+              ("effect","entry","add_political_power = 50","Effect.")]},
+  "random_scope_in_array":    {"label":"Random Scope in Array",        "cat":"Scopes",
+    "fields":[("array","entry","my_array","Array name."),
+              ("limit","entry","","Filter trigger."),
+              ("effect","entry","add_political_power = 10","Effect on random element.")]},
+  "party_leader":             {"label":"Party Leader scope",           "cat":"Scopes",
+    "fields":[("ideology","dropdown:democratic,fascism,communism,neutrality","fascism","Party ideology."),
+              ("effect","entry","add_skill_level = 1","Effect on the party leader.")]},
+  "global_every_army_leader": {"label":"Global Every Army Leader",     "cat":"Scopes",
+    "fields":[("limit","entry","","Filter trigger."),
+              ("effect","entry","add_skill_level = 1","Effect on every army leader globally.")]},
+  "random_list":              {"label":"Random List (weighted)",       "cat":"Scopes",
+    "fields":[("seed","entry","","Seed variable (optional)."),
+              ("effect","entry","10 = { add_political_power = 100 }\n25 = { add_stability = 0.05 }","Weighted options: weight = { effect }.")]},
+  "random":                   {"label":"Random Chance Effect",         "cat":"Scopes",
+    "fields":[("chance","entry","50","Percent chance (0-100)."),
+              ("effect","entry","add_political_power = 100","Effect if chance succeeds.")]},
+  "while_loop_effect":        {"label":"While Loop",                   "cat":"Scopes",
+    "fields":[("limit","entry","check_variable = { var = my_var value < 10 }","Trigger checked each iteration."),
+              ("effect","entry","add_to_variable = { var = my_var value = 1 }","Effect each iteration.")]},
+  "for_loop_effect":          {"label":"For Loop",                     "cat":"Scopes",
+    "fields":[("start","entry","0","Start value."),
+              ("end","entry","10","End value (exclusive)."),
+              ("effect","entry","add_political_power = 10","Effect per iteration.")]},
+  "for_each_loop":            {"label":"For Each Loop (array)",        "cat":"Scopes",
+    "fields":[("array","entry","my_array","Array to loop over."),
+              ("value","entry","v","Temp var for current value (default 'v')."),
+              ("index","entry","i","Temp var for index (default 'i')."),
+              ("effect","entry","add_political_power = var:v","Effect per element.")]},
+  "for_each_scope_loop":      {"label":"For Each Scope Loop (array)",  "cat":"Scopes",
+    "fields":[("array","entry","my_array","Array to loop over."),
+              ("effect","entry","add_skill_level = 1","Effect in scope of each element.")]},
+  "find_highest_in_array":    {"label":"Find Highest in Array",        "cat":"Scopes",
+    "fields":[("array","entry","my_array","Array to search."),
+              ("value","entry","highest_val","Temp var to store highest value.")]},
+  "find_lowest_in_array":     {"label":"Find Lowest in Array",         "cat":"Scopes",
+    "fields":[("array","entry","my_array","Array to search."),
+              ("value","entry","lowest_val","Temp var to store lowest value.")]},
+  "get_highest_scored_country":{"label":"Get Highest Scored Country",  "cat":"Scopes",
+    "fields":[("scorer","entry","my_country_scorer","Country scorer ID."),
+              ("target","entry","best_country","Event target name to store result.")]},
+  "get_sorted_scored_countries":{"label":"Get Sorted Scored Countries","cat":"Scopes",
+    "fields":[("scorer","entry","my_country_scorer","Country scorer ID."),
+              ("array","entry","sorted_countries","Array to store sorted countries.")]},
+  "get_supply_vehicles":      {"label":"Get Supply Vehicles Count",    "cat":"Scopes",
+    "fields":[("var","entry","supply_count","Variable to store the count in.")]},
+
+  # ── GOTO / MAP ────────────────────────────────────────────────────────────
+  "goto_state":               {"label":"Goto State (camera)",          "cat":"Map",
+    "fields":[("state","entry","1","State ID to move camera to.")]},
+  "goto_province":            {"label":"Goto Province (camera)",       "cat":"Map",
+    "fields":[("province","entry","42","Province ID to move camera to.")]},
+  "force_update_map_mode":    {"label":"Force Update Map Mode",        "cat":"Map",
+    "fields":[("mapmode","entry","scripted_map_mode_name","Map mode to force rebuild.")]},
+  "randomize_weather":        {"label":"Randomize Weather",            "cat":"Map",
+    "fields":[("value","dropdown:yes,no","yes","Randomize weather for all strategic regions.")]},
+  "add_region_efficiency":    {"label":"Add Region Efficiency",        "cat":"Map",
+    "fields":[("id","entry","asia_regional_efficiency","Region efficiency modifier ID."),
+              ("value","entry","0.1","Efficiency value.")]},
+  "set_state_province_controller":{"label":"Set State Province Controller","cat":"Map",
+    "fields":[("tag","entry","TAG","New controller."),
+              ("limit","entry","","Condition for provinces (optional).")]},
+  "create_entity":            {"label":"Create Entity (map object)",   "cat":"Map",
+    "fields":[("entity","entry","entity_name","GFX entity entry."),
+              ("id","entry","123","Optional ID for later reference."),
+              ("province","entry","42","Province to place at.")]},
+  "destroy_entity":           {"label":"Destroy Entity",               "cat":"Map",
+    "fields":[("id","entry","123","Entity ID to destroy.")]},
+  "set_entity_position":      {"label":"Set Entity Position",          "cat":"Map",
+    "fields":[("id","entry","123","Entity ID."),
+              ("province","entry","42","Province to move to.")]},
+  "set_entity_rotation":      {"label":"Set Entity Rotation",          "cat":"Map",
+    "fields":[("id","entry","123","Entity ID."),
+              ("rotation","entry","0.23","Angle in radians.")]},
+  "set_entity_scale":         {"label":"Set Entity Scale",             "cat":"Map",
+    "fields":[("id","entry","123","Entity ID."),
+              ("scale","entry","5.0","Scale factor.")]},
+
+  # ── AI ────────────────────────────────────────────────────────────────────
+  "add_ai_strategy":          {"label":"Add AI Strategy",              "cat":"AI",
+    "fields":[("type","entry","alliance","Strategy: alliance, antagonize, ignore, befriend, protect, etc."),
+              ("id","entry","TAG","Target country tag."),
+              ("value","entry","100","Strategy strength.")]},
+
+  # ── MISC ──────────────────────────────────────────────────────────────────
+  "add_dynamic_modifier":     {"label":"Add Dynamic Modifier",         "cat":"Misc",
+    "fields":[("modifier","entry","my_dynamic_modifier","Dynamic modifier ID from common/dynamic_modifiers/."),
+              ("scope","entry","","Country scope for variables (optional)."),
+              ("days","entry","","Duration in days (optional).")]},
+  "remove_dynamic_modifier":  {"label":"Remove Dynamic Modifier",      "cat":"Misc",
+    "fields":[("modifier","entry","my_dynamic_modifier","Dynamic modifier ID to remove.")]},
+  "force_update_dynamic_modifier":{"label":"Force Update Dynamic Modifier","cat":"Misc",
+    "fields":[("value","dropdown:yes,no","yes","Update modifiers in scope without waiting for daily tick.")]},
+  # ── ADDITIONAL from full documentation ───────────────────────────────────
+  "add_unit_medal_to_latest_entry":{"label":"Add Unit Medal",             "cat":"Military",
+    "fields":[("unit_medals","entry","medal_key","Medal key to add to the latest unit history entry.")]},
+  "destroy_unit":             {"label":"Destroy Unit (scoped)",            "cat":"Military",
+    "fields":[("value","dropdown:yes,no","yes","Destroy the currently scoped unit.")]},
+  "set_unit_organization":    {"label":"Set Unit Organization",            "cat":"Military",
+    "fields":[("value","entry","0.5","Organization ratio 0.0-1.0 (fraction of max org).")]},
+  "remove_exile_tag":         {"label":"Remove Exile Tag",                 "cat":"Political",
+    "fields":[("value","dropdown:yes,no","yes","Remove exile tag from scoped unit leader.")]},
+  "character_list_tooltip":   {"label":"Character List Tooltip",           "cat":"Events",
+    "fields":[("limit","entry","","(Optional) Filter trigger for which characters to display."),
+              ("tooltip","entry","","(Optional) Loc key to override tooltip title.")]},
+  "show_unit_leaders_tooltip":{"label":"Show Unit Leaders Tooltip",        "cat":"Events",
+    "fields":[("value","dropdown:yes,no","yes","Show unit leaders names in tooltip.")]},
+  "cancel_purchase_contract": {"label":"Cancel Purchase Contract",         "cat":"Misc",
+    "fields":[("value","dropdown:yes,no","yes","Cancel the scoped purchase contract.")]},
+  "execute_operation_coordinated_strike":{"label":"Execute Coordinated Strike Operation","cat":"Misc",
+    "fields":[("amount","entry","1","How many times to run the strike simulation.")]},
+  "get_highest_scored_country_temp":{"label":"Get Highest Scored Country (Temp)","cat":"Flags",
+    "fields":[("scorer","entry","scorer_id","Country scorer ID from common/country_scorer/."),
+              ("var","entry","highest_country","Temp variable name to store the result.")]},
+  "get_sorted_scored_countries_temp":{"label":"Get Sorted Scored Countries (Temp)","cat":"Flags",
+    "fields":[("scorer","entry","scorer_id","Country scorer ID."),
+              ("array","entry","scored_array","Temp array name to store sorted countries.")]},
+  "get_supply_vehicles_temp": {"label":"Get Supply Vehicles (Temp)",       "cat":"Flags",
+    "fields":[("var","entry","num_vehicles","Temp variable name to store result."),
+              ("type","dropdown:truck,train","truck","Vehicle type."),
+              ("need","dropdown:no,yes","no","yes=get number needed, no=get number in stockpile.")]},
+  "set_entity_animation":     {"label":"Set Entity Animation",             "cat":"Misc",
+    "fields":[("id","entry","123","Entity ID."),
+              ("animation","entry","shoot_lasers","Animation key to play.")]},
+  "set_entity_movement":      {"label":"Set Entity Movement",              "cat":"Misc",
+    "fields":[("id","entry","123","Entity ID."),
+              ("start","entry","{ province = 123 }","Start position block."),
+              ("end","entry","{ province = 456 }","End position block.")]},
+  "set_faction_military_unlocked":{"label":"Set Faction Military Unlocked","cat":"Diplomacy",
+    "fields":[("value","dropdown:yes,no","yes","Unlock military options for the faction.")]},
+  "set_faction_research_unlocked":{"label":"Set Faction Research Unlocked","cat":"Diplomacy",
+    "fields":[("value","dropdown:yes,no","yes","Unlock research sharing for the faction.")]},
+  "set_relation_rule":        {"label":"Set Relation Rule (deprecated)",    "cat":"Diplomacy",
+    "fields":[("note","entry","DEPRECATED","Use add_relation_rule_override instead.")]},
+
+}
+EFFECT_CATS = ["Political","Research","Military","Industry","Characters","Ships","Diplomacy","Occupation","Border Wars","Power Balance","MIO","Special Projects","Flags","Events","Scopes","Map","AI","Misc","MD Economy","MD Buildings","MD Politics","MD Factions","MD Influence","MD Modifiers"]
+
+
+def effects_in_cat(cat):
+    return [(k,v["label"]) for k,v in EFFECT_DEFS.items() if v.get("cat")==cat]
+
+
+MODIFIER_DEFS = {
+  'ai_badass_factor': {"cat":'AI', "desc":'Ai Badass Factor', "hint":'float (e.g. 0.1)'},
+  'ai_call_ally_desire_factor': {"cat":'AI', "desc":'Ai Call Ally Desire Factor', "hint":'integer (e.g. 1)'},
+  'ai_desired_divisions_factor': {"cat":'AI', "desc":'Ai Desired Divisions Factor', "hint":'float (e.g. 0.1)'},
+  'ai_focus_aggressive_factor': {"cat":'AI', "desc":'Ai Focus Aggressive Factor', "hint":'float (e.g. 0.1)'},
+  'ai_focus_aviation_factor': {"cat":'AI', "desc":'Ai Focus Aviation Factor', "hint":'float (e.g. 0.1)'},
+  'ai_focus_defense_factor': {"cat":'AI', "desc":'Ai Focus Defense Factor', "hint":'float (e.g. 0.1)'},
+  'ai_focus_military_advancements_factor': {"cat":'AI', "desc":'Ai Focus Military Advancements Factor', "hint":'float (e.g. 0.1)'},
+  'ai_focus_military_equipment_factor': {"cat":'AI', "desc":'Ai Focus Military Equipment Factor', "hint":'float (e.g. 0.1)'},
+  'ai_focus_naval_air_factor': {"cat":'AI', "desc":'Ai Focus Naval Air Factor', "hint":'float (e.g. 0.1)'},
+  'ai_focus_naval_factor': {"cat":'AI', "desc":'Ai Focus Naval Factor', "hint":'float (e.g. 0.1)'},
+  'ai_focus_peaceful_factor': {"cat":'AI', "desc":'Ai Focus Peaceful Factor', "hint":'float (e.g. 0.1)'},
+  'ai_focus_war_production_factor': {"cat":'AI', "desc":'Ai Focus War Production Factor', "hint":'float (e.g. 0.1)'},
+  'ai_get_ally_desire_factor': {"cat":'AI', "desc":'Ai Get Ally Desire Factor', "hint":'integer (e.g. 1)'},
+  'ai_join_ally_desire_factor': {"cat":'AI', "desc":'Ai Join Ally Desire Factor', "hint":'integer (e.g. 1)'},
+  'ai_license_acceptance': {"cat":'AI', "desc":'Ai License Acceptance', "hint":'integer (e.g. 1)'},
+  'ace_effectiveness_factor': {"cat":'Air', "desc":'Ace Effectiveness Factor', "hint":'float (e.g. 0.1)'},
+  'air_accidents': {"cat":'Air', "desc":'Air Accidents', "hint":'float (e.g. 0.1)'},
+  'air_accidents_factor': {"cat":'Air', "desc":'Air Accidents Factor', "hint":'float (e.g. 0.1)'},
+  'air_ace_bonuses_factor': {"cat":'Air', "desc":'Air Ace Bonuses Factor', "hint":'integer (e.g. 1)'},
+  'air_ace_generation_chance_factor': {"cat":'Air', "desc":'Air Ace Generation Chance Factor', "hint":'float (e.g. 0.05)'},
+  'air_advisor_cost_factor': {"cat":'Air', "desc":'Air Advisor Cost Factor', "hint":'integer (e.g. 1)'},
+  'air_agility_factor': {"cat":'Air', "desc":'Air Agility Factor', "hint":'integer (e.g. 1)'},
+  'air_attack_factor': {"cat":'Air', "desc":'Air Attack Factor', "hint":'integer (e.g. 1)'},
+  'air_bombing_targetting': {"cat":'Air', "desc":'Air Bombing Targetting', "hint":'float (e.g. 0.1)'},
+  'air_carrier_night_penalty_reduction_factor': {"cat":'Air', "desc":'Air Carrier Night Penalty Reduction Factor', "hint":'float (e.g. 0.05)'},
+  'air_cas_efficiency': {"cat":'Air', "desc":'Air Cas Efficiency', "hint":'integer (e.g. 1)'},
+  'air_cas_present_factor': {"cat":'Air', "desc":'Air Cas Present Factor', "hint":'float (e.g. 0.05)'},
+  'air_close_air_support_org_damage_factor': {"cat":'Air', "desc":'Air Close Air Support Org Damage Factor', "hint":'integer (e.g. 1)'},
+  'air_defence_factor': {"cat":'Air', "desc":'Air Defence Factor', "hint":'integer (e.g. 1)'},
+  'air_detection': {"cat":'Air', "desc":'Air Detection', "hint":'float (e.g. 0.1)'},
+  'air_escort_efficiency': {"cat":'Air', "desc":'Air Escort Efficiency', "hint":'integer (e.g. 1)'},
+  'air_fuel_consumption_factor': {"cat":'Air', "desc":'Air Fuel Consumption Factor', "hint":'float (e.g. 0.05)'},
+  'air_home_defence_factor': {"cat":'Air', "desc":'Air Home Defence Factor', "hint":'integer (e.g. 1)'},
+  'air_intercept_efficiency': {"cat":'Air', "desc":'Air Intercept Efficiency', "hint":'integer (e.g. 1)'},
+  'air_interception_detect_factor': {"cat":'Air', "desc":'Air Interception Detect Factor', "hint":'float (e.g. 0.05)'},
+  'air_invasion_division_cap': {"cat":'Air', "desc":'Air Invasion Division Cap', "hint":'integer (e.g. 1)'},
+  'air_invasion_preparation': {"cat":'Air', "desc":'Air Invasion Preparation', "hint":'float (e.g. 0.1)'},
+  'air_manpower_requirement_factor': {"cat":'Air', "desc":'Air Manpower Requirement Factor', "hint":'float (e.g. 0.05)'},
+  'air_maximum_speed_factor': {"cat":'Air', "desc":'Air Maximum Speed Factor', "hint":'integer (e.g. 1)'},
+  'air_mission_efficiency': {"cat":'Air', "desc":'Air Mission Efficiency', "hint":'float (e.g. 0.1)'},
+  'air_mission_xp_gain_factor': {"cat":'Air', "desc":'Air Mission Xp Gain Factor', "hint":'integer (e.g. 1)'},
+  'air_nav_efficiency': {"cat":'Air', "desc":'Air Nav Efficiency', "hint":'integer (e.g. 1)'},
+  'air_night_penalty': {"cat":'Air', "desc":'Air Night Penalty', "hint":'float (e.g. 0.05)'},
+  'air_power_projection_factor': {"cat":'Air', "desc":'Air Power Projection Factor', "hint":'integer (e.g. 1)'},
+  'air_range_factor': {"cat":'Air', "desc":'Air Range Factor', "hint":'integer (e.g. 1)'},
+  'air_strategic_bomber_bombing_factor': {"cat":'Air', "desc":'Air Strategic Bomber Bombing Factor', "hint":'float (e.g. 0.1)'},
+  'air_strategic_bomber_defence_factor': {"cat":'Air', "desc":'Air Strategic Bomber Defence Factor', "hint":'float (e.g. 0.05)'},
+  'air_strategic_bomber_night_penalty': {"cat":'Air', "desc":'Air Strategic Bomber Night Penalty', "hint":'float (e.g. 0.05)'},
+  'air_superiority_detect_factor': {"cat":'Air', "desc":'Air Superiority Detect Factor', "hint":'float (e.g. 0.05)'},
+  'air_superiority_efficiency': {"cat":'Air', "desc":'Air Superiority Efficiency', "hint":'integer (e.g. 1)'},
+  'air_training_xp_gain_factor': {"cat":'Air', "desc":'Air Training Xp Gain Factor', "hint":'integer (e.g. 1)'},
+  'air_untrained_pilots_penalty_factor': {"cat":'Air', "desc":'Air Untrained Pilots Penalty Factor', "hint":'integer (e.g. 1)'},
+  'air_weather_penalty': {"cat":'Air', "desc":'Air Weather Penalty', "hint":'float (e.g. 0.05)'},
+  'air_wing_xp_loss_when_killed_factor': {"cat":'Air', "desc":'Air Wing Xp Loss When Killed Factor', "hint":'integer (e.g. 1)'},
+  'army_bonus_air_superiority_factor': {"cat":'Air', "desc":'Army Bonus Air Superiority Factor', "hint":'float (e.g. 0.05)'},
+  'carrier_night_traffic': {"cat":'Air', "desc":'Carrier Night Traffic', "hint":'float (e.g. 0.05)'},
+  'enemy_army_bonus_air_superiority_factor': {"cat":'Air', "desc":'Enemy Army Bonus Air Superiority Factor', "hint":'float (e.g. 0.05)'},
+  'experience_gain_air': {"cat":'Air', "desc":'Experience Gain Air', "hint":'float (e.g. 0.05)'},
+  'experience_gain_air_factor': {"cat":'Air', "desc":'Experience Gain Air Factor', "hint":'float (e.g. 0.1)'},
+  'ground_attack': {"cat":'Air', "desc":'Ground Attack', "hint":'float (e.g. 0.1)'},
+  'ground_attack_factor': {"cat":'Air', "desc":'Ground Attack Factor', "hint":'float (e.g. 0.1)'},
+  'mines_planting_by_air_factor': {"cat":'Air', "desc":'Mines Planting By Air Factor', "hint":'integer (e.g. 1)'},
+  'mines_sweeping_by_air_factor': {"cat":'Air', "desc":'Mines Sweeping By Air Factor', "hint":'integer (e.g. 1)'},
+  'naval_strike_agility_factor': {"cat":'Air', "desc":'Naval Strike Agility Factor', "hint":'integer (e.g. 1)'},
+  'naval_strike_attack_factor': {"cat":'Air', "desc":'Naval Strike Attack Factor', "hint":'integer (e.g. 1)'},
+  'naval_strike_targetting_factor': {"cat":'Air', "desc":'Naval Strike Targetting Factor', "hint":'integer (e.g. 1)'},
+  'navy_weather_penalty': {"cat":'Air', "desc":'Navy Weather Penalty', "hint":'float (e.g. 0.05)'},
+  'strategic_bomb_visibility': {"cat":'Air', "desc":'Strategic Bomb Visibility', "hint":'integer (e.g. 1)'},
+  'acclimatization_cold_climate_gain_factor': {"cat":'Army', "desc":'Acclimatization Cold Climate Gain Factor', "hint":'float (e.g. 0.1)'},
+  'acclimatization_hot_climate_gain_factor': {"cat":'Army', "desc":'Acclimatization Hot Climate Gain Factor', "hint":'float (e.g. 0.1)'},
+  'air_superiority_bonus_in_combat': {"cat":'Army', "desc":'Air Superiority Bonus In Combat', "hint":'float (e.g. 0.1)'},
+  'armor_factor': {"cat":'Army', "desc":'Armor Factor', "hint":'float (e.g. 0.05)'},
+  'army_advisor_cost_factor': {"cat":'Army', "desc":'Army Advisor Cost Factor', "hint":'integer (e.g. 1)'},
+  'army_armor_attack_factor': {"cat":'Army', "desc":'Army Armor Attack Factor', "hint":'float (e.g. 0.1)'},
+  'army_armor_defence_factor': {"cat":'Army', "desc":'Army Armor Defence Factor', "hint":'float (e.g. 0.1)'},
+  'army_armor_speed_factor': {"cat":'Army', "desc":'Army Armor Speed Factor', "hint":'float (e.g. 0.1)'},
+  'army_artillery_attack_factor': {"cat":'Army', "desc":'Army Artillery Attack Factor', "hint":'float (e.g. 0.1)'},
+  'army_artillery_defence_factor': {"cat":'Army', "desc":'Army Artillery Defence Factor', "hint":'float (e.g. 0.1)'},
+  'army_attack_against_major_factor': {"cat":'Army', "desc":'Army Attack Against Major Factor', "hint":'float (e.g. 0.1)'},
+  'army_attack_against_minor_factor': {"cat":'Army', "desc":'Army Attack Against Minor Factor', "hint":'float (e.g. 0.1)'},
+  'army_attack_factor': {"cat":'Army', "desc":'Army Attack Factor', "hint":'float (e.g. 0.1)'},
+  'army_attack_speed_factor': {"cat":'Army', "desc":'Army Attack Speed Factor', "hint":'float (e.g. 0.05)'},
+  'army_breakthrough_against_major_factor': {"cat":'Army', "desc":'Army Breakthrough Against Major Factor', "hint":'float (e.g. 0.1)'},
+  'army_breakthrough_against_minor_factor': {"cat":'Army', "desc":'Army Breakthrough Against Minor Factor', "hint":'float (e.g. 0.1)'},
+  'army_claim_attack_factor': {"cat":'Army', "desc":'Army Claim Attack Factor', "hint":'float (e.g. 0.1)'},
+  'army_claim_defence_factor': {"cat":'Army', "desc":'Army Claim Defence Factor', "hint":'float (e.g. 0.1)'},
+  'army_core_attack_factor': {"cat":'Army', "desc":'Army Core Attack Factor', "hint":'float (e.g. 0.1)'},
+  'army_core_defence_factor': {"cat":'Army', "desc":'Army Core Defence Factor', "hint":'float (e.g. 0.1)'},
+  'army_defence_against_major_factor': {"cat":'Army', "desc":'Army Defence Against Major Factor', "hint":'float (e.g. 0.1)'},
+  'army_defence_against_minor_factor': {"cat":'Army', "desc":'Army Defence Against Minor Factor', "hint":'float (e.g. 0.1)'},
+  'army_defence_factor': {"cat":'Army', "desc":'Army Defence Factor', "hint":'float (e.g. 0.1)'},
+  'army_experience_from_volunteers': {"cat":'Army', "desc":'Army Experience From Volunteers', "hint":'float (e.g. 0.1)'},
+  'army_fuel_capacity_factor': {"cat":'Army', "desc":'Army Fuel Capacity Factor', "hint":'float (e.g. 0.05)'},
+  'army_fuel_consumption_factor': {"cat":'Army', "desc":'Army Fuel Consumption Factor', "hint":'float (e.g. 0.05)'},
+  'army_infantry_attack_factor': {"cat":'Army', "desc":'Army Infantry Attack Factor', "hint":'float (e.g. 0.1)'},
+  'army_infantry_defence_factor': {"cat":'Army', "desc":'Army Infantry Defence Factor', "hint":'float (e.g. 0.1)'},
+  'army_morale': {"cat":'Army', "desc":'Army Morale', "hint":'float (e.g. 0.1)'},
+  'army_morale_factor': {"cat":'Army', "desc":'Army Morale Factor', "hint":'float (e.g. 0.1)'},
+  'army_org': {"cat":'Army', "desc":'Army Org', "hint":'float (e.g. 0.1)'},
+  'army_org_factor': {"cat":'Army', "desc":'Army Org Factor', "hint":'float (e.g. 0.1)'},
+  'army_org_regain': {"cat":'Army', "desc":'Army Org Regain', "hint":'float (e.g. 0.05)'},
+  'army_retreat_speed_factor': {"cat":'Army', "desc":'Army Retreat Speed Factor', "hint":'float (e.g. 0.05)'},
+  'army_speed_factor': {"cat":'Army', "desc":'Army Speed Factor', "hint":'float (e.g. 0.05)'},
+  'army_strength_factor': {"cat":'Army', "desc":'Army Strength Factor', "hint":'float (e.g. 0.05)'},
+  'attack_bonus_against': {"cat":'Army', "desc":'Attack Bonus Against', "hint":'float (e.g. 0.1)'},
+  'attack_bonus_against_cores': {"cat":'Army', "desc":'Attack Bonus Against Cores', "hint":'float (e.g. 0.1)'},
+  'attrition': {"cat":'Army', "desc":'Attrition', "hint":'float (e.g. 0.1)'},
+  'attrition_for_controller': {"cat":'Army', "desc":'Attrition For Controller', "hint":'float (e.g. 0.1)'},
+  'breakthrough_bonus_against': {"cat":'Army', "desc":'Breakthrough Bonus Against', "hint":'float (e.g. 0.1)'},
+  'breakthrough_factor': {"cat":'Army', "desc":'Breakthrough Factor', "hint":'float (e.g. 0.05)'},
+  'cas_damage_reduction': {"cat":'Army', "desc":'Cas Damage Reduction', "hint":'float (e.g. 0.1)'},
+  'cavalry_attack_factor': {"cat":'Army', "desc":'Cavalry Attack Factor', "hint":'float (e.g. 0.1)'},
+  'cavalry_defence_factor': {"cat":'Army', "desc":'Cavalry Defence Factor', "hint":'float (e.g. 0.1)'},
+  'combat_width_factor': {"cat":'Army', "desc":'Combat Width Factor', "hint":'float (e.g. 0.1)'},
+  'coordination_bonus': {"cat":'Army', "desc":'Coordination Bonus', "hint":'float (e.g. 0.1)'},
+  'defence': {"cat":'Army', "desc":'Defence', "hint":'float (e.g. 0.05)'},
+  'defense_bonus_against': {"cat":'Army', "desc":'Defense Bonus Against', "hint":'float (e.g. 0.1)'},
+  'dig_in_speed': {"cat":'Army', "desc":'Dig In Speed', "hint":'integer (e.g. 1)'},
+  'dig_in_speed_factor': {"cat":'Army', "desc":'Dig In Speed Factor', "hint":'float (e.g. 0.1)'},
+  'dont_lose_dig_in_on_attack': {"cat":'Army', "desc":'Dont Lose Dig In On Attack', "hint":'bool (yes/no)'},
+  'experience_gain_army': {"cat":'Army', "desc":'Experience Gain Army', "hint":'float (e.g. 0.05)'},
+  'experience_gain_army_factor': {"cat":'Army', "desc":'Experience Gain Army Factor', "hint":'float (e.g. 0.1)'},
+  'experience_gain_army_unit': {"cat":'Army', "desc":'Experience Gain Army Unit', "hint":'float (e.g. 0.1)'},
+  'experience_gain_army_unit_factor': {"cat":'Army', "desc":'Experience Gain Army Unit Factor', "hint":'float (e.g. 0.1)'},
+  'extra_marine_supply_grace': {"cat":'Army', "desc":'Extra Marine Supply Grace', "hint":'float (e.g. 0.1)'},
+  'extra_paratrooper_supply_grace': {"cat":'Army', "desc":'Extra Paratrooper Supply Grace', "hint":'float (e.g. 0.1)'},
+  'heat_attrition': {"cat":'Army', "desc":'Heat Attrition', "hint":'float (e.g. 0.1)'},
+  'heat_attrition_factor': {"cat":'Army', "desc":'Heat Attrition Factor', "hint":'float (e.g. 0.05)'},
+  'land_night_attack': {"cat":'Army', "desc":'Land Night Attack', "hint":'float (e.g. 0.1)'},
+  'local_org_regain': {"cat":'Army', "desc":'Local Org Regain', "hint":'float (e.g. 0.05)'},
+  'marines_special_forces_contribution_factor': {"cat":'Army', "desc":'Marines Special Forces Contribution Factor', "hint":'integer (e.g. 1)'},
+  'max_commander_army_size': {"cat":'Army', "desc":'Max Commander Army Size', "hint":'integer (e.g. 1)'},
+  'max_dig_in': {"cat":'Army', "desc":'Max Dig In', "hint":'float (e.g. 0.1)'},
+  'max_dig_in_factor': {"cat":'Army', "desc":'Max Dig In Factor', "hint":'float (e.g. 0.1)'},
+  'max_planning': {"cat":'Army', "desc":'Max Planning', "hint":'float (e.g. 0.1)'},
+  'max_planning_factor': {"cat":'Army', "desc":'Max Planning Factor', "hint":'float (e.g. 0.1)'},
+  'max_training': {"cat":'Army', "desc":'Max Training', "hint":'float (e.g. 0.05)'},
+  'mechanized_attack_factor': {"cat":'Army', "desc":'Mechanized Attack Factor', "hint":'float (e.g. 0.1)'},
+  'mechanized_defence_factor': {"cat":'Army', "desc":'Mechanized Defence Factor', "hint":'float (e.g. 0.1)'},
+  'modifier_army_sub_unit_armored_car_attack_factor': {"cat":'Army', "desc":'Modifier Army Sub Unit Armored Car Attack Factor', "hint":'float (e.g. 0.05)'},
+  'modifier_army_sub_unit_armored_car_defence_factor': {"cat":'Army', "desc":'Modifier Army Sub Unit Armored Car Defence Factor', "hint":'float (e.g. 0.05)'},
+  'modifier_army_sub_unit_armored_car_max_org_factor': {"cat":'Army', "desc":'Modifier Army Sub Unit Armored Car Max Org Factor', "hint":'float (e.g. 0.05)'},
+  'modifier_army_sub_unit_armored_car_recon_attack_factor': {"cat":'Army', "desc":'Modifier Army Sub Unit Armored Car Recon Attack Factor', "hint":'float (e.g. 0.05)'},
+  'modifier_army_sub_unit_armored_car_recon_defence_factor': {"cat":'Army', "desc":'Modifier Army Sub Unit Armored Car Recon Defence Factor', "hint":'float (e.g. 0.05)'},
+  'modifier_army_sub_unit_armored_car_recon_max_org_factor': {"cat":'Army', "desc":'Modifier Army Sub Unit Armored Car Recon Max Org Factor', "hint":'float (e.g. 0.05)'},
+  'modifier_army_sub_unit_armored_car_recon_speed_factor': {"cat":'Army', "desc":'Modifier Army Sub Unit Armored Car Recon Speed Factor', "hint":'float (e.g. 0.05)'},
+  'modifier_army_sub_unit_armored_car_speed_factor': {"cat":'Army', "desc":'Modifier Army Sub Unit Armored Car Speed Factor', "hint":'float (e.g. 0.05)'},
+  'modifier_army_sub_unit_blackshirt_assault_battalion_attack_factor': {"cat":'Army', "desc":'Modifier Army Sub Unit Blackshirt Assault Battalion Attack Factor', "hint":'float (e.g. 0.05)'},
+  'modifier_army_sub_unit_blackshirt_assault_battalion_defence_factor': {"cat":'Army', "desc":'Modifier Army Sub Unit Blackshirt Assault Battalion Defence Factor', "hint":'float (e.g. 0.05)'},
+  'modifier_army_sub_unit_blackshirt_assault_battalion_max_org_factor': {"cat":'Army', "desc":'Modifier Army Sub Unit Blackshirt Assault Battalion Max Org Factor', "hint":'float (e.g. 0.05)'},
+  'modifier_army_sub_unit_blackshirt_assault_battalion_speed_factor': {"cat":'Army', "desc":'Modifier Army Sub Unit Blackshirt Assault Battalion Speed Factor', "hint":'float (e.g. 0.05)'},
+  'modifier_army_sub_unit_camelry_attack_factor': {"cat":'Army', "desc":'Modifier Army Sub Unit Camelry Attack Factor', "hint":'float (e.g. 0.05)'},
+  'modifier_army_sub_unit_camelry_defence_factor': {"cat":'Army', "desc":'Modifier Army Sub Unit Camelry Defence Factor', "hint":'float (e.g. 0.05)'},
+  'modifier_army_sub_unit_camelry_speed_factor': {"cat":'Army', "desc":'Modifier Army Sub Unit Camelry Speed Factor', "hint":'float (e.g. 0.05)'},
+  'modifier_army_sub_unit_category_rocket_artillery_attack_factor': {"cat":'Army', "desc":'Modifier Army Sub Unit Category Rocket Artillery Attack Factor', "hint":'float (e.g. 0.05)'},
+  'modifier_army_sub_unit_category_special_forces_max_org_factor': {"cat":'Army', "desc":'Modifier Army Sub Unit Category Special Forces Max Org Factor', "hint":'float (e.g. 0.05)'},
+  'modifier_army_sub_unit_cavalry_attack_factor': {"cat":'Army', "desc":'Modifier Army Sub Unit Cavalry Attack Factor', "hint":'float (e.g. 0.05)'},
+  'modifier_army_sub_unit_cavalry_defence_factor': {"cat":'Army', "desc":'Modifier Army Sub Unit Cavalry Defence Factor', "hint":'float (e.g. 0.05)'},
+  'modifier_army_sub_unit_cavalry_speed_factor': {"cat":'Army', "desc":'Modifier Army Sub Unit Cavalry Speed Factor', "hint":'float (e.g. 0.05)'},
+  'modifier_army_sub_unit_infantry_attack_factor': {"cat":'Army', "desc":'Modifier Army Sub Unit Infantry Attack Factor', "hint":'float (e.g. 0.05)'},
+  'modifier_army_sub_unit_infantry_defence_factor': {"cat":'Army', "desc":'Modifier Army Sub Unit Infantry Defence Factor', "hint":'float (e.g. 0.05)'},
+  'modifier_army_sub_unit_infantry_speed_factor': {"cat":'Army', "desc":'Modifier Army Sub Unit Infantry Speed Factor', "hint":'float (e.g. 0.05)'},
+  'modifier_army_sub_unit_irregular_infantry_attack_factor': {"cat":'Army', "desc":'Modifier Army Sub Unit Irregular Infantry Attack Factor', "hint":'float (e.g. 0.05)'},
+  'modifier_army_sub_unit_irregular_infantry_defence_factor': {"cat":'Army', "desc":'Modifier Army Sub Unit Irregular Infantry Defence Factor', "hint":'float (e.g. 0.05)'},
+  'modifier_army_sub_unit_irregular_infantry_max_org_factor': {"cat":'Army', "desc":'Modifier Army Sub Unit Irregular Infantry Max Org Factor', "hint":'float (e.g. 0.05)'},
+  'modifier_army_sub_unit_irregular_infantry_speed_factor': {"cat":'Army', "desc":'Modifier Army Sub Unit Irregular Infantry Speed Factor', "hint":'float (e.g. 0.05)'},
+  'modifier_army_sub_unit_light_tank_recon_attack_factor': {"cat":'Army', "desc":'Modifier Army Sub Unit Light Tank Recon Attack Factor', "hint":'float (e.g. 0.05)'},
+  'modifier_army_sub_unit_light_tank_recon_defence_factor': {"cat":'Army', "desc":'Modifier Army Sub Unit Light Tank Recon Defence Factor', "hint":'float (e.g. 0.05)'},
+  'modifier_army_sub_unit_light_tank_recon_max_org_factor': {"cat":'Army', "desc":'Modifier Army Sub Unit Light Tank Recon Max Org Factor', "hint":'float (e.g. 0.05)'},
+  'modifier_army_sub_unit_light_tank_recon_speed_factor': {"cat":'Army', "desc":'Modifier Army Sub Unit Light Tank Recon Speed Factor', "hint":'float (e.g. 0.05)'},
+  'modifier_army_sub_unit_long_range_patrol_support_attack_factor': {"cat":'Army', "desc":'Modifier Army Sub Unit Long Range Patrol Support Attack Factor', "hint":'float (e.g. 0.05)'},
+  'modifier_army_sub_unit_long_range_patrol_support_defence_factor': {"cat":'Army', "desc":'Modifier Army Sub Unit Long Range Patrol Support Defence Factor', "hint":'float (e.g. 0.05)'},
+  'modifier_army_sub_unit_marine_attack_factor': {"cat":'Army', "desc":'Modifier Army Sub Unit Marine Attack Factor', "hint":'float (e.g. 0.05)'},
+  'modifier_army_sub_unit_marine_defence_factor': {"cat":'Army', "desc":'Modifier Army Sub Unit Marine Defence Factor', "hint":'float (e.g. 0.05)'},
+  'modifier_army_sub_unit_marine_max_org_factor': {"cat":'Army', "desc":'Modifier Army Sub Unit Marine Max Org Factor', "hint":'float (e.g. 0.05)'},
+  'modifier_army_sub_unit_marine_speed_factor': {"cat":'Army', "desc":'Modifier Army Sub Unit Marine Speed Factor', "hint":'float (e.g. 0.05)'},
+  'modifier_army_sub_unit_military_police_attack_factor': {"cat":'Army', "desc":'Modifier Army Sub Unit Military Police Attack Factor', "hint":'float (e.g. 0.05)'},
+  'modifier_army_sub_unit_military_police_defence_factor': {"cat":'Army', "desc":'Modifier Army Sub Unit Military Police Defence Factor', "hint":'float (e.g. 0.05)'},
+  'modifier_army_sub_unit_military_police_max_org_factor': {"cat":'Army', "desc":'Modifier Army Sub Unit Military Police Max Org Factor', "hint":'float (e.g. 0.05)'},
+  'modifier_army_sub_unit_military_police_speed_factor': {"cat":'Army', "desc":'Modifier Army Sub Unit Military Police Speed Factor', "hint":'float (e.g. 0.05)'},
+  'modifier_army_sub_unit_militia_attack_factor': {"cat":'Army', "desc":'Modifier Army Sub Unit Militia Attack Factor', "hint":'float (e.g. 0.05)'},
+  'modifier_army_sub_unit_militia_defence_factor': {"cat":'Army', "desc":'Modifier Army Sub Unit Militia Defence Factor', "hint":'float (e.g. 0.05)'},
+  'modifier_army_sub_unit_militia_max_org_factor': {"cat":'Army', "desc":'Modifier Army Sub Unit Militia Max Org Factor', "hint":'float (e.g. 0.05)'},
+  'modifier_army_sub_unit_militia_org_recovery_cap_factor': {"cat":'Army', "desc":'Modifier Army Sub Unit Militia Org Recovery Cap Factor', "hint":'float (e.g. 0.05)'},
+  'modifier_army_sub_unit_militia_speed_factor': {"cat":'Army', "desc":'Modifier Army Sub Unit Militia Speed Factor', "hint":'float (e.g. 0.05)'},
+  'modifier_army_sub_unit_mountaineers_attack_factor': {"cat":'Army', "desc":'Modifier Army Sub Unit Mountaineers Attack Factor', "hint":'float (e.g. 0.05)'},
+  'modifier_army_sub_unit_mountaineers_defence_factor': {"cat":'Army', "desc":'Modifier Army Sub Unit Mountaineers Defence Factor', "hint":'float (e.g. 0.05)'},
+  'modifier_army_sub_unit_mountaineers_max_org_factor': {"cat":'Army', "desc":'Modifier Army Sub Unit Mountaineers Max Org Factor', "hint":'float (e.g. 0.05)'},
+  'modifier_army_sub_unit_mountaineers_speed_factor': {"cat":'Army', "desc":'Modifier Army Sub Unit Mountaineers Speed Factor', "hint":'float (e.g. 0.05)'},
+  'modifier_army_sub_unit_paratrooper_attack_factor': {"cat":'Army', "desc":'Modifier Army Sub Unit Paratrooper Attack Factor', "hint":'float (e.g. 0.05)'},
+  'modifier_army_sub_unit_paratrooper_defence_factor': {"cat":'Army', "desc":'Modifier Army Sub Unit Paratrooper Defence Factor', "hint":'float (e.g. 0.05)'},
+  'modifier_army_sub_unit_paratrooper_max_org_factor': {"cat":'Army', "desc":'Modifier Army Sub Unit Paratrooper Max Org Factor', "hint":'float (e.g. 0.05)'},
+  'modifier_army_sub_unit_paratrooper_speed_factor': {"cat":'Army', "desc":'Modifier Army Sub Unit Paratrooper Speed Factor', "hint":'float (e.g. 0.05)'},
+  'motorized_attack_factor': {"cat":'Army', "desc":'Motorized Attack Factor', "hint":'float (e.g. 0.1)'},
+  'motorized_defence_factor': {"cat":'Army', "desc":'Motorized Defence Factor', "hint":'float (e.g. 0.1)'},
+  'mountaineers_special_forces_contribution_factor': {"cat":'Army', "desc":'Mountaineers Special Forces Contribution Factor', "hint":'integer (e.g. 1)'},
+  'naval_invasion_planning_bonus_speed': {"cat":'Army', "desc":'Naval Invasion Planning Bonus Speed', "hint":'integer (e.g. 1)'},
+  'no_supply_grace': {"cat":'Army', "desc":'No Supply Grace', "hint":'float (e.g. 0.1)'},
+  'offence': {"cat":'Army', "desc":'Offence', "hint":'float (e.g. 0.05)'},
+  'org_loss_at_low_org_factor': {"cat":'Army', "desc":'Org Loss At Low Org Factor', "hint":'float (e.g. 0.05)'},
+  'org_loss_when_moving': {"cat":'Army', "desc":'Org Loss When Moving', "hint":'float (e.g. 0.1)'},
+  'out_of_supply_factor': {"cat":'Army', "desc":'Out Of Supply Factor', "hint":'float (e.g. 0.1)'},
+  'paratroopers_special_forces_contribution_factor': {"cat":'Army', "desc":'Paratroopers Special Forces Contribution Factor', "hint":'integer (e.g. 1)'},
+  'planning_decay_rate_factor': {"cat":'Army', "desc":'Planning Decay Rate Factor', "hint":'float (e.g. 0.05)'},
+  'planning_speed': {"cat":'Army', "desc":'Planning Speed', "hint":'float (e.g. 0.1)'},
+  'pocket_penalty': {"cat":'Army', "desc":'Pocket Penalty', "hint":'float (e.g. 0.1)'},
+  'rangers_special_forces_contribution_factor': {"cat":'Army', "desc":'Rangers Special Forces Contribution Factor', "hint":'integer (e.g. 1)'},
+  'recon_factor': {"cat":'Army', "desc":'Recon Factor', "hint":'float (e.g. 0.1)'},
+  'recon_factor_while_entrenched': {"cat":'Army', "desc":'Recon Factor While Entrenched', "hint":'float (e.g. 0.1)'},
+  'river_crossing_factor_against': {"cat":'Army', "desc":'River Crossing Factor Against', "hint":'float (e.g. 0.05)'},
+  'rocket_attack_factor': {"cat":'Army', "desc":'Rocket Attack Factor', "hint":'float (e.g. 0.1)'},
+  'shore_bombardment_bonus': {"cat":'Army', "desc":'Shore Bombardment Bonus', "hint":'float (e.g. 0.1)'},
+  'special_forces_attack_factor': {"cat":'Army', "desc":'Special Forces Attack Factor', "hint":'float (e.g. 0.1)'},
+  'special_forces_cap': {"cat":'Army', "desc":'Special Forces Cap', "hint":'float (e.g. 0.1)'},
+  'special_forces_cap_flat': {"cat":'Army', "desc":'Special Forces Cap Flat', "hint":'integer (e.g. 1)'},
+  'special_forces_defence_factor': {"cat":'Army', "desc":'Special Forces Defence Factor', "hint":'float (e.g. 0.1)'},
+  'special_forces_min': {"cat":'Army', "desc":'Special Forces Min', "hint":'integer (e.g. 1)'},
+  'special_forces_no_supply_grace': {"cat":'Army', "desc":'Special Forces No Supply Grace', "hint":'float (e.g. 0.1)'},
+  'special_forces_out_of_supply_factor': {"cat":'Army', "desc":'Special Forces Out Of Supply Factor', "hint":'float (e.g. 0.05)'},
+  'special_forces_training_time_factor': {"cat":'Army', "desc":'Special Forces Training Time Factor', "hint":'float (e.g. 0.1)'},
+  'static_anti_air_damage_factor': {"cat":'Army', "desc":'Static Anti Air Damage Factor', "hint":'float (e.g. 0.05)'},
+  'static_anti_air_hit_chance_factor': {"cat":'Army', "desc":'Static Anti Air Hit Chance Factor', "hint":'float (e.g. 0.05)'},
+  'supply_combat_penalties_on_core_factor': {"cat":'Army', "desc":'Supply Combat Penalties On Core Factor', "hint":'float (e.g. 0.1)'},
+  'supply_consumption_factor': {"cat":'Army', "desc":'Supply Consumption Factor', "hint":'float (e.g. 0.1)'},
+  'terrain_penalty_reduction': {"cat":'Army', "desc":'Terrain Penalty Reduction', "hint":'float (e.g. 0.1)'},
+  'training_time_army': {"cat":'Army', "desc":'Training Time Army', "hint":'float (e.g. 0.1)'},
+  'training_time_army_factor': {"cat":'Army', "desc":'Training Time Army Factor', "hint":'float (e.g. 0.1)'},
+  'training_time_factor': {"cat":'Army', "desc":'Training Time Factor', "hint":'float (e.g. 0.05)'},
+  'unit_upkeep_attrition_factor': {"cat":'Army', "desc":'Unit Upkeep Attrition Factor', "hint":'integer (e.g. 1)'},
+  'winter_attrition': {"cat":'Army', "desc":'Winter Attrition', "hint":'float (e.g. 0.1)'},
+  'winter_attrition_factor': {"cat":'Army', "desc":'Winter Attrition Factor', "hint":'float (e.g. 0.1)'},
+  'autonomy_gain': {"cat":'Autonomy', "desc":'Autonomy Gain', "hint":'float (e.g. 0.1)'},
+  'autonomy_gain_global_factor': {"cat":'Autonomy', "desc":'Autonomy Gain Global Factor', "hint":'float (e.g. 0.1)'},
+  'autonomy_gain_ll_to_overlord': {"cat":'Autonomy', "desc":'Autonomy Gain Ll To Overlord', "hint":'float (e.g. 0.05)'},
+  'autonomy_gain_ll_to_overlord_factor': {"cat":'Autonomy', "desc":'Autonomy Gain Ll To Overlord Factor', "hint":'float (e.g. 0.05)'},
+  'autonomy_gain_ll_to_subject': {"cat":'Autonomy', "desc":'Autonomy Gain Ll To Subject', "hint":'float (e.g. 0.05)'},
+  'autonomy_gain_ll_to_subject_factor': {"cat":'Autonomy', "desc":'Autonomy Gain Ll To Subject Factor', "hint":'float (e.g. 0.05)'},
+  'autonomy_gain_trade': {"cat":'Autonomy', "desc":'Autonomy Gain Trade', "hint":'float (e.g. 0.05)'},
+  'autonomy_gain_trade_factor': {"cat":'Autonomy', "desc":'Autonomy Gain Trade Factor', "hint":'float (e.g. 0.05)'},
+  'autonomy_gain_warscore': {"cat":'Autonomy', "desc":'Autonomy Gain Warscore', "hint":'float (e.g. 0.05)'},
+  'autonomy_gain_warscore_factor': {"cat":'Autonomy', "desc":'Autonomy Gain Warscore Factor', "hint":'float (e.g. 0.05)'},
+  'autonomy_manpower_share': {"cat":'Autonomy', "desc":'Autonomy Manpower Share', "hint":'float (e.g. 0.05)'},
+  'autonomy_manpower_share_from_subjects': {"cat":'Autonomy', "desc":'Autonomy Manpower Share From Subjects', "hint":'float (e.g. 0.05)'},
+  'can_master_build_for_us': {"cat":'Autonomy', "desc":'Can Master Build For Us', "hint":'bool (yes/no)'},
+  'cic_to_overlord_factor': {"cat":'Autonomy', "desc":'Cic To Overlord Factor', "hint":'float (e.g. 0.05)'},
+  'extra_trade_to_overlord_factor': {"cat":'Autonomy', "desc":'Extra Trade To Overlord Factor', "hint":'float (e.g. 0.05)'},
+  'license_subject_master_purchase_cost': {"cat":'Autonomy', "desc":'License Subject Master Purchase Cost', "hint":'float (e.g. 0.05)'},
+  'master_build_autonomy_factor': {"cat":'Autonomy', "desc":'Master Build Autonomy Factor', "hint":'bool (yes/no)'},
+  'mic_to_overlord_factor': {"cat":'Autonomy', "desc":'Mic To Overlord Factor', "hint":'float (e.g. 0.05)'},
+  'overlord_trade_cost_factor': {"cat":'Autonomy', "desc":'Overlord Trade Cost Factor', "hint":'float (e.g. 0.05)'},
+  'resources_to_overlord_factor': {"cat":'Autonomy', "desc":'Resources To Overlord Factor', "hint":'float (e.g. 0.05)'},
+  'subjects_autonomy_gain': {"cat":'Autonomy', "desc":'Subjects Autonomy Gain', "hint":'float (e.g. 0.05)'},
+  'additional_brigade_column_size': {"cat":'Country', "desc":'Additional Brigade Column Size', "hint":'integer (e.g. 1)'},
+  'agency_upgrade_time': {"cat":'Country', "desc":'Agency Upgrade Time', "hint":'float (e.g. 0.1)'},
+  'air_doctrine_cost_factor': {"cat":'Country', "desc":'Air Doctrine Cost Factor', "hint":'float (e.g. 0.05)'},
+  'air_equipment_upgrade_xp_cost': {"cat":'Country', "desc":'Air Equipment Upgrade Xp Cost', "hint":'integer (e.g. 1)'},
+  'air_invasion_plan_cap': {"cat":'Country', "desc":'Air Invasion Plan Cap', "hint":'integer (e.g. 1)'},
+  'air_invasion_prep_days': {"cat":'Country', "desc":'Air Invasion Prep Days', "hint":'float (e.g. 0.1)'},
+  'air_volunteer_cap': {"cat":'Country', "desc":'Air Volunteer Cap', "hint":'integer (e.g. 1)'},
+  'airforce_intel_to_others': {"cat":'Country', "desc":'Airforce Intel To Others', "hint":'float (e.g. 0.1)'},
+  'annex_subject_cost_factor': {"cat":'Country', "desc":'Annex Subject Cost Factor', "hint":'float (e.g. 0.05)'},
+  'army_intel_to_others': {"cat":'Country', "desc":'Army Intel To Others', "hint":'float (e.g. 0.1)'},
+  'assign_army_leader_cp_cost': {"cat":'Country', "desc":'Assign Army Leader Cp Cost', "hint":'integer (e.g. 1)'},
+  'automatic_grant_medal_chance': {"cat":'Country', "desc":'Automatic Grant Medal Chance', "hint":'integer (e.g. 1)'},
+  'base_fuel_gain': {"cat":'Country', "desc":'Base Fuel Gain', "hint":'integer (e.g. 1)'},
+  'base_fuel_gain_factor': {"cat":'Country', "desc":'Base Fuel Gain Factor', "hint":'float (e.g. 0.05)'},
+  'can_guarantee_other_ideologies': {"cat":'Country', "desc":'Can Guarantee Other Ideologies', "hint":'bool (yes/no)'},
+  'choose_preferred_tactics_cost': {"cat":'Country', "desc":'Choose Preferred Tactics Cost', "hint":'integer (e.g. 1)'},
+  'cic_construction_boost': {"cat":'Country', "desc":'Cic Construction Boost', "hint":'float (e.g. 0.1)'},
+  'cic_construction_boost_factor': {"cat":'Country', "desc":'Cic Construction Boost Factor', "hint":'float (e.g. 0.1)'},
+  'cic_to_target_factor': {"cat":'Country', "desc":'Cic To Target Factor', "hint":'float (e.g. 0.05)'},
+  'civil_war_involvement_tension': {"cat":'Country', "desc":'Civil War Involvement Tension', "hint":'float (e.g. 0.1)'},
+  'civilian_factory_use': {"cat":'Country', "desc":'Civilian Factory Use', "hint":'integer (e.g. 1)'},
+  'civilian_intel_to_others': {"cat":'Country', "desc":'Civilian Intel To Others', "hint":'float (e.g. 0.1)'},
+  'coastal_bunker_effectiveness_factor': {"cat":'Country', "desc":'Coastal Bunker Effectiveness Factor', "hint":'integer (e.g. 1)'},
+  'command_abilities_cost_factor': {"cat":'Country', "desc":'Command Abilities Cost Factor', "hint":'float (e.g. 0.05)'},
+  'command_power_gain': {"cat":'Country', "desc":'Command Power Gain', "hint":'float (e.g. 0.05)'},
+  'command_power_gain_mult': {"cat":'Country', "desc":'Command Power Gain Mult', "hint":'integer (e.g. 1)'},
+  'compliance_gain': {"cat":'Country', "desc":'Compliance Gain', "hint":'number'},
+  'compliance_growth': {"cat":'Country', "desc":'Compliance Growth', "hint":'integer (e.g. 1)'},
+  'compliance_growth_on_our_occupied_states': {"cat":'Country', "desc":'Compliance Growth On Our Occupied States', "hint":'integer (e.g. 1)'},
+  'conscription': {"cat":'Country', "desc":'Conscription', "hint":'float (e.g. 0.05)'},
+  'conscription_factor': {"cat":'Country', "desc":'Conscription Factor', "hint":'integer (e.g. 1)'},
+  'consumer_goods_expected_value': {"cat":'Country', "desc":'Consumer Goods Expected Value', "hint":'float (e.g. 0.1)'},
+  'consumer_goods_factor': {"cat":'Country', "desc":'Consumer Goods Factor', "hint":'float (e.g. 0.1)'},
+  'conversion_cost_civ_to_mil_factor': {"cat":'Country', "desc":'Conversion Cost Civ To Mil Factor', "hint":'float (e.g. 0.05)'},
+  'conversion_cost_mil_to_civ_factor': {"cat":'Country', "desc":'Conversion Cost Mil To Civ Factor', "hint":'float (e.g. 0.05)'},
+  'country_resource_': {"cat":'Country', "desc":'Country resource.', "hint":'integer (e.g. 1)'},
+  'country_resource_cost_': {"cat":'Country', "desc":'Country resource cost.', "hint":'integer (e.g. 1)'},
+  'decryption': {"cat":'Country', "desc":'Decryption', "hint":'float (e.g. 0.05)'},
+  'decryption_factor': {"cat":'Country', "desc":'Decryption Factor', "hint":'float (e.g. 0.05)'},
+  'defensive_war_stability_factor': {"cat":'Country', "desc":'Defensive War Stability Factor', "hint":'float (e.g. 0.05)'},
+  'disabled_ideas': {"cat":'Country', "desc":'Disabled Ideas', "hint":'bool (yes/no)'},
+  'embargo_cost_factor': {"cat":'Country', "desc":'Embargo Cost Factor', "hint":'float (e.g. 0.1)'},
+  'embargo_threshold_factor': {"cat":'Country', "desc":'Embargo Threshold Factor', "hint":'float (e.g. 0.1)'},
+  'encryption': {"cat":'Country', "desc":'Encryption', "hint":'float (e.g. 0.05)'},
+  'encryption_factor': {"cat":'Country', "desc":'Encryption Factor', "hint":'float (e.g. 0.05)'},
+  'enemy_declare_war_tension': {"cat":'Country', "desc":'Enemy Declare War Tension', "hint":'float (e.g. 0.1)'},
+  'enemy_justify_war_goal_time': {"cat":'Country', "desc":'Enemy Justify War Goal Time', "hint":'float (e.g. 0.1)'},
+  'enemy_spy_negative_status_factor': {"cat":'Country', "desc":'Enemy Spy Negative Status Factor', "hint":'integer (e.g. 1)'},
+  'equipment_capture': {"cat":'Country', "desc":'Equipment Capture', "hint":'float (e.g. 0.1)'},
+  'equipment_capture_factor': {"cat":'Country', "desc":'Equipment Capture Factor', "hint":'float (e.g. 0.1)'},
+  'equipment_conversion_speed': {"cat":'Country', "desc":'Equipment Conversion Speed', "hint":'integer (e.g. 1)'},
+  'equipment_upgrade_xp_cost': {"cat":'Country', "desc":'Equipment Upgrade Xp Cost', "hint":'integer (e.g. 1)'},
+  'exiled_government_weekly_manpower': {"cat":'Country', "desc":'Exiled Government Weekly Manpower', "hint":'integer (e.g. 1)'},
+  'experience_loss_factor': {"cat":'Country', "desc":'Experience Loss Factor', "hint":'float (e.g. 0.1)'},
+  'extra_trade_to_target_factor': {"cat":'Country', "desc":'Extra Trade To Target Factor', "hint":'float (e.g. 0.05)'},
+  'faction_trade_opinion_factor': {"cat":'Country', "desc":'Faction Trade Opinion Factor', "hint":'float (e.g. 0.05)'},
+  'factory_energy_consumption': {"cat":'Country', "desc":'Factory Energy Consumption', "hint":'float (e.g. 0.05)'},
+  'female_divisional_commander_chance': {"cat":'Country', "desc":'Female Divisional Commander Chance', "hint":'integer (e.g. 1)'},
+  'female_random_army_leader_chance': {"cat":'Country', "desc":'Female Random Army Leader Chance', "hint":'integer (e.g. 1)'},
+  'female_random_country_leader_chance': {"cat":'Country', "desc":'Female Random Country Leader Chance', "hint":'integer (e.g. 1)'},
+  'female_random_operative_chance': {"cat":'Country', "desc":'Female Random Operative Chance', "hint":'integer (e.g. 1)'},
+  'female_random_scientist_chance': {"cat":'Country', "desc":'Female Random Scientist Chance', "hint":'integer (e.g. 1)'},
+  'field_officer_promotion_penalty': {"cat":'Country', "desc":'Field Officer Promotion Penalty', "hint":'integer (e.g. 1)'},
+  'floating_harbor_duration': {"cat":'Country', "desc":'Floating Harbor Duration', "hint":'integer (e.g. 1)'},
+  'floating_harbor_range': {"cat":'Country', "desc":'Floating Harbor Range', "hint":'integer (e.g. 1)'},
+  'floating_harbor_supply': {"cat":'Country', "desc":'Floating Harbor Supply', "hint":'integer (e.g. 1)'},
+  'forced_surrender_limit': {"cat":'Country', "desc":'Forced Surrender Limit', "hint":'float (e.g. 0.05)'},
+  'foreign_subversive_activites': {"cat":'Country', "desc":'Foreign Subversive Activites', "hint":'integer (e.g. 1)'},
+  'fuel_cost': {"cat":'Country', "desc":'Fuel Cost', "hint":'integer (e.g. 1)'},
+  'fuel_gain': {"cat":'Country', "desc":'Fuel Gain', "hint":'float (e.g. 0.05)'},
+  'fuel_gain_factor': {"cat":'Country', "desc":'Fuel Gain Factor', "hint":'float (e.g. 0.05)'},
+  'fuel_gain_factor_from_states': {"cat":'Country', "desc":'Fuel Gain Factor From States', "hint":'float (e.g. 0.05)'},
+  'fuel_gain_from_states': {"cat":'Country', "desc":'Fuel Gain From States', "hint":'float (e.g. 0.05)'},
+  'generate_wargoal_tension': {"cat":'Country', "desc":'Generate Wargoal Tension', "hint":'float (e.g. 0.1)'},
+  'generate_wargoal_tension_against': {"cat":'Country', "desc":'Generate Wargoal Tension Against', "hint":'float (e.g. 0.1)'},
+  'global_building_slots': {"cat":'Country', "desc":'Global Building Slots', "hint":'integer (e.g. 1)'},
+  'global_building_slots_factor': {"cat":'Country', "desc":'Global Building Slots Factor', "hint":'integer (e.g. 1)'},
+  'grant_medal_cost_factor': {"cat":'Country', "desc":'Grant Medal Cost Factor', "hint":'float (e.g. 0.1)'},
+  'guarantee_cost': {"cat":'Country', "desc":'Guarantee Cost', "hint":'integer (e.g. 1)'},
+  'guarantee_tension': {"cat":'Country', "desc":'Guarantee Tension', "hint":'float (e.g. 0.1)'},
+  'improve_relations_maintain_cost_factor': {"cat":'Country', "desc":'Improve Relations Maintain Cost Factor', "hint":'integer (e.g. 1)'},
+  'industrial_capacity_dockyard': {"cat":'Country', "desc":'Industrial Capacity Dockyard', "hint":'float (e.g. 0.05)'},
+  'industrial_capacity_dockyard_powered': {"cat":'Country', "desc":'Industrial Capacity Dockyard Powered', "hint":'float (e.g. 0.05)'},
+  'industrial_capacity_factory': {"cat":'Country', "desc":'Industrial Capacity Factory', "hint":'float (e.g. 0.05)'},
+  'industrial_capacity_factory_powered': {"cat":'Country', "desc":'Industrial Capacity Factory Powered', "hint":'float (e.g. 0.05)'},
+  'industry_air_damage_factor': {"cat":'Country', "desc":'Industry Air Damage Factor', "hint":'float (e.g. 0.05)'},
+  'industry_free_repair_factor': {"cat":'Country', "desc":'Industry Free Repair Factor', "hint":'float (e.g. 0.05)'},
+  'industry_repair_factor': {"cat":'Country', "desc":'Industry Repair Factor', "hint":'float (e.g. 0.05)'},
+  'intel_from_combat_factor': {"cat":'Country', "desc":'Intel From Combat Factor', "hint":'float (e.g. 0.05)'},
+  'join_faction_tension': {"cat":'Country', "desc":'Join Faction Tension', "hint":'float (e.g. 0.1)'},
+  'justify_war_goal_time': {"cat":'Country', "desc":'Justify War Goal Time', "hint":'float (e.g. 0.1)'},
+  'justify_war_goal_when_in_major_war_time': {"cat":'Country', "desc":'Justify War Goal When In Major War Time', "hint":'float (e.g. 0.1)'},
+  'land_bunker_effectiveness_factor': {"cat":'Country', "desc":'Land Bunker Effectiveness Factor', "hint":'integer (e.g. 1)'},
+  'land_equipment_upgrade_xp_cost': {"cat":'Country', "desc":'Land Equipment Upgrade Xp Cost', "hint":'integer (e.g. 1)'},
+  'land_reinforce_rate': {"cat":'Country', "desc":'Land Reinforce Rate', "hint":'float (e.g. 0.1)'},
+  'lend_lease_tension': {"cat":'Country', "desc":'Lend Lease Tension', "hint":'float (e.g. 0.1)'},
+  'lend_lease_tension_with_overlord': {"cat":'Country', "desc":'Lend Lease Tension With Overlord', "hint":'float (e.g. 0.1)'},
+  'license_air_purchase_cost': {"cat":'Country', "desc":'License Air Purchase Cost', "hint":'integer (e.g. 1)'},
+  'license_anti_tank_eq_cost_factor': {"cat":'Country', "desc":'License Anti Tank Eq Cost Factor', "hint":'integer (e.g. 1)'},
+  'license_anti_tank_eq_production_speed_factor': {"cat":'Country', "desc":'License Anti Tank Eq Production Speed Factor', "hint":'integer (e.g. 1)'},
+  'license_anti_tank_eq_tech_difference_speed_factor': {"cat":'Country', "desc":'License Anti Tank Eq Tech Difference Speed Factor', "hint":'integer (e.g. 1)'},
+  'license_armor_purchase_cost': {"cat":'Country', "desc":'License Armor Purchase Cost', "hint":'integer (e.g. 1)'},
+  'license_artillery_eq_cost_factor': {"cat":'Country', "desc":'License Artillery Eq Cost Factor', "hint":'integer (e.g. 1)'},
+  'license_artillery_eq_production_speed_factor': {"cat":'Country', "desc":'License Artillery Eq Production Speed Factor', "hint":'integer (e.g. 1)'},
+  'license_artillery_eq_tech_difference_speed_factor': {"cat":'Country', "desc":'License Artillery Eq Tech Difference Speed Factor', "hint":'integer (e.g. 1)'},
+  'license_infantry_eq_cost_factor': {"cat":'Country', "desc":'License Infantry Eq Cost Factor', "hint":'integer (e.g. 1)'},
+  'license_infantry_eq_production_speed_factor': {"cat":'Country', "desc":'License Infantry Eq Production Speed Factor', "hint":'integer (e.g. 1)'},
+  'license_infantry_eq_tech_difference_speed_factor': {"cat":'Country', "desc":'License Infantry Eq Tech Difference Speed Factor', "hint":'integer (e.g. 1)'},
+  'license_infantry_purchase_cost': {"cat":'Country', "desc":'License Infantry Purchase Cost', "hint":'integer (e.g. 1)'},
+  'license_light_tank_eq_cost_factor': {"cat":'Country', "desc":'License Light Tank Eq Cost Factor', "hint":'integer (e.g. 1)'},
+  'license_light_tank_eq_production_speed_factor': {"cat":'Country', "desc":'License Light Tank Eq Production Speed Factor', "hint":'integer (e.g. 1)'},
+  'license_light_tank_eq_tech_difference_speed_factor': {"cat":'Country', "desc":'License Light Tank Eq Tech Difference Speed Factor', "hint":'integer (e.g. 1)'},
+  'license_naval_purchase_cost': {"cat":'Country', "desc":'License Naval Purchase Cost', "hint":'integer (e.g. 1)'},
+  'license_production_speed': {"cat":'Country', "desc":'License Production Speed', "hint":'integer (e.g. 1)'},
+  'license_purchase_cost': {"cat":'Country', "desc":'License Purchase Cost', "hint":'integer (e.g. 1)'},
+  'license_tech_difference_speed': {"cat":'Country', "desc":'License Tech Difference Speed', "hint":'integer (e.g. 1)'},
+  'line_change_production_efficiency_factor': {"cat":'Country', "desc":'Line Change Production Efficiency Factor', "hint":'float (e.g. 0.05)'},
+  'local_resources__factor': {"cat":'Country', "desc":'Local resources factor.', "hint":'integer (e.g. 1)'},
+  'max_command_power': {"cat":'Country', "desc":'Max Command Power', "hint":'integer (e.g. 1)'},
+  'max_command_power_mult': {"cat":'Country', "desc":'Max Command Power Mult', "hint":'integer (e.g. 1)'},
+  'max_fuel': {"cat":'Country', "desc":'Max Fuel', "hint":'float (e.g. 0.05)'},
+  'max_fuel_building': {"cat":'Country', "desc":'Max Fuel Building', "hint":'float (e.g. 0.05)'},
+  'max_fuel_factor': {"cat":'Country', "desc":'Max Fuel Factor', "hint":'float (e.g. 0.05)'},
+  'max_surrender_limit_offset': {"cat":'Country', "desc":'Max Surrender Limit Offset', "hint":'float (e.g. 0.05)'},
+  'mic_to_target_factor': {"cat":'Country', "desc":'Mic To Target Factor', "hint":'float (e.g. 0.05)'},
+  'min_export': {"cat":'Country', "desc":'Min Export', "hint":'integer (e.g. 1)'},
+  'minimum_training_level': {"cat":'Country', "desc":'Minimum Training Level', "hint":'integer (e.g. 1)'},
+  'monthly_population': {"cat":'Country', "desc":'Monthly Population', "hint":'float (e.g. 0.1)'},
+  'naval_equipment_upgrade_xp_cost': {"cat":'Country', "desc":'Naval Equipment Upgrade Xp Cost', "hint":'integer (e.g. 1)'},
+  'naval_invasion_plan_cap': {"cat":'Country', "desc":'Naval Invasion Plan Cap', "hint":'integer (e.g. 1)'},
+  'naval_invasion_prep_days': {"cat":'Country', "desc":'Naval Invasion Prep Days', "hint":'integer (e.g. 1)'},
+  'navy_intel_to_others': {"cat":'Country', "desc":'Navy Intel To Others', "hint":'float (e.g. 0.1)'},
+  'no_compliance_gain': {"cat":'Country', "desc":'No Compliance Gain', "hint":'bool (yes/no)'},
+  'nuclear_production': {"cat":'Country', "desc":'Nuclear Production', "hint":'bool (yes/no)'},
+  'nuclear_production_factor': {"cat":'Country', "desc":'Nuclear Production Factor', "hint":'integer (e.g. 1)'},
+  'offensive_war_stability_factor': {"cat":'Country', "desc":'Offensive War Stability Factor', "hint":'float (e.g. 0.05)'},
+  'opinion_gain_monthly': {"cat":'Country', "desc":'Opinion Gain Monthly', "hint":'float (e.g. 0.1)'},
+  'opinion_gain_monthly_factor': {"cat":'Country', "desc":'Opinion Gain Monthly Factor', "hint":'float (e.g. 0.05)'},
+  'opinion_gain_monthly_same_ideology': {"cat":'Country', "desc":'Opinion Gain Monthly Same Ideology', "hint":'float (e.g. 0.1)'},
+  'opinion_gain_monthly_same_ideology_factor': {"cat":'Country', "desc":'Opinion Gain Monthly Same Ideology Factor', "hint":'float (e.g. 0.05)'},
+  'out_of_power_impact_factor': {"cat":'Country', "desc":'Out Of Power Impact Factor', "hint":'float (e.g. 0.05)'},
+  'party_popularity_stability_factor': {"cat":'Country', "desc":'Party Popularity Stability Factor', "hint":'float (e.g. 0.05)'},
+  'political_power_cost': {"cat":'Country', "desc":'Political Power Cost', "hint":'float (e.g. 0.05)'},
+  'political_power_factor': {"cat":'Country', "desc":'Political Power Factor', "hint":'integer (e.g. 1)'},
+  'political_power_gain': {"cat":'Country', "desc":'Political Power Gain', "hint":'float (e.g. 0.05)'},
+  'power_balance_daily': {"cat":'Country', "desc":'Power Balance Daily', "hint":'float (e.g. 0.05)'},
+  'power_balance_weekly': {"cat":'Country', "desc":'Power Balance Weekly', "hint":'float (e.g. 0.05)'},
+  'production_cost__factor': {"cat":'Country', "desc":'Building construction cost factor.', "hint":'float (e.g. 0.05)'},
+  'production_factory_efficiency_gain_factor': {"cat":'Country', "desc":'Production Factory Efficiency Gain Factor', "hint":'float (e.g. 0.05)'},
+  'production_factory_max_efficiency_factor': {"cat":'Country', "desc":'Production Factory Max Efficiency Factor', "hint":'float (e.g. 0.05)'},
+  'production_factory_start_efficiency_factor': {"cat":'Country', "desc":'Production Factory Start Efficiency Factor', "hint":'float (e.g. 0.05)'},
+  'production_lack_of_resource_penalty_factor': {"cat":'Country', "desc":'Production Lack Of Resource Penalty Factor', "hint":'float (e.g. 0.05)'},
+  'production_oil_factor': {"cat":'Country', "desc":'Production Oil Factor', "hint":'float (e.g. 0.05)'},
+  'production_speed__factor': {"cat":'Country', "desc":'Country building construction speed factor.', "hint":'float (e.g. 0.05)'},
+  'production_speed_buildings_factor': {"cat":'Country', "desc":'Production Speed Buildings Factor', "hint":'float (e.g. 0.05)'},
+  'production_speed_buildings_powered_factor': {"cat":'Country', "desc":'Production Speed Buildings Powered Factor', "hint":'float (e.g. 0.05)'},
+  'production_speed_facility_factor': {"cat":'Country', "desc":'Production Speed Facility Factor', "hint":'float (e.g. 0.05)'},
+  'railway_gun_bombardment_factor': {"cat":'Country', "desc":'Railway Gun Bombardment Factor', "hint":'integer (e.g. 1)'},
+  'refit_ic_cost': {"cat":'Country', "desc":'Refit Ic Cost', "hint":'integer (e.g. 1)'},
+  'refit_speed': {"cat":'Country', "desc":'Refit Speed', "hint":'integer (e.g. 1)'},
+  'repair_speed__factor': {"cat":'Country', "desc":'Country building repair speed factor.', "hint":'float (e.g. 0.05)'},
+  'request_lease_tension': {"cat":'Country', "desc":'Request Lease Tension', "hint":'float (e.g. 0.1)'},
+  'required_garrison_factor': {"cat":'Country', "desc":'Required Garrison Factor', "hint":'integer (e.g. 1)'},
+  'research_sharing_per_country_bonus': {"cat":'Country', "desc":'Research Sharing Per Country Bonus', "hint":'float (e.g. 0.05)'},
+  'research_sharing_per_country_bonus_factor': {"cat":'Country', "desc":'Research Sharing Per Country Bonus Factor', "hint":'float (e.g. 0.05)'},
+  'research_speed_factor': {"cat":'Country', "desc":'Research Speed Factor', "hint":'float (e.g. 0.05)'},
+  'resistance_activity': {"cat":'Country', "desc":'Resistance Activity', "hint":'float (e.g. 0.1)'},
+  'resistance_damage_to_garrison': {"cat":'Country', "desc":'Resistance Damage To Garrison', "hint":'float (e.g. 0.05)'},
+  'resistance_damage_to_garrison_on_our_occupied_states': {"cat":'Country', "desc":'Resistance Damage To Garrison On Our Occupied States', "hint":'float (e.g. 0.05)'},
+  'resistance_decay': {"cat":'Country', "desc":'Resistance Decay', "hint":'integer (e.g. 1)'},
+  'resistance_decay_on_our_occupied_states': {"cat":'Country', "desc":'Resistance Decay On Our Occupied States', "hint":'integer (e.g. 1)'},
+  'resistance_garrison_penetration_chance': {"cat":'Country', "desc":'Resistance Garrison Penetration Chance', "hint":'float (e.g. 0.05)'},
+  'resistance_growth': {"cat":'Country', "desc":'Resistance Growth', "hint":'integer (e.g. 1)'},
+  'resistance_growth_on_our_occupied_states': {"cat":'Country', "desc":'Resistance Growth On Our Occupied States', "hint":'integer (e.g. 1)'},
+  'resistance_target': {"cat":'Country', "desc":'Resistance Target', "hint":'integer (e.g. 1)'},
+  'resistance_target_on_our_occupied_states': {"cat":'Country', "desc":'Resistance Target On Our Occupied States', "hint":'integer (e.g. 1)'},
+  'resource_trade_cost_bonus_per_factory': {"cat":'Country', "desc":'Resource Trade Cost Bonus Per Factory', "hint":'integer (e.g. 1)'},
+  'scientist_breakthrough_bonus_factor': {"cat":'Country', "desc":'Scientist Breakthrough Bonus Factor', "hint":'float (e.g. 0.05)'},
+  'scientist_research_bonus_factor': {"cat":'Country', "desc":'Scientist Research Bonus Factor', "hint":'float (e.g. 0.05)'},
+  'scientist_xp_gain_factor': {"cat":'Country', "desc":'Scientist Xp Gain Factor', "hint":'float (e.g. 0.05)'},
+  'send_volunteer_divisions_required': {"cat":'Country', "desc":'Send Volunteer Divisions Required', "hint":'float (e.g. 0.1)'},
+  'send_volunteer_factor': {"cat":'Country', "desc":'Send Volunteer Factor', "hint":'float (e.g. 0.1)'},
+  'send_volunteer_size': {"cat":'Country', "desc":'Send Volunteer Size', "hint":'integer (e.g. 1)'},
+  'send_volunteers_tension': {"cat":'Country', "desc":'Send Volunteers Tension', "hint":'float (e.g. 0.1)'},
+  'shore_bombardment_collateral_damage_factor': {"cat":'Country', "desc":'Shore Bombardment Collateral Damage Factor', "hint":'float (e.g. 0.05)'},
+  'special_forces_doctrine_cost_factor': {"cat":'Country', "desc":'Special Forces Doctrine Cost Factor', "hint":'float (e.g. 0.05)'},
+  'special_project_facility_supply_consumption_factor': {"cat":'Country', "desc":'Special Project Facility Supply Consumption Factor', "hint":'float (e.g. 0.05)'},
+  'special_project_speed_factor': {"cat":'Country', "desc":'Special Project Speed Factor', "hint":'float (e.g. 0.05)'},
+  'stability_factor': {"cat":'Country', "desc":'Stability Factor', "hint":'float (e.g. 0.05)'},
+  'stability_weekly': {"cat":'Country', "desc":'Stability Weekly', "hint":'float (e.g. 0.05)'},
+  'stability_weekly_factor': {"cat":'Country', "desc":'Stability Weekly Factor', "hint":'float (e.g. 0.05)'},
+  'starting_compliance': {"cat":'Country', "desc":'Starting Compliance', "hint":'integer (e.g. 1)'},
+  'subversive_activites_upkeep': {"cat":'Country', "desc":'Subversive Activites Upkeep', "hint":'integer (e.g. 1)'},
+  'supply_factor': {"cat":'Country', "desc":'Supply Factor', "hint":'integer (e.g. 1)'},
+  'supply_node_range': {"cat":'Country', "desc":'Supply Node Range', "hint":'integer (e.g. 1)'},
+  'surrender_limit': {"cat":'Country', "desc":'Surrender Limit', "hint":'float (e.g. 0.05)'},
+  'tech_air_damage_factor': {"cat":'Country', "desc":'Tech Air Damage Factor', "hint":'float (e.g. 0.05)'},
+  'thermonuclear_production': {"cat":'Country', "desc":'Thermonuclear Production', "hint":'bool (yes/no)'},
+  'thermonuclear_production_factor': {"cat":'Country', "desc":'Thermonuclear Production Factor', "hint":'integer (e.g. 1)'},
+  'trade_cost_for_target_factor': {"cat":'Country', "desc":'Trade Cost For Target Factor', "hint":'float (e.g. 0.05)'},
+  'trade_opinion_factor': {"cat":'Country', "desc":'Trade Opinion Factor', "hint":'float (e.g. 0.05)'},
+  'truck_attrition': {"cat":'Country', "desc":'Truck Attrition', "hint":'float (e.g. 0.05)'},
+  'truck_attrition_factor': {"cat":'Country', "desc":'Truck Attrition Factor', "hint":'integer (e.g. 1)'},
+  'underway_replenishment_convoy_cost': {"cat":'Country', "desc":'Underway Replenishment Convoy Cost', "hint":'float (e.g. 0.05)'},
+  'underway_replenishment_range': {"cat":'Country', "desc":'Underway Replenishment Range', "hint":'float (e.g. 0.05)'},
+  'unit_medal_effectiveness': {"cat":'Country', "desc":'Unit Medal Effectiveness', "hint":'integer (e.g. 1)'},
+  'war_stability_factor': {"cat":'Country', "desc":'War Stability Factor', "hint":'float (e.g. 0.05)'},
+  'war_support_factor': {"cat":'Country', "desc":'War Support Factor', "hint":'float (e.g. 0.05)'},
+  'war_support_weekly': {"cat":'Country', "desc":'War Support Weekly', "hint":'float (e.g. 0.05)'},
+  'war_support_weekly_factor': {"cat":'Country', "desc":'War Support Weekly Factor', "hint":'float (e.g. 0.05)'},
+  'weekly_bombing_war_support': {"cat":'Country', "desc":'Weekly Bombing War Support', "hint":'float (e.g. 0.05)'},
+  'weekly_casualties_war_support': {"cat":'Country', "desc":'Weekly Casualties War Support', "hint":'float (e.g. 0.05)'},
+  'weekly_convoys_war_support': {"cat":'Country', "desc":'Weekly Convoys War Support', "hint":'float (e.g. 0.05)'},
+  'weekly_manpower': {"cat":'Country', "desc":'Weekly Manpower', "hint":'integer (e.g. 1)'},
+  'annex_cost_factor': {"cat":'Diplomacy', "desc":'Annex Cost Factor', "hint":'float (e.g. 0.1)'},
+  'peace_score_ratio_transferred_to_overlord': {"cat":'Diplomacy', "desc":'Peace Score Ratio Transferred To Overlord', "hint":'float (e.g. 0.05)'},
+  'peace_score_ratio_transferred_to_players': {"cat":'Diplomacy', "desc":'Peace Score Ratio Transferred To Players', "hint":'float (e.g. 0.05)'},
+  'puppet_cost_factor': {"cat":'Diplomacy', "desc":'Puppet Cost Factor', "hint":'float (e.g. 0.1)'},
+  'faction_influence_contribution_factor': {"cat":'Faction', "desc":'Faction Influence Contribution Factor', "hint":'float (e.g. 0.05)'},
+  'faction_influence_war_score_factor': {"cat":'Faction', "desc":'Faction Influence War Score Factor', "hint":'float (e.g. 0.05)'},
+  'faction_subject_contribution_gain': {"cat":'Faction', "desc":'Faction Subject Contribution Gain', "hint":'float (e.g. 0.05)'},
+  'dockyard_donations': {"cat":'Govt in Exile', "desc":'Dockyard Donations', "hint":'integer (e.g. 1)'},
+  'exile_manpower_factor': {"cat":'Govt in Exile', "desc":'Exile Manpower Factor', "hint":'float (e.g. 0.05)'},
+  'industrial_factory_donations': {"cat":'Govt in Exile', "desc":'Industrial Factory Donations', "hint":'integer (e.g. 1)'},
+  'legitimacy_daily': {"cat":'Govt in Exile', "desc":'Legitimacy Daily', "hint":'float (e.g. 0.05)'},
+  'legitimacy_gain_factor': {"cat":'Govt in Exile', "desc":'Legitimacy Gain Factor', "hint":'integer (e.g. 1)'},
+  'military_factory_donations': {"cat":'Govt in Exile', "desc":'Military Factory Donations', "hint":'integer (e.g. 1)'},
+  'targeted_legitimacy_daily': {"cat":'Govt in Exile', "desc":'Targeted Legitimacy Daily', "hint":'float (e.g. 0.05)'},
+  'military_industrial_organization_design_team_assign_cost': {"cat":'Industry', "desc":'Military Industrial Organization Design Team Assign Cost', "hint":'integer (e.g. 1)'},
+  'military_industrial_organization_design_team_change_cost': {"cat":'Industry', "desc":'Military Industrial Organization Design Team Change Cost', "hint":'integer (e.g. 1)'},
+  'military_industrial_organization_funds_gain': {"cat":'Industry', "desc":'Military Industrial Organization Funds Gain', "hint":'integer (e.g. 1)'},
+  'military_industrial_organization_industrial_manufacturer_assign_cost': {"cat":'Industry', "desc":'Military Industrial Organization Industrial Manufacturer Assign Cost', "hint":'integer (e.g. 1)'},
+  'military_industrial_organization_policy_cooldown': {"cat":'Industry', "desc":'Military Industrial Organization Policy Cooldown', "hint":'integer (e.g. 1)'},
+  'military_industrial_organization_policy_cost': {"cat":'Industry', "desc":'Military Industrial Organization Policy Cost', "hint":'integer (e.g. 1)'},
+  'military_industrial_organization_research_bonus': {"cat":'Industry', "desc":'Military Industrial Organization Research Bonus', "hint":'integer (e.g. 1)'},
+  'military_industrial_organization_size_up_requirement': {"cat":'Industry', "desc":'Military Industrial Organization Size Up Requirement', "hint":'integer (e.g. 1)'},
+  'military_industrial_organization_task_capacity': {"cat":'Industry', "desc":'Military Industrial Organization Task Capacity', "hint":'integer (e.g. 1)'},
+  'airforce_intel_decryption_bonus': {"cat":'Intelligence', "desc":'Airforce Intel Decryption Bonus', "hint":'integer (e.g. 1)'},
+  'airforce_intel_factor': {"cat":'Intelligence', "desc":'Airforce Intel Factor', "hint":'integer (e.g. 1)'},
+  'army_intel_decryption_bonus': {"cat":'Intelligence', "desc":'Army Intel Decryption Bonus', "hint":'integer (e.g. 1)'},
+  'army_intel_factor': {"cat":'Intelligence', "desc":'Army Intel Factor', "hint":'integer (e.g. 1)'},
+  'boost_ideology_mission_factor': {"cat":'Intelligence', "desc":'Boost Ideology Mission Factor', "hint":'integer (e.g. 1)'},
+  'boost_resistance_factor': {"cat":'Intelligence', "desc":'Boost Resistance Factor', "hint":'integer (e.g. 1)'},
+  'civilian_intel_decryption_bonus': {"cat":'Intelligence', "desc":'Civilian Intel Decryption Bonus', "hint":'integer (e.g. 1)'},
+  'civilian_intel_factor': {"cat":'Intelligence', "desc":'Civilian Intel Factor', "hint":'integer (e.g. 1)'},
+  'commando_trait_chance_factor': {"cat":'Intelligence', "desc":'Commando Trait Chance Factor', "hint":'integer (e.g. 1)'},
+  'control_trade_mission_factor': {"cat":'Intelligence', "desc":'Control Trade Mission Factor', "hint":'integer (e.g. 1)'},
+  'crypto_department_enabled': {"cat":'Intelligence', "desc":'Crypto Department Enabled', "hint":'bool (yes/no)'},
+  'crypto_strength': {"cat":'Intelligence', "desc":'Crypto Strength', "hint":'integer (e.g. 1)'},
+  'decryption_power': {"cat":'Intelligence', "desc":'Decryption Power', "hint":'integer (e.g. 1)'},
+  'decryption_power_factor': {"cat":'Intelligence', "desc":'Decryption Power Factor', "hint":'integer (e.g. 1)'},
+  'defense_impact_on_blueprint_stealing': {"cat":'Intelligence', "desc":'Defense Impact On Blueprint Stealing', "hint":'float (e.g. 0.1)'},
+  'diplomatic_pressure_mission_factor': {"cat":'Intelligence', "desc":'Diplomatic Pressure Mission Factor', "hint":'integer (e.g. 1)'},
+  'enemy_operative_recruitment_chance': {"cat":'Intelligence', "desc":'Enemy Operative Recruitment Chance', "hint":'integer (e.g. 1)'},
+  'intel_from_operatives_factor': {"cat":'Intelligence', "desc":'Intel From Operatives Factor', "hint":'integer (e.g. 1)'},
+  'intelligence_agency_defense': {"cat":'Intelligence', "desc":'Intelligence Agency Defense', "hint":'float (e.g. 0.05)'},
+  'intelligence_operation_speed': {"cat":'Intelligence', "desc":'Intelligence Operation Speed', "hint":'integer (e.g. 1)'},
+  'navy_intel_decryption_bonus': {"cat":'Intelligence', "desc":'Navy Intel Decryption Bonus', "hint":'integer (e.g. 1)'},
+  'navy_intel_factor': {"cat":'Intelligence', "desc":'Navy Intel Factor', "hint":'integer (e.g. 1)'},
+  'new_operative_slot_bonus': {"cat":'Intelligence', "desc":'New Operative Slot Bonus', "hint":'integer (e.g. 1)'},
+  'occupied_operative_recruitment_chance': {"cat":'Intelligence', "desc":'Occupied Operative Recruitment Chance', "hint":'integer (e.g. 1)'},
+  'operation_cost': {"cat":'Intelligence', "desc":'Operation Cost', "hint":'integer (e.g. 1)'},
+  'operation_infiltrate_outcome': {"cat":'Intelligence', "desc":'Operation Infiltrate Outcome', "hint":'integer (e.g. 1)'},
+  'operation_outcome': {"cat":'Intelligence', "desc":'Operation Outcome', "hint":'integer (e.g. 1)'},
+  'operative_death_on_capture_chance': {"cat":'Intelligence', "desc":'Operative Death On Capture Chance', "hint":'integer (e.g. 1)'},
+  'operative_slot': {"cat":'Intelligence', "desc":'Operative Slot', "hint":'integer (e.g. 1)'},
+  'propaganda_mission_factor': {"cat":'Intelligence', "desc":'Propaganda Mission Factor', "hint":'integer (e.g. 1)'},
+  'root_out_resistance_effectiveness_factor': {"cat":'Intelligence', "desc":'Root Out Resistance Effectiveness Factor', "hint":'integer (e.g. 1)'},
+  'target_sabotage_factor': {"cat":'Intelligence', "desc":'Target Sabotage Factor', "hint":'integer (e.g. 1)'},
+  'amphibious_invasion': {"cat":'Naval', "desc":'Amphibious Invasion', "hint":'float (e.g. 0.1)'},
+  'amphibious_invasion_against': {"cat":'Naval', "desc":'Amphibious Invasion Against', "hint":'float (e.g. 0.1)'},
+  'amphibious_invasion_defence': {"cat":'Naval', "desc":'Amphibious Invasion Defence', "hint":'integer (e.g. 1)'},
+  'assign_navy_leader_cp_cost': {"cat":'Naval', "desc":'Assign Navy Leader Cp Cost', "hint":'integer (e.g. 1)'},
+  'carrier_capacity_penalty_reduction': {"cat":'Naval', "desc":'Carrier Capacity Penalty Reduction', "hint":'float (e.g. 0.1)'},
+  'carrier_sortie_hours_delay': {"cat":'Naval', "desc":'Carrier Sortie Hours Delay', "hint":'integer (e.g. 1)'},
+  'carrier_traffic': {"cat":'Naval', "desc":'Carrier Traffic', "hint":'integer (e.g. 1)'},
+  'convoy_escort_efficiency': {"cat":'Naval', "desc":'Convoy Escort Efficiency', "hint":'float (e.g. 0.1)'},
+  'convoy_raiding_efficiency_factor': {"cat":'Naval', "desc":'Convoy Raiding Efficiency Factor', "hint":'float (e.g. 0.05)'},
+  'convoy_retreat_speed': {"cat":'Naval', "desc":'Convoy Retreat Speed', "hint":'integer (e.g. 1)'},
+  'critical_receive_chance': {"cat":'Naval', "desc":'Critical Receive Chance', "hint":'float (e.g. 0.1)'},
+  'experience_gain__combat_factor': {"cat":'Naval', "desc":'Unit experience gain factor in combat.', "hint":'integer (e.g. 1)'},
+  'experience_gain__mission_factor': {"cat":'Naval', "desc":'Unit experience gain factor in missions.', "hint":'integer (e.g. 1)'},
+  'experience_gain__training_factor': {"cat":'Naval', "desc":'Unit experience gain factor on training.', "hint":'integer (e.g. 1)'},
+  'experience_gain_navy': {"cat":'Naval', "desc":'Experience Gain Navy', "hint":'float (e.g. 0.05)'},
+  'experience_gain_navy_factor': {"cat":'Naval', "desc":'Experience Gain Navy Factor', "hint":'float (e.g. 0.1)'},
+  'experience_gain_navy_unit': {"cat":'Naval', "desc":'Experience Gain Navy Unit', "hint":'float (e.g. 0.1)'},
+  'experience_gain_navy_unit_factor': {"cat":'Naval', "desc":'Experience Gain Navy Unit Factor', "hint":'float (e.g. 0.1)'},
+  'female_random_admiral_chance': {"cat":'Naval', "desc":'Female Random Admiral Chance', "hint":'integer (e.g. 1)'},
+  'fighter_sortie_efficiency': {"cat":'Naval', "desc":'Fighter Sortie Efficiency', "hint":'integer (e.g. 1)'},
+  'headquarters_experience_gain_factor': {"cat":'Naval', "desc":'Headquarters Experience Gain Factor', "hint":'float (e.g. 0.05)'},
+  'invasion_preparation': {"cat":'Naval', "desc":'Invasion Preparation', "hint":'float (e.g. 0.1)'},
+  'invasion_preparation_against': {"cat":'Naval', "desc":'Invasion Preparation Against', "hint":'float (e.g. 0.1)'},
+  'max_organisation': {"cat":'Naval', "desc":'Max Organisation', "hint":'integer (e.g. 1)'},
+  'mines_planting_by_fleets_factor': {"cat":'Naval', "desc":'Mines Planting By Fleets Factor', "hint":'integer (e.g. 1)'},
+  'mines_sweeping_by_fleets_factor': {"cat":'Naval', "desc":'Mines Sweeping By Fleets Factor', "hint":'integer (e.g. 1)'},
+  'module__design_cost_factor': {"cat":'Naval', "desc":'Module design cost factor.', "hint":'float (e.g. 0.05)'},
+  'naval_accidents_chance': {"cat":'Naval', "desc":'Naval Accidents Chance', "hint":'float (e.g. 0.05)'},
+  'naval_attrition': {"cat":'Naval', "desc":'Naval Attrition', "hint":'float (e.g. 0.05)'},
+  'naval_commando_raid_distance': {"cat":'Naval', "desc":'Naval Commando Raid Distance', "hint":'integer (e.g. 1)'},
+  'naval_coordination': {"cat":'Naval', "desc":'Naval Coordination', "hint":'integer (e.g. 1)'},
+  'naval_critical_effect_factor': {"cat":'Naval', "desc":'Naval Critical Effect Factor', "hint":'float (e.g. 0.05)'},
+  'naval_critical_score_chance_factor': {"cat":'Naval', "desc":'Naval Critical Score Chance Factor', "hint":'float (e.g. 0.05)'},
+  'naval_critical_score_chance_factor_against': {"cat":'Naval', "desc":'Naval Critical Score Chance Factor Against', "hint":'float (e.g. 0.05)'},
+  'naval_damage_factor': {"cat":'Naval', "desc":'Naval Damage Factor', "hint":'float (e.g. 0.05)'},
+  'naval_defense_factor': {"cat":'Naval', "desc":'Naval Defense Factor', "hint":'float (e.g. 0.05)'},
+  'naval_detection': {"cat":'Naval', "desc":'Naval Detection', "hint":'integer (e.g. 1)'},
+  'naval_enemy_fleet_size_ratio_penalty_factor': {"cat":'Naval', "desc":'Naval Enemy Fleet Size Ratio Penalty Factor', "hint":'float (e.g. 0.05)'},
+  'naval_enemy_positioning_in_initial_attack': {"cat":'Naval', "desc":'Naval Enemy Positioning In Initial Attack', "hint":'integer (e.g. 1)'},
+  'naval_enemy_retreat_chance': {"cat":'Naval', "desc":'Naval Enemy Retreat Chance', "hint":'float (e.g. 0.05)'},
+  'naval_has_potf_in_combat_attack': {"cat":'Naval', "desc":'Naval Has Potf In Combat Attack', "hint":'float (e.g. 0.05)'},
+  'naval_has_potf_in_combat_defense': {"cat":'Naval', "desc":'Naval Has Potf In Combat Defense', "hint":'float (e.g. 0.05)'},
+  'naval_heavy_gun_hit_chance_factor': {"cat":'Naval', "desc":'Naval Heavy Gun Hit Chance Factor', "hint":'float (e.g. 0.05)'},
+  'naval_hit_chance': {"cat":'Naval', "desc":'Naval Hit Chance', "hint":'integer (e.g. 1)'},
+  'naval_hit_chance_against': {"cat":'Naval', "desc":'Naval Hit Chance Against', "hint":'integer (e.g. 1)'},
+  'naval_invasion_capacity': {"cat":'Naval', "desc":'Naval Invasion Capacity', "hint":'integer (e.g. 1)'},
+  'naval_invasion_division_cap': {"cat":'Naval', "desc":'Naval Invasion Division Cap', "hint":'integer (e.g. 1)'},
+  'naval_invasion_penalty': {"cat":'Naval', "desc":'Naval Invasion Penalty', "hint":'integer (e.g. 1)'},
+  'naval_light_gun_hit_chance_factor': {"cat":'Naval', "desc":'Naval Light Gun Hit Chance Factor', "hint":'float (e.g. 0.05)'},
+  'naval_mine_hit_chance': {"cat":'Naval', "desc":'Naval Mine Hit Chance', "hint":'float (e.g. 0.05)'},
+  'naval_mines_damage_factor': {"cat":'Naval', "desc":'Naval Mines Damage Factor', "hint":'integer (e.g. 1)'},
+  'naval_mines_effect_reduction': {"cat":'Naval', "desc":'Naval Mines Effect Reduction', "hint":'integer (e.g. 1)'},
+  'naval_mission_xp_factor': {"cat":'Naval', "desc":'Naval Mission Xp Factor', "hint":'number'},
+  'naval_morale': {"cat":'Naval', "desc":'Naval Morale', "hint":'float (e.g. 0.1)'},
+  'naval_morale_factor': {"cat":'Naval', "desc":'Naval Morale Factor', "hint":'float (e.g. 0.1)'},
+  'naval_night_attack': {"cat":'Naval', "desc":'Naval Night Attack', "hint":'float (e.g. 0.1)'},
+  'naval_retreat_chance': {"cat":'Naval', "desc":'Naval Retreat Chance', "hint":'integer (e.g. 1)'},
+  'naval_retreat_chance_after_initial_combat': {"cat":'Naval', "desc":'Naval Retreat Chance After Initial Combat', "hint":'integer (e.g. 1)'},
+  'naval_retreat_speed': {"cat":'Naval', "desc":'Naval Retreat Speed', "hint":'float (e.g. 0.1)'},
+  'naval_retreat_speed_after_initial_combat': {"cat":'Naval', "desc":'Naval Retreat Speed After Initial Combat', "hint":'integer (e.g. 1)'},
+  'naval_ship_recovery_chance': {"cat":'Naval', "desc":'Naval Ship Recovery Chance', "hint":'integer (e.g. 1)'},
+  'naval_ship_recovery_chance_factor': {"cat":'Naval', "desc":'Naval Ship Recovery Chance Factor', "hint":'integer (e.g. 1)'},
+  'naval_speed_factor': {"cat":'Naval', "desc":'Naval Speed Factor', "hint":'integer (e.g. 1)'},
+  'naval_strike': {"cat":'Naval', "desc":'Naval Strike', "hint":'integer (e.g. 1)'},
+  'naval_supply_consumption_factor': {"cat":'Naval', "desc":'Naval Supply Consumption Factor', "hint":'float (e.g. 0.1)'},
+  'naval_torpedo_cooldown_factor': {"cat":'Naval', "desc":'Naval Torpedo Cooldown Factor', "hint":'float (e.g. 0.05)'},
+  'naval_torpedo_damage_reduction_factor': {"cat":'Naval', "desc":'Naval Torpedo Damage Reduction Factor', "hint":'float (e.g. 0.05)'},
+  'naval_torpedo_enemy_critical_chance_factor': {"cat":'Naval', "desc":'Naval Torpedo Enemy Critical Chance Factor', "hint":'float (e.g. 0.05)'},
+  'naval_torpedo_hit_chance_factor': {"cat":'Naval', "desc":'Naval Torpedo Hit Chance Factor', "hint":'float (e.g. 0.05)'},
+  'naval_torpedo_reveal_chance_factor': {"cat":'Naval', "desc":'Naval Torpedo Reveal Chance Factor', "hint":'float (e.g. 0.05)'},
+  'naval_torpedo_screen_penetration_factor': {"cat":'Naval', "desc":'Naval Torpedo Screen Penetration Factor', "hint":'float (e.g. 0.05)'},
+  'navy_advisor_cost_factor': {"cat":'Naval', "desc":'Navy Advisor Cost Factor', "hint":'integer (e.g. 1)'},
+  'navy_anti_air_attack': {"cat":'Naval', "desc":'Navy Anti Air Attack', "hint":'float (e.g. 0.1)'},
+  'navy_anti_air_attack_factor': {"cat":'Naval', "desc":'Navy Anti Air Attack Factor', "hint":'float (e.g. 0.05)'},
+  'navy_capital_ship_attack_factor': {"cat":'Naval', "desc":'Navy Capital Ship Attack Factor', "hint":'float (e.g. 0.05)'},
+  'navy_capital_ship_attack_factor_against': {"cat":'Naval', "desc":'Navy Capital Ship Attack Factor Against', "hint":'float (e.g. 0.05)'},
+  'navy_capital_ship_defence_factor': {"cat":'Naval', "desc":'Navy Capital Ship Defence Factor', "hint":'float (e.g. 0.05)'},
+  'navy_capital_ship_defence_factor_against': {"cat":'Naval', "desc":'Navy Capital Ship Defence Factor Against', "hint":'float (e.g. 0.05)'},
+  'navy_carrier_air_agility_factor': {"cat":'Naval', "desc":'Navy Carrier Air Agility Factor', "hint":'float (e.g. 0.05)'},
+  'navy_carrier_air_attack_factor': {"cat":'Naval', "desc":'Navy Carrier Air Attack Factor', "hint":'float (e.g. 0.05)'},
+  'navy_carrier_air_targetting_factor': {"cat":'Naval', "desc":'Navy Carrier Air Targetting Factor', "hint":'float (e.g. 0.05)'},
+  'navy_casualty_on_hit': {"cat":'Naval', "desc":'Navy Casualty On Hit', "hint":'float (e.g. 0.05)'},
+  'navy_casualty_on_sink': {"cat":'Naval', "desc":'Navy Casualty On Sink', "hint":'float (e.g. 0.05)'},
+  'navy_fuel_consumption_factor': {"cat":'Naval', "desc":'Navy Fuel Consumption Factor', "hint":'float (e.g. 0.05)'},
+  'navy_max_range': {"cat":'Naval', "desc":'Navy Max Range', "hint":'float (e.g. 0.1)'},
+  'navy_max_range_factor': {"cat":'Naval', "desc":'Navy Max Range Factor', "hint":'float (e.g. 0.05)'},
+  'navy_org': {"cat":'Naval', "desc":'Navy Org', "hint":'float (e.g. 0.1)'},
+  'navy_org_factor': {"cat":'Naval', "desc":'Navy Org Factor', "hint":'float (e.g. 0.1)'},
+  'navy_screen_attack_factor': {"cat":'Naval', "desc":'Navy Screen Attack Factor', "hint":'float (e.g. 0.05)'},
+  'navy_screen_attack_factor_against': {"cat":'Naval', "desc":'Navy Screen Attack Factor Against', "hint":'float (e.g. 0.05)'},
+  'navy_screen_defence_factor': {"cat":'Naval', "desc":'Navy Screen Defence Factor', "hint":'float (e.g. 0.05)'},
+  'navy_screen_defence_factor_against': {"cat":'Naval', "desc":'Navy Screen Defence Factor Against', "hint":'float (e.g. 0.05)'},
+  'navy_submarine_attack_factor': {"cat":'Naval', "desc":'Navy Submarine Attack Factor', "hint":'float (e.g. 0.05)'},
+  'navy_submarine_attack_factor_against': {"cat":'Naval', "desc":'Navy Submarine Attack Factor Against', "hint":'float (e.g. 0.05)'},
+  'navy_submarine_defence_factor': {"cat":'Naval', "desc":'Navy Submarine Defence Factor', "hint":'float (e.g. 0.05)'},
+  'navy_submarine_defence_factor_against': {"cat":'Naval', "desc":'Navy Submarine Defence Factor Against', "hint":'float (e.g. 0.05)'},
+  'navy_submarine_detection_factor': {"cat":'Naval', "desc":'Navy Submarine Detection Factor', "hint":'float (e.g. 0.05)'},
+  'navy_visibility': {"cat":'Naval', "desc":'Navy Visibility', "hint":'float (e.g. 0.05)'},
+  'night_spotting_chance': {"cat":'Naval', "desc":'Night Spotting Chance', "hint":'float (e.g. 0.1)'},
+  'port_strike': {"cat":'Naval', "desc":'Port Strike', "hint":'float (e.g. 0.1)'},
+  'positioning': {"cat":'Naval', "desc":'Positioning', "hint":'float (e.g. 0.1)'},
+  'production_cost_max_': {"cat":'Naval', "desc":'Max naval equipment production cost.', "hint":'integer (e.g. 1)'},
+  'repair_speed_factor': {"cat":'Naval', "desc":'Repair Speed Factor', "hint":'integer (e.g. 1)'},
+  'screening_efficiency': {"cat":'Naval', "desc":'Screening Efficiency', "hint":'float (e.g. 0.1)'},
+  'screening_without_screens': {"cat":'Naval', "desc":'Screening Without Screens', "hint":'float (e.g. 0.1)'},
+  'ships_at_battle_start': {"cat":'Naval', "desc":'Ships At Battle Start', "hint":'integer (e.g. 1)'},
+  'sortie_efficiency': {"cat":'Naval', "desc":'Sortie Efficiency', "hint":'integer (e.g. 1)'},
+  'spotting_chance': {"cat":'Naval', "desc":'Spotting Chance', "hint":'integer (e.g. 1)'},
+  'spotting_chance_against': {"cat":'Naval', "desc":'Spotting Chance Against', "hint":'integer (e.g. 1)'},
+  'strike_force_movement_org_loss': {"cat":'Naval', "desc":'Strike Force Movement Org Loss', "hint":'float (e.g. 0.05)'},
+  'sub_retreat_speed': {"cat":'Naval', "desc":'Sub Retreat Speed', "hint":'integer (e.g. 1)'},
+  'submarine_attack': {"cat":'Naval', "desc":'Submarine Attack', "hint":'float (e.g. 0.1)'},
+  'terrain_trait_xp_gain_factor': {"cat":'Naval', "desc":'Terrain Trait Xp Gain Factor', "hint":'float (e.g. 0.05)'},
+  'trait__xp_gain_factor': {"cat":'Naval', "desc":"Xp gain factor (used if the trait has not prefix 'trait_').", "hint":'float (e.g. 0.05)'},
+  'transport_capacity': {"cat":'Naval', "desc":'Transport Capacity', "hint":'integer (e.g. 1)'},
+  'unit__design_cost_factor': {"cat":'Naval', "desc":'Unit design cost factor.', "hint":'float (e.g. 0.05)'},
+  'drift_defence_factor': {"cat":'Politics', "desc":'Drift Defence Factor', "hint":'float (e.g. 0.1)'},
+  'master_ideology_drift': {"cat":'Politics', "desc":'Master Ideology Drift', "hint":'float (e.g. 0.05)'},
+  'army_speed_factor_for_controller': {"cat":'State', "desc":'Army Speed Factor For Controller', "hint":'float (e.g. 0.05)'},
+  'disable_strategic_redeployment': {"cat":'State', "desc":'Disable Strategic Redeployment', "hint":'bool (yes/no)'},
+  'disable_strategic_redeployment_for_controller': {"cat":'State', "desc":'Disable Strategic Redeployment For Controller', "hint":'bool (yes/no)'},
+  'enemy_army_speed_factor': {"cat":'State', "desc":'Enemy Army Speed Factor', "hint":'float (e.g. 0.05)'},
+  'enemy_attrition': {"cat":'State', "desc":'Enemy Attrition', "hint":'float (e.g. 0.1)'},
+  'enemy_intel_network_gain_factor_over_occupied_tag': {"cat":'State', "desc":'Enemy Intel Network Gain Factor Over Occupied Tag', "hint":'integer (e.g. 1)'},
+  'enemy_local_supplies': {"cat":'State', "desc":'Enemy Local Supplies', "hint":'integer (e.g. 1)'},
+  'enemy_truck_attrition_factor': {"cat":'State', "desc":'Enemy Truck Attrition Factor', "hint":'integer (e.g. 1)'},
+  'equipment_capture_factor_for_controller': {"cat":'State', "desc":'Equipment Capture Factor For Controller', "hint":'float (e.g. 0.1)'},
+  'equipment_capture_for_controller': {"cat":'State', "desc":'Equipment Capture For Controller', "hint":'float (e.g. 0.1)'},
+  'local_building_slots': {"cat":'State', "desc":'Local Building Slots', "hint":'integer (e.g. 1)'},
+  'local_building_slots_factor': {"cat":'State', "desc":'Local Building Slots Factor', "hint":'integer (e.g. 1)'},
+  'local_factories': {"cat":'State', "desc":'Local Factories', "hint":'integer (e.g. 1)'},
+  'local_factory_energy_consumption': {"cat":'State', "desc":'Local Factory Energy Consumption', "hint":'integer (e.g. 1)'},
+  'local_factory_sabotage': {"cat":'State', "desc":'Local Factory Sabotage', "hint":'integer (e.g. 1)'},
+  'local_intel_to_enemies': {"cat":'State', "desc":'Local Intel To Enemies', "hint":'integer (e.g. 1)'},
+  'local_manpower': {"cat":'State', "desc":'Local Manpower', "hint":'integer (e.g. 1)'},
+  'local_non_core_manpower': {"cat":'State', "desc":'Local Non Core Manpower', "hint":'float (e.g. 0.05)'},
+  'local_non_core_supply_impact_factor': {"cat":'State', "desc":'Local Non Core Supply Impact Factor', "hint":'integer (e.g. 1)'},
+  'local_resources': {"cat":'State', "desc":'Local Resources', "hint":'integer (e.g. 1)'},
+  'local_resources_factor': {"cat":'State', "desc":'Local Resources Factor', "hint":'float (e.g. 0.05)'},
+  'local_supplies': {"cat":'State', "desc":'Local Supplies', "hint":'integer (e.g. 1)'},
+  'local_supplies_for_controller': {"cat":'State', "desc":'Local Supplies For Controller', "hint":'integer (e.g. 1)'},
+  'local_supply_impact_factor': {"cat":'State', "desc":'Local Supply Impact Factor', "hint":'integer (e.g. 1)'},
+  'mobilization_speed': {"cat":'State', "desc":'Mobilization Speed', "hint":'float (e.g. 0.05)'},
+  'non_core_manpower': {"cat":'State', "desc":'Non Core Manpower', "hint":'float (e.g. 0.05)'},
+  'recruitable_population': {"cat":'State', "desc":'Recruitable Population', "hint":'number'},
+  'recruitable_population_factor': {"cat":'State', "desc":'Recruitable Population Factor', "hint":'float (e.g. 0.05)'},
+  'state__max_level_terrain_limit': {"cat":'State', "desc":'Maximum allowed building level for terrain.', "hint":'integer (e.g. 1)'},
+  'state_production_speed__factor': {"cat":'State', "desc":'State building construction speed factor.', "hint":'float (e.g. 0.05)'},
+  'state_production_speed_buildings_factor': {"cat":'State', "desc":'State Production Speed Buildings Factor', "hint":'integer (e.g. 1)'},
+  'state_production_speed_facility_factor': {"cat":'State', "desc":'State Production Speed Facility Factor', "hint":'float (e.g. 0.05)'},
+  'state_repair_speed__factor': {"cat":'State', "desc":'State building repair speed factor.', "hint":'float (e.g. 0.05)'},
+  'state_resource_': {"cat":'State', "desc":'State resource.', "hint":'integer (e.g. 1)'},
+  'state_resource_cost_': {"cat":'State', "desc":'State resource cost.', "hint":'integer (e.g. 1)'},
+  'state_resources__factor': {"cat":'State', "desc":'State resource factor.', "hint":'integer (e.g. 1)'},
+  'state_resources_factor': {"cat":'State', "desc":'State Resources Factor', "hint":'integer (e.g. 1)'},
+  'temporary_state_resource_': {"cat":'State', "desc":'Temporary state resource.', "hint":'integer (e.g. 1)'},
+  'army_leader_cost_factor': {"cat":'Unit Leader', "desc":'Army Leader Cost Factor', "hint":'float (e.g. 0.1)'},
+  'army_leader_start_attack_level': {"cat":'Unit Leader', "desc":'Army Leader Start Attack Level', "hint":'integer (e.g. 1)'},
+  'army_leader_start_defense_level': {"cat":'Unit Leader', "desc":'Army Leader Start Defense Level', "hint":'integer (e.g. 1)'},
+  'army_leader_start_level': {"cat":'Unit Leader', "desc":'Army Leader Start Level', "hint":'integer (e.g. 1)'},
+  'army_leader_start_logistics_level': {"cat":'Unit Leader', "desc":'Army Leader Start Logistics Level', "hint":'integer (e.g. 1)'},
+  'army_leader_start_planning_level': {"cat":'Unit Leader', "desc":'Army Leader Start Planning Level', "hint":'integer (e.g. 1)'},
+  'cannot_use_abilities': {"cat":'Unit Leader', "desc":'Cannot Use Abilities', "hint":'bool (yes/no)'},
+  'enemy_operative_capture_chance_factor': {"cat":'Unit Leader', "desc":'Enemy Operative Capture Chance Factor', "hint":'integer (e.g. 1)'},
+  'enemy_operative_detection_chance': {"cat":'Unit Leader', "desc":'Enemy Operative Detection Chance', "hint":'float (e.g. 0.05)'},
+  'enemy_operative_detection_chance_factor': {"cat":'Unit Leader', "desc":'Enemy Operative Detection Chance Factor', "hint":'integer (e.g. 1)'},
+  'enemy_operative_detection_chance_factor_over_occupied_tag': {"cat":'Unit Leader', "desc":'Enemy Operative Detection Chance Factor Over Occupied Tag', "hint":'integer (e.g. 1)'},
+  'enemy_operative_detection_chance_over_occupied_tag': {"cat":'Unit Leader', "desc":'Enemy Operative Detection Chance Over Occupied Tag', "hint":'float (e.g. 0.05)'},
+  'enemy_operative_forced_into_hiding_time_factor': {"cat":'Unit Leader', "desc":'Enemy Operative Forced Into Hiding Time Factor', "hint":'integer (e.g. 1)'},
+  'enemy_operative_harmed_time_factor': {"cat":'Unit Leader', "desc":'Enemy Operative Harmed Time Factor', "hint":'integer (e.g. 1)'},
+  'enemy_operative_intel_extraction_rate': {"cat":'Unit Leader', "desc":'Enemy Operative Intel Extraction Rate', "hint":'integer (e.g. 1)'},
+  'exiled_divisions_attack_factor': {"cat":'Unit Leader', "desc":'Exiled Divisions Attack Factor', "hint":'float (e.g. 0.05)'},
+  'exiled_divisions_defense_factor': {"cat":'Unit Leader', "desc":'Exiled Divisions Defense Factor', "hint":'float (e.g. 0.05)'},
+  'experience_gain_factor': {"cat":'Unit Leader', "desc":'Experience Gain Factor', "hint":'float (e.g. 0.1)'},
+  'fortification_collateral_chance': {"cat":'Unit Leader', "desc":'Fortification Collateral Chance', "hint":'float (e.g. 0.1)'},
+  'fortification_damage': {"cat":'Unit Leader', "desc":'Fortification Damage', "hint":'float (e.g. 0.1)'},
+  'initiative_factor': {"cat":'Unit Leader', "desc":'Initiative Factor', "hint":'float (e.g. 0.1)'},
+  'intel_network_gain': {"cat":'Unit Leader', "desc":'Intel Network Gain', "hint":'float (e.g. 0.1)'},
+  'intel_network_gain_factor': {"cat":'Unit Leader', "desc":'Intel Network Gain Factor', "hint":'integer (e.g. 1)'},
+  'max_army_group_size': {"cat":'Unit Leader', "desc":'Max Army Group Size', "hint":'integer (e.g. 1)'},
+  'military_leader_cost_factor': {"cat":'Unit Leader', "desc":'Military Leader Cost Factor', "hint":'float (e.g. 0.1)'},
+  'naval_invasion_prep_speed': {"cat":'Unit Leader', "desc":'Naval Invasion Prep Speed', "hint":'float (e.g. 0.1)'},
+  'navy_leader_cost_factor': {"cat":'Unit Leader', "desc":'Navy Leader Cost Factor', "hint":'float (e.g. 0.1)'},
+  'navy_leader_start_attack_level': {"cat":'Unit Leader', "desc":'Navy Leader Start Attack Level', "hint":'integer (e.g. 1)'},
+  'navy_leader_start_coordination_level': {"cat":'Unit Leader', "desc":'Navy Leader Start Coordination Level', "hint":'integer (e.g. 1)'},
+  'navy_leader_start_defense_level': {"cat":'Unit Leader', "desc":'Navy Leader Start Defense Level', "hint":'integer (e.g. 1)'},
+  'navy_leader_start_level': {"cat":'Unit Leader', "desc":'Navy Leader Start Level', "hint":'integer (e.g. 1)'},
+  'navy_leader_start_maneuvering_level': {"cat":'Unit Leader', "desc":'Navy Leader Start Maneuvering Level', "hint":'integer (e.g. 1)'},
+  'own_exiled_divisions_attack_factor': {"cat":'Unit Leader', "desc":'Own Exiled Divisions Attack Factor', "hint":'float (e.g. 0.05)'},
+  'own_exiled_divisions_defense_factor': {"cat":'Unit Leader', "desc":'Own Exiled Divisions Defense Factor', "hint":'float (e.g. 0.05)'},
+  'own_operative_capture_chance_factor': {"cat":'Unit Leader', "desc":'Own Operative Capture Chance Factor', "hint":'integer (e.g. 1)'},
+  'own_operative_detection_chance': {"cat":'Unit Leader', "desc":'Own Operative Detection Chance', "hint":'float (e.g. 0.05)'},
+  'own_operative_detection_chance_factor': {"cat":'Unit Leader', "desc":'Own Operative Detection Chance Factor', "hint":'integer (e.g. 1)'},
+  'own_operative_forced_into_hiding_time_factor': {"cat":'Unit Leader', "desc":'Own Operative Forced Into Hiding Time Factor', "hint":'integer (e.g. 1)'},
+  'own_operative_harmed_time_factor': {"cat":'Unit Leader', "desc":'Own Operative Harmed Time Factor', "hint":'integer (e.g. 1)'},
+  'own_operative_intel_extraction_rate': {"cat":'Unit Leader', "desc":'Own Operative Intel Extraction Rate', "hint":'integer (e.g. 1)'},
+  'paradrop_organization_factor': {"cat":'Unit Leader', "desc":'Paradrop Organization Factor', "hint":'float (e.g. 0.1)'},
+  'paratrooper_aa_defense': {"cat":'Unit Leader', "desc":'Paratrooper Aa Defense', "hint":'float (e.g. 0.1)'},
+  'paratrooper_weight_factor': {"cat":'Unit Leader', "desc":'Paratrooper Weight Factor', "hint":'float (e.g. 0.1)'},
+  'promote_cost_factor': {"cat":'Unit Leader', "desc":'Promote Cost Factor', "hint":'float (e.g. 0.1)'},
+  'reassignment_duration_factor': {"cat":'Unit Leader', "desc":'Reassignment Duration Factor', "hint":'float (e.g. 0.1)'},
+  'river_crossing_factor': {"cat":'Unit Leader', "desc":'River Crossing Factor', "hint":'float (e.g. 0.05)'},
+  'sickness_chance': {"cat":'Unit Leader', "desc":'Sickness Chance', "hint":'float (e.g. 0.05)'},
+  'skill_bonus_factor': {"cat":'Unit Leader', "desc":'Skill Bonus Factor', "hint":'float (e.g. 0.1)'},
+  'unit_leader_as_advisor_cp_cost_factor': {"cat":'Unit Leader', "desc":'Unit Leader As Advisor Cp Cost Factor', "hint":'float (e.g. 0.1)'},
+  'wounded_chance_factor': {"cat":'Unit Leader', "desc":'Wounded Chance Factor', "hint":'float (e.g. 0.1)'},
+}
+
+
+MODIFIER_CATS = ['AI', 'Air', 'Army', 'Autonomy', 'Country', 'Diplomacy', 'Faction', 'Govt in Exile', 'Industry', 'Intelligence', 'Naval', 'Politics', 'State', 'Unit Leader']
+
+def modifiers_in_cat(cat):
+    return sorted((k,v) for k,v in MODIFIER_DEFS.items() if v["cat"]==cat)
+
+
+
+# ── Wizard functions (national spirit & dynamic modifier) ────────
+
+import os
+import tkinter as tk
+from tkinter import messagebox, filedialog
+
+# All colour/font vars are accessed through the module-level names (same globals)
+
+def open_national_spirit_wizard(app):
+    """Visual National Spirit / Idea builder with searchable modifier cards."""
+    import os
+
+    win = tk.Toplevel(app)
+    win.title("National Spirit Builder")
+    win.configure(bg=BG_DARK)
+    win.geometry("820x860")
+    win.resizable(True, True)
+    win.grab_set()
+
+    # ── Auto-save on close ─────────────────────────────────────────────
+    import json as _spjson, tempfile as _sptmp, os as _spos
+    _sp_autosave = _spos.path.join(_sptmp.gettempdir(), "hoi4_cm_spirit_autosave.json")
+
+    def _spirit_autosave():
+        try:
+            data = {k: v.get() for k, v in _spirit_svars.items() if hasattr(v, "get")}
+            data["modifiers"] = spirit_modifiers[:]
+            with open(_sp_autosave, "w", encoding="utf-8") as f:
+                _spjson.dump(data, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
+    def _on_spirit_close():
+        _spirit_autosave(); win.destroy()
+    win.protocol("WM_DELETE_WINDOW", _on_spirit_close)
+
+    # ── State ─────────────────────────────────────────────────────────
+    spirit_modifiers = []   # list of {"key": str, "value": str}
+    _spirit_svars = {}      # populated by _field() calls for autosave
+
+    # ── Header ────────────────────────────────────────────────────────
+    tk.Label(win, text="NATIONAL SPIRIT BUILDER", bg=BG_DARK, fg=TEXT,
+             font=("Helvetica",12,"bold"), pady=10).pack(fill="x", padx=14)
+    tk.Frame(win, bg=BORDER_G, height=1).pack(fill="x")
+
+    # ── Two-column layout ─────────────────────────────────────────────
+    body = tk.Frame(win, bg=BG_DARK)
+    body.pack(fill="both", expand=True)
+
+    # Draggable split — PanedWindow
+    paned = tk.PanedWindow(body, orient="horizontal",
+                           bg=BORDER_G, sashwidth=5, sashrelief="flat",
+                           handlesize=0)
+    paned.pack(fill="both", expand=True)
+
+    # LEFT pane (scrollable form)
+    left_outer = tk.Frame(paned, bg=BG_PANEL)
+    paned.add(left_outer, minsize=300, width=460, stretch="always")
+
+    lc = tk.Canvas(left_outer, bg=BG_PANEL, highlightthickness=0)
+    lsb = tk.Scrollbar(left_outer, orient="vertical", command=lc.yview)
+    lfrm = tk.Frame(lc, bg=BG_PANEL)
+    lc.create_window((0,0), window=lfrm, anchor="nw")
+    lc.configure(yscrollcommand=lsb.set)
+    lfrm.bind("<Configure>", lambda e: lc.configure(scrollregion=lc.bbox("all")))
+    lc.bind("<Configure>", lambda e: lc.itemconfig(lc.find_withtag("all")[0], width=e.width)
+            if lc.find_withtag("all") else None)
+    lfrm.bind("<MouseWheel>", lambda e: lc.yview_scroll(int(-1*(e.delta/120)), "units"))
+    lsb.pack(side="right", fill="y")
+    lc.pack(fill="both", expand=True)
+
+    # RIGHT pane (preview)
+    right_outer = tk.Frame(paned, bg=BG_DARK)
+    paned.add(right_outer, minsize=200, width=360, stretch="always")
+    # Preview header with Edit toggle
+    prev_hdr = tk.Frame(right_outer, bg=BG_DARK)
+    prev_hdr.pack(fill="x", pady=(8,2))
+    tk.Label(prev_hdr, text="  OUTPUT PREVIEW", bg=BG_DARK, fg=TEXT_DIM,
+             font=("Helvetica",9,"bold"), anchor="w").pack(side="left")
+    _edit_mode    = [False]  # True while preview text box is editable
+    _raw_override = [None]   # if not None, Copy/Save use this raw string instead of _build_output
+
+    _edit_btn = tk.Button(prev_hdr, text="✎ Edit",
+                          bg=BG_CARD, fg=TEXT_DIM, relief="flat",
+                          font=("Helvetica",8,"bold"), padx=8, pady=1,
+                          cursor="hand2",
+                          highlightthickness=1, highlightbackground=BORDER_G)
+    _edit_btn.pack(side="right", padx=4)
+
+    _save_raw_btn = tk.Button(prev_hdr, text="💾 Save Raw",
+                              bg=BG_CARD, fg=TEXT_DIM, relief="flat",
+                              font=("Helvetica",8,"bold"), padx=8, pady=1,
+                              cursor="hand2",
+                              highlightthickness=1, highlightbackground=BORDER_G)
+    _save_raw_btn.pack(side="right", padx=2)
+
+
+    _lock_lbl = tk.Label(prev_hdr, text="live", bg=BG_DARK, fg=TEXT_DIM,
+                         font=("Helvetica",7,"italic"))
+    _lock_lbl.pack(side="right")
+    preview_txt = tk.Text(right_outer, bg="#0d1117", fg="#a8d8a8",
+                          font=("Courier",9), relief="flat",
+                          highlightthickness=1, highlightbackground=BORDER_G,
+                          wrap="none", state="disabled")
+    prev_sb = tk.Scrollbar(right_outer, orient="vertical", command=preview_txt.yview)
+    prev_sb.pack(side="right", fill="y", padx=(0,4))
+    preview_txt.configure(yscrollcommand=prev_sb.set)
+    preview_txt.pack(fill="both", expand=True, padx=(8,0), pady=(0,8))
+
+    # ── UI helpers ────────────────────────────────────────────────────
+    def _sep():
+        tk.Frame(lfrm, bg=BORDER_G, height=1).pack(fill="x", padx=8, pady=6)
+
+    def _sec(text):
+        tk.Label(lfrm, text=text, bg=BG_PANEL, fg=TEXT,
+                 font=("Helvetica",9,"bold"), anchor="w",
+                 padx=10, pady=4).pack(fill="x")
+
+    def _lbl(text):
+        tk.Label(lfrm, text=text, bg=BG_PANEL, fg=TEXT_DIM,
+                 font=("Helvetica",8), anchor="w", padx=12).pack(fill="x")
+
+    def _field(label, var, width=None):
+        row = tk.Frame(lfrm, bg=BG_PANEL)
+        row.pack(fill="x", padx=10, pady=2)
+        tk.Label(row, text=label, bg=BG_PANEL, fg=TEXT_DIM,
+                 font=("Helvetica",9), width=14, anchor="w").pack(side="left")
+        kw = {"width": width} if width else {}
+        e = tk.Entry(row, textvariable=var, bg=BG_CARD, fg=TEXT,
+                     insertbackground=BLUE, font=("Helvetica",10),
+                     relief="flat", highlightthickness=1,
+                     highlightbackground=BORDER_G, **kw)
+        e.pack(side="left", fill="x", expand=True, ipady=4)
+        return e
+
+    def _dropdown(label, var, options):
+        row = tk.Frame(lfrm, bg=BG_PANEL)
+        row.pack(fill="x", padx=10, pady=2)
+        tk.Label(row, text=label, bg=BG_PANEL, fg=TEXT_DIM,
+                 font=("Helvetica",9), width=14, anchor="w").pack(side="left")
+        om = tk.OptionMenu(row, var, *options)
+        om.config(bg=BG_CARD, fg=TEXT, activebackground=BORDER_G,
+                  font=("Helvetica",9), relief="flat", anchor="w",
+                  highlightthickness=1, highlightbackground=BORDER_G)
+        om["menu"].config(bg=BG_CARD, fg=TEXT, activebackground=BORDER_G)
+        om.pack(side="left", fill="x", expand=True)
+
+    def _trigger_field(label, height=2):
+        row = tk.Frame(lfrm, bg=BG_PANEL)
+        row.pack(fill="x", padx=10, pady=2)
+        tk.Label(row, text=label, bg=BG_PANEL, fg=TEXT_DIM,
+                 font=("Helvetica",9), width=14, anchor="nw").pack(side="left")
+        t = tk.Text(row, bg=BG_CARD, fg=TEXT, insertbackground=BLUE,
+                    font=("Courier",9), relief="flat",
+                    highlightthickness=1, highlightbackground=BORDER_G,
+                    height=height, wrap="none")
+        t.pack(side="left", fill="x", expand=True, ipady=2)
+        t.bind("<KeyRelease>", lambda e: _refresh_preview())
+        return t
+
+    # ── IDENTITY ──────────────────────────────────────────────────────
+    _sec("▸  IDENTITY")
+    v_id       = tk.StringVar(value="TAG_my_spirit")
+    v_name_key = tk.StringVar(value="TAG_my_spirit")
+    v_picture  = tk.StringVar(value="GFX_idea_TAG_my_spirit")
+    v_slot     = tk.StringVar(value="country")
+    v_cost     = tk.StringVar(value="0")
+    v_removal  = tk.StringVar(value="-1")
+    _field("Idea ID:",      v_id)
+    _field("Name loc key:", v_name_key)
+    # Picture GFX row with ⊞ browse button
+    _gfx_row = tk.Frame(lfrm, bg=BG_PANEL)
+    _gfx_row.pack(fill="x", padx=10, pady=2)
+    tk.Label(_gfx_row, text="Picture GFX:", bg=BG_PANEL, fg=TEXT_DIM,
+             font=("Helvetica",9), width=14, anchor="w").pack(side="left")
+    _gfx_ent = tk.Entry(_gfx_row, textvariable=v_picture,
+                        bg=BG_CARD, fg=TEXT, insertbackground=BLUE,
+                        font=("Helvetica",10), relief="flat",
+                        highlightthickness=1, highlightbackground=BORDER_G)
+    _gfx_ent.pack(side="left", fill="x", expand=True, ipady=4)
+    tk.Button(_gfx_row, text="⊞",
+              command=lambda: _open_idea_gfx_browser(),
+              bg=BG_CARD, fg=TEXT_DIM, relief="flat",
+              font=("Helvetica",11), cursor="hand2",
+              highlightthickness=1, highlightbackground=BORDER_G,
+              padx=4).pack(side="right", padx=(2,0))
+
+
+
+    # ── Idea GFX picker row  (identical UX to focus GFX picker) ──
+    def _open_idea_gfx_browser():
+        ideas_root = os.path.join(MOD.root, MOD.path_ideas_gfx) if MOD.loaded else None
+
+        if not MOD.loaded or not ideas_root or not os.path.isdir(ideas_root):
+            # Fallback: let user pick a folder manually
+            folder = filedialog.askdirectory(title="Select idea GFX folder")
+            if not folder: return
+            ideas_root = folder
+
+        # Build folder list (same logic as focus browser)
+        folders = []
+        try:
+            loose = [f for f in os.listdir(ideas_root)
+                     if f.lower().endswith((".dds",".png",".tga"))]
+            if loose:
+                folders.append(("[ideas root]", ideas_root))
+            for entry in sorted(os.listdir(ideas_root)):
+                full = os.path.join(ideas_root, entry)
+                if os.path.isdir(full):
+                    folders.append((entry, full))
+        except Exception:
+            pass
+
+        if not folders:
+            messagebox.showinfo("No Folders",
+                "No image files or subfolders found in the ideas GFX path.")
+            return
+
+        # ── Browser window ────────────────────────────────────────
+        bwin = tk.Toplevel(win)
+        bwin.title("GFX Browser  —  Ideas")
+        bwin.configure(bg=BG_DARK)
+        bwin.geometry("900x580")
+        bwin.resizable(True, True)
+        bwin.grab_set()
+
+        panes = tk.Frame(bwin, bg=BG_DARK)
+        panes.pack(fill="both", expand=True, padx=8, pady=8)
+
+        # Left: folder list
+        lf = tk.Frame(panes, bg=BG_PANEL, width=200)
+        lf.pack(side="left", fill="y", padx=(0,6))
+        lf.pack_propagate(False)
+        tk.Label(lf, text="  FOLDERS", bg=BG_PANEL, fg=TEXT_DIM,
+                 font=("Helvetica",9,"bold"), anchor="w", pady=6).pack(fill="x")
+        tk.Frame(lf, bg=BORDER_G, height=1).pack(fill="x")
+        folder_lb = tk.Listbox(lf, bg=BG_CARD, fg=TEXT,
+                               selectbackground=BLUE, selectforeground=TEXT,
+                               font=("Courier",9), relief="flat", bd=0,
+                               activestyle="none", highlightthickness=0)
+        fsb = tk.Scrollbar(lf, orient="vertical", command=folder_lb.yview)
+        folder_lb.configure(yscrollcommand=fsb.set)
+        fsb.pack(side="right", fill="y")
+        folder_lb.pack(fill="both", expand=True, padx=2, pady=4)
+        for display, _ in folders:
+            folder_lb.insert("end", "  " + display)
+
+        # Right panel
+        rf = tk.Frame(panes, bg=BG_DARK)
+        rf.pack(side="left", fill="both", expand=True)
+
+        top_r = tk.Frame(rf, bg=BG_DARK)
+        top_r.pack(fill="x", pady=(0,6))
+        tk.Label(top_r, text="Filter:", bg=BG_DARK, fg=TEXT_DIM,
+                 font=("Helvetica",9)).pack(side="left")
+        search_var = tk.StringVar()
+        tk.Entry(top_r, textvariable=search_var, bg=BG_CARD, fg=TEXT,
+                 insertbackground=BLUE, font=("Helvetica",10),
+                 relief="flat", highlightthickness=1,
+                 highlightbackground=BORDER_G).pack(
+                     side="left", padx=6, fill="x", expand=True, ipady=3)
+        status_lbl = tk.Label(top_r, text="select a folder", bg=BG_DARK,
+                              fg=TEXT_DIM, font=("Helvetica",9))
+        status_lbl.pack(side="right", padx=6)
+
+        cv_frame = tk.Frame(rf, bg=BG_PANEL)
+        cv_frame.pack(fill="both", expand=True)
+        cv = tk.Canvas(cv_frame, bg=BG_PANEL, highlightthickness=0)
+        vsb = tk.Scrollbar(cv_frame, orient="vertical", command=cv.yview)
+        cv.configure(yscrollcommand=vsb.set)
+        vsb.pack(side="right", fill="y")
+        cv.pack(side="left", fill="both", expand=True)
+
+        # Bottom bar
+        bot = tk.Frame(bwin, bg=BG_DARK)
+        bot.pack(fill="x", padx=10, pady=6)
+        selected_var = tk.StringVar(value="")
+        tk.Label(bot, textvariable=selected_var, bg=BG_DARK,
+                 fg=BLUE, font=("Helvetica",9)).pack(side="left", padx=4)
+        tk.Button(bot, text="Cancel", command=bwin.destroy,
+                  bg=BG_CARD, fg=TEXT, relief="flat",
+                  font=("Helvetica",9), padx=10, pady=4,
+                  cursor="hand2").pack(side="right", padx=4)
+        def _apply_idea():
+            v_picture.set(selected_var.get())
+            bwin.destroy()
+        _sel_btn_i = tk.Button(bot, text="Select ->", command=_apply_idea,
+                               bg="#1a3322", fg="#4b7a5e", relief="flat",
+                               font=("Helvetica",10,"bold"), padx=14, pady=5,
+                               cursor="arrow", state="disabled")
+        _sel_btn_i.pack(side="right")
+        def _on_sel_change_i(*_):
+            v = selected_var.get()
+            if v:
+                _sel_btn_i.config(bg="#14532d", fg="#0a0a0a",
+                                  cursor="hand2", state="normal")
+            else:
+                _sel_btn_i.config(bg="#1a3322", fg="#4b7a5e",
+                                  cursor="arrow", state="disabled")
+        selected_var.trace_add("write", _on_sel_change_i)
+
+        # ── Grid constants (same as focus browser) ────────────────
+        COLS   = 5
+        TILE_W = 110
+        TILE_H = 100
+        PAD    = 6
+
+        _st = {
+            "pairs": [], "img_cache": {}, "drawn": set(),
+            "canvas_ids": {}, "sel_idx": None,
+        }
+
+        def _tile_xy(idx):
+            col = idx % COLS; row = idx // COLS
+            return PAD + col*(TILE_W+PAD), PAD + row*(TILE_H+PAD)
+
+        def _select_tile(idx):
+            old = _st["sel_idx"]
+            if old is not None and old in _st["canvas_ids"]:
+                rid,_,_ = _st["canvas_ids"][old]
+                cv.itemconfig(rid, fill=BG_CARD, outline=BORDER_G)
+            _st["sel_idx"] = idx
+            gfx_key = _st["pairs"][idx][0]
+            selected_var.set(gfx_key)
+            if idx in _st["canvas_ids"]:
+                rid,_,_ = _st["canvas_ids"][idx]
+                cv.itemconfig(rid, fill=SEL_BG, outline=BLUE)
+
+        def _draw_tile(idx):
+            if idx in _st["drawn"]: return
+            _st["drawn"].add(idx)
+            gfx_key, path = _st["pairs"][idx]
+            x, y = _tile_xy(idx)
+            is_sel = (gfx_key == selected_var.get())
+            rid = cv.create_rectangle(
+                x, y, x+TILE_W, y+TILE_H,
+                fill=SEL_BG if is_sel else BG_CARD,
+                outline=BLUE if is_sel else BORDER_G,
+                width=2, tags=("tile","t%d"%idx))
+            iid = cv.create_text(
+                x+TILE_W//2, y+44, text="...", fill=TEXT_DIM,
+                font=("Helvetica",14), tags=("tile","t%d"%idx))
+            short = gfx_key.replace("GFX_idea_","").replace("GFX_focus_","")
+            short = (short[:16]+"...") if len(short)>16 else short
+            lid = cv.create_text(
+                x+TILE_W//2, y+TILE_H-14, text=short,
+                fill=TEXT_DIM, font=("Helvetica",7),
+                width=TILE_W-8, tags=("tile","t%d"%idx))
+            _st["canvas_ids"][idx] = (rid, iid, lid)
+            for item in (rid, iid, lid):
+                cv.tag_bind(item,"<Button-1>",
+                            lambda e,i=idx: _select_tile(i))
+                cv.tag_bind(item,"<Double-Button-1>",
+                            lambda e,i=idx: [_select_tile(i), _apply_idea()])
+            if path in _st["img_cache"]:
+                _fill_image(idx)
+
+        def _fill_image(idx):
+            if idx not in _st["canvas_ids"]: return
+            rid, iid, lid = _st["canvas_ids"][idx]
+            gfx_key, path = _st["pairs"][idx]
+            img = _st["img_cache"].get(path)
+            cv.delete(iid)
+            if img:
+                new_iid = cv.create_image(
+                    _tile_xy(idx)[0]+TILE_W//2,
+                    _tile_xy(idx)[1]+44,
+                    anchor="center", image=img,
+                    tags=("tile","t%d"%idx))
+            else:
+                new_iid = cv.create_text(
+                    _tile_xy(idx)[0]+TILE_W//2,
+                    _tile_xy(idx)[1]+30,
+                    text="?", fill=TEXT_DIM,
+                    font=("Helvetica",20),
+                    tags=("tile","t%d"%idx))
+            _st["canvas_ids"][idx] = (rid, new_iid, lid)
+            for item in (rid, new_iid, lid):
+                cv.tag_bind(item,"<Button-1>",
+                            lambda e,i=idx: _select_tile(i))
+                cv.tag_bind(item,"<Double-Button-1>",
+                            lambda e,i=idx: [_select_tile(i), _apply_idea()])
+
+        def _bg_load_images(pairs_snapshot, indices):
+            for idx in indices:
+                if idx >= len(pairs_snapshot): break
+                gfx_key, path = pairs_snapshot[idx]
+                if path in _st["img_cache"]: continue
+                img = None
+                try:
+                    if _PIL_OK and os.path.exists(path):
+                        pil = _PILImage.open(path).convert("RGBA")
+                        rs  = getattr(_PILImage,"LANCZOS",
+                                      getattr(_PILImage,"ANTIALIAS",1))
+                        pil = pil.resize((72,72), rs)
+                        img = _PILImageTk.PhotoImage(pil)
+                except Exception:
+                    pass
+                _st["img_cache"][path] = img
+                _safe_after(bwin, 0, lambda i=idx: _fill_image(i))
+
+        def _lazy_fill(*_):
+            if not _st["pairs"]: return
+            cv.update_idletasks()
+            top    = cv.canvasy(0)
+            bottom = cv.canvasy(cv.winfo_height())
+            visible = []
+            for idx in range(len(_st["pairs"])):
+                _, ty = _tile_xy(idx)
+                if ty + TILE_H >= top and ty <= bottom:
+                    _draw_tile(idx); visible.append(idx)
+            last = max(visible) if visible else 0
+            ahead = list(range(last+1, min(last+41, len(_st["pairs"]))))
+            to_load = [i for i in (visible + ahead)
+                       if _st["pairs"][i][1] not in _st["img_cache"]]
+            if to_load:
+                snap = list(_st["pairs"])
+                threading.Thread(target=_bg_load_images,
+                                 args=(snap, to_load), daemon=True).start()
+
+        def _rebuild_grid(pairs):
+            cv.delete("all")
+            _st["pairs"] = pairs; _st["drawn"].clear()
+            _st["canvas_ids"].clear(); _st["sel_idx"] = None
+            if not pairs:
+                status_lbl.config(text="0 icons"); return
+            status_lbl.config(text="%d icons" % len(pairs))
+            rows = (len(pairs)+COLS-1)//COLS
+            cv.configure(scrollregion=(0,0,
+                PAD+COLS*(TILE_W+PAD), PAD+rows*(TILE_H+PAD)))
+            cv.yview_moveto(0)
+            _safe_after_idle(bwin, _lazy_fill)
+
+        def _collect_files(folder_path):
+            pairs = []
+            ft = search_var.get().lower()
+            for root_d, dirs, fnames in os.walk(folder_path):
+                dirs.sort()
+                for fname in sorted(fnames):
+                    if not fname.lower().endswith((".dds",".png",".tga")): continue
+                    if ft and ft not in fname.lower(): continue
+                    full    = os.path.join(root_d, fname)
+                    stem    = os.path.splitext(fname)[0]
+                    gfx_key = "GFX_idea_" + stem
+                    pairs.append((gfx_key, full))
+            return pairs
+
+        def _load_folder(folder_path):
+            status_lbl.config(text="scanning...")
+            bwin.update_idletasks()
+            _rebuild_grid(_collect_files(folder_path))
+
+        def _on_folder_select(evt):
+            sel = folder_lb.curselection()
+            if not sel: return
+            _load_folder(folders[sel[0]][1])
+
+        cv.bind("<Configure>", lambda e: _safe_after_idle(bwin, _lazy_fill))
+        for ev in ("<MouseWheel>","<Button-4>","<Button-5>"):
+            cv.bind(ev, lambda e: [
+                cv.yview_scroll(-1 if (e.delta>0 or e.num==4) else 1, "units"),
+                _safe_after_idle(bwin, _lazy_fill)])
+        folder_lb.bind("<<ListboxSelect>>", _on_folder_select)
+        search_var.trace_add("write", lambda *_: _safe_after(bwin, 300,
+            lambda: _on_folder_select(None) if folder_lb.curselection() else None))
+
+        if folders:
+            folder_lb.selection_set(0)
+            _load_folder(folders[0][1])
+
+
+    _dropdown("Slot:", v_slot,
+              ["country","political_advisor","army_chief","navy_chief","air_chief",
+               "high_command","theorist","industrial_concern","materiel_designer",
+               "naval_manufacturer","aircraft_manufacturer","tank_manufacturer"])
+    _field("Cost (PP):",    v_cost,   width=6)
+    _field("Removal cost:", v_removal, width=6)
+    _lbl("  removal_cost = -1  means the spirit cannot be manually removed")
+
+    _sep()
+    # ── TRIGGERS ──────────────────────────────────────────────────────
+    _sec("▸  TRIGGERS  (optional)")
+    t_allowed   = _trigger_field("allowed:",   height=2)
+    t_available = _trigger_field("available:", height=2)
+    t_cancel    = _trigger_field("cancel:",    height=2)
+    t_visible   = _trigger_field("visible:",   height=2)
+    t_allowed.insert("1.0", "original_tag = TAG")
+
+    _sep()
+    # ── SCRIPTED EFFECTS ──────────────────────────────────────────────
+    _sec("▸  SCRIPTED EFFECTS  (optional)")
+    t_on_add    = _trigger_field("on_add:",    height=3)
+    t_on_remove = _trigger_field("on_remove:", height=2)
+    _lbl('  e.g.  set_rule = { can_access_market = no }')
+
+    _sep()
+    # ── RULE ──────────────────────────────────────────────────────────
+    _sec("▸  RULE  (optional)")
+    t_rule = _trigger_field("rule:", height=2)
+    _lbl("  e.g.  can_access_market = no")
+
+    _sep()
+    # ── MODIFIER BUILDER ──────────────────────────────────────────────
+    _sec("▸  MODIFIERS")
+    mod_outer = tk.Frame(lfrm, bg=BG_PANEL)
+    mod_outer.pack(fill="x", padx=8, pady=4)
+
+    # Search bar
+    _sv = tk.StringVar()
+    search_entry = tk.Entry(mod_outer, textvariable=_sv, bg=BG_CARD, fg=TEXT_DIM,
+                            insertbackground=BLUE, font=("Helvetica",10),
+                            relief="flat", highlightthickness=1,
+                            highlightbackground=BORDER_G)
+    search_entry.insert(0, "Search modifiers...")
+    search_entry.pack(fill="x", expand=True, ipady=4, padx=2, pady=(0,2))
+
+    def _ph_in(e):
+        if search_entry.get() == "Search modifiers...":
+            search_entry.delete(0, "end")
+            search_entry.config(fg=TEXT)
+    def _ph_out(e):
+        if not search_entry.get():
+            search_entry.insert(0, "Search modifiers...")
+            search_entry.config(fg=TEXT_DIM)
+    search_entry.bind("<FocusIn>",  _ph_in)
+    search_entry.bind("<FocusOut>", _ph_out)
+
+    # Category + dropdown row
+    cd_row = tk.Frame(mod_outer, bg=BG_PANEL)
+    cd_row.pack(fill="x", pady=2)
+    tk.Label(cd_row, text="Category:", bg=BG_PANEL, fg=TEXT_DIM,
+             font=("Helvetica",9)).pack(side="left")
+    _mc = tk.StringVar(value=MODIFIER_CATS[0])
+    cat_om = tk.OptionMenu(cd_row, _mc, *MODIFIER_CATS,
+                           command=lambda _: _rebuild_mod_dd())
+    cat_om.config(bg=BG_CARD, fg=TEXT, activebackground=BORDER_G,
+                  font=("Helvetica",9), relief="flat",
+                  highlightthickness=1, highlightbackground=BORDER_G,
+                  width=14, anchor="w")
+    cat_om["menu"].config(bg=BG_CARD, fg=TEXT, activebackground=BORDER_G,
+                          font=("Helvetica",9))
+    cat_om.pack(side="left", padx=4)
+
+    dd_frame = tk.Frame(cd_row, bg=BG_PANEL)
+    dd_frame.pack(side="left", fill="x", expand=True)
+    _mt = tk.StringVar()
+
+    def _rebuild_mod_dd():
+        for w in dd_frame.winfo_children(): w.destroy()
+        items = modifiers_in_cat(_mc.get())
+        if not items: return
+        _mt.set(items[0][0])
+        om = tk.OptionMenu(dd_frame, _mt, *[k for k, _ in items])
+        menu = om["menu"]; menu.delete(0, "end")
+        for k, v in items:
+            menu.add_command(
+                label="%s  (%s)" % (k, v["hint"]),
+                command=lambda val=k: _mt.set(val))
+        om.config(bg=BG_CARD, fg=TEXT, activebackground=SEL_BG,
+                  font=("Helvetica",9), relief="flat",
+                  highlightthickness=1, highlightbackground=BORDER_G,
+                  anchor="w", width=26)
+        om["menu"].config(bg=BG_CARD, fg=TEXT, activebackground=SEL_BG,
+                          font=("Helvetica",9))
+        om.pack(fill="x", expand=True)
+
+    _rebuild_mod_dd()
+
+    def _filter_mod_dd(*_):
+        raw = _sv.get()
+        if raw == "Search modifiers...": return
+        query = raw.lower().strip()
+        for w in dd_frame.winfo_children(): w.destroy()
+        if query:
+            matches = [(k, v) for k, v in MODIFIER_DEFS.items()
+                       if query in k.lower() or query in v["desc"].lower()
+                       or query in v["cat"].lower()]
+            if not matches:
+                tk.Label(dd_frame, text="No modifiers found",
+                         bg=BG_PANEL, fg=TEXT_DIM,
+                         font=("Helvetica",9)).pack(anchor="w")
+                return
+            _mt.set(matches[0][0])
+            om = tk.OptionMenu(dd_frame, _mt, *[k for k, _ in matches])
+            menu = om["menu"]; menu.delete(0, "end")
+            for k, v in matches:
+                menu.add_command(
+                    label="[%s]  %s  (%s)" % (v["cat"], k, v["hint"]),
+                    command=lambda val=k: _mt.set(val))
+            om.config(bg=BG_CARD, fg=TEXT, activebackground=SEL_BG,
+                      font=("Helvetica",9), relief="flat",
+                      highlightthickness=1, highlightbackground=BORDER_G,
+                      anchor="w", width=30)
+            om["menu"].config(bg=BG_CARD, fg=TEXT, activebackground=SEL_BG,
+                              font=("Helvetica",9))
+            om.pack(fill="x", expand=True)
+        else:
+            _rebuild_mod_dd()
+
+    _sv.trace_add("write", _filter_mod_dd)
+
+    # + Add Modifier button
+    tk.Button(mod_outer, text="plus  Add Modifier",
+              command=lambda: _add_mod_card(),
+              bg="#14532d", fg="#4ade80",
+              font=("Helvetica",10,"bold"), relief="flat",
+              pady=6, cursor="hand2").pack(fill="x", padx=2, pady=(4,2))
+
+    tk.Frame(mod_outer, bg=BORDER_G, height=1).pack(fill="x", pady=4)
+    tk.Label(mod_outer, text="  ADDED MODIFIERS", bg=BG_PANEL, fg=TEXT_DIM,
+             font=("Helvetica",8,"bold"), anchor="w").pack(fill="x")
+
+    mod_box = tk.Frame(mod_outer, bg=BG_PANEL)
+    mod_box.pack(fill="x", padx=2)
+
+    def _refresh_mod_cards():
+        for w in mod_box.winfo_children(): w.destroy()
+        if not spirit_modifiers:
+            tk.Label(mod_box, text="None -- add modifiers above",
+                     bg=BG_PANEL, fg=TEXT_DIM,
+                     font=("Helvetica",9,"italic")).pack(anchor="w", padx=6)
+            return
+        for i, mod in enumerate(spirit_modifiers):
+            _draw_mod_card(i, mod)
+
+    def _draw_mod_card(i, mod):
+        key  = mod["key"]
+        defn = MODIFIER_DEFS.get(key, {})
+        cat  = defn.get("cat", "Custom")
+        hint = defn.get("hint", "number")
+        desc = defn.get("desc", "")
+        known = bool(defn)
+        hdr_bg = "#0d1117" if known else "#1a1020"
+        bdr    = BORDER_G  if known else ORANGE
+
+        card = tk.Frame(mod_box, bg=BG_CARD,
+                        highlightthickness=1, highlightbackground=bdr)
+        card.pack(fill="x", pady=2)
+
+        hdr = tk.Frame(card, bg=hdr_bg)
+        hdr.pack(fill="x")
+        tk.Label(hdr, text="[%s]  %s" % (cat, key),
+                 bg=hdr_bg, fg=TEXT_DIM if known else ORANGE,
+                 font=("Helvetica",9,"bold"),
+                 anchor="w", padx=6).pack(side="left", fill="x", expand=True)
+        tk.Button(hdr, text="X",
+                  command=lambda idx=i: _rm_mod(idx),
+                  bg=hdr_bg, fg=RED, relief="flat",
+                  font=("Georgia",9), cursor="hand2",
+                  padx=4).pack(side="right")
+
+        val_row = tk.Frame(card, bg=BG_CARD)
+        val_row.pack(fill="x", padx=6, pady=3)
+        tk.Label(val_row, text="value:", bg=BG_CARD, fg=TEXT_DIM,
+                 font=("Helvetica",9), width=6,
+                 anchor="w").pack(side="left")
+        vvar = tk.StringVar(value=mod["value"])
+        ve = tk.Entry(val_row, textvariable=vvar, bg=BG_CARD, fg=TEXT,
+                      insertbackground=BLUE, font=("Helvetica",10),
+                      relief="flat", highlightthickness=1,
+                      highlightbackground=BORDER_G)
+        ve.pack(side="left", fill="x", expand=True, ipady=3)
+        vvar.trace_add("write", lambda *a, idx=i, v=vvar: _update_mod_val(idx, v))
+
+        if hint or desc:
+            info = "  %s%s" % (hint, ("  --  " + desc[:70]) if desc else "")
+            tk.Label(card, text=info, bg=BG_CARD, fg=TEXT_DIM,
+                     font=("Helvetica",8), anchor="w",
+                     padx=6).pack(fill="x", pady=(0,3))
+
+    def _add_mod_card():
+        key = _mt.get().strip()
+        if not key: return
+        defn = MODIFIER_DEFS.get(key, {})
+        hint = defn.get("hint", "number")
+        if "bool"    in hint: default = "yes"
+        elif "float" in hint: default = "0.05"
+        elif "int"   in hint: default = "1"
+        else:                  default = "0.1"
+        spirit_modifiers.append({"key": key, "value": default})
+        _refresh_mod_cards()
+        _refresh_preview()
+
+    def _rm_mod(idx):
+        spirit_modifiers.pop(idx)
+        _refresh_mod_cards()
+        _refresh_preview()
+
+    def _update_mod_val(idx, var):
+        if idx < len(spirit_modifiers):
+            spirit_modifiers[idx]["value"] = var.get()
+            _refresh_preview()
+
+    _sep()
+    # ── EXTRA / CUSTOM MODIFIERS ──────────────────────────────────────
+    _sec("▸  EXTRA / CUSTOM MODIFIERS  (free text  key = value)")
+    t_extra = tk.Text(lfrm, bg=BG_CARD, fg=TEXT, insertbackground=BLUE,
+                      font=("Courier",10), relief="flat",
+                      highlightthickness=1, highlightbackground=BORDER_G,
+                      height=4, wrap="none")
+    t_extra.pack(fill="x", padx=10, pady=2)
+    t_extra.bind("<KeyRelease>", lambda e: _refresh_preview())
+    _lbl("  e.g.  modifier_army_sub_unit_Militia_Bat_attack_factor = 0.15")
+
+    _sep()
+    # ── LOCALISATION ──────────────────────────────────────────────────
+    _sec("▸  LOCALISATION")
+    v_loc_name = tk.StringVar(value="My National Spirit")
+    v_loc_desc = tk.StringVar(value="A spirit granting special bonuses.")
+    _field("Display name:", v_loc_name)
+    _field("Description:",  v_loc_desc)
+
+    _sep()
+    # ── AI ────────────────────────────────────────────────────────────
+    _sec("▸  AI  (optional)")
+    v_ai = tk.StringVar(value="1")
+    _field("ai_will_do:", v_ai)
+
+    # ── Output builder ────────────────────────────────────────────────
+    def _build_output():
+        sid     = v_id.get().strip()      or "TAG_my_spirit"
+        namekey = v_name_key.get().strip() or sid
+        pic     = v_picture.get().strip()  or ("GFX_idea_%s" % sid)
+        slot    = v_slot.get().strip()     or "country"
+        cost    = v_cost.get().strip()
+        removal = v_removal.get().strip()
+        loc_n   = v_loc_name.get().strip()
+        loc_d   = v_loc_desc.get().strip()
+        ai_f    = v_ai.get().strip()
+
+        def _tri(t): return t.get("1.0","end").strip()
+        allowed   = _tri(t_allowed)
+        available = _tri(t_available)
+        cancel    = _tri(t_cancel)
+        visible   = _tri(t_visible)
+        on_add    = _tri(t_on_add)
+        on_remove = _tri(t_on_remove)
+        rule      = _tri(t_rule)
+        extra     = t_extra.get("1.0","end").strip()
+
+        def _block(name, body, indent="\t\t\t"):
+            lines = ["%s%s = {" % (indent, name)]
+            for ln in body.splitlines():
+                if ln.strip():
+                    lines.append("%s\t%s" % (indent, ln.strip()))
+            lines.append("%s}" % indent)
+            return lines
+
+        out = []
+        out.append("# ============================================================")
+        out.append("# FILE: common/ideas/%s.txt" % sid)
+        out.append("# ============================================================")
+        out.append("")
+        out.append("ideas = {")
+        out.append("\t%s = {" % slot)
+        out.append("")
+        out.append("\t\t%s = {" % sid)
+        if namekey != sid:
+            out.append("\t\t\tname = %s" % namekey)
+        out.append("\t\t\tpicture = %s" % pic)
+        if cost:
+            out.append("\t\t\tcost = %s" % cost)
+        if removal:
+            out.append("\t\t\tremoval_cost = %s" % removal)
+        if allowed:   out += _block("allowed",   allowed)
+        if available: out += _block("available", available)
+        if visible:   out += _block("visible",   visible)
+        if cancel:    out += _block("cancel",    cancel)
+        if on_add:    out += _block("on_add",    on_add)
+        if on_remove: out += _block("on_remove", on_remove)
+        if rule:      out += _block("rule",      rule)
+
+        # Collect all modifiers
+        all_mods = list(spirit_modifiers)
+        if extra:
+            for ln in extra.splitlines():
+                ln = ln.strip()
+                if ln and not ln.startswith("#") and "=" in ln:
+                    parts = ln.split("=", 1)
+                    all_mods.append({"key": parts[0].strip(),
+                                     "value": parts[1].strip()})
+        if all_mods:
+            out.append("\t\t\tmodifier = {")
+            for m in all_mods:
+                out.append("\t\t\t\t%s = %s" % (m["key"], m["value"]))
+            out.append("\t\t\t}")
+
+        if ai_f and ai_f != "0":
+            out.append("\t\t\tai_will_do = { factor = %s }" % ai_f)
+
+        out.append("\t\t}")
+        out.append("\t}")
+        out.append("}")
+        out.append("")
+        out.append("# ============================================================")
+        out.append("# LOCALISATION  common/localisation/english/%s_l_english.yml" % sid)
+        out.append("# ============================================================")
+        out.append("")
+        out.append(' %s:0 "%s"' % (sid, loc_n))
+        out.append(' %s_desc:0 "%s"' % (sid, loc_d))
+        return "\n".join(out)
+
+    def _refresh_preview(*_):
+        """Rebuild preview from form fields (no-op in edit mode or raw override)."""
+        if _edit_mode[0]: return
+        if _raw_override[0] is not None: return  # raw override takes precedence
+        try:
+            preview_txt.config(state="normal")
+            preview_txt.delete("1.0","end")
+            preview_txt.insert("1.0", _build_output())
+            preview_txt.config(state="disabled")
+        except Exception:
+            pass
+
+    def _get_output_text():
+        """Return the text to use for Copy/Save — raw override if set, else live."""
+        if _raw_override[0] is not None:
+            return _raw_override[0]
+        return _build_output()
+
+    def _toggle_edit():
+        """Enter/exit raw edit mode.  Does NOT affect the raw override."""
+        _edit_mode[0] = not _edit_mode[0]
+        if _edit_mode[0]:
+            # Entering edit mode — populate box with current output first
+            preview_txt.config(state="normal")
+            preview_txt.delete("1.0", "end")
+            preview_txt.insert("1.0", _get_output_text())
+            preview_txt.config(bg="#0d1a0d", highlightbackground="#4ade80")
+            _edit_btn.config(text="✖ Cancel Edit", fg="#ef4444", bg="#2a0a0a")
+            _lock_lbl.config(text="editing — click 💾 Save Raw to keep changes",
+                             fg="#fbbf24")
+        else:
+            # Cancel edit — discard changes and go fully back to live-from-fields
+            _raw_override[0] = None
+            _edit_btn.config(text="✎ Edit", fg=TEXT_DIM, bg=BG_CARD)
+            _save_raw_btn.config(text="💾 Save Raw", fg=TEXT_DIM, bg=BG_CARD)
+            preview_txt.config(bg="#0d1117", highlightbackground=BORDER_G)
+            _lock_lbl.config(text="live", fg=TEXT_DIM)
+            _refresh_preview()
+
+    def _save_raw():
+        """Save raw preview: parse safe fields back into form, store as override,
+        notify user of anything that couldn't be synced to a field."""
+        import re as _re
+
+        preview_txt.config(state="normal")
+        txt = preview_txt.get("1.0", "end").strip()
+        _raw_override[0] = txt
+        _edit_mode[0] = False
+        preview_txt.config(state="disabled", bg="#0d1117",
+                           highlightbackground=ORANGE)
+        _edit_btn.config(text="✎ Edit", fg=TEXT_DIM, bg=BG_CARD)
+        _edit_btn.config(text="✎ Edit", fg=TEXT_DIM, bg=BG_CARD)
+
+        # ── Parse safe fields from the raw text ──────────────────────────
+        changes = []
+        warnings = []
+
+        # Section split
+        loc_idx = next((i for i,l in enumerate(txt.splitlines())
+                        if "# LOCALISATION" in l), None)
+        ideas_lines = txt.splitlines()[:loc_idx] if loc_idx else txt.splitlines()
+        loc_lines   = txt.splitlines()[loc_idx:]  if loc_idx else []
+
+        # Localisation scalars
+        for ln in loc_lines:
+            m = _re.match(r'^\s*(\S+?):0\s+"(.*)"', ln)
+            if m:
+                key, val = m.group(1), m.group(2)
+                if key.endswith("_desc"):
+                    if val != v_loc_desc.get():
+                        v_loc_desc.set(val); changes.append(f"Description → {val!r}")
+                else:
+                    if val != v_loc_name.get():
+                        v_loc_name.set(val); changes.append(f"Display name → {val!r}")
+
+        # Walk the ideas block with a state machine
+        state = "top"; depth = 0; spirit_id = None; slot_val = None
+        current_block = None; block_buf = []
+
+        def _strip_block(buf):
+            """Strip one level of leading tabs from block body lines."""
+            out = []
+            for l in buf:
+                if l.startswith("\t\t\t\t"):   out.append(l[4:])
+                elif l.startswith("\t\t\t"):    out.append(l[3:])
+                else:                              out.append(l)
+            return "\n".join(out).strip()
+
+        def _set_text(widget, content, label):
+            old = widget.get("1.0","end").strip()
+            if content != old:
+                widget.delete("1.0","end")
+                if content: widget.insert("1.0", content)
+                changes.append(f"{label} block updated")
+
+        for ln in ideas_lines:
+            s = ln.strip()
+            if not s or s.startswith("#"): continue
+
+            if state == "top":
+                if _re.match(r"ideas\s*=\s*\{", s): state = "in_ideas"; depth = 1
+                continue
+            if state == "in_ideas":
+                m = _re.match(r"(\w+)\s*=\s*\{", s)
+                if m: slot_val = m.group(1); state = "in_slot"; depth = 2
+                continue
+            if state == "in_slot":
+                m = _re.match(r"(\w+)\s*=\s*\{", s)
+                if m: spirit_id = m.group(1); state = "in_spirit"; depth = 3
+                continue
+            if state != "in_spirit": continue
+
+            if current_block is not None:
+                opens = s.count("{"); closes = s.count("}")
+                depth += opens - closes
+                if depth <= 3:
+                    # block just closed — write to widget
+                    content = _strip_block(block_buf)
+                    if current_block == "allowed":
+                        _set_text(t_allowed, content, "allowed")
+                    elif current_block == "available":
+                        _set_text(t_available, content, "available")
+                    elif current_block == "cancel":
+                        _set_text(t_cancel, content, "cancel")
+                    elif current_block == "visible":
+                        _set_text(t_visible, content, "visible")
+                    elif current_block == "on_add":
+                        _set_text(t_on_add, content, "on_add")
+                    elif current_block == "on_remove":
+                        _set_text(t_on_remove, content, "on_remove")
+                    elif current_block == "rule":
+                        _set_text(t_rule, content, "rule")
+                    elif current_block == "modifier":
+                        warnings.append(
+                            "modifier block — modifier cards not updated "
+                            "(use Extra / Custom Modifiers field if needed)")
+                    current_block = None; block_buf = []; depth = 3
+                else:
+                    block_buf.append(ln)
+                continue
+
+            # Scalar fields
+            m = _re.match(r"picture\s*=\s*(\S+)", s)
+            if m and m.group(1) != v_picture.get():
+                v_picture.set(m.group(1)); changes.append(f"Picture GFX → {m.group(1)!r}"); continue
+            m = _re.match(r"^name\s*=\s*(\S+)", s)
+            if m and m.group(1) != v_name_key.get():
+                v_name_key.set(m.group(1)); changes.append(f"Name key → {m.group(1)!r}"); continue
+            m = _re.match(r"cost\s*=\s*(-?\d+(?:\.\d+)?)", s)
+            if m and m.group(1) != v_cost.get():
+                v_cost.set(m.group(1)); changes.append(f"Cost → {m.group(1)}"); continue
+            m = _re.match(r"removal_cost\s*=\s*(-?\d+(?:\.\d+)?)", s)
+            if m and m.group(1) != v_removal.get():
+                v_removal.set(m.group(1)); changes.append(f"Removal cost → {m.group(1)}"); continue
+            m = _re.match(r"ai_will_do\s*=\s*\{\s*factor\s*=\s*(\S+)\s*\}", s)
+            if m and m.group(1) != v_ai.get():
+                v_ai.set(m.group(1)); changes.append(f"AI will do → {m.group(1)}"); continue
+
+            # Spirit/slot ID changes
+            if spirit_id and spirit_id != v_id.get():
+                v_id.set(spirit_id); changes.append(f"Idea ID → {spirit_id!r}")
+            if slot_val and slot_val != v_slot.get():
+                v_slot.set(slot_val); changes.append(f"Slot → {slot_val!r}")
+
+            # Block openings
+            matched_block = False
+            for bname in ("allowed","available","cancel","visible",
+                          "on_add","on_remove","rule","modifier"):
+                if _re.match(rf"{bname}\s*=\s*\{{", s):
+                    current_block = bname; block_buf = []; depth = 4
+                    matched_block = True; break
+            if not matched_block and s not in ("}", "{{"):
+                # line inside spirit block we didn't handle
+                if not _re.match(r"^(picture|name|cost|removal_cost|ai_will_do)\b", s):
+                    warnings.append(f"Unrecognised line kept as-is: {s!r}")
+
+        # Apply spirit_id / slot if not caught inside loop
+        if spirit_id and spirit_id != v_id.get():
+            v_id.set(spirit_id); changes.append(f"Idea ID → {spirit_id!r}")
+        if slot_val and slot_val != v_slot.get():
+            v_slot.set(slot_val); changes.append(f"Slot → {slot_val!r}")
+
+        # ── Build notification message ────────────────────────────────────
+        _lock_lbl.config(text="raw override active", fg=ORANGE)
+
+        parts = []
+        if changes:
+            parts.append("Fields updated from your code:\n" +
+                         "\n".join(f"  • {c}" for c in changes))
+        if warnings:
+            parts.append("Please check these manually:\n" +
+                         "\n".join(f"  ⚠ {w}" for w in warnings))
+        if not changes and not warnings:
+            parts.append("No field changes detected. Raw override saved.")
+
+        parts.append("\nThe output will export exactly as shown in the preview.")
+
+        messagebox.showinfo("Saved — Review Changes", "\n\n".join(parts), parent=win)
+
+
+    def _show_current_preview():
+        """Render the current output (raw override or live) into the preview box."""
+        preview_txt.config(state="normal")
+        preview_txt.delete("1.0", "end")
+        preview_txt.insert("1.0", _get_output_text())
+        if not _edit_mode[0]:
+            preview_txt.config(state="disabled")
+
+    _edit_btn.config(command=_toggle_edit)
+    _save_raw_btn.config(command=_save_raw)
+
+    # Wire all StringVar fields to live-update the preview
+    for _sv in (v_id, v_name_key, v_picture, v_slot,
+                v_cost, v_removal, v_loc_name, v_loc_desc, v_ai):
+        _sv.trace_add("write", _refresh_preview)
+
+    _refresh_mod_cards()
+    _refresh_preview()
+
+
+    def _copy_output():
+        txt = _get_output_text()
+        win.clipboard_clear(); win.clipboard_append(txt)
+        app._hint("National Spirit code copied to clipboard!")
+
+    def _save_to_mod():
+        sid   = v_id.get().strip() or "TAG_my_spirit"
+        slot  = v_slot.get().strip() or "country"
+        loc_n = v_loc_name.get().strip()
+        loc_d = v_loc_desc.get().strip()
+        full_txt = _get_output_text()
+
+        split_idx   = full_txt.find("# LOCALISATION")
+        ideas_block = full_txt[:split_idx].strip() if split_idx > 0 else full_txt
+
+        saved = []; errs = []; warnings = []
+
+        # ── Determine ideas file ──────────────────────────────────────────
+        if MOD.edit_ideas_file:
+            ideas_path = MOD.edit_ideas_file
+            mod_root   = MOD.root or os.path.dirname(os.path.dirname(ideas_path))
+        elif MOD.root:
+            mod_root   = MOD.root
+            ideas_path = os.path.join(mod_root, "common", "ideas", f"{sid}.txt")
+        else:
+            mod_root = filedialog.askdirectory(
+                title="Select MOD ROOT folder (common/ideas/ will be used)")
+            if not mod_root: return
+            ideas_path = os.path.join(mod_root, "common", "ideas", f"{sid}.txt")
+
+        os.makedirs(os.path.dirname(ideas_path), exist_ok=True)
+
+        # ── SAFE APPEND to ideas file ─────────────────────────────────────
+        try:
+            file_exists = os.path.isfile(ideas_path)
+            if file_exists:
+                with open(ideas_path, "r", encoding="utf-8", errors="replace") as f:
+                    existing = f.read()
+                # Check if spirit ID already defined
+                if re.search(r'\b' + re.escape(sid) + r'\s*=\s*\{', existing):
+                    warnings.append(f"Spirit '{sid}' already exists in file — skipped (edit the file manually to update it).")
+                else:
+                    # Extract the spirit's own block from ideas_block
+                    # ideas_block = "ideas { <slot> { <sid> = { ... } } }"
+                    m_spirit = re.search(r'\b' + re.escape(sid) + r'\s*=\s*\{', ideas_block)
+                    if m_spirit:
+                        depth = 0; spirit_start = m_spirit.start()
+                        brace_start = ideas_block.index('{', spirit_start)
+                        spirit_end  = brace_start
+                        for ci, ch in enumerate(ideas_block[brace_start:], brace_start):
+                            if ch == '{': depth += 1
+                            elif ch == '}':
+                                depth -= 1
+                                if depth == 0: spirit_end = ci + 1; break
+                        spirit_block = "\t\t" + ideas_block[spirit_start:spirit_end].replace("\n", "\n\t\t")
+                    else:
+                        spirit_block = None
+
+                    if spirit_block:
+                        # Find the slot section (e.g. "country = {") and insert before its closing }
+                        slot_pat = re.compile(r'\b' + re.escape(slot) + r'\s*=\s*\{')
+                        sm = slot_pat.search(existing)
+                        if sm:
+                            depth2 = 0; si2 = existing.index('{', sm.start())
+                            close_pos = si2
+                            for ci2, ch2 in enumerate(existing[si2:], si2):
+                                if ch2 == '{': depth2 += 1
+                                elif ch2 == '}':
+                                    depth2 -= 1
+                                    if depth2 == 0: close_pos = ci2; break
+                            new_existing = (existing[:close_pos].rstrip()
+                                            + "\n\n" + spirit_block + "\n\t"
+                                            + existing[close_pos:])
+                        else:
+                            # Slot section not found — append full block at end
+                            new_existing = existing.rstrip() + "\n\n" + ideas_block + "\n"
+                    else:
+                        new_existing = existing.rstrip() + "\n\n" + ideas_block + "\n"
+
+                    with open(ideas_path, "w", encoding="utf-8") as f:
+                        f.write(new_existing)
+                    rel = os.path.relpath(ideas_path, mod_root)
+                    saved.append(rel + "  (spirit appended into existing file)")
+            else:
+                # New file — write as-is
+                with open(ideas_path, "w", encoding="utf-8") as f:
+                    f.write(ideas_block)
+                rel = os.path.relpath(ideas_path, mod_root)
+                saved.append(rel + "  (new file created)")
+
+        except Exception as e:
+            errs.append("Ideas: " + str(e))
+
+        # ── SAFE APPEND to localisation ───────────────────────────────────
+        if MOD.edit_loc_file and os.path.isfile(MOD.edit_loc_file):
+            loc_path = MOD.edit_loc_file
+        else:
+            loc_path = os.path.join(mod_root, "localisation", "english",
+                                    f"{sid}_l_english.yml")
+        os.makedirs(os.path.dirname(loc_path), exist_ok=True)
+        try:
+            new_entries = {sid: loc_n, f"{sid}_desc": loc_d}
+            existing_keys = set()
+            if os.path.isfile(loc_path):
+                with open(loc_path, "r", encoding="utf-8-sig", errors="replace") as f:
+                    for line in f:
+                        m = re.match(r'\s+(\S+?):\d+', line)
+                        if m: existing_keys.add(m.group(1))
+
+            to_add = {k: v for k, v in new_entries.items() if k not in existing_keys}
+            if to_add:
+                if not os.path.isfile(loc_path):
+                    with open(loc_path, "w", encoding="utf-8-sig") as f:
+                        f.write("l_english:\n")
+                with open(loc_path, "a", encoding="utf-8-sig") as f:
+                    for k, v in to_add.items():
+                        f.write(f' {k}:0 "{v}"\n')
+                rel = os.path.relpath(loc_path, mod_root)
+                saved.append(rel + f"  (+{len(to_add)} keys)")
+            else:
+                warnings.append("Localisation keys already present — skipped.")
+        except Exception as e:
+            errs.append("Localisation: " + str(e))
+
+        # ── SCRIPTED LOC ─────────────────────────────────────────────────
+        if MOD.edit_scripted_loc_file:
+            sloc_blocks = []
+            if sid:
+                sloc_blocks.append({
+                    "name": f"GET_{sid}_name",
+                    "texts": [],
+                    "default": sid
+                })
+                if v_loc_desc.get().strip():
+                    sloc_blocks.append({
+                        "name": f"GET_{sid}_desc",
+                        "texts": [],
+                        "default": f"{sid}_desc"
+                    })
+            _append_scripted_loc(MOD.edit_scripted_loc_file,
+                                  sloc_blocks, saved, errs, mod_root)
+
+        msg = ""
+        if saved:    msg += "Saved:\n" + "\n".join(saved)
+        if warnings: msg += ("\n\n" if msg else "") + "Notes:\n" + "\n".join(warnings)
+        if errs:     msg += ("\n\n" if msg else "") + "Errors:\n" + "\n".join(errs)
+        if not msg:  msg = "Nothing to save."
+        messagebox.showinfo("Saved to Mod", msg, parent=win)
+
+    tk.Frame(win, bg=BORDER_G, height=1).pack(fill="x")
+    bot = tk.Frame(win, bg=BG_DARK, pady=8)
+    bot.pack(fill="x")
+    tk.Button(bot, text="Copy to Clipboard", command=_copy_output,
+              bg=BG_CARD, fg=TEXT, relief="flat",
+              font=("Helvetica",10,"bold"), padx=16, pady=6,
+              cursor="hand2").pack(side="left", padx=12)
+    tk.Button(bot, text="Save to Mod Folder", command=_save_to_mod,
+              bg="#1a3a1a", fg="#4ade80", relief="flat",
+              font=("Helvetica",10,"bold"), padx=16, pady=6,
+              cursor="hand2").pack(side="left", padx=4)
+    tk.Button(bot, text="Close", command=win.destroy,
+              bg=BG_CARD, fg=TEXT_DIM, relief="flat",
+              font=("Helvetica",10), padx=16, pady=6,
+              cursor="hand2").pack(side="right", padx=12)
+
+
+
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  DECISION MAKER WIZARD
+#  open_decision_wizard(app)
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+def _open_universal_gfx_browser(win, on_select, title="GFX Browser",
+                                  gfx_hints=None):
+    """
+    Universal GFX browser for the Decision Maker.
+    Scans ALL mod GFX folders (decisions icons, ideas, event pictures,
+    interface, goals, custom dirs) and lets user pick any sprite.
+    on_select(gfx_key, abs_path) is called when user confirms.
+    gfx_hints: list of folder category hints to pre-select e.g. ["decisions","ideas"]
+    """
+    import threading as _thr
+
+    # ── Collect all scannable folder groups ──────────────────────────────────
+    folder_groups = []   # (group_label, abs_folder_path, gfx_prefix)
+
+    if MOD.loaded and os.path.isdir(MOD.root):
+        r = MOD.root
+        candidates = [
+            # (label,                rel_path,                        prefix)
+            ("decisions icons",     os.path.join("gfx","interface","decisions"),    "GFX_decision_"),
+            ("decisions (root)",    os.path.join("interface"),                      "GFX_decision_"),
+            ("ideas",               MOD.path_ideas_gfx,                             "GFX_idea_"),
+            ("focus goals",         MOD.path_goals,                                 "GFX_focus_"),
+            ("event pictures",      getattr(MOD,"path_event_pictures",
+                                    os.path.join("gfx","event_pictures")),          "GFX_event_"),
+            ("flags",               os.path.join("gfx","flags"),                    "GFX_flag_"),
+            ("interface",           os.path.join("gfx","interface"),                "GFX_"),
+            ("interface (root)",    os.path.join("interface"),                      "GFX_"),
+        ]
+        for lbl, rel, pfx in candidates:
+            full = os.path.join(r, rel)
+            if os.path.isdir(full):
+                folder_groups.append((lbl, full, pfx))
+        # Custom GFX dirs
+        for cdir in getattr(MOD, "custom_gfx_dirs", []):
+            if os.path.isdir(cdir):
+                folder_groups.append((os.path.basename(cdir)+" (custom)", cdir, "GFX_"))
+        # Walk each group and collect subfolders
+        expanded = []
+        seen = set()
+        for lbl, base, pfx in folder_groups:
+            if base in seen: continue
+            seen.add(base)
+            expanded.append((lbl, base, pfx))
+            try:
+                for ent in sorted(os.listdir(base)):
+                    sub = os.path.join(base, ent)
+                    if os.path.isdir(sub) and sub not in seen:
+                        seen.add(sub)
+                        expanded.append((f"  {lbl}/{ent}", sub, pfx))
+            except Exception:
+                pass
+        folder_groups = expanded
+
+    if not folder_groups:
+        # No mod loaded — let user pick a folder manually
+        folder = filedialog.askdirectory(title="Select GFX folder", parent=win)
+        if not folder: return
+        folder_groups = [("(selected)", folder, "GFX_")]
+
+    # ── Window ───────────────────────────────────────────────────────────────
+    bwin = tk.Toplevel(win)
+    bwin.title(title)
+    bwin.configure(bg=BG_DARK)
+    bwin.geometry("1000x640")
+    bwin.resizable(True, True)
+    bwin.grab_set()
+
+    # top search bar
+    top_bar = tk.Frame(bwin, bg=BG_DARK); top_bar.pack(fill="x", padx=8, pady=(6,0))
+    tk.Label(top_bar, text="🔍", bg=BG_DARK, fg=TEXT_DIM,
+             font=("Helvetica",11)).pack(side="left", padx=(0,4))
+    search_var = tk.StringVar()
+    search_ent = tk.Entry(top_bar, textvariable=search_var, bg=BG_CARD, fg=TEXT,
+                          insertbackground=BLUE, font=("Helvetica",10),
+                          relief="flat", highlightthickness=1, highlightbackground=BORDER_G)
+    search_ent.pack(side="left", fill="x", expand=True, ipady=4)
+    status_lbl = tk.Label(top_bar, text="select a folder", bg=BG_DARK, fg=TEXT_DIM,
+                          font=("Helvetica",9))
+    status_lbl.pack(side="right", padx=8)
+    # add custom folder button
+    def _add_custom():
+        d = filedialog.askdirectory(title="Add custom GFX folder", parent=bwin)
+        if d:
+            if d not in [g[1] for g in folder_groups]:
+                folder_groups.append((os.path.basename(d)+" (custom)", d, "GFX_"))
+                folder_lb.insert("end", "  "+os.path.basename(d)+" (custom)")
+            if d not in getattr(MOD,"custom_gfx_dirs",[]):
+                MOD.custom_gfx_dirs.append(d)
+    tk.Button(top_bar, text="+ Add Folder", command=_add_custom,
+              bg=BG_CARD, fg=TEAL, relief="flat", font=("Helvetica",9),
+              cursor="hand2", padx=8, pady=3).pack(side="right", padx=4)
+
+    tk.Frame(bwin, bg=BORDER_G, height=1).pack(fill="x", padx=4, pady=(4,0))
+
+    # paned: left folder list + right grid
+    body_f = tk.Frame(bwin, bg=BG_DARK); body_f.pack(fill="both", expand=True, padx=6, pady=6)
+    lf = tk.Frame(body_f, bg=BG_PANEL, width=210); lf.pack(side="left", fill="y", padx=(0,5))
+    lf.pack_propagate(False)
+    tk.Label(lf, text="  FOLDERS", bg=BG_PANEL, fg=TEXT_DIM,
+             font=("Helvetica",9,"bold"), anchor="w", pady=5).pack(fill="x")
+    tk.Frame(lf, bg=BORDER_G, height=1).pack(fill="x")
+    folder_lb = tk.Listbox(lf, bg=BG_CARD, fg=TEXT, selectbackground=BLUE,
+                           selectforeground=TEXT, font=("Courier",9),
+                           relief="flat", bd=0, activestyle="none",
+                           highlightthickness=0)
+    fsb = tk.Scrollbar(lf, orient="vertical", command=folder_lb.yview)
+    folder_lb.configure(yscrollcommand=fsb.set)
+    fsb.pack(side="right", fill="y"); folder_lb.pack(fill="both", expand=True, pady=4, padx=2)
+    for lbl2, _, _ in folder_groups:
+        folder_lb.insert("end", lbl2)
+
+    rf = tk.Frame(body_f, bg=BG_DARK); rf.pack(side="left", fill="both", expand=True)
+    cv_f = tk.Frame(rf, bg=BG_PANEL); cv_f.pack(fill="both", expand=True)
+    cv = tk.Canvas(cv_f, bg=BG_PANEL, highlightthickness=0)
+    vsb = tk.Scrollbar(cv_f, orient="vertical", command=cv.yview)
+    cv.configure(yscrollcommand=vsb.set)
+    vsb.pack(side="right", fill="y"); cv.pack(side="left", fill="both", expand=True)
+
+    # bottom bar
+    bot_f = tk.Frame(bwin, bg=BG_DARK); bot_f.pack(fill="x", padx=10, pady=6)
+    sel_var = tk.StringVar(value="")
+    tk.Label(bot_f, textvariable=sel_var, bg=BG_DARK, fg=BLUE,
+             font=("Helvetica",9)).pack(side="left", padx=4)
+    tk.Button(bot_f, text="Cancel", command=bwin.destroy,
+              bg=BG_CARD, fg=TEXT, relief="flat", font=("Helvetica",9),
+              padx=10, pady=4, cursor="hand2").pack(side="right", padx=4)
+    sel_btn = tk.Button(bot_f, text="Select →", bg="#1a3322", fg="#4b7a5e",
+                        relief="flat", font=("Helvetica",10,"bold"),
+                        padx=14, pady=5, cursor="arrow", state="disabled")
+    sel_btn.pack(side="right")
+    sel_path = [None]
+
+    def _do_select():
+        if sel_var.get() and sel_path[0]:
+            on_select(sel_var.get(), sel_path[0])
+            bwin.destroy()
+    sel_btn.config(command=_do_select)
+
+    def _on_sel_change(*_):
+        v = sel_var.get()
+        if v:
+            sel_btn.config(bg="#14532d", fg="#0a0a0a", cursor="hand2", state="normal")
+        else:
+            sel_btn.config(bg="#1a3322", fg="#4b7a5e", cursor="arrow", state="disabled")
+    sel_var.trace_add("write", _on_sel_change)
+
+    # ── Grid rendering ────────────────────────────────────────────────────────
+    COLS=5; TILE_W=110; TILE_H=100; PAD_G=6
+    _st = {"pairs":[], "img_cache":{}, "drawn":set(), "canvas_ids":{}, "sel_idx":None}
+
+    def _tile_xy(idx):
+        col=idx%COLS; row=idx//COLS
+        return PAD_G+col*(TILE_W+PAD_G), PAD_G+row*(TILE_H+PAD_G)
+
+    def _select_tile(idx):
+        old=_st["sel_idx"]
+        if old is not None and old in _st["canvas_ids"]:
+            rid,_,_=_st["canvas_ids"][old]; cv.itemconfig(rid,fill=BG_CARD,outline=BORDER_G)
+        _st["sel_idx"]=idx
+        gfx_key,path=_st["pairs"][idx]
+        sel_var.set(gfx_key); sel_path[0]=path
+        if idx in _st["canvas_ids"]:
+            rid,_,_=_st["canvas_ids"][idx]; cv.itemconfig(rid,fill=SEL_BG,outline=BLUE)
+
+    def _draw_tile(idx):
+        if idx in _st["drawn"]: return
+        _st["drawn"].add(idx)
+        gfx_key,path=_st["pairs"][idx]; x,y=_tile_xy(idx)
+        is_sel=(_st["sel_idx"]==idx)
+        rid=cv.create_rectangle(x,y,x+TILE_W,y+TILE_H,
+            fill=SEL_BG if is_sel else BG_CARD,
+            outline=BLUE if is_sel else BORDER_G,width=2,tags=("t","t%d"%idx))
+        iid=cv.create_text(x+TILE_W//2,y+44,text="...",fill=TEXT_DIM,
+            font=("Helvetica",14),tags=("t","t%d"%idx))
+        short=gfx_key; short=(short[:16]+"…") if len(short)>16 else short
+        lid=cv.create_text(x+TILE_W//2,y+TILE_H-14,text=short,fill=TEXT_DIM,
+            font=("Helvetica",7),width=TILE_W-8,tags=("t","t%d"%idx))
+        _st["canvas_ids"][idx]=(rid,iid,lid)
+        for item in (rid,iid,lid):
+            cv.tag_bind(item,"<Button-1>",lambda e,i=idx:_select_tile(i))
+            cv.tag_bind(item,"<Double-Button-1>",lambda e,i=idx:[_select_tile(i),_do_select()])
+        if path in _st["img_cache"]: _fill_image(idx)
+
+    def _fill_image(idx):
+        if idx not in _st["canvas_ids"]: return
+        rid,iid,lid=_st["canvas_ids"][idx]
+        gfx_key,path=_st["pairs"][idx]; img=_st["img_cache"].get(path)
+        cv.delete(iid)
+        x,y=_tile_xy(idx)
+        if img:
+            new_iid=cv.create_image(x+TILE_W//2,y+44,anchor="center",image=img,
+                tags=("t","t%d"%idx))
+        else:
+            new_iid=cv.create_text(x+TILE_W//2,y+34,text="?",fill=TEXT_DIM,
+                font=("Helvetica",20),tags=("t","t%d"%idx))
+        _st["canvas_ids"][idx]=(rid,new_iid,lid)
+        for item in (rid,new_iid,lid):
+            cv.tag_bind(item,"<Button-1>",lambda e,i=idx:_select_tile(i))
+            cv.tag_bind(item,"<Double-Button-1>",lambda e,i=idx:[_select_tile(i),_do_select()])
+
+    def _bg_load(snap, indices):
+        for i in indices:
+            if i>=len(snap): break
+            _,path=snap[i]
+            if path in _st["img_cache"]: continue
+            img=None
+            alts=[path]+[os.path.splitext(path)[0]+ext
+                for ext in (".png",".tga",".dds")
+                if os.path.exists(os.path.splitext(path)[0]+ext) and
+                   os.path.splitext(path)[0]+ext != path]
+            for tp in alts:
+                try:
+                    if _PIL_OK and os.path.exists(tp):
+                        pil=_PILImage.open(tp).convert("RGBA")
+                        rs=getattr(_PILImage,"LANCZOS",getattr(_PILImage,"ANTIALIAS",1))
+                        pw,ph=pil.size; ratio=min(80/max(pw,1),70/max(ph,1))
+                        pil=pil.resize((max(1,int(pw*ratio)),max(1,int(ph*ratio))),rs)
+                        img=_PILImageTk.PhotoImage(pil); break
+                except Exception: pass
+            _st["img_cache"][path]=img
+            _safe_after(bwin,0,lambda i2=i:_fill_image(i2))
+
+    def _lazy_fill(*_):
+        if not _st["pairs"]: return
+        cv.update_idletasks()
+        top2=cv.canvasy(0); bottom2=cv.canvasy(cv.winfo_height()); visible=[]
+        for idx in range(len(_st["pairs"])):
+            _,ty=_tile_xy(idx)
+            if ty+TILE_H>=top2 and ty<=bottom2: _draw_tile(idx); visible.append(idx)
+        last=max(visible) if visible else 0
+        ahead=list(range(last+1,min(last+41,len(_st["pairs"]))))
+        to_load=[i for i in (visible+ahead) if _st["pairs"][i][1] not in _st["img_cache"]]
+        if to_load:
+            snap=list(_st["pairs"])
+            _thr.Thread(target=_bg_load,args=(snap,to_load),daemon=True).start()
+
+    def _rebuild_grid(pairs):
+        cv.delete("all"); _st.update({"pairs":pairs,"drawn":set(),"canvas_ids":{},"sel_idx":None})
+        sel_var.set(""); sel_path[0]=None
+        if not pairs: status_lbl.config(text="0 images"); return
+        status_lbl.config(text=f"{len(pairs)} images")
+        rows=(len(pairs)+COLS-1)//COLS
+        cv.configure(scrollregion=(0,0,PAD_G+COLS*(TILE_W+PAD_G),PAD_G+rows*(TILE_H+PAD_G)))
+        cv.yview_moveto(0); _safe_after_idle(bwin,_lazy_fill)
+
+    def _collect_images(folder_path, prefix):
+        ft=search_var.get().strip().lower(); pairs=[]
+        seen_stems=set()
+        for rd,dirs,fnames in os.walk(folder_path):
+            dirs.sort()
+            for fname in sorted(fnames):
+                if not fname.lower().endswith((".dds",".png",".tga")): continue
+                if ft and ft not in fname.lower() and ft not in rd.lower(): continue
+                stem=os.path.splitext(fname)[0]
+                if stem in seen_stems: continue
+                seen_stems.add(stem)
+                pairs.append((prefix+stem, os.path.join(rd,fname)))
+        return pairs
+
+    def _load_folder(idx):
+        if idx<0 or idx>=len(folder_groups): return
+        lbl2,fpath,pfx=folder_groups[idx]
+        status_lbl.config(text="scanning…"); bwin.update_idletasks()
+        _rebuild_grid(_collect_images(fpath,pfx))
+
+    def _on_folder_select(evt=None):
+        s=folder_lb.curselection()
+        if s: _load_folder(s[0])
+
+    cv.bind("<Configure>",lambda e:_safe_after_idle(bwin,_lazy_fill))
+    for ev in ("<MouseWheel>","<Button-4>","<Button-5>"):
+        cv.bind(ev,lambda e:[cv.yview_scroll(-1 if (e.delta>0 if e.num not in (4,5) else e.num==4) else 1,"units"),
+                              _safe_after_idle(bwin,_lazy_fill)])
+    folder_lb.bind("<<ListboxSelect>>",_on_folder_select)
+    search_var.trace_add("write",lambda *_:_safe_after(bwin,300,
+        lambda:_on_folder_select() if folder_lb.curselection() else None))
+
+    # Pre-select first matching group based on hints
+    hint_kws = gfx_hints or []
+    pre_sel = 0
+    for hi,(lbl2,_,_) in enumerate(folder_groups):
+        if any(h.lower() in lbl2.lower() for h in hint_kws):
+            pre_sel=hi; break
+    folder_lb.selection_set(pre_sel); _load_folder(pre_sel)
+
+
+
+
+def _open_gfx_placement_editor(win, initial_items=None, on_confirm=None):
+    """
+    Visual drag-to-place canvas for decisions GFX.
+    Users drag icon/picture images around a mock decision panel.
+    Generates the matching GFX sprite positioning code.
+
+    initial_items: list of dicts {gfx_key, abs_path, role, x, y, w, h}
+    on_confirm(items, generated_code): called when user clicks Confirm
+    """
+    CANVAS_W = 460
+    CANVAS_H = 320
+    PANEL_BG   = "#1a1f2e"
+    PANEL_HDR  = "#141929"
+    PANEL_BORD = "#3a4a6a"
+
+    pwin = tk.Toplevel(win)
+    pwin.title("GFX Placement Editor")
+    pwin.configure(bg=BG_DARK)
+    pwin.geometry("900x620")
+    pwin.resizable(True, True)
+    pwin.grab_set()
+
+    tk.Label(pwin, text="GFX PLACEMENT EDITOR",
+             bg=BG_DARK, fg=TEXT, font=("Helvetica",10,"bold"), pady=6).pack(fill="x", padx=12)
+    tk.Label(pwin,
+             text="Drag images to position them. The tool writes the GFX code matching your layout.",
+             bg=BG_DARK, fg=TEXT_DIM, font=("Helvetica",8,"italic")).pack(fill="x", padx=12)
+    tk.Frame(pwin, bg=BORDER_G, height=1).pack(fill="x", pady=(4,0))
+
+    body = tk.Frame(pwin, bg=BG_DARK); body.pack(fill="both", expand=True)
+
+    # ── LEFT: placement canvas ───────────────────────────────────────────────
+    left_f = tk.Frame(body, bg=BG_DARK); left_f.pack(side="left", fill="both", expand=True, padx=8, pady=8)
+    tk.Label(left_f, text="  Decision panel preview  (drag GFX items to position)",
+             bg=BG_DARK, fg=TEAL, font=("Helvetica",8,"bold"), anchor="w").pack(fill="x")
+    cv_place = tk.Canvas(left_f, bg=PANEL_BG, width=CANVAS_W, height=CANVAS_H,
+                          highlightthickness=2, highlightbackground=PANEL_BORD,
+                          relief="flat")
+    cv_place.pack(padx=4, pady=4)
+
+    # Draw static panel frame elements
+    cv_place.create_rectangle(0,0,CANVAS_W,36, fill=PANEL_HDR, outline="")
+    cv_place.create_text(30,18, text="📁  Category Name", fill="#c8d4e0",
+                          font=("Palatino Linotype",11,"bold"), anchor="w")
+    cv_place.create_line(0,36,CANVAS_W,36, fill=PANEL_BORD)
+    cv_place.create_text(12,55, text="Category description text goes here...",
+                          fill="#6a7a8a", font=("Palatino Linotype",9), anchor="w")
+    cv_place.create_line(0,120,CANVAS_W,120, fill=PANEL_BORD)
+    for i,lbl in enumerate(["Decision Name 1","Decision Name 2","Decision Name 3"]):
+        y=130+i*32
+        cv_place.create_rectangle(0,y,CANVAS_W,y+30, fill="#131828" if i%2 else "#161c2e", outline="")
+        cv_place.create_rectangle(8,y+4,30,y+26, fill="#2a3550", outline="#3a4a6a")
+        cv_place.create_text(38,y+15, text=lbl, fill="#c8d4e0",
+                              font=("Palatino Linotype",10), anchor="w")
+        cv_place.create_oval(CANVAS_W-20,y+9,CANVAS_W-8,y+21, fill="#22c55e", outline="")
+
+    # Grid overlay toggle
+    grid_on = tk.BooleanVar(value=True)
+    _grid_ids = []
+    def _draw_grid():
+        for gid in _grid_ids: cv_place.delete(gid)
+        _grid_ids.clear()
+        if not grid_on.get(): return
+        for x in range(0, CANVAS_W, 20):
+            _grid_ids.append(cv_place.create_line(x,0,x,CANVAS_H, fill="#1d222d"))
+        for y in range(0, CANVAS_H, 20):
+            _grid_ids.append(cv_place.create_line(0,y,CANVAS_W,y, fill="#1d222d"))
+    _draw_grid()
+    grid_on.trace_add("write", lambda *_: _draw_grid())
+
+    # Snap-to-grid helper
+    snap_on = tk.BooleanVar(value=True)
+    GRID_SIZE = 20
+    def _snap(v): return round(v/GRID_SIZE)*GRID_SIZE if snap_on.get() else v
+
+    # ── Item model ────────────────────────────────────────────────────────────
+    # items: [{gfx_key, abs_path, role(icon/picture), x, y, w, h, canvas_id, label_id, img_ref}]
+    items = list(initial_items or [])
+    _drag_state = {"active": None, "ox": 0, "oy": 0}
+
+    def _load_img(path, max_w, max_h):
+        try:
+            if _PIL_OK and os.path.exists(path):
+                alts=[path]+[os.path.splitext(path)[0]+ext
+                    for ext in (".png",".tga",".dds")
+                    if os.path.exists(os.path.splitext(path)[0]+ext) and
+                       os.path.splitext(path)[0]+ext!=path]
+                for tp in alts:
+                    try:
+                        pil=_PILImage.open(tp).convert("RGBA")
+                        rs=getattr(_PILImage,"LANCZOS",getattr(_PILImage,"ANTIALIAS",1))
+                        pw,ph=pil.size; ratio=min(max_w/max(pw,1),max_h/max(ph,1),1.0)
+                        pil=pil.resize((max(1,int(pw*ratio)),max(1,int(ph*ratio))),rs)
+                        return _PILImageTk.PhotoImage(pil)
+                    except Exception: pass
+        except Exception: pass
+        return None
+
+    def _render_item(item):
+        """Draw or redraw a single item on the canvas."""
+        if "canvas_id" in item: cv_place.delete(item["canvas_id"])
+        if "label_id"  in item: cv_place.delete(item["label_id"])
+        if "border_id" in item: cv_place.delete(item["border_id"])
+        x,y,w,h = item["x"],item["y"],item["w"],item["h"]
+        bid = cv_place.create_rectangle(x,y,x+w,y+h,
+            outline=GOLD if item["role"]=="picture" else BLUE,
+            width=2, dash=(4,2), fill="")
+        if item.get("img_ref"):
+            cid=cv_place.create_image(x+w//2,y+h//2,image=item["img_ref"],anchor="center")
+        else:
+            cid=cv_place.create_rectangle(x+2,y+2,x+w-2,y+h-2,fill="#2a3550",outline="")
+            cv_place.create_text(x+w//2,y+h//2,text="?",fill=TEXT_DIM,font=("Helvetica",16))
+        short=item["gfx_key"][-18:] if len(item["gfx_key"])>18 else item["gfx_key"]
+        lid=cv_place.create_text(x+w//2,y+h+10,text=short,fill=TEXT_DIM,
+            font=("Helvetica",7),width=w+20)
+        item["canvas_id"]=cid; item["label_id"]=lid; item["border_id"]=bid
+        # bind drag
+        for obj in (bid, cid):
+            cv_place.tag_bind(obj,"<ButtonPress-1>",  lambda e,it=item:_drag_start(e,it))
+            cv_place.tag_bind(obj,"<B1-Motion>",      lambda e,it=item:_drag_move(e,it))
+            cv_place.tag_bind(obj,"<ButtonRelease-1>",lambda e,it=item:_drag_end(e,it))
+
+    def _drag_start(e, item):
+        _drag_state["active"]=item
+        _drag_state["ox"]=e.x-item["x"]
+        _drag_state["oy"]=e.y-item["y"]
+        cv_place.tag_raise(item.get("canvas_id",""))
+        cv_place.tag_raise(item.get("border_id",""))
+        cv_place.tag_raise(item.get("label_id",""))
+
+    def _drag_move(e, item):
+        if _drag_state["active"] is not item: return
+        nx=e.x-_drag_state["ox"]; ny=e.y-_drag_state["oy"]
+        nx=max(0,min(nx,CANVAS_W-item["w"])); ny=max(0,min(ny,CANVAS_H-item["h"]))
+        dx=nx-item["x"]; dy=ny-item["y"]
+        item["x"]=nx; item["y"]=ny
+        for obj_key in ("canvas_id","border_id"):
+            if item.get(obj_key): cv_place.move(item[obj_key],dx,dy)
+        if item.get("label_id"): cv_place.move(item["label_id"],dx,dy)
+        _update_code()
+
+    def _drag_end(e, item):
+        item["x"]=_snap(item["x"]); item["y"]=_snap(item["y"])
+        _render_item(item); _update_code()
+        _drag_state["active"]=None
+
+    def _add_item(gfx_key, abs_path, role="icon"):
+        max_w,max_h=(60,60) if role=="icon" else (120,90)
+        img=_load_img(abs_path,max_w,max_h)
+        item={"gfx_key":gfx_key,"abs_path":abs_path,"role":role,
+              "x":40,"y":44,"w":max_w,"h":max_h,"img_ref":img}
+        # offset if overlapping
+        used_positions=[(it["x"],it["y"]) for it in items]
+        ox,oy=40,44
+        while (ox,oy) in used_positions: ox+=max_w+10
+        item["x"]=ox; item["y"]=oy
+        items.append(item); _render_item(item); _update_code()
+
+    # Render initial items
+    for it in items:
+        if "img_ref" not in it:
+            it["img_ref"]=_load_img(it.get("abs_path",""),it.get("w",60),it.get("h",60))
+        _render_item(it)
+
+    # ── RIGHT: properties + code output ─────────────────────────────────────
+    right_f = tk.Frame(body, bg=BG_PANEL, width=360); right_f.pack(side="left", fill="y", padx=(0,8), pady=8)
+    right_f.pack_propagate(False)
+
+    tk.Label(right_f, text="  ADD GFX ITEMS", bg=BG_PANEL, fg=GOLD,
+             font=("Helvetica",9,"bold"), anchor="w", pady=4).pack(fill="x")
+    tk.Frame(right_f, bg=BORDER_G, height=1).pack(fill="x")
+
+    # buttons to add icon or picture
+    btn_row = tk.Frame(right_f, bg=BG_PANEL); btn_row.pack(fill="x", padx=8, pady=6)
+
+    def _browse_and_add(role):
+        def _on_sel(gfx_key, path):
+            _add_item(gfx_key, path, role)
+            _update_props_list()
+        _open_universal_gfx_browser(pwin, _on_sel,
+            title=f"Pick GFX for {role}",
+            gfx_hints=["decisions","ideas"] if role=="icon" else ["decisions","ideas","interface"])
+
+    tk.Button(btn_row, text="＋ Add Icon",
+              command=lambda: _browse_and_add("icon"),
+              bg="#1a2842", fg=BLUE, relief="flat", font=("Helvetica",9),
+              cursor="hand2", padx=10, pady=4).pack(side="left", padx=(0,4))
+    tk.Button(btn_row, text="＋ Add Picture",
+              command=lambda: _browse_and_add("picture"),
+              bg="#32302a", fg=GOLD, relief="flat", font=("Helvetica",9),
+              cursor="hand2", padx=10, pady=4).pack(side="left")
+
+    # Grid + snap toggles
+    opt_row = tk.Frame(right_f, bg=BG_PANEL); opt_row.pack(fill="x", padx=8)
+    tk.Checkbutton(opt_row, text="Grid", variable=grid_on, bg=BG_PANEL, fg=TEXT_DIM,
+                   activebackground=BG_PANEL, selectcolor=BG_CARD,
+                   font=("Helvetica",9), cursor="hand2").pack(side="left")
+    tk.Checkbutton(opt_row, text="Snap to grid", variable=snap_on, bg=BG_PANEL, fg=TEXT_DIM,
+                   activebackground=BG_PANEL, selectcolor=BG_CARD,
+                   font=("Helvetica",9), cursor="hand2").pack(side="left", padx=8)
+
+    tk.Frame(right_f, bg=BORDER_G, height=1).pack(fill="x", padx=4, pady=4)
+
+    # Item list
+    tk.Label(right_f, text="  PLACED ITEMS", bg=BG_PANEL, fg=TEAL,
+             font=("Helvetica",8,"bold"), anchor="w").pack(fill="x")
+    props_frame = tk.Frame(right_f, bg=BG_PANEL); props_frame.pack(fill="x", padx=6)
+
+    def _update_props_list():
+        for w in props_frame.winfo_children(): w.destroy()
+        for i,it in enumerate(items):
+            row2=tk.Frame(props_frame,bg=BG_CARD,highlightthickness=1,highlightbackground=BORDER_G)
+            row2.pack(fill="x",pady=2)
+            role_color=BLUE if it["role"]=="icon" else GOLD
+            tk.Label(row2,text=it["role"].upper(),bg=BG_CARD,fg=role_color,
+                     font=("Helvetica",7),padx=4).pack(side="left")
+            tk.Label(row2,text=it["gfx_key"][-22:],bg=BG_CARD,fg=TEXT,
+                     font=("Courier",8),anchor="w").pack(side="left",fill="x",expand=True)
+            # x,y editable
+            for lbl2,attr in [("x","x"),("y","y"),("w","w"),("h","h")]:
+                sv=tk.StringVar(value=str(it[attr]))
+                def _on_dim(v,it2=it,a=attr,sv2=sv):
+                    try: it2[a]=int(sv2.get()); _render_item(it2); _update_code()
+                    except Exception: pass
+                sv.trace_add("write",_on_dim)
+                tk.Label(row2,text=lbl2,bg=BG_CARD,fg=TEXT_DIM,font=("Helvetica",7)).pack(side="left",padx=(4,0))
+                tk.Entry(row2,textvariable=sv,bg=BG_DARK,fg=TEXT,font=("Courier",8),
+                         width=4,relief="flat",insertbackground=BLUE).pack(side="left")
+            def _rm(i2=i):
+                it2=items[i2]
+                for k in ("canvas_id","label_id","border_id"):
+                    if it2.get(k): cv_place.delete(it2[k])
+                items.pop(i2); _update_props_list(); _update_code()
+            tk.Button(row2,text="✕",command=_rm,bg=BG_CARD,fg=RED,
+                      relief="flat",font=("Helvetica",8),cursor="hand2",padx=4).pack(side="right")
+
+    _update_props_list()
+
+    tk.Frame(right_f, bg=BORDER_G, height=1).pack(fill="x", padx=4, pady=4)
+
+    # Generated code
+    tk.Label(right_f, text="  GENERATED GFX CODE", bg=BG_PANEL, fg=GREEN,
+             font=("Helvetica",8,"bold"), anchor="w").pack(fill="x")
+    code_text = tk.Text(right_f, bg="#080b10", fg=GREEN, insertbackground=BLUE,
+                        font=("Courier",8), relief="flat", height=10, wrap="none",
+                        highlightthickness=1, highlightbackground=BORDER_G)
+    code_text.pack(fill="both", expand=True, padx=6, pady=4)
+
+    def _update_code(*_):
+        code_text.config(state="normal")
+        code_text.delete("1.0","end")
+        lines=["# ── GFX positioning  (interface/*.gfx)"]
+        lines.append("# Place this in any interface/*.gfx file in your mod\n")
+        for it in items:
+            role=it["role"]; gk=it["gfx_key"]
+            x,y,w,h=it["x"],it["y"],it["w"],it["h"]
+            if role=="icon":
+                lines.append(f'spriteType = {{\n')
+                lines.append(f'\tname = "{gk}"\n')
+                lines.append(f'\ttexturefile = "gfx/interface/decisions/{gk.replace("GFX_decision_","")}.dds"\n')
+                lines.append(f'}}\n')
+                lines.append(f'# icon position in containerWindowType:\n')
+                lines.append(f'# iconType = {{\n')
+                lines.append(f'#     name = "icon"\n')
+                lines.append(f'#     spriteType = "{gk}"\n')
+                lines.append(f'#     position = {{ x={x} y={y} }}\n')
+                lines.append(f'# }}\n')
+            else:
+                lines.append(f'spriteType = {{\n')
+                lines.append(f'\tname = "{gk}"\n')
+                lines.append(f'\ttexturefile = "gfx/interface/decisions/{gk.replace("GFX_decision_category_","").replace("GFX_decision_","")}.dds"\n')
+                lines.append(f'\tnoOfFrames = 1\n')
+                lines.append(f'}}\n')
+                lines.append(f'# picture position in containerWindowType:\n')
+                lines.append(f'# iconType = {{\n')
+                lines.append(f'#     name = "picture"\n')
+                lines.append(f'#     spriteType = "{gk}"\n')
+                lines.append(f'#     position = {{ x={x} y={y} }}\n')
+                lines.append(f'#     size = {{ width={w} height={h} }}\n')
+                lines.append(f'# }}\n')
+            lines.append("\n")
+        lines.append("# ── Decision category localisation note:\n")
+        lines.append("# picture requires a _desc localisation key to render in-game\n")
+        code_text.insert("1.0","".join(lines))
+        code_text.config(state="disabled")
+
+    _update_code()
+
+    # Bottom bar
+    tk.Frame(pwin, bg=BORDER_G, height=1).pack(fill="x")
+    bot2=tk.Frame(pwin,bg=BG_DARK); bot2.pack(fill="x",padx=10,pady=6)
+    tk.Button(bot2,text="Cancel",command=pwin.destroy,bg=BG_CARD,fg=TEXT,
+              relief="flat",font=("Helvetica",9),padx=10,pady=4,cursor="hand2").pack(side="right",padx=4)
+    def _confirm():
+        code=code_text.get("1.0","end-1c")
+        if on_confirm: on_confirm(list(items), code)
+        pwin.destroy()
+    tk.Button(bot2,text="✓  Confirm Placement",command=_confirm,
+              bg="#14532d",fg=GREEN,relief="flat",font=("Helvetica",10,"bold"),
+              padx=14,pady=5,cursor="hand2").pack(side="right")
+    tk.Label(bot2,text="Positions are written to the GFX code panel",
+             bg=BG_DARK,fg=TEXT_DIM,font=("Helvetica",8,"italic")).pack(side="left",padx=4)
+
+
+
+def open_decision_wizard(app):
+    """HOI4 Decision / Decision Category maker — matches mockup layout."""
+    import threading as _thr
+
+    win = tk.Toplevel(app)
+    win.title("Decision Maker")
+    win.configure(bg=BG_DARK)
+    win.geometry("1340x820")
+    win.resizable(True, True)
+
+    # ── Auto-save / undo infrastructure ─────────────────────────────────────
+    import json as _json, copy as _copy, tempfile as _tempfile
+    _autosave_dir = _tempfile.gettempdir()
+    _autosave_path = os.path.join(_autosave_dir, "hoi4_cm_decision_autosave.json")
+    _undo_stack = []   # list of (dm_cats snapshot, dm_decs snapshot)
+    _undo_max  = 30
+
+    def _snapshot():
+        """Push current state onto undo stack."""
+        _undo_stack.append((_copy.deepcopy(dm_cats), _copy.deepcopy(dm_decs)))
+        if len(_undo_stack) > _undo_max:
+            _undo_stack.pop(0)
+
+    def _do_undo():
+        if not _undo_stack:
+            _dm_status.config(text="  ⚠  Nothing to undo"); return
+        cats_snap, decs_snap = _undo_stack.pop()
+        dm_cats.clear(); dm_cats.extend(cats_snap)
+        dm_decs.clear(); dm_decs.extend(decs_snap)
+        _rebuild_tree(); _rebuild_editor()
+        _dm_status.config(text="  ↩  Undo applied")
+
+    def _autosave():
+        """Save current state to JSON sidecar."""
+        try:
+            data = {"cats": dm_cats, "decs": dm_decs}
+            with open(_autosave_path, "w", encoding="utf-8") as f:
+                _json.dump(data, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
+    def _load_autosave():
+        """Restore from autosave JSON if it exists."""
+        if not os.path.isfile(_autosave_path): return False
+        try:
+            with open(_autosave_path, "r", encoding="utf-8") as f:
+                data = _json.load(f)
+            if data.get("cats") and data.get("decs"):
+                dm_cats.clear(); dm_cats.extend(data["cats"])
+                dm_decs.clear(); dm_decs.extend(data["decs"])
+                return True
+        except Exception:
+            pass
+        return False
+
+    def _on_dec_win_close():
+        try: _collect()
+        except Exception: pass
+        try: _autosave()
+        except Exception: pass
+        win.destroy()
+    win.protocol("WM_DELETE_WINDOW", _on_dec_win_close)
+
+    # ── colour aliases matching mockup exactly ───────────────────────────────
+    C_DARK   = BG_DARK    # "#0d1117"
+    C_PANEL  = BG_PANEL   # "#161b27"
+    C_CARD   = BG_CARD    # "#1e2435"
+    C_CARD2  = "#252d40"
+    C_TEXT   = TEXT       # "#e2e8f0"
+    C_DIM    = TEXT_DIM   # "#6b7280"
+    C_BORD   = BORDER     # "#2d3748"
+    C_BORDG  = BORDER_G   # "#374151"
+    C_BLUE   = BLUE       # "#3b82f6"
+    C_GREEN  = GREEN      # "#22c55e"
+    C_GOLD   = GOLD       # "#f0c040"
+    C_RED    = RED        # "#ef4444"
+    C_ORANGE = ORANGE     # "#f97316"
+    C_TEAL   = TEAL       # "#2dd4bf"
+    C_PURPLE = PURPLE     # "#a78bfa"
+
+    # ── safe blended colours (pre-computed, no alpha appending) ─────────────
+    # blend(fg, alpha, bg=#161b27):  used for tag bg, section hr, etc.
+    GOLD_TAG_BG   = "#2a2415"   # gold 22% on panel
+    GOLD_TAG_BD   = "#3d3420"   # gold 44%
+    BLUE_TAG_BG   = "#152038"   # blue 22%
+    BLUE_TAG_BD   = "#1e3252"   # blue 44%
+    TEAL_TAG_BG   = "#142b29"   # teal 22%
+    TEAL_TAG_BD   = "#1d4240"   # teal 44%
+    PURP_TAG_BG   = "#251e38"   # purple 22%
+    PURP_TAG_BD   = "#342d50"   # purple 44%
+    ORAN_TAG_BG   = "#2d1e10"   # orange 22%
+    ORAN_TAG_BD   = "#432c18"   # orange 44%
+    RED_TAG_BG    = "#2d1315"   # red 11%
+    RED_TAG_BD    = "#3d1c1e"   # red 33%
+    SEL_BG_TREE   = "#17254a"   # sel 33% on panel
+
+    # ── data model ───────────────────────────────────────────────────────────
+    dm_cats = []
+    dm_decs = []
+    sel     = {"uid": None, "type": None}
+    _uid_n  = [0]
+
+    def _uid():
+        _uid_n[0] += 1
+        return f"dm_{_uid_n[0]}"
+
+    def _new_cat():
+        return dict(uid=_uid(), cat_id="TAG_my_category", loc_name="My Category",
+                    loc_desc="", icon="", picture="", allowed="", visible="",
+                    priority="1", visible_when_empty=False, on_map_area=False,
+                    map_state="123", map_name="my_map_area", map_zoom="850",
+                    map_trigger="", scripted_gui="", highlight_states="")
+
+    def _new_dec(cat_uid=""):
+        return dict(uid=_uid(), cat_uid=cat_uid, dec_id="TAG_my_decision",
+                    loc_name="My Decision", loc_desc="", icon="",
+                    allowed="", visible="", available="",
+                    cost_type="pp", cost="25",
+                    custom_cost_trigger="", custom_cost_text="", ai_hint_pp_cost="",
+                    cost_var="", cost_amount="",
+                    days_remove="", days_re_enable="",
+                    fire_only_once=False, fixed_random_seed=True,
+                    is_mission=False, mission_timeout="100",
+                    selectable_mission=True, is_good=False,
+                    activation="", timeout_effect="", war_with_on_timeout="",
+                    targeted="none", targets="", targets_dynamic=False,
+                    target_non_existing=False, target_array="",
+                    target_trigger="", target_root_trigger="",
+                    state_target_scope="yes", on_map_mode="map_and_decisions_view",
+                    war_complete_tag="", war_remove_tag="",
+                    war_target_complete=False, war_target_remove=False,
+                    complete_effect="", remove_effect="", cancel_effect="",
+                    cancel_trigger="", cancel_if_not_visible=False,
+                    modifier="", remove_trigger="",
+                    ai_will_do="base = 0", priority="1", chain="",
+                    highlight_states="")
+
+    # ── helpers ──────────────────────────────────────────────────────────────
+    def _get_cat(uid): return next((c for c in dm_cats if c["uid"]==uid), None)
+    def _get_dec(uid): return next((d for d in dm_decs if d["uid"]==uid), None)
+    def _decs_for(cat_uid): return [d for d in dm_decs if d["cat_uid"]==cat_uid]
+
+    def _s(v):
+        """Safely coerce any field value to a stripped string (guards against bool/int/None)."""
+        if v is None: return ""
+        if isinstance(v, bool): return ""
+        return str(v).strip()
+
+    def _dedup_cats():
+        """Remove truly duplicate categories (same non-empty cat_id AND same uid duplicated),
+        and remove any orphaned decisions whose cat_uid no longer exists."""
+        # Only deduplicate if the SAME uid appears more than once
+        # (don't merge different cats that happen to share a cat_id)
+        seen_uids = set()
+        unique_cats = []
+        for c in dm_cats:
+            if c["uid"] not in seen_uids:
+                seen_uids.add(c["uid"])
+                unique_cats.append(c)
+        valid_uids = {c["uid"] for c in unique_cats}
+        dm_cats[:] = unique_cats
+        dm_decs[:] = [d for d in dm_decs if d["cat_uid"] in valid_uids]
+
+    # ── TITLE BAR ────────────────────────────────────────────────────────────
+    titlebar = tk.Frame(win, bg="#080b10", height=42)
+    titlebar.pack(fill="x"); titlebar.pack_propagate(False)
+    tk.Label(titlebar, text="⚖  DECISION MAKER", bg="#080b10", fg=C_GOLD,
+             font=("Courier", 13, "bold")).pack(side="left", padx=14)
+    _dm_status = tk.Label(titlebar, text="", bg="#080b10", fg=C_DIM,
+                          font=("Helvetica", 9, "italic"))
+    _dm_status.pack(side="right", padx=10)
+
+    def _tbtn(text, cmd, color=C_BLUE):
+        b = tk.Button(titlebar, text=text, command=cmd,
+                      bg=C_CARD, fg=color,
+                      relief="flat", font=("Courier", 9),
+                      cursor="hand2", padx=10, pady=4,
+                      highlightthickness=1, highlightbackground=color)
+        b.pack(side="left", padx=3, pady=6)
+        return b
+
+    def _snap_then(fn):
+        """Take undo snapshot then call fn."""
+        def _inner():
+            _collect(); _snapshot(); fn()
+        return _inner
+
+    _tbtn("＋ New Category",    lambda: (_collect(), _snapshot(), _add_cat()),    C_GREEN)
+    _tbtn("＋ New Decision",    lambda: (_collect(), _snapshot(), _add_dec()),    C_BLUE)
+    _tbtn("Import .txt",        lambda: (_snapshot(), _import_txt()), C_TEAL)
+    _tbtn("Import .yml loc",    lambda: _import_yml_loc(), C_TEAL)
+    _tbtn("Import scripted_loc",lambda: _import_scripted_loc(), C_TEAL)
+    _tbtn("Export .txt",        lambda: _export_txt(), C_GOLD)
+    _tbtn("Copy .yml",          lambda: _copy_yml(),   C_GOLD)
+    _tbtn("Save to Mod",        lambda: _save_to_mod(), C_GREEN)
+    _tbtn("↩ Undo",             lambda: _do_undo(),    C_DIM)
+
+    win.bind_all("<Control-z>", lambda e: _do_undo())
+    win.bind_all("<Control-Z>", lambda e: _do_undo())
+    def _key_delete(e=None):
+        if sel["type"] == "dec" and sel["uid"]:   _delete_dec(sel["uid"])
+        elif sel["type"] == "cat" and sel["uid"]: _delete_cat(sel["uid"])
+    win.bind_all("<Delete>", _key_delete)
+    def _key_duplicate(e=None):
+        if sel["type"] == "dec" and sel["uid"]:   _duplicate_dec(sel["uid"])
+        elif sel["type"] == "cat" and sel["uid"]: _duplicate_cat(sel["uid"])
+    win.bind_all("<Control-d>", _key_duplicate)
+    win.bind_all("<Control-D>", _key_duplicate)
+    # Auto-save every 60 seconds while window is open
+    def _periodic_autosave():
+        try: _collect(); _autosave()
+        except Exception: pass
+        try: win.after(60000, _periodic_autosave)
+        except Exception: pass
+    win.after(60000, _periodic_autosave)
+
+    tk.Frame(win, bg=C_BORDG, height=1).pack(fill="x")
+
+    # ── BODY (3 panes) ───────────────────────────────────────────────────────
+    body = tk.Frame(win, bg=C_DARK); body.pack(fill="both", expand=True)
+    paned = tk.PanedWindow(body, orient="horizontal", bg=C_BORDG,
+                           sashwidth=4, sashrelief="flat", handlesize=0)
+    paned.pack(fill="both", expand=True)
+
+    # ════════════════════════════════════════════════════════════════════════
+    # LEFT  ─ tree  (220 px)
+    # ════════════════════════════════════════════════════════════════════════
+    left_f = tk.Frame(paned, bg=C_PANEL)
+    paned.add(left_f, minsize=180, width=230, stretch="never")
+
+    hdr_row = tk.Frame(left_f, bg=C_DARK); hdr_row.pack(fill="x")
+    tk.Label(hdr_row, text="  CATEGORIES & DECISIONS",
+             bg=C_DARK, fg=C_DIM,
+             font=("Courier", 8), anchor="w", pady=6).pack(side="left", fill="x", expand=True)
+    tk.Frame(left_f, bg=C_BORDG, height=1).pack(fill="x")
+
+    # ── Search bar ──────────────────────────────────────────────────────────
+    _tree_filter = tk.StringVar()
+    search_row = tk.Frame(left_f, bg=C_PANEL); search_row.pack(fill="x", padx=4, pady=3)
+    tk.Label(search_row, text="🔍", bg=C_PANEL, fg=C_DIM,
+             font=("Helvetica",9)).pack(side="left", padx=(2,0))
+    filter_entry = tk.Entry(search_row, textvariable=_tree_filter,
+                            bg=C_CARD, fg=C_TEXT, insertbackground=C_BLUE,
+                            relief="flat", font=("Helvetica",9),
+                            highlightthickness=1, highlightbackground=C_BORDG)
+    filter_entry.pack(side="left", fill="x", expand=True, ipady=3, padx=4)
+    def _clear_filter():
+        _tree_filter.set("")
+    tk.Button(search_row, text="✕", command=_clear_filter,
+              bg=C_PANEL, fg=C_DIM, relief="flat",
+              font=("Helvetica",8), cursor="hand2", padx=2).pack(side="left")
+    # Show All / Hide All quick buttons
+    vis_row = tk.Frame(left_f, bg=C_PANEL); vis_row.pack(fill="x", padx=4, pady=2)
+    tk.Label(vis_row, text="Preview:", bg=C_PANEL, fg=C_DIM,
+             font=("Helvetica",8)).pack(side="left", padx=(2,4))
+    def _show_all_cats():
+        for c in dm_cats: cat_visible[c["uid"]] = True
+        _rebuild_tree(); _rebuild_editor(); _rebuild_right()
+    def _hide_all_cats():
+        for c in dm_cats: cat_visible[c["uid"]] = False
+        _rebuild_tree(); _rebuild_editor(); _rebuild_right()
+    def _show_only_selected():
+        target_uid = None
+        if sel["type"] == "cat" and sel["uid"]:
+            target_uid = sel["uid"]
+        elif sel["type"] == "dec" and sel["uid"]:
+            dec = _get_dec(sel["uid"])
+            if dec: target_uid = dec["cat_uid"]
+        if target_uid:
+            for c in dm_cats: cat_visible[c["uid"]] = (c["uid"] == target_uid)
+            _rebuild_tree(); _rebuild_editor(); _rebuild_right()
+    tk.Button(vis_row, text="👁 All",   command=_show_all_cats,
+              bg=C_CARD, fg=C_TEAL, relief="flat",
+              font=("Helvetica",8), cursor="hand2", padx=6, pady=2).pack(side="left", padx=1)
+    tk.Button(vis_row, text="🚫 All",  command=_hide_all_cats,
+              bg=C_CARD, fg=C_DIM, relief="flat",
+              font=("Helvetica",8), cursor="hand2", padx=6, pady=2).pack(side="left", padx=1)
+    tk.Button(vis_row, text="Solo",     command=_show_only_selected,
+              bg=C_CARD, fg=C_GOLD, relief="flat",
+              font=("Helvetica",8), cursor="hand2", padx=6, pady=2,
+              highlightthickness=1, highlightbackground=GOLD_TAG_BD).pack(side="left", padx=1)
+    tk.Frame(left_f, bg=C_BORDG, height=1).pack(fill="x")
+
+    tree_cv     = tk.Canvas(left_f, bg=C_PANEL, highlightthickness=0)
+    tree_sb     = tk.Scrollbar(left_f, orient="vertical", command=tree_cv.yview)
+    tree_inner  = tk.Frame(tree_cv, bg=C_PANEL)
+    _tree_win   = tree_cv.create_window((0,0), window=tree_inner, anchor="nw")
+    tree_cv.configure(yscrollcommand=tree_sb.set)
+    tree_inner.bind("<Configure>", lambda e: tree_cv.configure(scrollregion=tree_cv.bbox("all")))
+    tree_cv.bind("<Configure>",    lambda e: tree_cv.itemconfig(_tree_win, width=e.width))
+    for ev in ("<MouseWheel>","<Button-4>","<Button-5>"):
+        tree_cv.bind(ev, lambda e: tree_cv.yview_scroll(
+            -1 if (e.delta>0 if e.num not in (4,5) else e.num==4) else 1, "units"))
+    tree_sb.pack(side="right", fill="y"); tree_cv.pack(fill="both", expand=True)
+
+    tree_status = tk.Label(left_f, text="", bg=C_DARK, fg=C_DIM,
+                           font=("Helvetica", 8), anchor="w", pady=3)
+    tree_status.pack(fill="x")
+    tk.Frame(left_f, bg=C_BORDG, height=1).pack(fill="x")
+
+    cat_expanded = {}
+    cat_visible   = {}  # uid -> bool; True=shown in preview & code, False=hidden
+    _tree_filter.trace_add("write", lambda *_: _rebuild_tree())
+
+    _tree_rows = {}  # uid -> (crow, lbar) for fast highlight updates
+
+    def _update_tree_highlight():
+        """Update tree row highlight colors without rebuilding."""
+        for uid, (crow, lbar, inn, bg_sel, bg_norm) in _tree_rows.items():
+            is_sel = (sel["uid"] == uid)
+            try:
+                crow.config(bg=bg_sel if is_sel else bg_norm)
+                inn.config(bg=bg_sel if is_sel else bg_norm)
+                lbar.config(bg=C_GOLD if is_sel else bg_norm)
+            except Exception:
+                pass
+
+    def _rebuild_tree():
+        _tree_rows.clear()
+        for w in tree_inner.winfo_children(): w.destroy()
+        # Apply search filter
+        filt = _tree_filter.get().strip().lower()
+        for cat in dm_cats:
+            decs = _decs_for(cat["uid"])
+            # Filter: show cat if name matches OR any child dec matches
+            if filt:
+                cat_match = filt in cat["cat_id"].lower() or filt in (cat["loc_name"] or "").lower()
+                dec_matches = [d for d in decs if
+                               filt in d["dec_id"].lower() or filt in (d["loc_name"] or "").lower()]
+                if not cat_match and not dec_matches:
+                    continue  # hide this category entirely
+                # If filtering, show only matching decs (or all if cat itself matches)
+                if not cat_match:
+                    decs = dec_matches
+            exp  = True if filt else cat_expanded.get(cat["uid"], True)
+            is_sel = (sel["uid"]==cat["uid"] and sel["type"]=="cat")
+
+            # category row
+            crow = tk.Frame(tree_inner, bg=C_PANEL, cursor="hand2"); crow.pack(fill="x")
+            bg_c = SEL_BG_TREE if is_sel else C_PANEL
+            lbar = tk.Frame(crow, bg=C_GOLD if is_sel else C_PANEL, width=2); lbar.pack(side="left", fill="y")
+            inn  = tk.Frame(crow, bg=bg_c); inn.pack(fill="x", expand=True)
+            tk.Label(inn, text="▼" if exp else "▶", bg=bg_c, fg=C_DIM,
+                     font=("Helvetica",8), width=2).pack(side="left", padx=(6,2), pady=6)
+            # Try to show category icon GFX, fall back to folder emoji
+            _cicon_key = cat.get("icon", "").strip()
+            _cicon_img = _load_dec_icon(_cicon_key, 24) if _cicon_key else None
+            if _cicon_img:
+                _cicon_lbl = tk.Label(inn, image=_cicon_img, bg=bg_c)
+                _cicon_lbl.image = _cicon_img  # keep ref
+                _cicon_lbl.pack(side="left", padx=(0,2))
+            else:
+                tk.Label(inn, text="📁", bg=bg_c, font=("Helvetica",12)).pack(side="left")
+            info = tk.Frame(inn, bg=bg_c); info.pack(side="left", fill="x", expand=True, padx=6, pady=4)
+            _vis_fg = C_GOLD if cat_visible.get(cat["uid"], True) else C_DIM
+            _cat_disp = _strip_loc_codes(cat["loc_name"] or cat["cat_id"])
+            tk.Label(info, text=("🚫 " if not cat_visible.get(cat["uid"], True) else "") + _cat_disp,
+                     bg=bg_c, fg=_vis_fg,
+                     font=("Helvetica",10), anchor="w").pack(fill="x")
+            tk.Label(info, text=cat["cat_id"], bg=bg_c, fg=C_DIM,
+                     font=("Courier",8), anchor="w").pack(fill="x")
+            # visibility + count tag area
+            vis  = cat_visible.get(cat["uid"], True)
+            # eye toggle button
+            eye_btn = tk.Button(inn, text="👁" if vis else "🚫",
+                                bg=bg_c, fg=C_TEAL if vis else C_RED,
+                                relief="flat", font=("Helvetica",10),
+                                cursor="hand2", padx=4, pady=0,
+                                highlightthickness=0, bd=0)
+            eye_btn.pack(side="right", padx=(0,2), pady=4)
+            def _toggle_vis(uid=cat["uid"]):
+                cat_visible[uid] = not cat_visible.get(uid, True)
+                _rebuild_tree(); _rebuild_editor(); _rebuild_right()
+            eye_btn.config(command=_toggle_vis)
+            # count tag
+            tag_f = tk.Frame(inn, bg=GOLD_TAG_BG if vis else C_CARD,
+                             highlightthickness=1,
+                             highlightbackground=GOLD_TAG_BD if vis else C_BORDG)
+            tag_f.pack(side="right", padx=2, pady=6)
+            tk.Label(tag_f, text=str(len(decs)), bg=GOLD_TAG_BG if vis else C_CARD,
+                     fg=C_GOLD if vis else C_DIM,
+                     font=("Courier",9), padx=5, pady=1).pack()
+            tk.Frame(tree_inner, bg=C_BORD, height=1).pack(fill="x")
+
+            _tree_rows[cat["uid"]] = (crow, lbar, inn, SEL_BG_TREE, C_PANEL)
+
+            def _on_cat(e, uid=cat["uid"]):
+                cat_expanded[uid] = not cat_expanded.get(uid, True)
+                sel["uid"]=uid; sel["type"]="cat"
+                _rebuild_tree(); _rebuild_editor()
+            for w in (crow, inn, info, tag_f):
+                w.bind("<Button-1>", _on_cat)
+            lbar.bind("<Button-1>", _on_cat)
+
+            if exp:
+                for dec in decs:
+                    is_dsel = (sel["uid"]==dec["uid"] and sel["type"]=="dec")
+                    drow = tk.Frame(tree_inner, bg=C_PANEL, cursor="hand2"); drow.pack(fill="x")
+                    bg_d = SEL_BG_TREE if is_dsel else C_PANEL
+                    dlbar= tk.Frame(drow, bg=C_BLUE if is_dsel else C_PANEL, width=2); dlbar.pack(side="left", fill="y")
+                    dinn = tk.Frame(drow, bg=bg_d); dinn.pack(fill="x", expand=True)
+                    # Try to show decision icon GFX, fall back to clipboard emoji
+                    _dicon_key = dec.get("icon", "").strip()
+                    _dicon_img = _load_dec_icon(_dicon_key, 20) if _dicon_key else None
+                    if _dicon_img:
+                        _dicon_lbl = tk.Label(dinn, image=_dicon_img, bg=bg_d)
+                        _dicon_lbl.image = _dicon_img  # keep ref
+                        _dicon_lbl.pack(side="left", padx=(28,2), pady=5)
+                    else:
+                        tk.Label(dinn, text="📋", bg=bg_d, font=("Helvetica",10)).pack(side="left", padx=(28,4), pady=5)
+                    dinfo = tk.Frame(dinn, bg=bg_d); dinfo.pack(side="left", fill="x", expand=True, pady=4)
+                    _dec_disp = _strip_loc_codes(dec["loc_name"] or dec["dec_id"])
+                    tk.Label(dinfo, text=_dec_disp, bg=bg_d, fg=C_TEXT,
+                             font=("Helvetica",10), anchor="w").pack(fill="x")
+                    # tag row
+                    tagrow = tk.Frame(dinfo, bg=bg_d); tagrow.pack(fill="x")
+                    if dec["targeted"] != "none":
+                        _tag(tagrow, "T", C_TEAL, TEAL_TAG_BG, TEAL_TAG_BD)
+                    if dec["cost_type"]=="pp" and dec.get("cost","").strip():
+                        _tag(tagrow, f'{dec["cost"]}PP', C_GOLD, GOLD_TAG_BG, GOLD_TAG_BD)
+                    if dec["chain"]:
+                        _tag(tagrow, dec["chain"][:8], C_PURPLE, PURP_TAG_BG, PURP_TAG_BD)
+                    tk.Frame(tree_inner, bg=C_BORD, height=1).pack(fill="x")
+                    _tree_rows[dec["uid"]] = (drow, dlbar, dinn,
+                                                   SEL_BG_TREE, C_PANEL)
+
+                    def _on_dec(e, uid=dec["uid"]):
+                        sel["uid"]=uid; sel["type"]="dec"
+                        _update_tree_highlight()  # fast highlight, no rebuild
+                        _rebuild_editor()
+                    for w in (drow, dinn, dinfo, tagrow):
+                        w.bind("<Button-1>", _on_dec)
+                    dlbar.bind("<Button-1>", _on_dec)
+
+        total_d = sum(len(_decs_for(c["uid"])) for c in dm_cats)
+        tree_status.config(text=f"  {total_d} decisions  ·  {len(dm_cats)} categories")
+
+    def _tag(parent, text, fg, bg, bd):
+        f = tk.Frame(parent, bg=bg, highlightthickness=1, highlightbackground=bd)
+        f.pack(side="left", padx=(0,3), pady=1)
+        tk.Label(f, text=text, bg=bg, fg=fg, font=("Courier",8), padx=4, pady=0).pack()
+
+    def _add_cat():
+        c = _new_cat(); dm_cats.append(c)
+        sel["uid"]=c["uid"]; sel["type"]="cat"
+        _rebuild_tree(); _rebuild_editor()
+
+    def _add_dec():
+        if sel["type"]=="cat":   cat_uid = sel["uid"]
+        elif sel["type"]=="dec": cat_uid = (_get_dec(sel["uid"]) or {}).get("cat_uid","")
+        else:                    cat_uid = dm_cats[0]["uid"] if dm_cats else None
+        if not cat_uid:
+            messagebox.showwarning("No Category", "Add a category first.", parent=win); return
+        d = _new_dec(cat_uid); dm_decs.append(d)
+        sel["uid"]=d["uid"]; sel["type"]="dec"
+        _rebuild_tree(); _rebuild_editor()
+
+    # ════════════════════════════════════════════════════════════════════════
+    # MIDDLE  ─ editor  (420 px)
+    # ════════════════════════════════════════════════════════════════════════
+    mid_f = tk.Frame(paned, bg=C_PANEL)
+    paned.add(mid_f, minsize=340, width=440, stretch="never")
+
+    mid_hdr = tk.Label(mid_f, text="  DECISION PROPERTIES",
+                       bg=C_DARK, fg=C_DIM, font=("Courier",8), anchor="w", pady=6)
+    mid_hdr.pack(fill="x")
+    tk.Frame(mid_f, bg=C_BORDG, height=1).pack(fill="x")
+
+    mid_cv  = tk.Canvas(mid_f, bg=C_PANEL, highlightthickness=0)
+    mid_sb  = tk.Scrollbar(mid_f, orient="vertical", command=mid_cv.yview)
+    mid_frm = tk.Frame(mid_cv, bg=C_PANEL)
+    _mid_w  = mid_cv.create_window((0,0), window=mid_frm, anchor="nw")
+    mid_cv.configure(yscrollcommand=mid_sb.set)
+    mid_frm.bind("<Configure>", lambda e: mid_cv.configure(scrollregion=mid_cv.bbox("all")))
+    mid_cv.bind("<Configure>",  lambda e: mid_cv.itemconfig(_mid_w, width=e.width))
+    for ev in ("<MouseWheel>","<Button-4>","<Button-5>"):
+        mid_cv.bind(ev, lambda e: mid_cv.yview_scroll(
+            -1 if (e.delta>0 if e.num not in (4,5) else e.num==4) else 1, "units"))
+    mid_sb.pack(side="right", fill="y"); mid_cv.pack(fill="both", expand=True)
+
+    # ── editor widget helpers (all target mid_frm) ───────────────────────────
+    _evars = {}        # key -> tk var or Text widget
+    _editor_hooks = {}  # name -> callable, called after _populate_editor to refresh dynamic sections
+
+    def _sv(key, val):
+        if key in _evars and isinstance(_evars[key], tk.StringVar):
+            return _evars[key]  # already registered, return existing var
+        v = tk.StringVar(value=str(val))
+        _evars[key] = v
+        v.trace_add("write", lambda *_: (_collect(), _rebuild_right()))
+        return v
+
+    def _bv(key, val):
+        if key in _evars and isinstance(_evars[key], tk.BooleanVar):
+            return _evars[key]
+        v = tk.BooleanVar(value=bool(val))
+        _evars[key] = v
+        v.trace_add("write", lambda *_: (_collect(), _rebuild_right()))
+        return v
+
+    def _reg_text(key, widget, initial=""):
+        if initial: widget.insert("1.0", str(initial))
+        _evars[key] = widget
+        widget.bind("<KeyRelease>", lambda e: _collect() if widget.winfo_exists() else None)
+        return widget
+
+    PAD = dict(padx=14, pady=2)
+
+    def _sec(label, color=C_GOLD):
+        """Section header with coloured underline — matches SectionHeader in mockup."""
+        f = tk.Frame(mid_frm, bg=C_PANEL); f.pack(fill="x", padx=14, pady=(12,4))
+        tk.Label(f, text=label.upper(), bg=C_PANEL, fg=color,
+                 font=("Courier",9,"bold"), anchor="w").pack(fill="x")
+        tk.Frame(mid_frm, bg=color, height=1).pack(fill="x", padx=14, pady=(0,4))
+
+    def _field(label, var, mono=False, hint="", full=False):
+        """Labelled entry — matches Field component."""
+        f = tk.Frame(mid_frm, bg=C_PANEL); f.pack(fill="x", **PAD)
+        lbl_text = label.upper()
+        tk.Label(f, text=lbl_text, bg=C_PANEL, fg=C_DIM,
+                 font=("Courier",8), anchor="w").pack(fill="x")
+        ent = tk.Entry(f, textvariable=var, bg=C_CARD, fg=C_TEXT,
+                       insertbackground=C_BLUE,
+                       font=("Courier" if mono else "Helvetica", 10),
+                       relief="flat", highlightthickness=1,
+                       highlightbackground=C_BORDG)
+        ent.pack(fill="x", ipady=4, pady=(2,0))
+        if hint:
+            tk.Label(f, text=hint, bg=C_PANEL, fg=C_DIM,
+                     font=("Helvetica",8,"italic")).pack(fill="x")
+        return ent
+
+    def _toggle(label, var, hint_tag=None):
+        """Toggle switch — matches Toggle component."""
+        row = tk.Frame(mid_frm, bg=C_PANEL); row.pack(fill="x", padx=14, pady=3)
+        # small checkbox styled as toggle
+        chk = tk.Checkbutton(row, variable=var, bg=C_PANEL,
+                             activebackground=C_PANEL, selectcolor=C_GREEN,
+                             fg=C_DIM, font=("Helvetica",9), cursor="hand2",
+                             relief="flat", bd=0)
+        chk.pack(side="left")
+        tk.Label(row, text=label, bg=C_PANEL, fg=C_DIM,
+                 font=("Helvetica",9)).pack(side="left")
+        if hint_tag:
+            _inline_tag(row, hint_tag, C_ORANGE, ORAN_TAG_BG, ORAN_TAG_BD)
+        var.trace_add("write", lambda *_: (_collect(), _rebuild_right()))
+
+    def _inline_tag(parent, text, fg, bg, bd):
+        f = tk.Frame(parent, bg=bg, highlightthickness=1, highlightbackground=bd)
+        f.pack(side="left", padx=4)
+        tk.Label(f, text=text, bg=bg, fg=fg, font=("Courier",8), padx=4).pack()
+
+    def _triggerblock(label, key, initial="", hint=None, rows=2):
+        """Trigger / code textarea — matches TriggerBlock."""
+        f = tk.Frame(mid_frm, bg=C_PANEL); f.pack(fill="x", **PAD)
+        hrow = tk.Frame(f, bg=C_PANEL); hrow.pack(fill="x")
+        tk.Label(hrow, text=label.upper(), bg=C_PANEL, fg=C_DIM,
+                 font=("Courier",8), anchor="w").pack(side="left")
+        if hint:
+            _inline_tag(hrow, hint, C_TEAL, TEAL_TAG_BG, TEAL_TAG_BD)
+        t = tk.Text(f, bg=C_CARD, fg=C_GREEN, insertbackground=C_BLUE,
+                    font=("Courier",9), relief="flat",
+                    highlightthickness=1, highlightbackground=C_BORDG,
+                    height=rows, wrap="none", undo=True)
+        t.pack(fill="x", pady=(2,0))
+        return _reg_text(key, t, initial)
+
+    def _effectblock(label, key, initial="", rows=4):
+        """Effect textarea + Effect Picker button — matches TextArea with extra button."""
+        f = tk.Frame(mid_frm, bg=C_PANEL); f.pack(fill="x", **PAD)
+        tk.Label(f, text=label.upper(), bg=C_PANEL, fg=C_DIM,
+                 font=("Courier",8), anchor="w").pack(fill="x")
+        t = tk.Text(f, bg=C_CARD, fg=C_GREEN, insertbackground=C_BLUE,
+                    font=("Courier",9), relief="flat",
+                    highlightthickness=1, highlightbackground=C_BORDG,
+                    height=rows, wrap="none", undo=True)
+        t.pack(fill="x", pady=(2,0))
+        brow = tk.Frame(f, bg=C_PANEL); brow.pack(fill="x", pady=(2,0))
+        tk.Button(brow, text="＋ Effect Picker",
+                  command=lambda tw=t: _open_effect_picker(tw),
+                  bg=C_CARD, fg=C_BLUE, relief="flat",
+                  font=("Courier",8), cursor="hand2",
+                  padx=8, pady=2, highlightthickness=1,
+                  highlightbackground=BLUE_TAG_BD).pack(side="right")
+        return _reg_text(key, t, initial)
+
+    def _gfx_field(label, key, initial="", prefix_note="", warn=""):
+        """GFX drop zone — matches GfxDropZone component."""
+        f = tk.Frame(mid_frm, bg=C_PANEL); f.pack(fill="x", **PAD)
+        tk.Label(f, text=label.upper(), bg=C_PANEL, fg=C_DIM,
+                 font=("Courier",8), anchor="w").pack(fill="x", pady=(0,2))
+        drop_outer = tk.Frame(f, bg=C_CARD, highlightthickness=1,
+                              highlightbackground=C_BORDG)
+        drop_outer.pack(fill="x")
+        icon_lbl = tk.Label(drop_outer, text="🖼", bg=C_CARD, fg=C_DIM,
+                            font=("Helvetica",14))
+        icon_lbl.pack(side="left", padx=6, pady=5)
+        sv = _sv(key, initial)
+        ent = tk.Entry(drop_outer, textvariable=sv, bg=C_CARD, fg=C_TEXT,
+                       insertbackground=C_BLUE, font=("Courier",10),
+                       relief="flat", highlightthickness=0)
+        ent.pack(side="left", fill="x", expand=True, ipady=4)
+        tk.Label(drop_outer, text="← drag .dds/.png/.tga",
+                 bg=C_CARD, fg=C_DIM, font=("Helvetica",7)).pack(side="left", padx=3)
+        def _browse():
+            def _on_sel(gfx_key, path):
+                sv.set(gfx_key)
+            _open_universal_gfx_browser(win, _on_sel,
+                title=f"GFX Browser — {label}",
+                gfx_hints=["decisions","ideas"])
+        tk.Button(drop_outer, text="Browse ▸", command=_browse,
+                  bg=C_CARD, fg=C_PURPLE, relief="flat", font=("Courier",8),
+                  cursor="hand2", padx=8, pady=4,
+                  highlightthickness=1, highlightbackground=PURP_TAG_BD).pack(side="right", padx=4)
+        def _on_drop(e):
+            try:
+                files = win.tk.splitlist(e.data)
+                if files:
+                    stem = os.path.splitext(os.path.basename(files[0]))[0]
+                    sv.set("GFX_decision_" + stem)
+                    drop_outer.configure(highlightbackground=C_BORDG)
+            except Exception: pass
+        try:
+            drop_outer.drop_target_register("DND_Files")
+            drop_outer.dnd_bind("<<Drop>>", _on_drop)
+        except Exception: pass
+        if prefix_note:
+            tk.Label(f, text="ℹ  " + prefix_note, bg=C_PANEL, fg=C_TEAL,
+                     font=("Helvetica",8), anchor="w", wraplength=380).pack(fill="x")
+        if warn:
+            tk.Label(f, text="⚠  " + warn, bg=C_PANEL, fg=C_ORANGE,
+                     font=("Helvetica",8), anchor="w", wraplength=380).pack(fill="x")
+
+    def _warn_box(text, color=C_ORANGE, bg_override=None, bd_override=None):
+        """Orange/red warning banner — matches orange/red info boxes in mockup."""
+        bg = bg_override or ORAN_TAG_BG
+        bd = bd_override or ORAN_TAG_BD
+        f = tk.Frame(mid_frm, bg=bg, highlightthickness=1, highlightbackground=bd)
+        f.pack(fill="x", padx=14, pady=3)
+        tk.Label(f, text=text, bg=bg, fg=color,
+                 font=("Helvetica",9), anchor="w", justify="left",
+                 wraplength=380, padx=8, pady=5).pack(fill="x")
+
+    def _card_frame():
+        """Indented card frame for sub-options — matches card border style."""
+        f = tk.Frame(mid_frm, bg=C_CARD, highlightthickness=1,
+                     highlightbackground=C_BORDG)
+        f.pack(fill="x", padx=14, pady=4)
+        return f
+
+    def _type_badge(parent, text, fg, bg, bd):
+        f = tk.Frame(parent, bg=bg, highlightthickness=1, highlightbackground=bd)
+        f.pack(side="left", padx=(0,6))
+        tk.Label(f, text=text, bg=bg, fg=fg, font=("Courier",9,"bold"),
+                 padx=6, pady=2).pack()
+
+    # ── collect current editor state back into data model ────────────────────
+    def _safe_evar_get(v):
+        """Safely read an evar widget value — returns None if widget destroyed."""
+        try:
+            if isinstance(v, tk.Text):
+                return v.get("1.0","end-1c") if v.winfo_exists() else None
+            return v.get()
+        except Exception:
+            return None
+
+    def _collect():
+        uid = sel["uid"]
+        if sel["type"]=="cat":
+            c = _get_cat(uid)
+            if not c: return
+            for k in ("cat_id","loc_name","loc_desc","icon","picture","allowed","visible",
+                      "priority","map_state","map_name","map_zoom","map_trigger","scripted_gui"):
+                if k in _evars:
+                    val = _safe_evar_get(_evars[k])
+                    if val is not None: c[k] = val
+            for k in ("visible_when_empty","on_map_area"):
+                if k in _evars:
+                    val = _safe_evar_get(_evars[k])
+                    if val is not None: c[k] = bool(val)
+        elif sel["type"]=="dec":
+            d = _get_dec(uid)
+            if not d: return
+            for k in ("dec_id","loc_name","loc_desc","icon","allowed","visible","available",
+                      "cost","custom_cost_trigger","custom_cost_text","ai_hint_pp_cost",
+                      "cost_var","cost_amount","days_remove","days_re_enable",
+                      "mission_timeout","activation","war_with_on_timeout",
+                      "targets","target_array","target_trigger","target_root_trigger",
+                      "state_target_scope","on_map_mode",
+                      "war_complete_tag","war_remove_tag",
+                      "cancel_trigger","modifier","remove_trigger",
+                      "ai_will_do","priority","chain","highlight_states"):
+                if k in _evars:
+                    val = _safe_evar_get(_evars[k])
+                    if val is not None: d[k] = val
+            for k in ("fire_only_once","fixed_random_seed","is_mission","selectable_mission",
+                      "is_good","targets_dynamic","target_non_existing",
+                      "cancel_if_not_visible","war_target_complete","war_target_remove"):
+                if k in _evars:
+                    val = _safe_evar_get(_evars[k])
+                    if val is not None: d[k] = bool(val)
+            for k in ("cost_type","targeted"):
+                if k in _evars:
+                    val = _safe_evar_get(_evars[k])
+                    if val is not None: d[k] = val
+            for k in ("complete_effect","remove_effect","cancel_effect","timeout_effect"):
+                if k in _evars:
+                    val = _safe_evar_get(_evars[k])
+                    if val is not None: d[k] = val
+
+    # ── BUILD CATEGORY EDITOR ────────────────────────────────────────────────
+    def _delete_cat(uid):
+        """Delete a category and all its decisions (with confirmation)."""
+        c = _get_cat(uid)
+        if not c: return
+        n = len(_decs_for(uid))
+        msg = f"Delete category '{c['cat_id']}'"
+        if n: msg += f" and its {n} decision{'s' if n!=1 else ''}?"
+        else: msg += "?"
+        if not messagebox.askyesno("Delete Category", msg, parent=win): return
+        _collect(); _snapshot()
+        global dm_cats, dm_decs
+        dm_decs[:] = [d for d in dm_decs if d["cat_uid"] != uid]
+        dm_cats[:] = [c for c in dm_cats if c["uid"] != uid]
+        if dm_cats: sel["uid"]=dm_cats[0]["uid"]; sel["type"]="cat"
+        else:       sel["uid"]=None; sel["type"]=None
+        _rebuild_tree(); _rebuild_editor()
+
+    def _duplicate_cat(uid):
+        """Duplicate a category with all its decisions."""
+        import copy as _cp, uuid as _uv
+        _collect(); _snapshot()
+        c = _get_cat(uid)
+        if not c: return
+        nc = _cp.deepcopy(c)
+        nc["uid"] = str(_uv.uuid4()); nc["cat_id"] = c["cat_id"] + "_copy"
+        dm_cats.append(nc)
+        for d in _decs_for(uid):
+            nd = _cp.deepcopy(d)
+            nd["uid"] = str(_uv.uuid4()); nd["cat_uid"] = nc["uid"]
+            nd["dec_id"] = d["dec_id"] + "_copy"
+            dm_decs.append(nd)
+        sel["uid"]=nc["uid"]; sel["type"]="cat"
+        _rebuild_tree(); _rebuild_editor()
+
+    def _delete_dec(uid):
+        """Delete a single decision."""
+        d = _get_dec(uid)
+        if not d: return
+        if not messagebox.askyesno("Delete Decision",
+            f"Delete decision '{d['dec_id']}'?", parent=win): return
+        _collect(); _snapshot()
+        cat_uid = d["cat_uid"]
+        dm_decs[:] = [x for x in dm_decs if x["uid"] != uid]
+        # Select sibling or parent cat
+        siblings = _decs_for(cat_uid)
+        if siblings: sel["uid"]=siblings[0]["uid"]; sel["type"]="dec"
+        elif _get_cat(cat_uid): sel["uid"]=cat_uid; sel["type"]="cat"
+        else: sel["uid"]=None; sel["type"]=None
+        _rebuild_tree(); _rebuild_editor()
+
+    def _duplicate_dec(uid):
+        """Duplicate a decision."""
+        import copy as _cp, uuid as _uv
+        _collect(); _snapshot()
+        d = _get_dec(uid)
+        if not d: return
+        nd = _cp.deepcopy(d)
+        nd["uid"] = str(_uv.uuid4()); nd["dec_id"] = d["dec_id"] + "_copy"
+        dm_decs.append(nd)
+        sel["uid"]=nd["uid"]; sel["type"]="dec"
+        _rebuild_tree(); _rebuild_editor()
+
+    def _build_cat_editor(cat):
+        mid_hdr.config(text="  CATEGORY PROPERTIES")
+        tk.Label(mid_frm, text="", bg=C_PANEL, height=1).pack()
+        # type badge + id + action buttons
+        top = tk.Frame(mid_frm, bg=C_PANEL); top.pack(fill="x", padx=14, pady=(4,8))
+        _type_badge(top, "CATEGORY", C_GOLD, GOLD_TAG_BG, GOLD_TAG_BD)
+        tk.Label(top, text=cat["cat_id"], bg=C_PANEL, fg=C_TEXT,
+                 font=("Courier",11)).pack(side="left")
+        # Delete + Duplicate buttons (right-aligned)
+        tk.Button(top, text="⧉ Duplicate", command=lambda: _duplicate_cat(cat["uid"]),
+                  bg=C_CARD, fg=C_TEAL, relief="flat", font=("Helvetica",8),
+                  cursor="hand2", padx=6, pady=2).pack(side="right", padx=(4,0))
+        tk.Button(top, text="🗑 Delete", command=lambda: _delete_cat(cat["uid"]),
+                  bg=C_CARD, fg="#ef4444", relief="flat", font=("Helvetica",8),
+                  cursor="hand2", padx=6, pady=2).pack(side="right", padx=(4,0))
+
+        _sec("Identity", C_GOLD)
+        _field("Category ID", _sv("cat_id", cat["cat_id"]), mono=True,
+               hint='Used in decisions files:  my_category = { ... }')
+        _field("Display Name (localisation)", _sv("loc_name", cat["loc_name"]), hint='Loc key shown in-game. Use §Y...§! for colour.')
+        _field("Description (localisation)",  _sv("loc_desc", cat["loc_desc"]), hint='Tooltip text shown when hovering the category.')
+
+        _sec("GFX — Icon + Picture", C_PURPLE)
+        _gfx_field("Icon", "icon", cat["icon"],
+                   prefix_note='Auto-prefixed → GFX_decision_category_<n>  (or use full GFX_ name directly)')
+        _gfx_field("Picture (category detail panel)", "picture", cat["picture"],
+                   warn="Picture only renders if a localisation description is set above")
+        # Visual placement button
+        prow = tk.Frame(mid_frm, bg=C_PANEL); prow.pack(fill="x", padx=14, pady=(4,2))
+        tk.Button(prow, text="🖼  Visual Placement Editor →",
+                  command=lambda c=cat: _open_placement_cat(c),
+                  bg=GOLD_TAG_BG, fg=C_GOLD, relief="flat",
+                  font=("Courier",9), cursor="hand2", padx=10, pady=5,
+                  highlightthickness=1, highlightbackground=GOLD_TAG_BD).pack(side="left")
+
+        _sec("Triggers", C_TEAL)
+        _triggerblock("allowed  (checked ONCE at game start)",
+                      "allowed", cat["allowed"], hint="once-only")
+        _triggerblock("visible  (checked every frame)",
+                      "visible", cat["visible"], hint="per-frame")
+
+        _sec("Options", C_BLUE)
+        _field("Priority", _sv("priority", cat["priority"]), mono=True,
+               hint="Higher = closer to top.  Default = 1")
+        _toggle("visible_when_empty — show category even with no visible decisions",
+                _bv("visible_when_empty", cat["visible_when_empty"]))
+        on_map_v = _bv("on_map_area", cat["on_map_area"])
+        _toggle("on_map_area — camera move button at top of list", on_map_v)
+        _toggle("scripted_gui — embed custom GUI panel in category",
+                _bv("scripted_gui", False))
+
+        map_host = tk.Frame(mid_frm, bg=C_PANEL); map_host.pack(fill="x")
+        def _toggle_map(*_):
+            for w in map_host.winfo_children(): w.destroy()
+            if not on_map_v.get(): return
+            cf = tk.Frame(map_host, bg=C_CARD, highlightthickness=1,
+                          highlightbackground=C_BORDG)
+            cf.pack(fill="x", padx=14, pady=4)
+            tk.Label(cf, text="  ON MAP AREA CONFIG", bg=C_CARD, fg=C_TEAL,
+                     font=("Courier",9,"bold"), pady=4, anchor="w").pack(fill="x")
+            for lbl2, k2, dflt2, ht2 in [
+                ("Target state",  "map_state", cat["map_state"], "state ID"),
+                ("Name (loc key)","map_name",  cat["map_name"],  "localisation key"),
+                ("Zoom level",    "map_zoom",  cat["map_zoom"],  "50–3000  (lower = more zoomed in)"),
+            ]:
+                r2 = tk.Frame(cf, bg=C_CARD); r2.pack(fill="x", padx=8, pady=1)
+                tk.Label(r2, text=lbl2.upper(), bg=C_CARD, fg=C_DIM,
+                         font=("Courier",8), anchor="w").pack(fill="x")
+                tk.Entry(r2, textvariable=_sv(k2, dflt2), bg=BG_DARK, fg=C_TEXT,
+                         insertbackground=C_BLUE, font=("Courier",9), relief="flat",
+                         highlightthickness=1, highlightbackground=C_BORDG
+                         ).pack(fill="x", ipady=3, pady=(2,4))
+                if ht2:
+                    tk.Label(r2, text=ht2, bg=C_CARD, fg=C_DIM,
+                             font=("Helvetica",8,"italic")).pack(fill="x")
+            tk.Label(cf, text="  TARGET_ROOT_TRIGGER", bg=C_CARD, fg=C_DIM,
+                     font=("Courier",8), anchor="w", padx=8).pack(fill="x")
+            mt = tk.Text(cf, bg=BG_DARK, fg=C_GREEN, insertbackground=C_BLUE,
+                         font=("Courier",9), relief="flat",
+                         highlightthickness=1, highlightbackground=C_BORDG,
+                         height=2, wrap="none")
+            mt.pack(fill="x", padx=8, pady=(2,6))
+            _reg_text("map_trigger", mt, cat.get("map_trigger",""))
+        on_map_v.trace_add("write", _toggle_map)
+        _toggle_map()
+
+    # ── BUILD DECISION EDITOR ────────────────────────────────────────────────
+    def _build_dec_editor(dec):
+        mid_hdr.config(text="  DECISION PROPERTIES")
+        tk.Label(mid_frm, text="", bg=C_PANEL, height=1).pack()
+        # type badge row — DECISION + tags
+        top = tk.Frame(mid_frm, bg=C_PANEL); top.pack(fill="x", padx=14, pady=(4,8))
+        _type_badge(top, "DECISION", C_BLUE, BLUE_TAG_BG, BLUE_TAG_BD)
+        if dec["targeted"] != "none":
+            _type_badge(top, "TARGETED", C_TEAL, TEAL_TAG_BG, TEAL_TAG_BD)
+        if dec["is_mission"]:
+            _type_badge(top, "MISSION", C_PURPLE, PURP_TAG_BG, PURP_TAG_BD)
+        if dec["fire_only_once"]:
+            _type_badge(top, "ONCE", C_ORANGE, ORAN_TAG_BG, ORAN_TAG_BD)
+        tk.Label(top, text=dec["dec_id"], bg=C_PANEL, fg=C_TEXT,
+                 font=("Courier",11)).pack(side="left")
+        tk.Button(top, text="⧉ Duplicate", command=lambda: _duplicate_dec(dec["uid"]),
+                  bg=C_CARD, fg=C_TEAL, relief="flat", font=("Helvetica",8),
+                  cursor="hand2", padx=6, pady=2).pack(side="right", padx=(4,0))
+        tk.Button(top, text="🗑 Delete", command=lambda: _delete_dec(dec["uid"]),
+                  bg=C_CARD, fg="#ef4444", relief="flat", font=("Helvetica",8),
+                  cursor="hand2", padx=6, pady=2).pack(side="right", padx=(4,0))
+
+        _sec("Identity", C_GOLD)
+        _field("Decision ID", _sv("dec_id", dec["dec_id"]), mono=True, hint='Unique key, e.g. TAG_my_decision')
+        _field("Display Name (localisation)", _sv("loc_name", dec["loc_name"]), hint='Loc key shown in-game. Use §Y...§! for colour.')
+        _field("Description (localisation, optional)", _sv("loc_desc", dec.get("loc_desc","")))
+        _gfx_field("Icon", "icon", dec["icon"],
+                   prefix_note='Auto-prefixed → GFX_decision_<n>  (or full GFX_ name). Supports conditional icon blocks.')
+        _field("Chain / group tag (visual only)", _sv("chain", dec["chain"]), mono=True)
+
+        _sec("Triggers", C_TEAL)
+        _triggerblock("allowed  (once-only at game start)",
+                      "allowed", dec["allowed"], hint="once-only")
+        _triggerblock("visible  (per-frame — makes decision show)",
+                      "visible", dec["visible"], hint="per-frame")
+        _triggerblock("available  (per-frame — enables or greys out)",
+                      "available", dec["available"], hint="per-frame")
+
+        _sec("Cost", C_BLUE)
+        use_custom_v = tk.BooleanVar(value=(dec["cost_type"] != "pp"))
+        _evars["_use_custom"] = use_custom_v
+        _toggle("Use custom cost (non-PP cost)", use_custom_v, hint_tag="visual only")
+
+        cost_host = tk.Frame(mid_frm, bg=C_PANEL); cost_host.pack(fill="x")
+        def _rebuild_cost(*_):
+            if not cost_host.winfo_exists(): return
+            for w in cost_host.winfo_children(): w.destroy()
+            if not use_custom_v.get():
+                _evars["cost_type"] = tk.StringVar(value="pp")
+                # inline field inside cost_host
+                cf = tk.Frame(cost_host, bg=C_PANEL); cf.pack(fill="x", **PAD)
+                tk.Label(cf, text="COST (POLITICAL POWER)", bg=C_PANEL, fg=C_DIM,
+                         font=("Courier",8)).pack(fill="x")
+                sv2 = _sv("cost", dec["cost"])
+                tk.Entry(cf, textvariable=sv2, bg=C_CARD, fg=C_TEXT,
+                         insertbackground=C_BLUE, font=("Courier",10),
+                         relief="flat", highlightthickness=1,
+                         highlightbackground=C_BORDG).pack(fill="x", ipady=4, pady=(2,0))
+                tk.Label(cf, text="Can be a variable.  Default = 0",
+                         bg=C_PANEL, fg=C_DIM, font=("Helvetica",8,"italic")).pack(fill="x")
+            else:
+                _evars["cost_type"] = tk.StringVar(value="custom")
+                cf = tk.Frame(cost_host, bg=C_CARD, highlightthickness=1,
+                              highlightbackground=C_BORDG)
+                cf.pack(fill="x", padx=14, pady=4)
+                # build trigger block inside card
+                tk.Label(cf, text="CUSTOM_COST_TRIGGER", bg=C_CARD, fg=C_DIM,
+                         font=("Courier",8), padx=4).pack(fill="x", pady=(4,0))
+                ct = tk.Text(cf, bg=BG_DARK, fg=C_GREEN, insertbackground=C_BLUE,
+                             font=("Courier",9), relief="flat",
+                             highlightthickness=1, highlightbackground=C_BORDG,
+                             height=2, wrap="none")
+                ct.pack(fill="x", padx=4, pady=2)
+                _reg_text("custom_cost_trigger", ct, dec["custom_cost_trigger"])
+                for lbl2, k2, dflt2, ht2 in [
+                    ("custom_cost_text (loc key)", "custom_cost_text", dec["custom_cost_text"], ""),
+                    ("ai_hint_pp_cost",            "ai_hint_pp_cost",  dec["ai_hint_pp_cost"],
+                     "Tell AI how much PP to save (optional)"),
+                ]:
+                    r2 = tk.Frame(cf, bg=C_CARD); r2.pack(fill="x", padx=4, pady=1)
+                    tk.Label(r2, text=lbl2.upper(), bg=C_CARD, fg=C_DIM,
+                             font=("Courier",8)).pack(fill="x")
+                    tk.Entry(r2, textvariable=_sv(k2, dflt2), bg=BG_DARK, fg=C_TEXT,
+                             insertbackground=C_BLUE, font=("Courier",9),
+                             relief="flat", highlightthickness=1,
+                             highlightbackground=C_BORDG).pack(fill="x", ipady=3, pady=(2,4))
+                    if ht2:
+                        tk.Label(r2, text=ht2, bg=C_CARD, fg=C_DIM,
+                                 font=("Helvetica",8,"italic")).pack(fill="x")
+                # warning banner inside card
+                wb = tk.Frame(cf, bg=ORAN_TAG_BG, highlightthickness=1,
+                              highlightbackground=ORAN_TAG_BD)
+                wb.pack(fill="x", padx=4, pady=(2,6))
+                tk.Label(wb, text="⚠ Custom cost does NOT deduct anything automatically —\nadd hidden_effect in complete_effect to subtract manually",
+                         bg=ORAN_TAG_BG, fg=C_ORANGE, font=("Helvetica",8),
+                         justify="left", padx=6, pady=4).pack(fill="x")
+        use_custom_v.trace_add("write", _rebuild_cost)
+        _rebuild_cost()
+
+        _sec("Timer", C_PURPLE)
+        _field("days_remove  (-1 = never auto-removes, blank = no timer)",
+               _sv("days_remove", dec["days_remove"]), mono=True)
+        _field("days_re_enable  (cooldown, blank = next day)",
+               _sv("days_re_enable", dec["days_re_enable"]), mono=True)
+        _toggle("fire_only_once — disappears after first use",
+                _bv("fire_only_once", dec["fire_only_once"]))
+        _toggle("fixed_random_seed — same random result each use (default ON)",
+                _bv("fixed_random_seed", dec["fixed_random_seed"]))
+
+        _sec("Mission Mode", C_PURPLE)
+        miss_v = _bv("is_mission", dec["is_mission"])
+        _evars["_is_mission"] = miss_v
+        _toggle("Turn into a MISSION (adds days_mission_timeout)", miss_v)
+        miss_host = tk.Frame(mid_frm, bg=C_PANEL); miss_host.pack(fill="x")
+        def _rebuild_mission(*_):
+            if not miss_host.winfo_exists(): return
+            for w in miss_host.winfo_children(): w.destroy()
+            if not miss_v.get(): return
+            cf = tk.Frame(miss_host, bg=C_CARD, highlightthickness=1,
+                          highlightbackground=C_BORDG)
+            cf.pack(fill="x", padx=14, pady=4)
+            # fields inside card
+            for lbl2, k2, dflt2 in [
+                ("days_mission_timeout","mission_timeout", dec["mission_timeout"]),
+            ]:
+                r2=tk.Frame(cf,bg=C_CARD); r2.pack(fill="x",padx=6,pady=2)
+                tk.Label(r2,text=lbl2.upper(),bg=C_CARD,fg=C_DIM,font=("Courier",8)).pack(fill="x")
+                tk.Entry(r2,textvariable=_sv(k2,dflt2),bg=BG_DARK,fg=C_TEXT,
+                         insertbackground=C_BLUE,font=("Courier",9),relief="flat",
+                         highlightthickness=1,highlightbackground=C_BORDG).pack(fill="x",ipady=3,pady=(2,4))
+            def _mtoggle(lbl3,k3,v3):
+                rr=tk.Frame(cf,bg=C_CARD); rr.pack(fill="x",padx=6,pady=1)
+                bv2=_bv(k3,v3)
+                tk.Checkbutton(rr,variable=bv2,bg=C_CARD,activebackground=C_CARD,
+                               selectcolor=C_GREEN,font=("Helvetica",9),cursor="hand2").pack(side="left")
+                tk.Label(rr,text=lbl3,bg=C_CARD,fg=C_DIM,font=("Helvetica",9)).pack(side="left")
+            _mtoggle("selectable_mission — player must click to activate",
+                     "selectable_mission", dec["selectable_mission"])
+            _mtoggle("is_good — swaps tooltip to show 'Effects when failed'",
+                     "is_good", dec["is_good"])
+            # activation trigger
+            tk.Label(cf,text="ACTIVATION  (REPLACES VISIBLE — CHECKED DAILY)",
+                     bg=C_CARD,fg=C_DIM,font=("Courier",8),padx=6).pack(fill="x",pady=(4,0))
+            at=tk.Text(cf,bg=BG_DARK,fg=C_GREEN,insertbackground=C_BLUE,
+                       font=("Courier",9),relief="flat",highlightthickness=1,
+                       highlightbackground=C_BORDG,height=2,wrap="none")
+            at.pack(fill="x",padx=6,pady=2)
+            _reg_text("activation",at,dec["activation"])
+            # warning
+            wb2=tk.Frame(cf,bg=ORAN_TAG_BG,highlightthickness=1,highlightbackground=ORAN_TAG_BD)
+            wb2.pack(fill="x",padx=6,pady=(0,2))
+            tk.Label(wb2,text="⚠ visible = {} does NOTHING in missions — use activation instead",
+                     bg=ORAN_TAG_BG,fg=C_ORANGE,font=("Helvetica",8),padx=4,pady=3).pack(fill="x")
+            # timeout_effect
+            tk.Label(cf,text="TIMEOUT_EFFECT  (FIRES IF TIMER RUNS OUT)",
+                     bg=C_CARD,fg=C_DIM,font=("Courier",8),padx=6).pack(fill="x",pady=(4,0))
+            te=tk.Text(cf,bg=BG_DARK,fg=C_GREEN,insertbackground=C_BLUE,
+                       font=("Courier",9),relief="flat",highlightthickness=1,
+                       highlightbackground=C_BORDG,height=2,wrap="none")
+            te.pack(fill="x",padx=6,pady=(2,6))
+            _reg_text("timeout_effect",te,dec.get("timeout_effect",""))
+        miss_v.trace_add("write",_rebuild_mission); _rebuild_mission()
+
+        _sec("Targeting", C_TEAL)
+        tgt_country_v = tk.BooleanVar(value=(dec["targeted"]=="country"))
+        tgt_state_v   = tk.BooleanVar(value=(dec["targeted"]=="state"))
+        _evars["_tgt_country"] = tgt_country_v
+        _evars["_tgt_state"]   = tgt_state_v
+        def _on_tgt_country(*_):
+            if tgt_country_v.get(): tgt_state_v.set(False)
+            _sync_targeted()
+        def _on_tgt_state(*_):
+            if tgt_state_v.get(): tgt_country_v.set(False)
+            _sync_targeted()
+        def _sync_targeted():
+            if tgt_country_v.get(): _evars["targeted"] = tk.StringVar(value="country")
+            elif tgt_state_v.get(): _evars["targeted"] = tk.StringVar(value="state")
+            else:                   _evars["targeted"] = tk.StringVar(value="none")
+            _rebuild_tgt()
+
+        row_tgt = tk.Frame(mid_frm, bg=C_PANEL); row_tgt.pack(fill="x", padx=14, pady=3)
+        tk.Checkbutton(row_tgt, variable=tgt_country_v, bg=C_PANEL,
+                       activebackground=C_PANEL, selectcolor=C_GREEN,
+                       font=("Helvetica",9), cursor="hand2").pack(side="left")
+        tk.Label(row_tgt, text="Targeted decision (FROM = target country)",
+                 bg=C_PANEL, fg=C_DIM, font=("Helvetica",9)).pack(side="left")
+        tgt_country_v.trace_add("write", _on_tgt_country)
+        row_tst = tk.Frame(mid_frm, bg=C_PANEL); row_tst.pack(fill="x", padx=14, pady=3)
+        tk.Checkbutton(row_tst, variable=tgt_state_v, bg=C_PANEL,
+                       activebackground=C_PANEL, selectcolor=C_GREEN,
+                       font=("Helvetica",9), cursor="hand2").pack(side="left")
+        tk.Label(row_tst, text="State targeted (FROM = target state)",
+                 bg=C_PANEL, fg=C_DIM, font=("Helvetica",9)).pack(side="left")
+        tgt_state_v.trace_add("write", _on_tgt_state)
+
+        tgt_host = tk.Frame(mid_frm, bg=C_PANEL); tgt_host.pack(fill="x")
+        tgt_sub_tab = tk.StringVar(value="countries")
+
+        def _rebuild_tgt(*_):
+            if not tgt_host.winfo_exists(): return
+            for w in tgt_host.winfo_children(): w.destroy()
+            targeted = "country" if tgt_country_v.get() else ("state" if tgt_state_v.get() else "none")
+            _evars["targeted"] = tk.StringVar(value=targeted)
+            if targeted == "none":
+                # standard war warnings card
+                cf = tk.Frame(tgt_host, bg=C_CARD, highlightthickness=1,
+                              highlightbackground=C_BORDG)
+                cf.pack(fill="x", padx=14, pady=4)
+                war_c_v = _bv("war_target_complete", dec["war_complete_tag"] != "")
+                war_r_v = _bv("war_target_remove",   dec["war_remove_tag"] != "")
+                def _mtog2(lbl3,bv2,parent=cf):
+                    rr=tk.Frame(parent,bg=C_CARD); rr.pack(fill="x",padx=6,pady=1)
+                    tk.Checkbutton(rr,variable=bv2,bg=C_CARD,activebackground=C_CARD,
+                                   selectcolor=C_GREEN,font=("Helvetica",9),cursor="hand2").pack(side="left")
+                    tk.Label(rr,text=lbl3,bg=C_CARD,fg=C_DIM,font=("Helvetica",9)).pack(side="left")
+                _mtog2("war_with_on_complete = TAG", war_c_v)
+                _mtog2("war_with_on_remove = TAG",   war_r_v)
+                war_host = tk.Frame(cf, bg=C_CARD); war_host.pack(fill="x",padx=6,pady=(0,4))
+                def _rebuild_war_tag(*_):
+                    if not war_host.winfo_exists(): return
+                    for w in war_host.winfo_children(): w.destroy()
+                    if war_c_v.get() or war_r_v.get():
+                        rr2=tk.Frame(war_host,bg=C_CARD); rr2.pack(fill="x",pady=1)
+                        tk.Label(rr2,text="TARGET TAG",bg=C_CARD,fg=C_DIM,font=("Courier",8)).pack(fill="x")
+                        tk.Entry(rr2,textvariable=_sv("war_complete_tag",dec["war_complete_tag"]),
+                                 bg=BG_DARK,fg=C_TEXT,insertbackground=C_BLUE,font=("Courier",9),
+                                 relief="flat",highlightthickness=1,highlightbackground=C_BORDG
+                                 ).pack(fill="x",ipady=3,pady=(2,4))
+                war_c_v.trace_add("write",_rebuild_war_tag)
+                war_r_v.trace_add("write",_rebuild_war_tag)
+                _rebuild_war_tag()
+                return
+            # targeted card
+            cf = tk.Frame(tgt_host, bg=C_CARD, highlightthickness=1,
+                          highlightbackground=C_BORDG)
+            cf.pack(fill="x", padx=14, pady=4)
+            # sub-tab row: targets={} | target_array | target_trigger
+            tab_row = tk.Frame(cf, bg=C_CARD); tab_row.pack(fill="x", padx=6, pady=6)
+            TABS = [("countries","targets = {}"),
+                    ("array","target_array"),
+                    ("trigger","target_trigger")]
+            for tid2, tlbl2 in TABS:
+                is_active = (tgt_sub_tab.get()==tid2)
+                fb = tk.Frame(tab_row,
+                              bg=BLUE_TAG_BG if is_active else C_CARD,
+                              highlightthickness=1,
+                              highlightbackground=BLUE_TAG_BD if is_active else C_BORDG)
+                fb.pack(side="left", padx=(0,4))
+                def _mktab2(t=tid2): tgt_sub_tab.set(t); _rebuild_tgt()
+                tk.Button(fb, text=tlbl2, command=_mktab2,
+                          bg=BLUE_TAG_BG if is_active else C_CARD,
+                          fg=C_BLUE if is_active else C_DIM,
+                          relief="flat", font=("Courier",9),
+                          cursor="hand2", padx=8, pady=3).pack()
+            # sub-tab content
+            sub = tgt_sub_tab.get()
+            if sub == "countries":
+                r2=tk.Frame(cf,bg=C_CARD); r2.pack(fill="x",padx=6,pady=2)
+                tk.Label(r2,text="TARGETS = { TAG TAG TAG ... }",bg=C_CARD,fg=C_DIM,
+                         font=("Courier",8)).pack(fill="x")
+                tk.Entry(r2,textvariable=_sv("targets",dec["targets"]),bg=BG_DARK,fg=C_TEXT,
+                         insertbackground=C_BLUE,font=("Courier",9),relief="flat",
+                         highlightthickness=1,highlightbackground=C_BORDG).pack(fill="x",ipady=3,pady=(2,4))
+                def _mtog3(lbl3,k3,v3):
+                    rr=tk.Frame(cf,bg=C_CARD); rr.pack(fill="x",padx=6,pady=1)
+                    bv2=_bv(k3,v3)
+                    tk.Checkbutton(rr,variable=bv2,bg=C_CARD,activebackground=C_CARD,
+                                   selectcolor=C_GREEN,font=("Helvetica",9),cursor="hand2").pack(side="left")
+                    tk.Label(rr,text=lbl3,bg=C_CARD,fg=C_DIM,font=("Helvetica",9)).pack(side="left")
+                _mtog3("targets_dynamic — include civil war / dynamic countries",
+                       "targets_dynamic", dec["targets_dynamic"])
+                _mtog3("target_non_existing — allow non-existing countries",
+                       "target_non_existing", dec["target_non_existing"])
+            elif sub == "array":
+                r2=tk.Frame(cf,bg=C_CARD); r2.pack(fill="x",padx=6,pady=2)
+                tk.Label(r2,text="TARGET_ARRAY (GAME ARRAY NAME)",bg=C_CARD,fg=C_DIM,
+                         font=("Courier",8)).pack(fill="x")
+                tk.Entry(r2,textvariable=_sv("target_array",dec["target_array"]),bg=BG_DARK,fg=C_TEXT,
+                         insertbackground=C_BLUE,font=("Courier",9),relief="flat",
+                         highlightthickness=1,highlightbackground=C_BORDG).pack(fill="x",ipady=3,pady=(2,4))
+                tk.Label(r2,text="e.g. enemies, allies, controlled_states",
+                         bg=C_CARD,fg=C_DIM,font=("Helvetica",8,"italic")).pack(fill="x")
+            else:  # trigger
+                tk.Label(cf,text="TARGET_TRIGGER  (ROOT = DECIDER, FROM = TARGET)",
+                         bg=C_CARD,fg=C_DIM,font=("Courier",8),padx=6).pack(fill="x",pady=(4,0))
+                tt=tk.Text(cf,bg=BG_DARK,fg=C_GREEN,insertbackground=C_BLUE,
+                           font=("Courier",9),relief="flat",highlightthickness=1,
+                           highlightbackground=C_BORDG,height=3,wrap="none")
+                tt.pack(fill="x",padx=6,pady=(2,4))
+                _reg_text("target_trigger",tt,dec["target_trigger"])
+            # target_root_trigger always visible
+            tk.Label(cf,text="TARGET_ROOT_TRIGGER  (ROOT ONLY — RUNS BEFORE TARGET_TRIGGER FOR PERFORMANCE)",
+                     bg=C_CARD,fg=C_DIM,font=("Courier",7),padx=6,wraplength=380).pack(fill="x",pady=(6,0))
+            rt=tk.Text(cf,bg=BG_DARK,fg=C_GREEN,insertbackground=C_BLUE,
+                       font=("Courier",9),relief="flat",highlightthickness=1,
+                       highlightbackground=C_BORDG,height=2,wrap="none")
+            rt.pack(fill="x",padx=6,pady=(2,4))
+            _reg_text("target_root_trigger",rt,dec["target_root_trigger"])
+            if targeted == "state":
+                r3=tk.Frame(cf,bg=C_CARD); r3.pack(fill="x",padx=6,pady=2)
+                tk.Label(r3,text="STATE_TARGET SCOPE",bg=C_CARD,fg=C_DIM,font=("Courier",8)).pack(fill="x")
+                scope_opts=["yes","any_owned_state","any_controlled_state",
+                            "any","europe","africa","north_america","south_america","asia","oceania","middle_east"]
+                sv_scope=_sv("state_target_scope",dec["state_target_scope"])
+                om=tk.OptionMenu(r3,sv_scope,*scope_opts)
+                om.config(bg=BG_DARK,fg=C_TEXT,activebackground=C_BORDG,relief="flat",
+                          highlightthickness=1,highlightbackground=C_BORDG,font=("Courier",9))
+                om["menu"].config(bg=BG_DARK,fg=C_TEXT)
+                om.pack(fill="x",pady=2)
+                tk.Label(r3,text="any / any_owned_state / any_controlled_state / europe / africa ...",
+                         bg=C_CARD,fg=C_DIM,font=("Helvetica",8,"italic")).pack(fill="x")
+                r4=tk.Frame(cf,bg=C_CARD); r4.pack(fill="x",padx=6,pady=2)
+                tk.Label(r4,text="ON_MAP_MODE",bg=C_CARD,fg=C_DIM,font=("Courier",8)).pack(fill="x")
+                mode_opts=["map_only","decision_view_only","map_and_decisions_view"]
+                sv_mode=_sv("on_map_mode",dec["on_map_mode"])
+                om2=tk.OptionMenu(r4,sv_mode,*mode_opts)
+                om2.config(bg=BG_DARK,fg=C_TEXT,activebackground=C_BORDG,relief="flat",
+                           highlightthickness=1,highlightbackground=C_BORDG,font=("Courier",9))
+                om2["menu"].config(bg=BG_DARK,fg=C_TEXT)
+                om2.pack(fill="x",pady=2)
+            # war warnings (targeted)
+            tk.Label(cf,text="WAR WARNINGS (TARGETED)",bg=C_CARD,fg=C_RED,
+                     font=("Courier",9,"bold"),padx=6,pady=(8,2)).pack(fill="x")
+            def _wt(lbl3,k3,v3):
+                rr=tk.Frame(cf,bg=C_CARD); rr.pack(fill="x",padx=6,pady=1)
+                bv2=_bv(k3,v3)
+                tk.Checkbutton(rr,variable=bv2,bg=C_CARD,activebackground=C_CARD,
+                               selectcolor=C_GREEN,font=("Helvetica",9),cursor="hand2").pack(side="left")
+                tk.Label(rr,text=lbl3,bg=C_CARD,fg=C_DIM,font=("Helvetica",9)).pack(side="left")
+            _wt("war_with_target_on_complete — warn FROM on complete",
+                "war_target_complete", dec["war_target_complete"])
+            _wt("war_with_target_on_remove — warn FROM on remove",
+                "war_target_remove", dec["war_target_remove"])
+            # small bottom pad
+            tk.Label(cf,text="",bg=C_CARD,pady=3).pack()
+        _rebuild_tgt()
+
+        _sec("Highlight States & Map Mode", C_TEAL)
+        tk.Label(mid_frm, text="  Paste raw highlight_states block. For non-targeted decisions that show on map, also set on_map_mode.",
+                 bg=C_PANEL, fg=C_DIM, font=("Helvetica",8,"italic"),
+                 wraplength=380).pack(fill="x", padx=14)
+        _triggerblock("highlight_states  (optional — highlights states on map)",
+                      "highlight_states", dec.get("highlight_states",""), rows=3)
+        # on_map_mode for non-targeted decisions — store in the shared "on_map_mode" field
+        _field("on_map_mode  (non-targeted, e.g. map_and_decisions_view — leave blank to omit)",
+               _sv("on_map_mode", dec.get("on_map_mode","")), mono=True)
+
+        _sec("Effects", C_GREEN)
+        _effectblock("complete_effect  (fires immediately on selection)",
+                     "complete_effect", dec["complete_effect"], rows=4)
+
+        # timer effects — shown only when days_remove is set
+        timer_host = tk.Frame(mid_frm, bg=C_PANEL); timer_host.pack(fill="x")
+        def _rebuild_timer_fx(*_):
+            if not timer_host.winfo_exists(): return
+            for w in timer_host.winfo_children(): w.destroy()
+            dr = _evars.get("days_remove")
+            val = (dr.get() if isinstance(dr, tk.StringVar) else "") if dr else ""
+            if not val.strip(): return
+            # these are rendered directly into mid_frm via helpers but we need a
+            # sub-frame approach — inline build:
+            def _sub_effectblock(lbl3,k3,v3,rows2=3):
+                sf=tk.Frame(timer_host,bg=C_PANEL); sf.pack(fill="x",**PAD)
+                tk.Label(sf,text=lbl3.upper(),bg=C_PANEL,fg=C_DIM,font=("Courier",8)).pack(fill="x")
+                t2=tk.Text(sf,bg=C_CARD,fg=C_GREEN,insertbackground=C_BLUE,
+                           font=("Courier",9),relief="flat",highlightthickness=1,
+                           highlightbackground=C_BORDG,height=rows2,wrap="none",undo=True)
+                t2.pack(fill="x",pady=(2,0))
+                br2=tk.Frame(sf,bg=C_PANEL); br2.pack(fill="x",pady=(2,0))
+                tk.Button(br2,text="＋ Effect Picker",command=lambda tw=t2:_open_effect_picker(tw),
+                          bg=C_CARD,fg=C_BLUE,relief="flat",font=("Courier",8),
+                          cursor="hand2",padx=8,pady=2,highlightthickness=1,
+                          highlightbackground=BLUE_TAG_BD).pack(side="right")
+                _reg_text(k3,t2,v3)
+            def _sub_trigblock(lbl3,k3,v3):
+                sf=tk.Frame(timer_host,bg=C_PANEL); sf.pack(fill="x",**PAD)
+                tk.Label(sf,text=lbl3.upper(),bg=C_PANEL,fg=C_DIM,font=("Courier",8)).pack(fill="x")
+                t2=tk.Text(sf,bg=C_CARD,fg=C_GREEN,insertbackground=C_BLUE,
+                           font=("Courier",9),relief="flat",highlightthickness=1,
+                           highlightbackground=C_BORDG,height=2,wrap="none",undo=True)
+                t2.pack(fill="x",pady=(2,0))
+                _reg_text(k3,t2,v3)
+            def _sub_toggle2(lbl3,k3,v3):
+                rr=tk.Frame(timer_host,bg=C_PANEL); rr.pack(fill="x",padx=14,pady=3)
+                bv2=_bv(k3,v3)
+                tk.Checkbutton(rr,variable=bv2,bg=C_PANEL,activebackground=C_PANEL,
+                               selectcolor=C_GREEN,font=("Helvetica",9),cursor="hand2").pack(side="left")
+                tk.Label(rr,text=lbl3,bg=C_PANEL,fg=C_DIM,font=("Helvetica",9)).pack(side="left")
+            _sub_effectblock("remove_effect  (fires when timer ends)",   "remove_effect", dec["remove_effect"])
+            _sub_effectblock("cancel_effect  (fires on early cancel, no remove_effect)", "cancel_effect",  dec["cancel_effect"],rows2=2)
+            _sub_trigblock("cancel_trigger  (cancels timer without remove_effect)", "cancel_trigger", dec["cancel_trigger"])
+            _sub_toggle2("cancel_if_not_visible — auto-cancel when not visible", "cancel_if_not_visible", dec["cancel_if_not_visible"])
+            _sub_effectblock("modifier  (active during timer)", "modifier", dec["modifier"],rows2=2)
+            _sub_trigblock("remove_trigger  (instantly fires remove_effect)", "remove_trigger", dec["remove_trigger"])
+        if "days_remove" in _evars:
+            _evars["days_remove"].trace_add("write", _rebuild_timer_fx)
+        _rebuild_timer_fx()
+
+        # Register hooks for post-populate refresh
+        _editor_hooks["rebuild_tgt"]      = _rebuild_tgt
+        _editor_hooks["rebuild_timer_fx"] = _rebuild_timer_fx
+        _editor_hooks["rebuild_cost"]     = _rebuild_cost
+        _editor_hooks["rebuild_mission"]  = _rebuild_mission
+
+        _sec("AI", C_ORANGE)
+        # red warning banner
+        rb = tk.Frame(mid_frm, bg=RED_TAG_BG, highlightthickness=1,
+                      highlightbackground=RED_TAG_BD)
+        rb.pack(fill="x", padx=14, pady=(0,4))
+        tk.Label(rb, text="⚠ AI will NEVER take this decision by default — ai_will_do is required",
+                 bg=RED_TAG_BG, fg=C_RED, font=("Helvetica",9),
+                 padx=6, pady=4).pack(fill="x")
+        _triggerblock("ai_will_do  (MTTH block — base + modifier triggers)",
+                      "ai_will_do", dec["ai_will_do"], rows=3)
+        _field("priority", _sv("priority", dec["priority"]), mono=True,
+               hint="Higher = shown earlier in AI evaluation")
+
+    # ── rebuild_editor  (clears mid_frm and dispatches) ──────────────────────
+    # Track what type is currently built so we know when to do a full rebuild
+    _editor_state = {"type": None}  # "cat", "dec", or None
+
+    def _set_var_silent(key, value):
+        """Set a tkinter var without firing its write traces."""
+        v = _evars.get(key)
+        if v is None: return
+        try:
+            cbs = [(m, cb) for m, cb in v.trace_info() if "write" in m]
+            for m, cb in cbs:
+                try: v.trace_remove("write", cb)
+                except Exception: pass
+            if isinstance(v, tk.BooleanVar): v.set(bool(value))
+            else: v.set(str(value) if value is not None else "")
+            for m, cb in cbs:
+                try: v.trace_add("write", lambda *a, _cb=cb, _v=v: None)
+                except Exception: pass
+        except Exception:
+            try:
+                if isinstance(v, tk.BooleanVar): v.set(bool(value))
+                else: v.set(str(value) if value is not None else "")
+            except Exception: pass
+
+    def _set_text_silent(key, value):
+        """Update a tk.Text widget in-place."""
+        v = _evars.get(key)
+        if not isinstance(v, tk.Text): return
+        try:
+            v.delete("1.0", "end")
+            if value: v.insert("1.0", str(value))
+        except Exception: pass
+
+    def _populate_dec_editor(d):
+        """Fast-path: populate existing dec editor without rebuilding any widgets."""
+        # Simple string / text fields
+        for k in ("dec_id","loc_name","loc_desc","icon","chain","priority",
+                  "allowed","visible","available",
+                  "cost","days_remove","days_re_enable",
+                  "custom_cost_trigger","custom_cost_text","ai_hint_pp_cost",
+                  "mission_timeout","activation",
+                  "targets","target_array","target_trigger","target_root_trigger",
+                  "state_target_scope","on_map_mode","war_with_on_timeout",
+                  "war_complete_tag","war_remove_tag",
+                  "cancel_trigger","modifier","remove_trigger","highlight_states",
+                  "ai_will_do","complete_effect","remove_effect",
+                  "cancel_effect","timeout_effect"):
+            val = d.get(k, "") or ""
+            if k in _evars:
+                v = _evars[k]
+                if isinstance(v, tk.Text): _set_text_silent(k, val)
+                else: _set_var_silent(k, val)
+        # Bool flags (not structural — don't drive sub-section rebuilds)
+        for k in ("fire_only_once","fixed_random_seed","selectable_mission",
+                  "is_good","targets_dynamic","target_non_existing",
+                  "cancel_if_not_visible","war_target_complete","war_target_remove"):
+            _set_var_silent(k, bool(d.get(k, False)))
+        # Structural vars — set silently then fire hooks once
+        _set_var_silent("_use_custom", d.get("cost_type","pp") != "pp")
+        targeted = d.get("targeted","none")
+        _set_var_silent("_tgt_country", targeted == "country")
+        _set_var_silent("_tgt_state",   targeted == "state")
+        _set_var_silent("_is_mission",  bool(d.get("is_mission", False)))
+        # Fire sub-section rebuilds once cleanly
+        for hook in ("rebuild_cost","rebuild_mission","rebuild_tgt","rebuild_timer_fx"):
+            fn = _editor_hooks.get(hook)
+            if fn:
+                try: fn()
+                except Exception: pass
+        # Update badge row
+        try:
+            children = mid_frm.winfo_children()
+            if len(children) > 1:
+                top_frame = children[1]
+                for w in top_frame.winfo_children(): w.destroy()
+                _type_badge(top_frame, "DECISION", C_BLUE, BLUE_TAG_BG, BLUE_TAG_BD)
+                if targeted != "none":
+                    _type_badge(top_frame, "TARGETED", C_TEAL, TEAL_TAG_BG, TEAL_TAG_BD)
+                if d.get("is_mission"):
+                    _type_badge(top_frame, "MISSION", C_PURPLE, PURP_TAG_BG, PURP_TAG_BD)
+                if d.get("fire_only_once"):
+                    _type_badge(top_frame, "ONCE", C_ORANGE, ORAN_TAG_BG, ORAN_TAG_BD)
+                tk.Label(top_frame, text=d["dec_id"], bg=C_PANEL, fg=C_TEXT,
+                         font=("Courier",11)).pack(side="left")
+        except Exception: pass
+
+    def _populate_cat_editor(c):
+        """Fast-path: populate existing cat editor widgets without rebuilding."""
+        for k in ("cat_id","loc_name","loc_desc","icon","picture","priority",
+                  "map_state","map_name","map_zoom","scripted_gui","highlight_states"):
+            val = c.get(k, "") or ""
+            if k in _evars:
+                v = _evars[k]
+                if isinstance(v, tk.Text): _set_text_silent(k, val)
+                else: _set_var_silent(k, val)
+        for k in ("allowed","visible","map_trigger"):
+            _set_text_silent(k, c.get(k,"") or "")
+        _set_var_silent("visible_when_empty", bool(c.get("visible_when_empty", False)))
+        _set_var_silent("on_map_area", bool(c.get("on_map_area", False)))
+    def _rebuild_editor():
+        _collect()  # save current edits before switching
+        uid = sel["uid"]
+        new_type = sel["type"]
+        obj = _get_cat(uid) if new_type == "cat" else (_get_dec(uid) if new_type == "dec" else None)
+
+        # Always do a full widget rebuild — fast because we skip _rebuild_right()
+        for w in mid_frm.winfo_children(): w.destroy()
+        _evars.clear()
+        _editor_hooks.clear()
+        if new_type == "cat" and obj:
+            _build_cat_editor(obj)
+        elif new_type == "dec" and obj:
+            _build_dec_editor(obj)
+        else:
+            tk.Label(mid_frm,
+                     text="\n  Select a category or decision\n  from the tree on the left.",
+                     bg=C_PANEL, fg=C_DIM, font=("Helvetica",10),
+                     justify="center").pack(pady=40)
+        _editor_state["type"] = new_type
+        # Scroll editor back to top on selection change
+        try: mid_cv.yview_moveto(0)
+        except Exception: pass
+
+    # ════════════════════════════════════════════════════════════════════════
+    # RIGHT  ─ Preview / Chain / Code
+    # ════════════════════════════════════════════════════════════════════════
+    right_f = tk.Frame(paned, bg=C_DARK)
+    paned.add(right_f, minsize=280, width=420, stretch="always")
+
+    # tab bar
+    tab_bar = tk.Frame(right_f, bg=C_PANEL); tab_bar.pack(fill="x")
+    _rtab = tk.StringVar(value="preview")
+    _tab_btns = {}
+    for tid, tlbl in [("preview","🎮 Preview"),("chain","🔗 Chain View"),("code","{ } Code")]:
+        def _mktab(t=tid):
+            _rtab.set(t); _update_tab_styles(); _rebuild_right()
+        b = tk.Button(tab_bar, text=tlbl, command=_mktab,
+                      bg=C_DARK, fg=C_TEXT, relief="flat",
+                      font=("Courier",10), cursor="hand2",
+                      padx=14, pady=8, bd=0)
+        b.pack(side="left")
+        _tab_btns[tid] = b
+    tk.Button(tab_bar, text="↺  Refresh",
+              command=lambda: _rebuild_right(),
+              bg=C_CARD, fg=C_TEAL, relief="flat",
+              font=("Courier",8), cursor="hand2",
+              padx=8, pady=2,
+              highlightthickness=1, highlightbackground=C_TEAL
+              ).pack(side="right", padx=(0,6), pady=4)
+    tk.Label(tab_bar, text="approximate in-game appearance",
+             bg=C_PANEL, fg=C_DIM, font=("Helvetica",8,"italic")).pack(side="right", padx=10)
+    tk.Frame(tab_bar, bg=C_BORDG, height=1).pack(side="bottom", fill="x")
+
+    def _update_tab_styles():
+        for tid2, b2 in _tab_btns.items():
+            active = (_rtab.get()==tid2)
+            b2.config(fg=C_TEXT if active else C_DIM,
+                      bg=C_DARK if active else C_PANEL)
+
+    right_body = tk.Frame(right_f, bg=C_DARK)
+    right_body.pack(fill="both", expand=True)
+
+    _rr_job = [None]
+    def _rebuild_right():
+        # Debounce: cancel pending rebuild and schedule new one 80ms out
+        if _rr_job[0] is not None:
+            try: win.after_cancel(_rr_job[0])
+            except Exception: pass
+        def _do_rebuild():
+            _rr_job[0] = None
+            for w in right_body.winfo_children(): w.destroy()
+            t = _rtab.get()
+            if   t == "preview": _build_preview()
+            elif t == "chain":   _build_chain()
+            elif t == "code":    _build_code()
+            _update_tab_styles()
+        _rr_job[0] = win.after(80, _do_rebuild)
+
+    # ── PREVIEW ──────────────────────────────────────────────────────────────
+    # ── shared preview image cache: gfx_key -> PhotoImage|None ─────────────
+    _dec_prev_img_cache = {}
+    _app_img_caches.append(_dec_prev_img_cache)  # register for mod-reload invalidation
+
+    # ── PIL / DDS capability check ────────────────────────────────────────
+    _dds_supported = False
+    if _PIL_OK:
+        try:
+            from PIL import features as _pil_feat
+            _dds_supported = _pil_feat.check_feature("libtiff") or True
+            # Actually test by checking registered formats
+            from PIL import Image as _tpil
+            _dds_supported = "DDS" in _tpil.registered_extensions().get(".dds","").upper() if hasattr(_tpil,"registered_extensions") else False
+        except Exception:
+            _dds_supported = False
+
+    def _load_dec_icon(gfx_key, size=24):
+        """Load a decision icon image, returns PhotoImage or None. Cached."""
+        if not gfx_key or not _PIL_OK: return None
+        cache_key = (gfx_key, size)
+        if cache_key in _dec_prev_img_cache:
+            cached = _dec_prev_img_cache[cache_key]
+            if cached is not None:
+                return cached
+            # cached None — retry in case mod was reloaded with new sprites
+        # resolve path
+        path = (MOD.decision_sprites.get(gfx_key)
+                or MOD.idea_sprites.get(gfx_key)
+                or MOD.sprites.get(gfx_key))
+        if not path:
+            stem = gfx_key
+            for pfx in ("GFX_decision_category_","GFX_decision_","GFX_idea_","GFX_"):
+                if gfx_key.startswith(pfx):
+                    stem = gfx_key[len(pfx):]
+                    break
+            if MOD.root:
+                for sub in ("gfx/interface/decisions","gfx/interface/decisions/categories",
+                            "gfx/interface","gfx/interface/ideas"):
+                    for ext in (".dds",".tga",".png"):
+                        p = os.path.join(MOD.root, sub.replace("/",os.sep), stem+ext)
+                        if os.path.isfile(p): path = p; break
+                    if path: break
+        img = None
+        if path:
+            candidates = [path]
+            # If .dds fails, try .png/.tga with same stem
+            stem_no_ext = os.path.splitext(path)[0]
+            for ext in (".png", ".tga", ".dds"):
+                alt = stem_no_ext + ext
+                if alt != path and os.path.isfile(alt):
+                    candidates.append(alt)
+            for cpath in candidates:
+                try:
+                    pil = _PILImage.open(cpath).convert("RGBA")
+                    rs  = getattr(_PILImage,"LANCZOS",getattr(_PILImage,"ANTIALIAS",1))
+                    pil = pil.resize((size, size), rs)
+                    img = _PILImageTk.PhotoImage(pil)
+                    break
+                except Exception:
+                    continue
+        _dec_prev_img_cache[cache_key] = img
+        return img
+
+    def _load_cat_picture(gfx_key, w=64, h=64):
+        """Load a category picture image. Cached."""
+        if not gfx_key or not _PIL_OK: return None
+        cache_key = (gfx_key, w, h)
+        if cache_key in _dec_prev_img_cache:
+            cached = _dec_prev_img_cache[cache_key]
+            if cached is not None:
+                return cached
+        # Try key as-is, then with common category prefixes
+        path = (MOD.decision_sprites.get(gfx_key)
+                or MOD.idea_sprites.get(gfx_key)
+                or MOD.sprites.get(gfx_key)
+                or MOD.decision_sprites.get("GFX_decision_cat_" + gfx_key.split("_")[-1])
+                )
+        if not path and MOD.root:
+            stem = gfx_key
+            for pfx in ("GFX_decision_category_","GFX_decision_cat_","GFX_decision_","GFX_idea_","GFX_"):
+                if gfx_key.startswith(pfx): stem = gfx_key[len(pfx):]; break
+            for sub in ("gfx/interface/decisions","gfx/interface/decisions/categories",
+                        "gfx/interface","gfx/interface/ideas","gfx"):
+                for ext in (".dds",".tga",".png"):
+                    p = os.path.join(MOD.root, sub.replace("/",os.sep), stem+ext)
+                    if os.path.isfile(p): path = p; break
+                if path: break
+        img = None
+        if path:
+            candidates = [path]
+            stem_no_ext = os.path.splitext(path)[0]
+            for ext in (".png", ".tga", ".dds"):
+                alt = stem_no_ext + ext
+                if alt != path and os.path.isfile(alt):
+                    candidates.append(alt)
+            for cpath in candidates:
+                try:
+                    pil = _PILImage.open(cpath).convert("RGBA")
+                    rs  = getattr(_PILImage,"LANCZOS",getattr(_PILImage,"ANTIALIAS",1))
+                    pw,ph = pil.size
+                    ratio = min(w/max(pw,1), h/max(ph,1))
+                    pil = pil.resize((max(1,int(pw*ratio)), max(1,int(ph*ratio))), rs)
+                    img = _PILImageTk.PhotoImage(pil)
+                    break
+                except Exception:
+                    continue
+        _dec_prev_img_cache[cache_key] = img
+        return img
+
+    # ── HOI4 loc renderer ────────────────────────────────────────────────────
+    _HOI4_CLR = {
+        "Y": "#e0c060",   # gold
+        "R": "#e05050",   # red
+        "G": "#50c878",   # green
+        "B": "#5090e0",   # blue
+        "W": "#e8e8e8",   # white/near-white
+        "b": "#8ab4d4",   # light blue
+        "g": "#80c080",   # light green
+        "T": "#c060c0",   # teal/purple
+        "H": "#e0a030",   # orange
+        "L": "#aaaaaa",   # grey
+    }
+
+    def _strip_loc_codes(text):
+        """Strip all HOI4 loc codes from a string for plain tree display."""
+        import re as _re_s
+        text = text.replace("\\n", " ").replace("\n", " ")
+        text = _re_s.sub(r"§[A-Za-z0-9!]", "", text)        # §Y §2 §! etc
+        text = _re_s.sub(r"\$([^$]{1,40})\$",                    # $2The Gas$ → The Gas
+                lambda m: _re_s.sub(r"^\d+", "", m.group(1)), text)
+        text = _re_s.sub(r"\[([A-Z]{2,5})\](\S+)", r"\2", text)  # [TAG]Word → Word
+        text = _re_s.sub(r"\[([A-Z]{2,5}):[^\]]+\]",              # [TAG:X] → TAG
+                lambda m: m.group(1), text)
+        text = _re_s.sub(r"\[[^\]]{1,80}\]", "", text)            # remaining [tokens]
+        return text.strip()
+
+    def _hoi4_loc_widget(parent, text, bg, base_fg="#c8d4e0",
+                         font=("Palatino Linotype", 9), wraplength=300):
+        """Render a HOI4 localisation string with colour codes and scripted loc
+        tokens into a read-only tk.Text widget that matches the parent bg."""
+        import re as _re
+
+        # Convert literal \n escape sequences to real newlines
+        text = text.replace("\\n", "\n").replace("\\\\n", "\n")
+        # Strip trailing backslashes (common in raw HOI4 strings)
+        text = text.rstrip("\\").strip()
+        # Strip trailing backslashes (common in raw HOI4 strings)
+        text = text.rstrip("\\").strip()
+
+        # Estimate height needed: roughly 1 line per 45 chars of wraplength
+        chars_per_line = max(1, wraplength // 7)
+        est_lines = max(2, text.count("\n") + len(text) // max(1, wraplength // 7 * 6))
+        height = min(max(2, est_lines), 12)
+
+        w = int(wraplength / 7)  # approx chars per line for Text width
+        txt = tk.Text(parent, bg=bg, fg=base_fg,
+                      font=font, relief="flat", bd=0,
+                      highlightthickness=0,
+                      wrap="word", width=w, height=height,
+                      cursor="arrow", state="normal",
+                      exportselection=False,
+                      spacing1=1, spacing2=1, spacing3=1)
+        txt.pack(side="left", fill="x", expand=True, padx=(0, 4))
+
+        # Bind the widget width to parent to enable proper wrapping
+        def _resize(e, t=txt):
+            try:
+                new_w = max(10, e.width // 7)
+                t.config(width=new_w)
+            except Exception:
+                pass
+        parent.bind("<Configure>", _resize, add=True)
+
+        # Configure colour tags
+        txt.tag_config("base", foreground=base_fg)
+        for code, colour in _HOI4_CLR.items():
+            txt.tag_config(f"clr_{code}", foreground=colour)
+        txt.tag_config("scrloc",  foreground="#7ec8e3", font=(font[0], font[1], "italic"))
+        txt.tag_config("var",     foreground="#a78bfa", font=(font[0], font[1], "italic"))
+        txt.tag_config("bold",    font=(font[0], font[1], "bold"))
+
+        # ── Tokenise and insert ──────────────────────────────────────────────
+        # Tokens: §X colour codes, [Scope.Func] scripted loc, $var$ variables, 
+
+        # ── Single-pass tokeniser ───────────────────────────────────────
+        # Handles: §Y colour  §2 number-colour  §!  [TAG:X]  [TAG]Word  $var$
+        import re as _re
+
+        TOKEN = _re.compile(
+            r"(§[A-Za-z0-9!]"           # §Y §2 §!
+            r"|\[([A-Z]{2,5})\](\S*)"   # [TAG] optionally followed by a word
+            r"|\[([^\]]{1,80})\]"        # [any:token]
+            r"|\$([^$]{1,40})\$"         # $var$
+            r")"
+        )
+
+        colour_stack = []
+
+        def _cur_clr():
+            return colour_stack[-1] if colour_stack else "base"
+
+        def _resolve_tag(tag):
+            return MOD.country_tag_names.get(tag, tag)
+
+        pos = 0
+        for m in TOKEN.finditer(text):
+            # Insert any plain text before this token
+            if m.start() > pos:
+                txt.insert("end", text[pos:m.start()], (_cur_clr(),))
+            pos = m.end()
+
+            full, bare_tag, bare_word, bracket_inner, var_inner = \
+                m.group(0), m.group(2), m.group(3), m.group(4), m.group(5)
+
+            if full.startswith("§"):
+                code = full[1:]
+                if code == "!":
+                    if colour_stack: colour_stack.pop()
+                elif code in _HOI4_CLR:
+                    colour_stack.append(f"clr_{code}")
+                # number codes (§2 etc) — just suppress
+                continue
+
+            if bare_tag is not None:
+                # [TAG]Word  or  [TAG] (standalone)
+                word = bare_word or bare_tag   # fallback to tag itself
+                name = MOD.country_tag_names.get(bare_tag, None)
+                label = f"\U0001f3f3 {name or word}"
+                txt.insert("end", label, ("scrloc",))
+                continue
+
+            if bracket_inner is not None:
+                inner = bracket_inner
+                # Match TAG:Func  OR  TAG·Func  (·  = middle-dot from old renderer)
+                mc = _re.match(r"([A-Z]{2,5})[:·\.](\w+)", inner)
+                if mc:
+                    tag = mc.group(1)
+                    name = MOD.country_tag_names.get(tag, None)
+                    label = name or tag
+                else:
+                    label = inner[:20]
+                txt.insert("end", label, ("scrloc",))
+                continue
+
+            if var_inner is not None:
+                # $2The Gas Pipeline$ → strip leading digits
+                clean = _re.sub(r"^\d+", "", var_inner)
+                txt.insert("end", clean, ("var",))
+                continue
+
+        # Any trailing plain text
+        if pos < len(text):
+            txt.insert("end", text[pos:], (_cur_clr(),))
+
+        txt.config(state="disabled")
+        return txt
+
+    def _build_preview():
+        _collect()
+        # ── DDS warning banner ────────────────────────────────────────────────
+        if _PIL_OK and not _dds_supported and MOD.loaded and MOD.decision_sprites                 and not getattr(_build_preview, "_dds_warned", False):
+            # Check if any sprites are .dds — show warning only once per session
+            has_dds = any(str(v).lower().endswith(".dds")
+                          for v in list(MOD.decision_sprites.values())[:20])
+            if has_dds:
+                _build_preview._dds_warned = True
+                warn_f = tk.Frame(right_body, bg="#3a1a00")
+                warn_f.pack(fill="x")
+                tk.Label(warn_f,
+                    text="⚠  Icons are .dds files — install 'pillow-dds' for full GFX support: pip install pillow-dds",
+                    bg="#3a1a00", fg="#f59e0b", font=("Helvetica",8),
+                    pady=4, padx=8).pack(anchor="w")
+
+        # ── scrollable container ──────────────────────────────────────────────
+        cv  = tk.Canvas(right_body, bg=C_DARK, highlightthickness=0)
+        sb  = tk.Scrollbar(right_body, orient="vertical", command=cv.yview)
+        frm = tk.Frame(cv, bg=C_DARK)
+        wid = cv.create_window((0,0), window=frm, anchor="nw")
+        cv.configure(yscrollcommand=sb.set)
+        frm.bind("<Configure>", lambda e: cv.configure(scrollregion=cv.bbox("all")))
+        cv.bind("<Configure>",  lambda e: cv.itemconfig(wid, width=e.width))
+        for ev in ("<MouseWheel>","<Button-4>","<Button-5>"):
+            cv.bind(ev, lambda e: cv.yview_scroll(
+                -1 if (e.delta>0 if e.num not in (4,5) else e.num==4) else 1,"units"))
+        sb.pack(side="right", fill="y"); cv.pack(fill="both", expand=True)
+
+        # Keep image refs alive (prevent GC)
+        _img_refs = []
+
+        CHAIN_ICONS = {"hacking":"💻","drugs":"🧪","currency":"💵","default":"⚖"}
+
+        for cat in dm_cats:
+            if not cat_visible.get(cat["uid"], True): continue
+            decs = _decs_for(cat["uid"])
+
+            # ── Category panel ────────────────────────────────────────────────
+            panel = tk.Frame(frm, bg="#1a1f2e",
+                             highlightthickness=1, highlightbackground="#3a4a6a")
+            panel.pack(fill="x", padx=10, pady=8)
+            panel._img_refs = []  # keep images alive per-panel
+
+            # ── Header: icon + name ───────────────────────────────────────────
+            hdr = tk.Frame(panel, bg="#141929"); hdr.pack(fill="x")
+            # category icon (32x32)
+            icon_key = cat.get("icon","").strip()
+            cat_img = _load_dec_icon(icon_key, 32) if icon_key else None
+            if cat_img:
+                panel._img_refs.append(cat_img)
+                ic_lbl = tk.Label(hdr, image=cat_img, bg="#141929",
+                                   width=32, height=32)
+            else:
+                ic_lbl = tk.Frame(hdr, bg="#2a3550", width=32, height=32)
+                ic_lbl.pack_propagate(False)
+            ic_lbl.pack(side="left", padx=8, pady=6)
+            # Right-click to copy GFX key
+            if icon_key:
+                def _ctx_cat_icon(e, k=icon_key):
+                    m = tk.Menu(win, tearoff=0, bg=C_CARD, fg=C_TEXT,
+                                activebackground=C_BLUE, font=("Helvetica",9))
+                    m.add_command(label=f"Copy GFX key: {k}",
+                                  command=lambda: [win.clipboard_clear(), win.clipboard_append(k)])
+                    m.post(e.x_root, e.y_root)
+                ic_lbl.bind("<Button-3>", _ctx_cat_icon)
+            cat_display_name = cat["loc_name"] or cat["cat_id"]
+            _hoi4_loc_widget(hdr, cat_display_name, bg="#141929",
+                              base_fg="#c8d4e0",
+                              font=("Palatino Linotype", 12, "bold"),
+                              wraplength=320)
+            tk.Frame(panel, bg="#2a3550", height=1).pack(fill="x")
+
+            # ── Desc row: picture + description ──────────────────────────────
+            pic_key  = cat.get("picture","").strip()
+            desc_txt = cat.get("loc_desc","").strip()
+            if pic_key or desc_txt:
+                pic_row = tk.Frame(panel, bg="#1a1f2e"); pic_row.pack(fill="x", padx=10, pady=8)
+                if pic_key:
+                    pic_box = tk.Frame(pic_row, bg="#2a3550",
+                                        highlightthickness=1, highlightbackground="#3a4a6a",
+                                        width=64, height=64)
+                    pic_box.pack(side="left", padx=(0,10))
+                    pic_box.pack_propagate(False)
+                    cat_pic = _load_cat_picture(pic_key, 64, 64)
+                    if cat_pic:
+                        panel._img_refs.append(cat_pic)
+                        tk.Label(pic_box, image=cat_pic, bg="#2a3550").pack(expand=True)
+                    else:
+                        # Show placeholder, try async load
+                        ph = tk.Label(pic_box, text="🎖", bg="#2a3550",
+                                 font=("Helvetica",24))
+                        ph.pack(expand=True)
+                        def _async_cat_pic(key=pic_key, box=pic_box, ph_lbl=ph,
+                                           refs=panel._img_refs):
+                            import threading
+                            def _worker():
+                                img = _load_cat_picture(key, 64, 64)
+                                def _paint():
+                                    if not box.winfo_exists(): return
+                                    if img:
+                                        ph_lbl.destroy()
+                                        lbl = tk.Label(box, image=img, bg="#2a3550")
+                                        lbl.pack(expand=True)
+                                        refs.append(img)
+                                try: box.after(0, _paint)
+                                except Exception: pass
+                            threading.Thread(target=_worker, daemon=True).start()
+                        win.after(10, _async_cat_pic)
+                if desc_txt:
+                    _hoi4_loc_widget(pic_row, desc_txt, bg="#1a1f2e",
+                                     base_fg="#8a9ab0",
+                                     font=("Palatino Linotype", 9),
+                                     wraplength=300)
+            tk.Frame(panel, bg="#2a3550", height=1).pack(fill="x")
+
+            # ── Decision rows (lightweight: use tk.Canvas per row for speed) ─
+            for i, dec in enumerate(decs):
+                bg_d  = "#161c2e" if i%2==0 else "#131828"
+                drow  = tk.Frame(panel, bg=bg_d, cursor="hand2")
+                drow.pack(fill="x")
+
+                # icon (24x24 image or emoji fallback)
+                dec_icon_key = dec.get("icon","").strip()
+                # auto-expand short icon names
+                if dec_icon_key and not dec_icon_key.startswith("GFX_"):
+                    dec_icon_key = "GFX_decision_" + dec_icon_key
+                dec_img = _load_dec_icon(dec_icon_key, 24) if dec_icon_key else None
+
+                icon_box = tk.Frame(drow, bg="#2a3550",
+                                     highlightthickness=1, highlightbackground="#3a4a6a",
+                                     width=26, height=26)
+                icon_box.pack(side="left", padx=(10,6), pady=4)
+                icon_box.pack_propagate(False)
+                if dec_icon_key:
+                    def _ctx_dec_icon(e, k=dec_icon_key):
+                        m = tk.Menu(win, tearoff=0, bg=C_CARD, fg=C_TEXT,
+                                    activebackground=C_BLUE, font=("Helvetica",9))
+                        m.add_command(label=f"Copy GFX key: {k}",
+                                      command=lambda: [win.clipboard_clear(), win.clipboard_append(k)])
+                        m.post(e.x_root, e.y_root)
+                    icon_box.bind("<Button-3>", _ctx_dec_icon)
+                if dec_img:
+                    panel._img_refs.append(dec_img)
+                    tk.Label(icon_box, image=dec_img, bg="#2a3550").pack(expand=True)
+                else:
+                    ic = CHAIN_ICONS.get(dec.get("chain","").lower(), "⚖")
+                    fallback = tk.Label(icon_box, text=ic, bg="#2a3550",
+                              font=("Helvetica",9))
+                    fallback.pack(expand=True)
+                    if dec_icon_key:
+                        def _async_dec_icon(key=dec_icon_key, box=icon_box,
+                                            fb=fallback, refs=panel._img_refs):
+                            import threading
+                            def _worker():
+                                img = _load_dec_icon(key, 24)
+                                def _paint():
+                                    if not box.winfo_exists(): return
+                                    if img:
+                                        fb.destroy()
+                                        lbl = tk.Label(box, image=img, bg="#2a3550")
+                                        lbl.pack(expand=True)
+                                        refs.append(img)
+                                try: box.after(0, _paint)
+                                except Exception: pass
+                            threading.Thread(target=_worker, daemon=True).start()
+                        win.after(10, _async_dec_icon)
+
+                # decision name — render with HOI4 loc codes
+                targeted = dec.get("targeted","none")
+                prefix   = "↗ " if targeted != "none" else ""
+                raw_name = (dec["loc_name"] or dec["dec_id"])
+                name_txt = prefix + raw_name
+                name_lbl = _hoi4_loc_widget(drow, name_txt, bg=bg_d,
+                                             base_fg="#c8d4e0",
+                                             font=("Palatino Linotype", 10),
+                                             wraplength=240)
+
+                # cost
+                cost_widgets = []
+                if dec["cost_type"]=="pp" and dec.get("cost","").strip():
+                    lpp = tk.Label(drow, text="🏛", bg=bg_d, font=("Helvetica",9))
+                    lpp.pack(side="left", padx=(0,1))
+                    lco = tk.Label(drow, text=dec["cost"], bg=bg_d,
+                                    fg="#e0c060", font=("Courier",9))
+                    lco.pack(side="left", padx=(0,6))
+                    cost_widgets = [lpp, lco]
+
+                # availability indicator (green = available, grey = unknown)
+                ind = tk.Frame(drow, bg="#22c55e", width=12, height=12)
+                ind.pack(side="right", padx=(2,8), pady=8)
+
+                # ── click → select in editor ──
+                def _on_prev_click(e, uid=dec["uid"]):
+                    sel["uid"] = uid; sel["type"] = "dec"
+                    _update_tree_highlight(); _rebuild_editor()
+                    return "break"  # prevent Text widget from getting focus
+                for w in [drow, icon_box, ind] + cost_widgets:
+                    w.bind("<Button-1>", _on_prev_click)
+                # tk.Text needs special binding to prevent caret/selection
+                try:
+                    name_lbl.bind("<Button-1>", _on_prev_click)
+                    name_lbl.config(cursor="hand2")
+                except Exception:
+                    pass
+
+                if i < len(decs)-1:
+                    tk.Frame(panel, bg="#1e2840", height=1).pack(fill="x")
+
+    # ── CHAIN VIEW ────────────────────────────────────────────────────────────
+    def _build_chain():
+        _collect()
+        cv  = tk.Canvas(right_body, bg=C_DARK, highlightthickness=0)
+        sb  = tk.Scrollbar(right_body, orient="vertical", command=cv.yview)
+        frm = tk.Frame(cv, bg=C_DARK)
+        wid = cv.create_window((0,0), window=frm, anchor="nw")
+        cv.configure(yscrollcommand=sb.set)
+        frm.bind("<Configure>", lambda e: cv.configure(scrollregion=cv.bbox("all")))
+        cv.bind("<Configure>",  lambda e: cv.itemconfig(wid, width=e.width))
+        for ev in ("<MouseWheel>","<Button-4>","<Button-5>"):
+            cv.bind(ev, lambda e: cv.yview_scroll(
+                -1 if (e.delta>0 if e.num not in (4,5) else e.num==4) else 1,"units"))
+        sb.pack(side="right", fill="y"); cv.pack(fill="both", expand=True)
+
+        tk.Label(frm, text="  Decision chains — decisions sharing a chain tag are visualised as a group",
+                 bg=C_DARK, fg=C_DIM, font=("Helvetica",8,"italic"), pady=8).pack(fill="x")
+
+        all_decs = [d for cat in dm_cats for d in _decs_for(cat["uid"])]
+        chains = {}
+        for d in all_decs:
+            c = d.get("chain","").strip() or "misc"
+            if c not in chains: chains[c] = []
+            chains[c].append(d)
+
+        CCOLORS = {"hacking":C_BLUE,"drugs":C_ORANGE,"currency":C_GOLD,
+                   "misc":C_DIM}
+        clist   = list(chains.items())
+        for ci,(chain,decs) in enumerate(clist):
+            cc = CCOLORS.get(chain, [C_BLUE,C_TEAL,C_ORANGE,C_PURPLE,C_GREEN][ci%5])
+            tk.Label(frm, text=f"  ── {chain.upper()} CHAIN  ({len(decs)} decisions)",
+                     bg=C_DARK, fg=cc,
+                     font=("Courier",9,"bold"), anchor="w").pack(fill="x", padx=10, pady=(10,4))
+
+            for i, dec in enumerate(decs):
+                row = tk.Frame(frm, bg=C_DARK); row.pack(fill="x", padx=16, pady=1)
+                # connector dot
+                dot_f = tk.Frame(row, bg=C_DARK, width=20); dot_f.pack(side="left", fill="y")
+                dot_f.pack_propagate(False)
+                tk.Canvas(dot_f, bg=C_DARK, highlightthickness=0, width=20, height=30
+                          ).pack(fill="y", expand=True)
+                # card
+                card = tk.Frame(row, bg=C_CARD, highlightthickness=1,
+                                highlightbackground=cc)
+                card.pack(side="left", fill="x", expand=True, pady=1)
+                tk.Label(card, text=dec["loc_name"] or dec["dec_id"],
+                         bg=C_CARD, fg=C_TEXT, font=("Courier",10), anchor="w",
+                         padx=10, pady=5).pack(fill="x")
+                tag_row = tk.Frame(card, bg=C_CARD); tag_row.pack(fill="x", padx=10, pady=(0,5))
+                _tag(tag_row, "targeted" if dec["targeted"]!="none" else "standard",
+                     C_TEAL if dec["targeted"]!="none" else C_DIM,
+                     TEAL_TAG_BG if dec["targeted"]!="none" else C_CARD,
+                     TEAL_TAG_BD if dec["targeted"]!="none" else C_BORDG)
+                if dec["cost_type"]=="pp" and dec.get("cost","").strip():
+                    _tag(tag_row, f'PP {dec["cost"]}', C_GOLD, GOLD_TAG_BG, GOLD_TAG_BD)
+                _tag(tag_row, dec["dec_id"], C_DIM, C_DARK, C_BORDG)
+
+        # Chain assignment card
+        asgn = tk.Frame(frm, bg=C_CARD, highlightthickness=1, highlightbackground=C_BORDG)
+        asgn.pack(fill="x", padx=10, pady=14)
+        tk.Label(asgn, text="  CHAIN ASSIGNMENT", bg=C_CARD, fg=C_GOLD,
+                 font=("Courier",9,"bold"), pady=4).pack(anchor="w")
+        tk.Label(asgn, text="  Assign decisions to chains to track sequences. "
+                            "Chains are stored as comments — no engine impact.",
+                 bg=C_CARD, fg=C_DIM, font=("Helvetica",9),
+                 wraplength=360, justify="left").pack(fill="x", padx=6)
+        inp_row = tk.Frame(asgn, bg=C_CARD); inp_row.pack(fill="x", padx=6, pady=8)
+        chain_inp = tk.Entry(inp_row, bg=C_DARK, fg=C_TEXT,
+                             insertbackground=C_BLUE, font=("Courier",10),
+                             relief="flat", highlightthickness=1,
+                             highlightbackground=C_BORDG)
+        chain_inp.insert(0, "chain name...")
+        chain_inp.pack(side="left", fill="x", expand=True, ipady=4)
+        tk.Button(inp_row, text="+ New Chain",
+                  bg=TEAL_TAG_BG, fg=C_TEAL, relief="flat",
+                  font=("Courier",9), cursor="hand2",
+                  padx=10, pady=4, highlightthickness=1,
+                  highlightbackground=TEAL_TAG_BD).pack(side="right", padx=4)
+
+    # ── CODE VIEW ────────────────────────────────────────────────────────────
+    def _build_code():
+        _collect()
+        # sub-tabs
+        sub_f = tk.Frame(right_body, bg=C_PANEL); sub_f.pack(fill="x")
+        ctab_v = tk.StringVar(value="decisions")
+        cv  = tk.Canvas(right_body, bg=C_DARK, highlightthickness=0)
+        sb  = tk.Scrollbar(right_body, orient="vertical", command=cv.yview)
+        sb_h = tk.Scrollbar(right_body, orient="horizontal")
+        code_t = tk.Text(cv, bg="#080b10", fg="#a8b4c0",
+                         insertbackground=C_BLUE,
+                         font=("Courier",9), relief="flat",
+                         wrap="none", undo=True, highlightthickness=0,
+                         xscrollcommand=sb_h.set)
+        sb_h.config(command=code_t.xview)
+        cv.configure(yscrollcommand=sb.set)
+        sb.pack(side="right", fill="y")
+        # Pack sb_h before cv so horizontal scrollbar sits below the canvas
+        sb_h.pack(side="bottom", fill="x")
+        cv.pack(fill="both", expand=True)
+        cwin = cv.create_window((0,0), window=code_t, anchor="nw")
+        code_t.bind("<Configure>", lambda e: cv.configure(scrollregion=cv.bbox("all")))
+        cv.bind("<Configure>",     lambda e: cv.itemconfig(cwin, width=e.width))
+
+        # ── Syntax highlighting config ────────────────────────────────────────
+        import re as _re_hl
+        code_t.tag_config("kw_block",   foreground="#569cd6")  # block keywords
+        code_t.tag_config("kw_value",   foreground="#4ec9b0")  # yes/no values
+        code_t.tag_config("kw_number",  foreground="#b5cea8")  # numbers
+        code_t.tag_config("kw_comment", foreground="#6a9955")  # # comments
+        code_t.tag_config("kw_string",  foreground="#ce9178")  # "strings"
+        code_t.tag_config("kw_gfx",     foreground="#dcdcaa")  # GFX_ references
+        code_t.tag_config("kw_scope",   foreground="#c586c0")  # scope keywords
+        _HL_BLOCKS  = re.compile(r"\b(allowed|visible|available|trigger|effect|"
+                                 r"modifier|complete_effect|remove_effect|cancel_effect|"
+                                 r"timeout_effect|ai_will_do|immediate|on_map_area|"
+                                 r"activation|highlight_states|targets|war_with_on_timeout|"
+                                 r"remove_trigger|cancel_trigger|target_trigger|"
+                                 r"target_root_trigger|defined_text|text)\b")
+        _HL_SCOPES  = re.compile(r"\b(country_event|news_event|state_event|unit_leader_event|"
+                                 r"character_event|ROOT|FROM|PREV|THIS|any_country|"
+                                 r"every_country|random_country|owner|controller)\b")
+        _HL_YESNO   = re.compile(r"\byes\b|\bno\b")
+        _HL_NUMBER  = re.compile(r"(?<![\w])(-?\d+\.?\d*)(?![\w])")
+        _HL_COMMENT = re.compile(r"#[^\n]*")
+        _HL_STRING  = re.compile(r'"[^"\n]*"')
+        _HL_GFX     = re.compile(r"\bGFX_[\w]+")
+
+        def _apply_highlight(event=None):
+            for tag in ("kw_block","kw_value","kw_number","kw_comment",
+                        "kw_string","kw_gfx","kw_scope"):
+                code_t.tag_remove(tag, "1.0", "end")
+            text = code_t.get("1.0", "end")
+            def _mark(pattern, tag):
+                for m in pattern.finditer(text):
+                    s = f"1.0 + {m.start()} chars"
+                    e = f"1.0 + {m.end()} chars"
+                    code_t.tag_add(tag, s, e)
+            _mark(_HL_COMMENT, "kw_comment")
+            _mark(_HL_STRING,  "kw_string")
+            _mark(_HL_BLOCKS,  "kw_block")
+            _mark(_HL_SCOPES,  "kw_scope")
+            _mark(_HL_GFX,     "kw_gfx")
+            _mark(_HL_YESNO,   "kw_value")
+            _mark(_HL_NUMBER,  "kw_number")
+
+        # Debounced — run highlight 400ms after last keystroke
+        _hl_job = [None]
+        def _sched_highlight(e=None):
+            if _hl_job[0]: win.after_cancel(_hl_job[0])
+            _hl_job[0] = win.after(400, _apply_highlight)
+        code_t.bind("<KeyRelease>", _sched_highlight)
+
+        # Wrap toggle button added to bot later
+        _wrap_mode = [False]  # False=no wrap, True=word wrap
+        def _toggle_wrap():
+            _wrap_mode[0] = not _wrap_mode[0]
+            code_t.config(wrap="word" if _wrap_mode[0] else "none")
+            wrap_btn.config(text="⮐ Unwrap" if _wrap_mode[0] else "⮐ Wrap")
+
+        def _load(tab):
+            code_t.config(state="normal"); code_t.delete("1.0","end")
+            if tab=="decisions":      code_t.insert("1.0", _gen_decisions_file())
+            elif tab=="categories":   code_t.insert("1.0", _gen_categories_file())
+            elif tab=="yml":          code_t.insert("1.0", _gen_yml())
+            elif tab=="scripted_loc": code_t.insert("1.0", _gen_scripted_loc())
+        for tid2,tlbl2 in [("decisions","decisions .txt"),
+                            ("categories","categories .txt"),
+                            ("yml","localisation .yml"),
+                            ("scripted_loc","scripted_loc .txt")]:
+            def _mksub(t=tid2):
+                ctab_v.set(t); _load(t)
+                for b2 in sub_f.winfo_children():
+                    if isinstance(b2, tk.Button):
+                        b2.config(fg=C_TEXT if b2.cget("text")==tlbl2 else C_DIM)
+            b3 = tk.Button(sub_f, text=tlbl2, command=_mksub,
+                           bg=C_PANEL, fg=C_DIM, relief="flat",
+                           font=("Courier",9), cursor="hand2", padx=12, pady=5)
+            b3.pack(side="left")
+        bot = tk.Frame(right_body, bg=C_DARK); bot.pack(fill="x", before=cv)
+
+        def _apply_code_edits():
+            """Re-import whatever is in the code editor back into dm_cats/dm_decs."""
+            import re as _re2
+            raw = code_t.get("1.0", "end-1c").strip()
+            if not raw:
+                _dm_status.config(text="  ✗  Nothing to apply"); return
+            tab = ctab_v.get()
+            if tab not in ("decisions", "scripted_loc"):
+                _dm_status.config(text="  ⚠  Only 'decisions .txt' and 'scripted_loc .txt' edits can be applied"); return
+            if tab == "scripted_loc":
+                if MOD.edit_scripted_loc_file:
+                    try:
+                        with open(MOD.edit_scripted_loc_file, "w", encoding="utf-8") as _f:
+                            _f.write(raw)
+                        _dm_status.config(text=f"  ✓  Scripted loc saved to {os.path.basename(MOD.edit_scripted_loc_file)}")
+                    except Exception as _ex:
+                        _dm_status.config(text=f"  ✗  Save error: {_ex}")
+                else:
+                    win.clipboard_clear(); win.clipboard_append(raw)
+                    _dm_status.config(text="  ✓  Copied (no scripted loc file set in Edit Targets)")
+                return
+
+            # ── Parse the raw decisions text directly (no monkeypatch) ──────
+            def _extract_block2(text, start_pos=0):
+                depth = 0; j = start_pos
+                while j < len(text):
+                    if text[j] == "{": depth += 1
+                    elif text[j] == "}":
+                        depth -= 1
+                        if depth == 0: return text[start_pos+1:j], j
+                    j += 1
+                return text[start_pos+1:], len(text)-1
+
+            def _find_blocks2(text):
+                blocks = []; i = 0
+                while i < len(text):
+                    if text[i] == "#":
+                        while i < len(text) and text[i] != "\n": i += 1
+                        continue
+                    m = _re2.match(r"\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*\{", text[i:])
+                    if m:
+                        name = m.group(1)
+                        brace_pos = i + m.end() - 1
+                        inner, end_j = _extract_block2(text, brace_pos)
+                        blocks.append((name, inner, text[i:end_j+1]))
+                        i = end_j + 1; continue
+                    i += 1
+                return blocks
+
+            def _get_block2(text, key):
+                m = _re2.search(rf"\b{_re2.escape(key)}\s*=\s*\{{", text)
+                if not m: return None
+                inner, _ = _extract_block2(text, m.end()-1)
+                return inner.strip()
+
+            def _get_value2(text, key):
+                m = _re2.search(rf"\b{_re2.escape(key)}\s*=\s*([^\s{{}}#\n]+)", text)
+                return m.group(1).strip() if m else None
+
+            def _get_yn2(text, key):
+                v = _get_value2(text, key)
+                return v == "yes" if v else None
+
+            _snapshot()
+            old_cats = list(dm_cats); old_decs = list(dm_decs)
+            dm_cats.clear(); dm_decs.clear()
+            imported = 0
+            try:
+                for cat_name, cat_inner, _ in _find_blocks2(raw):
+                    if cat_name in ("add_namespace", "namespace"): continue
+                    c = _new_cat()
+                    c["cat_id"]   = cat_name
+                    c["loc_name"] = cat_name  # preserve existing loc name if we can
+                    # try to keep existing loc_name if cat already existed
+                    existing_cat = next((ec for ec in old_cats if ec["cat_id"] == cat_name), None)
+                    if existing_cat:
+                        c["loc_name"] = existing_cat["loc_name"]
+                        c["loc_desc"] = existing_cat["loc_desc"]
+                    for _fld, _key in [("icon","icon"),("picture","picture"),("scripted_gui","scripted_gui")]:
+                        v = _get_value2(cat_inner, _key)
+                        if v: c[_fld] = v
+                    for _fld, _key in [("allowed","allowed"),("visible","visible"),
+                                        ("highlight_states","highlight_states"),
+                                        ("map_trigger","target_root_trigger")]:
+                        v = _get_block2(cat_inner, _key)
+                        if v is not None: c[_fld] = v
+                    pv = _get_value2(cat_inner, "priority")
+                    if pv: c["priority"] = pv
+                    if _get_yn2(cat_inner, "visible_when_empty"): c["visible_when_empty"] = True
+                    oma = _get_block2(cat_inner, "on_map_area")
+                    if oma is not None:
+                        c["on_map_area"] = True
+                        sv = _get_value2(oma, "state"); c["map_state"] = sv or ""
+                        nv = _get_value2(oma, "name");  c["map_name"]  = nv or ""
+                        zv = _get_value2(oma, "zoom");  c["map_zoom"]  = zv or "850"
+                    dm_cats.append(c)
+
+                    for dec_name, dec_inner, _ in _find_blocks2(cat_inner):
+                        d = _new_dec(c["uid"])
+                        d["dec_id"]   = dec_name
+                        d["loc_name"] = dec_name
+                        existing_dec = next((ed for ed in old_decs if ed["dec_id"] == dec_name), None)
+                        if existing_dec:
+                            d["loc_name"] = existing_dec["loc_name"]
+                            d["loc_desc"] = existing_dec["loc_desc"]
+                        sv_map = {
+                            "cost":"cost","days_remove":"days_remove",
+                            "days_re_enable":"days_re_enable","priority":"priority",
+                            "icon":"icon","mission_timeout":"days_mission_timeout",
+                            "target_array":"target_array",
+                        }
+                        for dkey, hkey in sv_map.items():
+                            v = _get_value2(dec_inner, hkey or dkey)
+                            if v and dkey in d: d[dkey] = v
+                        iv = _get_value2(dec_inner, "icon")
+                        if iv: d["icon"] = iv
+                        for _fld, _key in [
+                            ("allowed","allowed"),("visible","visible"),
+                            ("available","available"),("complete_effect","complete_effect"),
+                            ("remove_effect","remove_effect"),("cancel_effect","cancel_effect"),
+                            ("cancel_trigger","cancel_trigger"),("modifier","modifier"),
+                            ("remove_trigger","remove_trigger"),("timeout_effect","timeout_effect"),
+                            ("activation","activation"),("highlight_states","highlight_states"),
+                            ("target_trigger","target_trigger"),
+                            ("target_root_trigger","target_root_trigger"),
+                            ("targets","targets"),("target_array","target_array"),
+                            ("ai_will_do","ai_will_do"),
+                        ]:
+                            v = _get_block2(dec_inner, _key)
+                            if v is not None: d[_fld] = v
+                        for _fld, _key in [
+                            ("fire_only_once","fire_only_once"),
+                            ("fixed_random_seed","fixed_random_seed"),
+                            ("is_mission","is_mission"),
+                            ("selectable_mission","selectable_mission"),
+                            ("is_good","is_good"),
+                            ("cancel_if_not_visible","cancel_if_not_visible"),
+                            ("targets_dynamic","targets_dynamic"),
+                            ("target_non_existing","target_non_existing"),
+                        ]:
+                            yn = _get_yn2(dec_inner, _key)
+                            if yn is not None: d[_fld] = yn
+                        ct = _get_value2(dec_inner, "days_remove")
+                        if ct: d["days_remove"] = ct
+                        d["cost_type"] = "pp"
+                        cst = _get_value2(dec_inner, "cost")
+                        if cst: d["cost"] = cst
+                        dm_decs.append(d)
+                        imported += 1
+
+                _dedup_cats()
+                _rebuild_tree(); _rebuild_editor()
+                try: _build_preview()
+                except Exception: pass
+                _autosave()
+                _dm_status.config(text=f"  ✓  Applied — {len(dm_cats)} categories, {imported} decisions parsed from code")
+            except Exception as _ex:
+                import traceback as _tb
+                dm_cats[:] = old_cats; dm_decs[:] = old_decs
+                _dm_status.config(text=f"  ✗  Parse error: {_ex}")
+                _tb.print_exc()
+
+        tk.Button(bot, text="⬆  Apply edits",
+                  command=_apply_code_edits,
+                  bg=C_CARD, fg=C_GREEN, relief="flat", font=("Courier",9,"bold"),
+                  cursor="hand2", padx=10, pady=3,
+                  highlightthickness=1, highlightbackground=C_GREEN
+                  ).pack(side="left", padx=6, pady=3)
+        tk.Label(bot, text="Edit code directly then click Apply to save changes",
+                 bg=C_DARK, fg=C_DIM, font=("Helvetica",8,"italic")).pack(side="left")
+        tk.Button(bot, text="Copy to clipboard",
+                  command=lambda: [win.clipboard_clear(),
+                                   win.clipboard_append(code_t.get("1.0","end-1c")),
+                                   _dm_status.config(text="  ✓  Copied")],
+                  bg=C_CARD, fg=C_DIM, relief="flat", font=("Courier",9),
+                  cursor="hand2", padx=10, pady=3).pack(side="right", padx=6, pady=3)
+        wrap_btn = tk.Button(bot, text="⮐ Wrap", command=_toggle_wrap,
+                  bg=C_CARD, fg=C_DIM, relief="flat", font=("Courier",9),
+                  cursor="hand2", padx=10, pady=3)
+        wrap_btn.pack(side="right", padx=2, pady=3)
+        # Line/char count label
+        _line_lbl = tk.Label(bot, text="", bg=C_DARK, fg=C_DIM,
+                              font=("Helvetica",8), anchor="e")
+        _line_lbl.pack(side="right", padx=8)
+        def _update_line_count(e=None):
+            txt = code_t.get("1.0","end-1c")
+            lines = txt.count("\n") + 1
+            chars = len(txt)
+            _line_lbl.config(text=f"{lines} lines · {chars} chars")
+        code_t.bind("<KeyRelease>", lambda e: (_sched_highlight(e), _update_line_count(e)), add=True)
+        _load("decisions")
+        _apply_highlight()
+        _update_line_count()
+
+    # ── PLACEMENT EDITOR shortcut ────────────────────────────────────────────
+    def _open_placement_cat(cat):
+        existing = []
+        if cat.get("icon"):
+            p = MOD.idea_sprites.get(cat["icon"], MOD.sprites.get(cat["icon"],""))
+            existing.append({"gfx_key":cat["icon"],"abs_path":p,"role":"icon","x":8,"y":6,"w":24,"h":24})
+        if cat.get("picture"):
+            p = MOD.idea_sprites.get(cat["picture"], MOD.sprites.get(cat["picture"],""))
+            existing.append({"gfx_key":cat["picture"],"abs_path":p,"role":"picture","x":8,"y":44,"w":120,"h":90})
+        def _on_confirm(placed, code):
+            for it in placed:
+                if it["role"]=="icon" and "icon" in _evars:
+                    _evars["icon"].set(it["gfx_key"])
+                elif it["role"]=="picture" and "picture" in _evars:
+                    _evars["picture"].set(it["gfx_key"])
+            _collect(); _rebuild_right()
+        _open_gfx_placement_editor(win, initial_items=existing, on_confirm=_on_confirm)
+
+    # ════════════════════════════════════════════════════════════════════════
+    # CODE GENERATION
+    # ════════════════════════════════════════════════════════════════════════
+    def _gen_scripted_loc():
+        """Generate scripted_localisation defined_text blocks for all decisions/cats."""
+        out = ["# ================================================================",
+               "# FILE: common/scripted_localisation/TAG_scripted_loc.txt",
+               "# ================================================================",
+               "# These defined_text blocks let you reference decision/category names",
+               "# dynamically in localisation via [GetVariableName]",
+               "# ================================================================\n"]
+        for cat in dm_cats:
+            cid = cat["cat_id"].strip()
+            if not cid: continue
+            out.append(f"defined_text = {{")
+            out.append(f"\tname = GET_{cid}_name")
+            out.append(f"\ttext = {{")
+            out.append(f"\t\tlocalization_key = {cid}")
+            out.append(f"\t}}")
+            out.append(f"}}\n")
+            if cat.get("loc_desc","").strip():
+                out.append(f"defined_text = {{")
+                out.append(f"\tname = GET_{cid}_desc")
+                out.append(f"\ttext = {{")
+                out.append(f"\t\tlocalization_key = {cid}_desc")
+                out.append(f"\t}}")
+                out.append(f"}}\n")
+            for dec in _decs_for(cat["uid"]):
+                did = dec["dec_id"].strip()
+                if not did: continue
+                out.append(f"defined_text = {{")
+                out.append(f"\tname = GET_{did}_name")
+                out.append(f"\ttext = {{")
+                out.append(f"\t\tlocalization_key = {did}")
+                out.append(f"\t}}")
+                out.append(f"}}\n")
+                if dec.get("loc_desc","").strip():
+                    out.append(f"defined_text = {{")
+                    out.append(f"\tname = GET_{did}_desc")
+                    out.append(f"\ttext = {{")
+                    out.append(f"\t\tlocalization_key = {did}_desc")
+                    out.append(f"\t}}")
+                    out.append(f"}}\n")
+        return "\n".join(out)
+
+    def _indent(text, n=1):
+        tab = "\t"*n
+        return "\n".join(tab+l if l.strip() else l for l in text.splitlines())
+
+    def _gen_decision_txt(dec):
+        """Generate a single decision block at 1-tab indent inside its category block.
+
+        Vanilla HOI4 rules learned from real decisions:
+        - Decision body = 1 tab indent
+        - Block content  = 3 tabs (user types relative, we add 3 tabs prefix)
+        - state_target = yes  (for both country AND state targeted via target_array/state_target)
+        - state_target = <scope>  when a specific scope keyword is chosen (any_controlled_state etc)
+        - cancel_trigger / cancel_effect / modifier / remove_effect / remove_trigger /
+          cancel_if_not_visible are NOT gated behind days_remove — they appear whenever set
+        - highlight_states is a raw block the user pastes in
+        - ai_hint_pp_cost is written when custom cost AND the field is non-empty
+        """
+        T1 = "\t";  T2 = "\t\t"
+        lines = [f"{T1}{dec['dec_id']} = {{"]
+
+        # ── allowed ──────────────────────────────────────────────────────────
+        if _s(dec["allowed"]):
+            lines.append(f"{T2}allowed = {{\n{_indent(_s(dec['allowed']),3)}\n{T2}}}")
+
+        # ── targeting ────────────────────────────────────────────────────────
+        tgt_var = _evars.get("targeted")
+        targeted = tgt_var.get() if isinstance(tgt_var, tk.StringVar) else dec.get("targeted","none")
+        if targeted != "none":
+            if _s(dec["target_root_trigger"]):
+                lines.append(f"{T2}target_root_trigger = {{\n{_indent(_s(dec['target_root_trigger']),3)}\n{T2}}}")
+            if _s(dec["target_trigger"]):
+                lines.append(f"{T2}target_trigger = {{\n{_indent(_s(dec['target_trigger']),3)}\n{T2}}}")
+            # state_target
+            if targeted == "state":
+                scope = _s(dec.get("state_target_scope","any"))
+                # vanilla uses "state_target = yes" OR "state_target = <scope>"
+                if scope in ("yes","any",""):
+                    lines.append(f"{T2}state_target = yes")
+                else:
+                    lines.append(f"{T2}state_target = {scope}")
+                lines.append(f"{T2}on_map_mode = {dec.get('on_map_mode','map_and_decisions_view')}")
+            elif targeted == "country":
+                # country targeted: state_target = yes is NOT used
+                pass
+            # targets list (country tags or state IDs)
+            if _s(dec["targets"]):
+                lines.append(f"{T2}targets = {{ {_s(dec['targets'])} }}")
+            if dec.get("targets_dynamic"):
+                lines.append(f"{T2}targets_dynamic = yes")
+            if dec.get("target_non_existing"):
+                lines.append(f"{T2}target_non_existing = yes")
+            if _s(dec["target_array"]):
+                lines.append(f"{T2}target_array = {_s(dec['target_array'])}")
+                # when using target_array with state_target, always need on_map_mode
+                if targeted == "country" and _s(dec.get("on_map_mode","")):
+                    lines.append(f"{T2}on_map_mode = {_s(dec['on_map_mode'])}")
+
+        # ── visible / available ──────────────────────────────────────────────
+        if _s(dec["visible"]):
+            lines.append(f"{T2}visible = {{\n{_indent(_s(dec['visible']),3)}\n{T2}}}")
+        if _s(dec["available"]):
+            lines.append(f"{T2}available = {{\n{_indent(_s(dec['available']),3)}\n{T2}}}")
+
+        # ── highlight_states ─────────────────────────────────────────────────
+        if _s(dec.get("highlight_states","")):
+            hs = _s(dec["highlight_states"])
+            # user may or may not wrap in highlight_states = { }
+            if not hs.startswith("highlight_states"):
+                lines.append(f"{T2}highlight_states = {{\n{_indent(hs,3)}\n{T2}}}")
+            else:
+                lines.append(_indent(hs, 2))
+
+        # ── on_map_mode (non-targeted) ───────────────────────────────────────
+        # For non-targeted decisions that still use highlight_states + on_map_mode
+        if targeted == "none" and _s(dec.get("on_map_mode","")):
+            lines.append(f"{T2}on_map_mode = {_s(dec['on_map_mode'])}")
+
+        # ── icon ─────────────────────────────────────────────────────────────
+        if _s(dec["icon"]):
+            lines.append(f"{T2}icon = {_s(dec['icon'])}")
+
+        # ── mission fields ───────────────────────────────────────────────────
+        if dec.get("is_mission"):
+            lines.append(f"{T2}days_mission_timeout = {dec.get('mission_timeout','100')}")
+            if dec.get("selectable_mission"):
+                lines.append(f"{T2}selectable_mission = yes")
+            if dec.get("is_good"):
+                lines.append(f"{T2}is_good = yes")
+            if _s(dec.get("activation","")):
+                lines.append(f"{T2}activation = {{\n{_indent(_s(dec['activation']),3)}\n{T2}}}")
+
+        # ── cost ─────────────────────────────────────────────────────────────
+        cost_type_var = _evars.get("cost_type")
+        ct_val = cost_type_var.get() if isinstance(cost_type_var,tk.StringVar) else dec.get("cost_type","pp")
+        if ct_val == "pp":
+            if _s(dec.get("cost","")):
+                lines.append(f"{T2}cost = {_s(dec['cost'])}")
+        else:  # custom cost
+            if _s(dec.get("ai_hint_pp_cost","")):
+                lines.append(f"{T2}ai_hint_pp_cost = {_s(dec['ai_hint_pp_cost'])}")
+            if _s(dec.get("custom_cost_trigger","")):
+                lines.append(f"{T2}custom_cost_trigger = {{\n{_indent(_s(dec['custom_cost_trigger']),3)}\n{T2}}}")
+            if _s(dec.get("custom_cost_text","")):
+                lines.append(f"{T2}custom_cost_text = {_s(dec['custom_cost_text'])}")
+
+        # ── timer ────────────────────────────────────────────────────────────
+        if _s(dec.get("days_remove","")):
+            lines.append(f"{T2}days_remove = {_s(dec['days_remove'])}")
+        if _s(dec.get("days_re_enable","")):
+            lines.append(f"{T2}days_re_enable = {_s(dec['days_re_enable'])}")
+        if dec.get("fire_only_once"):
+            lines.append(f"{T2}fire_only_once = yes")
+        if not dec.get("fixed_random_seed", True):
+            lines.append(f"{T2}fixed_random_seed = no")
+
+        # ── war warnings ─────────────────────────────────────────────────────
+        if targeted != "none":
+            if dec.get("war_target_complete"):
+                lines.append(f"{T2}war_with_target_on_complete = yes")
+            if dec.get("war_target_remove"):
+                lines.append(f"{T2}war_with_target_on_remove = yes")
+        else:
+            if _s(dec.get("war_complete_tag","")):
+                lines.append(f"{T2}war_with_on_complete = {_s(dec['war_complete_tag'])}")
+            if _s(dec.get("war_remove_tag","")):
+                lines.append(f"{T2}war_with_on_remove = {_s(dec['war_remove_tag'])}")
+
+        # ── modifier (NOT gated behind days_remove — can appear standalone) ──
+        if _s(dec.get("modifier","")):
+            lines.append(f"{T2}modifier = {{\n{_indent(_s(dec['modifier']),3)}\n{T2}}}")
+
+        # ── effects — all ungated (remove_effect, cancel_effect, etc) ────────
+        if _s(dec.get("complete_effect","")):
+            lines.append(f"{T2}complete_effect = {{\n{_indent(_s(dec['complete_effect']),3)}\n{T2}}}")
+
+        if dec.get("is_mission") and _s(dec.get("timeout_effect","")):
+            lines.append(f"{T2}timeout_effect = {{\n{_indent(_s(dec['timeout_effect']),3)}\n{T2}}}")
+
+        if _s(dec.get("remove_effect","")):
+            lines.append(f"{T2}remove_effect = {{\n{_indent(_s(dec['remove_effect']),3)}\n{T2}}}")
+
+        if _s(dec.get("cancel_trigger","")):
+            lines.append(f"{T2}cancel_trigger = {{\n{_indent(_s(dec['cancel_trigger']),3)}\n{T2}}}")
+
+        if _s(dec.get("cancel_effect","")):
+            lines.append(f"{T2}cancel_effect = {{\n{_indent(_s(dec['cancel_effect']),3)}\n{T2}}}")
+
+        if dec.get("cancel_if_not_visible"):
+            lines.append(f"{T2}cancel_if_not_visible = yes")
+
+        if _s(dec.get("remove_trigger","")):
+            lines.append(f"{T2}remove_trigger = {{\n{_indent(_s(dec['remove_trigger']),3)}\n{T2}}}")
+
+        # ── AI ───────────────────────────────────────────────────────────────
+        if _s(dec.get("ai_will_do","")):
+            lines.append(f"{T2}ai_will_do = {{\n{_indent(_s(dec['ai_will_do']),3)}\n{T2}}}")
+
+        if _s(dec.get("priority","")) not in ("","1"):
+            lines.append(f"{T2}priority = {_s(dec['priority'])}")
+
+        lines.append(f"{T1}}}")
+        return "\n".join(lines)
+
+    def _gen_decisions_file():
+        _collect()
+        out=["# ================================================================",
+             "# FILE: common/decisions/TAG_decisions.txt",
+             "# ================================================================\n"]
+        for cat in dm_cats:
+            decs=_decs_for(cat["uid"])
+            if not decs: continue
+            out.append(f"{cat['cat_id']} = {{")
+            for dec in decs:
+                out.append("\n"+_gen_decision_txt(dec))
+            out.append("}\n")
+        result = "\n".join(out)
+        return result
+
+    def _gen_categories_file():
+        _collect()
+        T1 = "\t"; T2 = "\t\t"
+        out=["# ================================================================",
+             "# FILE: common/decisions/categories/TAG_categories.txt",
+             "# ================================================================\n"]
+        for cat in dm_cats:
+            out.append(f"{cat['cat_id']} = {{")
+            if _s(cat["allowed"]):
+                out.append(f"{T1}allowed = {{\n{_indent(_s(cat['allowed']),2)}\n{T1}}}")
+            if _s(cat["visible"]):
+                out.append(f"{T1}visible = {{\n{_indent(_s(cat['visible']),2)}\n{T1}}}")
+            if _s(cat["icon"]):
+                out.append(f"{T1}icon = {_s(cat['icon'])}")
+            if _s(cat["picture"]):
+                out.append(f"{T1}picture = {_s(cat['picture'])}")
+            if _s(cat["priority"]) not in ("","1"):
+                out.append(f"{T1}priority = {_s(cat['priority'])}")
+            if cat.get("visible_when_empty"):
+                out.append(f"{T1}visible_when_empty = yes")
+            if _s(cat.get("scripted_gui","")):
+                out.append(f"{T1}scripted_gui = {_s(cat['scripted_gui'])}")
+            if _s(cat.get("highlight_states","")):
+                hs = _s(cat["highlight_states"])
+                if not hs.startswith("highlight_states"):
+                    out.append(f"{T1}highlight_states = {{\n{_indent(hs,2)}\n{T1}}}")
+                else:
+                    out.append(_indent(hs,1))
+            if cat["on_map_area"]:
+                out.append(f"{T1}on_map_area = {{")
+                out.append(f"{T2}state = {_s(cat.get('map_state',''))}")
+                out.append(f"{T2}name = {_s(cat.get('map_name',''))}")
+                out.append(f"{T2}zoom = {_s(cat.get('map_zoom','850'))}")
+                if _s(cat.get("map_trigger","")):
+                    out.append(f"{T2}target_root_trigger = {{\n{_indent(_s(cat['map_trigger']),3)}\n{T2}}}")
+                out.append(f"{T1}}}")
+            out.append("}\n")
+        return "\n".join(out)
+
+    def _gen_yml():
+        _collect()
+        lines=["l_english:"]
+        for cat in dm_cats:
+            cid=_s(cat["cat_id"])
+            if cid:
+                lines.append(f' {cid}:0 "{cat["loc_name"]}"')
+                if _s(cat.get("loc_desc","")):
+                    lines.append(f' {cid}_desc:0 "{_s(cat["loc_desc"])}"')
+            for dec in _decs_for(cat["uid"]):
+                did=_s(dec["dec_id"])
+                if did:
+                    lines.append(f' {did}:0 "{dec["loc_name"]}"')
+                    if _s(dec.get("loc_desc","")):
+                        lines.append(f' {did}_desc:0 "{_s(dec["loc_desc"])}"')
+        return "\n".join(lines)+"\n"
+
+    # ── import / export ───────────────────────────────────────────────────────
+    def _import_txt():
+        import re as _re, os as _os
+
+        paths = filedialog.askopenfilenames(
+            parent=win, title="Import decisions .txt (+ optionally loc .yml)",
+            filetypes=[("HOI4 files","*.txt *.yml"),("TXT","*.txt"),("YML","*.yml"),("All","*.*")])
+        if not paths: return
+
+        # ── helper: extract a named block from text, return (inner_text, full_text) ──
+        def _extract_block(text, start_pos=0):
+            """Given text starting at '{', return content between braces."""
+            depth = 0; j = start_pos
+            while j < len(text):
+                if text[j] == "{": depth += 1
+                elif text[j] == "}":
+                    depth -= 1
+                    if depth == 0: return text[start_pos+1:j], j
+                j += 1
+            return text[start_pos+1:], len(text)-1
+
+        def _find_blocks(text):
+            """Find all top-level key = { ... } blocks, skipping comments."""
+            blocks = []; i = 0
+            while i < len(text):
+                if text[i] == "#":
+                    while i < len(text) and text[i] != "\n": i += 1
+                    continue
+                m = _re.match(r"\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*\{", text[i:])
+                if m:
+                    name = m.group(1)
+                    brace_pos = i + m.end() - 1
+                    inner, end_j = _extract_block(text, brace_pos)
+                    blocks.append((name, inner, text[i:end_j+1]))
+                    i = end_j + 1; continue
+                i += 1
+            return blocks
+
+        def _get_block(text, key):
+            """Extract inner content of first occurrence of key = { ... } in text."""
+            m = _re.search(rf"\b{_re.escape(key)}\s*=\s*\{{", text)
+            if not m: return None
+            inner, _ = _extract_block(text, m.end()-1)
+            return inner.strip()
+
+        def _get_value(text, key):
+            """Get scalar value: key = value (not a block)."""
+            m = _re.search(rf"\b{_re.escape(key)}\s*=\s*([^\s{{}}#\n]+)", text)
+            return m.group(1).strip() if m else None
+
+        def _get_yes_no(text, key):
+            v = _get_value(text, key)
+            return v == "yes" if v else None
+
+        # ── load localisation from .yml files ──
+        loc = {}
+        for path in paths:
+            if path.lower().endswith(".yml"):
+                try:
+                    with open(path, "r", encoding="utf-8-sig", errors="replace") as f:
+                        for line in f:
+                            lm = _re.match(r'\s+([\w]+):(?:\d+)?\s+"(.*?)"', line)
+                            if lm: loc[lm.group(1)] = lm.group(2)
+                except Exception: pass
+
+        # Also try to auto-load loc from same folder as first .txt
+        txt_paths = [p for p in paths if p.lower().endswith(".txt")]
+        if txt_paths and not any(p.lower().endswith(".yml") for p in paths):
+            folder = os.path.dirname(txt_paths[0])
+            # walk up to find localisation folder
+            for _ in range(5):
+                loc_dir = os.path.join(folder, "localisation")
+                if os.path.isdir(loc_dir):
+                    for fn in os.listdir(loc_dir):
+                        if fn.endswith(".yml") or fn.endswith("_l_english.yml"):
+                            try:
+                                with open(os.path.join(loc_dir, fn), "r",
+                                          encoding="utf-8-sig", errors="replace") as f:
+                                    for line in f:
+                                        lm = _re.match(r'\s+([\w]+):(?:\d+)?\s+"(.*?)"', line)
+                                        if lm: loc[lm.group(1)] = lm.group(2)
+                            except Exception: pass
+                    break
+                folder = os.path.dirname(folder)
+
+        imported = 0
+        for path in txt_paths:
+            try:
+                with open(path, "r", encoding="utf-8", errors="replace") as f:
+                    raw = f.read()
+            except Exception as e:
+                messagebox.showerror("Import Error", str(e), parent=win); continue
+
+            for cat_name, cat_inner, _ in _find_blocks(raw):
+                if cat_name in ("add_namespace", "namespace"): continue
+                c = _new_cat()
+                c["cat_id"] = cat_name
+                c["loc_name"] = loc.get(cat_name, cat_name)
+                c["loc_desc"] = loc.get(cat_name + "_desc", "")
+                # Parse category fields
+                for _field, _key in [("icon","icon"),("picture","picture"),
+                                      ("scripted_gui","scripted_gui")]:
+                    v = _get_value(cat_inner, _key)
+                    if v: c[_field] = v
+                for _field, _key in [("allowed","allowed"),("visible","visible"),
+                                      ("highlight_states","highlight_states"),
+                                      ("map_trigger","target_root_trigger")]:
+                    v = _get_block(cat_inner, _key)
+                    if v is not None: c[_field] = v
+                pv = _get_value(cat_inner, "priority")
+                if pv: c["priority"] = pv
+                if _get_yes_no(cat_inner, "visible_when_empty"): c["visible_when_empty"] = True
+                # on_map_area
+                oma = _get_block(cat_inner, "on_map_area")
+                if oma is not None:
+                    c["on_map_area"] = True
+                    sv = _get_value(oma, "state"); c["map_state"] = sv or ""
+                    nv = _get_value(oma, "name"); c["map_name"] = nv or ""
+                    zv = _get_value(oma, "zoom"); c["map_zoom"] = zv or "850"
+                dm_cats.append(c)
+
+                for dec_name, dec_inner, _ in _find_blocks(cat_inner):
+                    d = _new_dec(c["uid"])
+                    d["dec_id"] = dec_name
+                    d["loc_name"] = loc.get(dec_name, dec_name)
+                    d["loc_desc"] = loc.get(dec_name + "_desc", "")
+
+                    # ── scalar fields ──
+                    for _field, _key in [("priority","priority"),("chain","")]:
+                        pass  # handled below
+                    sv_map = {
+                        "cost": "cost", "days_remove": "days_remove",
+                        "days_re_enable": "days_re_enable", "priority": "priority",
+                        "icon": "icon", "mission_timeout": "days_mission_timeout",
+                        "target_array": "target_array",
+                    }
+                    for dkey, hkey in sv_map.items():
+                        v = _get_value(dec_inner, hkey or dkey)
+                        if v and dkey in d: d[dkey] = v
+                    # icon direct key
+                    iv = _get_value(dec_inner, "icon")
+                    if iv: d["icon"] = iv
+
+                    # ── boolean flags ──
+                    if _get_yes_no(dec_inner, "fire_only_once") is True:
+                        d["fire_only_once"] = True
+                    if _re.search(r"\bfire_only_once\b", dec_inner):
+                        d["fire_only_once"] = True
+                    if _get_yes_no(dec_inner, "fixed_random_seed") is False:
+                        d["fixed_random_seed"] = False
+                    if _get_yes_no(dec_inner, "is_mission") is True:
+                        d["is_mission"] = True
+                    if _get_yes_no(dec_inner, "selectable_mission") is False:
+                        d["selectable_mission"] = False
+                    if _get_yes_no(dec_inner, "is_good") is True:
+                        d["is_good"] = True
+                    if _get_yes_no(dec_inner, "cancel_if_not_visible") is True:
+                        d["cancel_if_not_visible"] = True
+                    if _get_yes_no(dec_inner, "targets_dynamic") is True:
+                        d["targets_dynamic"] = True
+                    if _get_yes_no(dec_inner, "target_non_existing") is True:
+                        d["target_non_existing"] = True
+
+                    # ── cost type detection ──
+                    if _re.search(r"\bcustom_cost_trigger\b", dec_inner):
+                        d["cost_type"] = "custom"
+                        ccb = _get_block(dec_inner, "custom_cost_trigger")
+                        if ccb: d["custom_cost_trigger"] = ccb
+                        cct = _get_value(dec_inner, "custom_cost_text")
+                        if cct: d["custom_cost_text"] = cct
+                        ahp = _get_value(dec_inner, "ai_hint_pp_cost")
+                        if ahp: d["ai_hint_pp_cost"] = ahp
+                    else:
+                        cv = _get_value(dec_inner, "cost")
+                        if cv:
+                            d["cost"] = cv
+                            d["cost_type"] = "pp"
+
+                    # ── block fields ──
+                    block_map = {
+                        "allowed": "allowed", "visible": "visible",
+                        "available": "available", "cancel_trigger": "cancel_trigger",
+                        "complete_effect": "complete_effect",
+                        "remove_effect": "remove_effect",
+                        "cancel_effect": "cancel_effect",
+                        "timeout_effect": "timeout_effect",
+                        "ai_will_do": "ai_will_do",
+                        "modifier": "modifier",
+                        "remove_trigger": "remove_trigger",
+                        "activation": "activation",
+                        "highlight_states": "highlight_states",
+                        "target_trigger": "target_trigger",
+                        "target_root_trigger": "target_root_trigger",
+                        "war_with_on_timeout": "war_with_on_timeout",
+                    }
+                    for dkey, hkey in block_map.items():
+                        v = _get_block(dec_inner, hkey)
+                        if v is not None and dkey in d:
+                            d[dkey] = v
+
+                    # ── targeting detection ──
+                    if _re.search(r"\btarget_array\b|\btargets\b", dec_inner):
+                        d["targeted"] = "country"
+                        tv = _get_value(dec_inner, "targets")
+                        if tv: d["targets"] = tv
+                    if _re.search(r"\bstate_target\b", dec_inner):
+                        d["targeted"] = "state"
+                    if d["targeted"] != "none":
+                        on_mm = _get_value(dec_inner, "on_map_mode")
+                        if on_mm: d["on_map_mode"] = on_mm
+                        st_scope = _get_value(dec_inner, "state_target")
+                        if st_scope and st_scope != "yes": d["state_target_scope"] = st_scope
+                        ta = _get_value(dec_inner, "target_array")
+                        if ta: d["target_array"] = ta
+
+                    dm_decs.append(d)
+                    imported += 1
+
+        _autosave()
+        _dm_status.config(text=f"  ✓  Imported {imported} decisions — rebuilding...")
+        win.update_idletasks()
+        _rebuild_tree()
+        win.after(50, lambda: (_rebuild_editor(),
+                               _dm_status.config(text=f"  ✓  Imported {imported} decisions")))
+
+    def _import_scripted_loc():
+        """Load a scripted_localisation .txt and apply loc keys to existing decisions/cats."""
+        import re as _rsl, os as _osl
+        paths = filedialog.askopenfilenames(
+            parent=win, title="Import scripted_localisation .txt files",
+            filetypes=[("HOI4 txt","*.txt"),("All","*.*")])
+        if not paths: return
+        # Build map: defined_text name -> localization_key (from first text block)
+        sloc_map = {}
+        for path in paths:
+            try:
+                with open(path, "r", encoding="utf-8", errors="replace") as f:
+                    raw = f.read()
+                for m in _rsl.finditer(
+                        r"defined_text\s*=\s*\{[^}]*?name\s*=\s*(\S+)[^}]*?"
+                        r"localization_key\s*=\s*(\S+)", raw, _rsl.DOTALL):
+                    sloc_map[m.group(1)] = m.group(2)
+            except Exception: pass
+        if not sloc_map:
+            _dm_status.config(text="  ⚠  No defined_text blocks found"); return
+        updated = 0
+        # Match GET_{id}_name -> loc_name key, GET_{id}_desc -> loc_desc key
+        for c in dm_cats:
+            cid = c["cat_id"].strip()
+            key_name = f"GET_{cid}_name"
+            if key_name in sloc_map: c["loc_name"] = sloc_map[key_name]; updated += 1
+            key_desc = f"GET_{cid}_desc"
+            if key_desc in sloc_map: c["loc_desc"] = sloc_map[key_desc]
+        for d in dm_decs:
+            did = d["dec_id"].strip()
+            key_name = f"GET_{did}_name"
+            if key_name in sloc_map: d["loc_name"] = sloc_map[key_name]; updated += 1
+            key_desc = f"GET_{did}_desc"
+            if key_desc in sloc_map: d["loc_desc"] = sloc_map[key_desc]
+        _dm_status.config(text=f"  ✓  Scripted loc applied — {updated} entries matched")
+        win.after(30, lambda: (_rebuild_tree(), _rebuild_editor()))
+
+    def _import_yml_loc():
+        """Load a localisation .yml and apply names/descs to existing decisions/cats."""
+        import re as _re2, os as _os2
+        paths = filedialog.askopenfilenames(
+            parent=win, title="Import localisation .yml files",
+            filetypes=[("YML localisation","*.yml"),("All","*.*")])
+        if not paths: return
+        loc2 = {}
+        for path in paths:
+            try:
+                with open(path, "r", encoding="utf-8-sig", errors="replace") as f:
+                    for line in f:
+                        lm = _re2.match(r'\s+([\w]+):(?:\d+)?\s+"(.*?)"', line)
+                        if lm: loc2[lm.group(1)] = lm.group(2)
+            except Exception as e:
+                messagebox.showerror("YML Error", str(e), parent=win); return
+        updated = 0
+        for c in dm_cats:
+            if c["cat_id"] in loc2:
+                c["loc_name"] = loc2[c["cat_id"]]; updated += 1
+            if c["cat_id"] + "_desc" in loc2:
+                c["loc_desc"] = loc2[c["cat_id"] + "_desc"]
+        for d in dm_decs:
+            if d["dec_id"] in loc2:
+                d["loc_name"] = loc2[d["dec_id"]]; updated += 1
+            if d["dec_id"] + "_desc" in loc2:
+                d["loc_desc"] = loc2[d["dec_id"] + "_desc"]
+        _dm_status.config(text=f"  ✓  Localisation applied — {updated} entries matched")
+        win.after(30, lambda: (_rebuild_tree(), _rebuild_editor()))
+
+    def _export_txt():
+        _collect()
+        path=filedialog.asksaveasfilename(parent=win,title="Export decisions .txt",
+            defaultextension=".txt",filetypes=[("HOI4 decisions","*.txt"),("All","*.*")])
+        if not path: return
+        try:
+            with open(path,"w",encoding="utf-8") as f: f.write(_gen_decisions_file())
+            cat_path=path.replace(".txt","_categories.txt")
+            with open(cat_path,"w",encoding="utf-8") as f: f.write(_gen_categories_file())
+            _dm_status.config(text=f"  ✓  Exported")
+        except Exception as e: messagebox.showerror("Export Error",str(e),parent=win)
+
+    def _copy_yml():
+        _collect()
+        win.clipboard_clear(); win.clipboard_append(_gen_yml())
+        _dm_status.config(text="  ✓  YML copied to clipboard")
+
+    def _save_to_mod():
+        _collect()
+        if not dm_cats: messagebox.showwarning("Empty","No categories to save.",parent=win); return
+        if MOD.root and os.path.isdir(MOD.root): mod_root=MOD.root
+        else:
+            mod_root=filedialog.askdirectory(parent=win,title="Select MOD ROOT folder")
+            if not mod_root: return
+        ns=dm_cats[0]["cat_id"].split("_")[0] if dm_cats else "TAG"
+        saved=[]; errs=[]
+        dec_path=os.path.join(mod_root,"common","decisions",f"{ns}_decisions.txt")
+        os.makedirs(os.path.dirname(dec_path),exist_ok=True)
+        try:
+            with open(dec_path,"w",encoding="utf-8") as f: f.write(_gen_decisions_file())
+            saved.append(os.path.relpath(dec_path,mod_root))
+        except Exception as e: errs.append(str(e))
+        cat_path=os.path.join(mod_root,"common","decisions","categories",f"{ns}_categories.txt")
+        os.makedirs(os.path.dirname(cat_path),exist_ok=True)
+        try:
+            with open(cat_path,"w",encoding="utf-8") as f: f.write(_gen_categories_file())
+            saved.append(os.path.relpath(cat_path,mod_root))
+        except Exception as e: errs.append(str(e))
+        yml_path = (MOD.edit_loc_file if MOD.edit_loc_file and os.path.isfile(MOD.edit_loc_file)
+                   else os.path.join(mod_root,"localisation","english",f"{ns}_decisions_l_english.yml"))
+        os.makedirs(os.path.dirname(yml_path),exist_ok=True)
+        try:
+            if not os.path.isfile(yml_path):
+                with open(yml_path,"w",encoding="utf-8-sig") as f: f.write("l_english:\n")
+            new_lines=[l for l in _gen_yml().splitlines()
+                       if l.strip() and not l.strip().startswith("l_english")]
+            with open(yml_path,"a",encoding="utf-8-sig") as f: f.write("\n".join(new_lines)+"\n")
+            saved.append(os.path.relpath(yml_path,mod_root))
+        except Exception as e: errs.append(str(e))
+        # ── SCRIPTED LOC ─────────────────────────────────────────────────
+        if MOD.edit_scripted_loc_file:
+            sloc_blocks = []
+            for cat in dm_cats:
+                cid = cat["cat_id"].strip()
+                if cid:
+                    sloc_blocks.append({"name": f"GET_{cid}_name", "texts": [], "default": cid})
+                for dec in _decs_for(cat["uid"]):
+                    did = dec["dec_id"].strip()
+                    if did:
+                        sloc_blocks.append({"name": f"GET_{did}_name", "texts": [], "default": did})
+            _append_scripted_loc(MOD.edit_scripted_loc_file,
+                                  sloc_blocks, saved, errs, mod_root)
+
+        msg="Saved:\n"+"\n".join(saved)
+        if errs: msg+="\n\nErrors:\n"+"\n".join(errs)
+        messagebox.showinfo("Saved to Mod",msg,parent=win)
+        _dm_status.config(text="  ✓  Saved to mod")
+
+    # ── init ─────────────────────────────────────────────────────────────────
+    # ── Autosave restore prompt ──────────────────────────────────────────────
+    def _try_restore():
+        if os.path.isfile(_autosave_path):
+            try:
+                import json as _j
+                with open(_autosave_path, "r", encoding="utf-8") as f:
+                    data = _j.load(f)
+                n_cats = len(data.get("cats",[]))
+                n_decs = len(data.get("decs",[]))
+                if n_cats > 0 or n_decs > 0:
+                    if messagebox.askyesno("Restore autosave",
+                        f"An autosave was found with {n_cats} categories and {n_decs} decisions.\nRestore it?",
+                        parent=win):
+                        dm_cats.clear(); dm_cats.extend(data["cats"])
+                        dm_decs.clear(); dm_decs.extend(data["decs"])
+                        _dedup_cats()
+                        # Select first cat and rebuild everything now that data is loaded
+                        if dm_cats:
+                            sel["uid"] = dm_cats[0]["uid"]; sel["type"] = "cat"
+                        _rebuild_tree()
+                        _rebuild_editor()
+                        _rebuild_right()
+            except Exception:
+                pass
+
+    if not dm_cats:
+        win.after(50, _try_restore)
+    else:
+        # Data already present (passed in externally) — just build
+        sel["uid"] = dm_cats[0]["uid"]; sel["type"] = "cat"
+        _rebuild_tree()
+        _rebuild_editor()
+        _rebuild_right()
+
+def open_dyn_mod_wizard(app):
+    """Wizard to create a HOI4 dynamic modifier .txt file."""
+    win = tk.Toplevel(app); win.title("Dynamic Modifier Generator")
+    win.configure(bg=BG_DARK); win.geometry("640x720"); win.resizable(True,True)
+    win.grab_set()
+    import json as _dmjson, tempfile as _dmtmp
+    _dm_autosave_p = _dmtmp.gettempdir() + "/hoi4_cm_dynmod_autosave.json"
+    def _dynmod_close():
+        try:
+            data = {k: v.get() for k, v in _dm_svars.items()}
+            with open(_dm_autosave_p, "w", encoding="utf-8") as f:
+                _dmjson.dump(data, f)
+        except Exception:
+            pass
+        win.destroy()
+    win.protocol("WM_DELETE_WINDOW", _dynmod_close)
+    _dm_svars = {}   # populated below
+
+    tk.Label(win,text="DYNAMIC MODIFIER GENERATOR",bg=BG_DARK,fg=TEXT,
+             font=("Helvetica",11,"bold"),pady=10).pack(fill="x",padx=14)
+    tk.Frame(win,bg=BORDER_G,height=1).pack(fill="x")
+
+    # Draggable split
+    dm_paned = tk.PanedWindow(win, orient="horizontal",
+                              bg=BORDER_G, sashwidth=5, sashrelief="flat",
+                              handlesize=0)
+    dm_paned.pack(fill="both", expand=True)
+
+    # LEFT — scrollable form
+    dm_left = tk.Frame(dm_paned, bg=BG_PANEL)
+    dm_paned.add(dm_left, minsize=280, width=400, stretch="always")
+    sc=tk.Canvas(dm_left,bg=BG_PANEL,highlightthickness=0)
+    sb=tk.Scrollbar(dm_left,orient="vertical",command=sc.yview)
+    frm=tk.Frame(sc,bg=BG_PANEL)
+    sc.create_window((0,0),window=frm,anchor="nw")
+    sc.configure(yscrollcommand=sb.set)
+    frm.bind("<Configure>",lambda e:sc.configure(scrollregion=sc.bbox("all")))
+    sc.bind("<Configure>",lambda e:sc.itemconfig(sc.find_withtag("all")[0],width=e.width))
+    sb.pack(side="right",fill="y"); sc.pack(fill="both",expand=True,padx=0)
+
+    # RIGHT — preview panel
+    dm_right = tk.Frame(dm_paned, bg=BG_DARK)
+    dm_paned.add(dm_right, minsize=200, width=300, stretch="always")
+
+    def lbl(text,fg=TEXT_DIM,bold=False):
+        tk.Label(frm,text=text,bg=BG_PANEL,fg=fg,
+                 font=("Helvetica",9,"bold" if bold else "normal"),anchor="w").pack(fill="x",padx=12,pady=(6,0))
+    def entry(var,placeholder=""):
+        e=tk.Entry(frm,textvariable=var,bg=BG_CARD,fg=TEXT,insertbackground=BLUE,
+                   font=("Helvetica",10),relief="flat",highlightthickness=1,
+                   highlightbackground=BORDER_G); e.pack(fill="x",padx=12,pady=2,ipady=4)
+        return e
+    def sep(): tk.Frame(frm,bg=BORDER_G,height=1).pack(fill="x",padx=8,pady=6)
+
+    # ── Core fields ──────────────────────────────────────────
+    lbl("MODIFIER ID  (must match add_dynamic_modifier = { modifier = ... })",bold=True)
+    v_id = tk.StringVar(value="TAG_my_dynamic_modifier")
+    entry(v_id)
+
+    lbl("Scope:  country | state | unit_leader")
+    v_scope = tk.StringVar(value="country")
+    om_scope=tk.OptionMenu(frm,v_scope,"country","state","unit_leader")
+    om_scope.config(bg=BG_CARD,fg=TEXT,activebackground=BORDER_G,font=("Helvetica",10),
+                    relief="flat",highlightthickness=1,highlightbackground=BORDER_G,anchor="w")
+    om_scope["menu"].config(bg=BG_CARD,fg=TEXT,activebackground=BORDER_G)
+    om_scope.pack(fill="x",padx=12,pady=2)
+
+    lbl("Icon GFX  (optional — shows in national spirits list if set)")
+    v_icon = tk.StringVar(value="")
+    _icon_row = tk.Frame(frm, bg=BG_PANEL); _icon_row.pack(fill="x", padx=12, pady=2)
+    tk.Entry(_icon_row, textvariable=v_icon, bg=BG_CARD, fg=TEXT,
+             insertbackground=BLUE, font=("Helvetica",10), relief="flat",
+             highlightthickness=1, highlightbackground=BORDER_G
+             ).pack(side="left", fill="x", expand=True, ipady=4)
+    def _open_dynmod_gfx_browser():
+        ideas_root = os.path.join(MOD.root, MOD.path_ideas_gfx) if MOD.loaded else None
+        if not MOD.loaded or not ideas_root or not os.path.isdir(ideas_root):
+            folder = filedialog.askdirectory(title="Select idea GFX folder (gfx/interface/ideas)")
+            if not folder: return
+            ideas_root = folder
+        folders = []
+        try:
+            loose = [f for f in os.listdir(ideas_root) if f.lower().endswith((".dds",".png",".tga"))]
+            if loose: folders.append(("[ideas root]", ideas_root))
+            for _e in sorted(os.listdir(ideas_root)):
+                full = os.path.join(ideas_root, _e)
+                if os.path.isdir(full): folders.append((_e, full))
+        except Exception: pass
+        if not folders:
+            messagebox.showinfo("No Folders",
+                "No image files or subfolders found in the ideas GFX path.", parent=win)
+            return
+        bwin = tk.Toplevel(win); bwin.title("GFX Browser  —  Ideas / Dynamic Modifier")
+        bwin.configure(bg=BG_DARK); bwin.geometry("900x580"); bwin.resizable(True,True)
+        bwin.grab_set()
+        panes = tk.Frame(bwin, bg=BG_DARK); panes.pack(fill="both", expand=True, padx=8, pady=8)
+        lf = tk.Frame(panes, bg=BG_PANEL, width=200)
+        lf.pack(side="left", fill="y", padx=(0,6)); lf.pack_propagate(False)
+        tk.Label(lf, text="  FOLDERS", bg=BG_PANEL, fg=TEXT_DIM,
+                 font=("Helvetica",9,"bold"), anchor="w", pady=6).pack(fill="x")
+        tk.Frame(lf, bg=BORDER_G, height=1).pack(fill="x")
+        folder_lb = tk.Listbox(lf, bg=BG_CARD, fg=TEXT, selectbackground=BLUE,
+                               selectforeground=TEXT, font=("Courier",9),
+                               relief="flat", bd=0, activestyle="none", highlightthickness=0)
+        fsb = tk.Scrollbar(lf, orient="vertical", command=folder_lb.yview)
+        folder_lb.configure(yscrollcommand=fsb.set)
+        fsb.pack(side="right", fill="y"); folder_lb.pack(fill="both", expand=True, padx=2, pady=4)
+        for display, _ in folders: folder_lb.insert("end", "  " + display)
+        rf = tk.Frame(panes, bg=BG_DARK); rf.pack(side="left", fill="both", expand=True)
+        top_r = tk.Frame(rf, bg=BG_DARK); top_r.pack(fill="x", pady=(0,6))
+        tk.Label(top_r, text="Filter:", bg=BG_DARK, fg=TEXT_DIM, font=("Helvetica",9)).pack(side="left")
+        search_var = tk.StringVar()
+        tk.Entry(top_r, textvariable=search_var, bg=BG_CARD, fg=TEXT,
+                 insertbackground=BLUE, font=("Helvetica",10), relief="flat",
+                 highlightthickness=1, highlightbackground=BORDER_G
+                 ).pack(side="left", padx=6, fill="x", expand=True, ipady=3)
+        status_lbl = tk.Label(top_r, text="select a folder", bg=BG_DARK,
+                              fg=TEXT_DIM, font=("Helvetica",9)); status_lbl.pack(side="right", padx=6)
+        cv_frame = tk.Frame(rf, bg=BG_PANEL); cv_frame.pack(fill="both", expand=True)
+        cv = tk.Canvas(cv_frame, bg=BG_PANEL, highlightthickness=0)
+        vsb = tk.Scrollbar(cv_frame, orient="vertical", command=cv.yview)
+        cv.configure(yscrollcommand=vsb.set); vsb.pack(side="right", fill="y")
+        cv.pack(side="left", fill="both", expand=True)
+        bot2 = tk.Frame(bwin, bg=BG_DARK); bot2.pack(fill="x", padx=10, pady=6)
+        selected_var2 = tk.StringVar(value="")
+        tk.Label(bot2, textvariable=selected_var2, bg=BG_DARK, fg=BLUE,
+                 font=("Helvetica",9)).pack(side="left", padx=4)
+        tk.Button(bot2, text="Cancel", command=bwin.destroy,
+                  bg=BG_CARD, fg=TEXT, relief="flat", font=("Helvetica",9),
+                  padx=10, pady=4, cursor="hand2").pack(side="right", padx=4)
+        def _apply_dynmod_icon():
+            v_icon.set(selected_var2.get()); bwin.destroy()
+        _sel_btn2 = tk.Button(bot2, text="Select ->", command=_apply_dynmod_icon,
+                              bg="#1a3322", fg="#4b7a5e", relief="flat",
+                              font=("Helvetica",10,"bold"), padx=14, pady=5,
+                              cursor="arrow", state="disabled")
+        _sel_btn2.pack(side="right")
+        def _on_sel2(*_):
+            if selected_var2.get(): _sel_btn2.config(bg="#14532d",fg="#0a0a0a",cursor="hand2",state="normal")
+            else: _sel_btn2.config(bg="#1a3322",fg="#4b7a5e",cursor="arrow",state="disabled")
+        selected_var2.trace_add("write", _on_sel2)
+        COLS2=5; TILE_W2=110; TILE_H2=100; PAD2=6
+        IMG_W2=80; IMG_H2=70
+        _st2 = {"pairs":[],"img_cache":{},"drawn":set(),"canvas_ids":{},"sel_idx":None}
+        def _tile_xy2(idx):
+            col=idx%COLS2; row=idx//COLS2
+            return PAD2+col*(TILE_W2+PAD2), PAD2+row*(TILE_H2+PAD2)
+        def _select_tile2(idx):
+            old=_st2["sel_idx"]
+            if old is not None and old in _st2["canvas_ids"]:
+                rid,_,_=_st2["canvas_ids"][old]; cv.itemconfig(rid,fill=BG_CARD,outline=BORDER_G)
+            _st2["sel_idx"]=idx
+            gfx_key=_st2["pairs"][idx][0]; selected_var2.set(gfx_key)
+            if idx in _st2["canvas_ids"]:
+                rid,_,_=_st2["canvas_ids"][idx]; cv.itemconfig(rid,fill=SEL_BG,outline=BLUE)
+        def _draw_tile2(idx):
+            if idx in _st2["drawn"]: return
+            _st2["drawn"].add(idx)
+            gfx_key,path=_st2["pairs"][idx]; x,y=_tile_xy2(idx)
+            is_sel=(gfx_key==selected_var2.get())
+            rid=cv.create_rectangle(x,y,x+TILE_W2,y+TILE_H2,
+                fill=SEL_BG if is_sel else BG_CARD,
+                outline=BLUE if is_sel else BORDER_G,width=2,tags=("dt","dt%d"%idx))
+            iid=cv.create_text(x+TILE_W2//2,y+44,text="...",fill=TEXT_DIM,
+                font=("Helvetica",14),tags=("dt","dt%d"%idx))
+            short=gfx_key.replace("GFX_idea_","").replace("GFX_focus_","")
+            short=(short[:16]+"...") if len(short)>16 else short
+            lid=cv.create_text(x+TILE_W2//2,y+TILE_H2-14,text=short,fill=TEXT_DIM,
+                font=("Helvetica",7),width=TILE_W2-8,tags=("dt","dt%d"%idx))
+            _st2["canvas_ids"][idx]=(rid,iid,lid)
+            for item in (rid,iid,lid):
+                cv.tag_bind(item,"<Button-1>",lambda e,i=idx:_select_tile2(i))
+                cv.tag_bind(item,"<Double-Button-1>",lambda e,i=idx:[_select_tile2(i),_apply_dynmod_icon()])
+            if path in _st2["img_cache"]: _fill_image2(idx)
+        def _fill_image2(idx):
+            if idx not in _st2["canvas_ids"]: return
+            rid,iid,lid=_st2["canvas_ids"][idx]
+            gfx_key,path=_st2["pairs"][idx]; img=_st2["img_cache"].get(path)
+            cv.delete(iid)
+            if img:
+                new_iid=cv.create_image(_tile_xy2(idx)[0]+TILE_W2//2,_tile_xy2(idx)[1]+44,
+                    anchor="center",image=img,tags=("dt","dt%d"%idx))
+            else:
+                new_iid=cv.create_text(_tile_xy2(idx)[0]+TILE_W2//2,_tile_xy2(idx)[1]+34,
+                    text="?",fill=TEXT_DIM,font=("Helvetica",20),tags=("dt","dt%d"%idx))
+            _st2["canvas_ids"][idx]=(rid,new_iid,lid)
+            for item in (rid,new_iid,lid):
+                cv.tag_bind(item,"<Button-1>",lambda e,i=idx:_select_tile2(i))
+                cv.tag_bind(item,"<Double-Button-1>",lambda e,i=idx:[_select_tile2(i),_apply_dynmod_icon()])
+        def _bg_load2(snap,indices):
+            for i in indices:
+                if i>=len(snap): break
+                _,path=snap[i]
+                if path in _st2["img_cache"]: continue
+                img=None
+                paths_try=[path]+[os.path.splitext(path)[0]+ext
+                    for ext in (".png",".tga") if os.path.exists(os.path.splitext(path)[0]+ext)]
+                for tp in paths_try:
+                    try:
+                        if _PIL_OK and os.path.exists(tp):
+                            pil=_PILImage.open(tp).convert("RGBA")
+                            rs=getattr(_PILImage,"LANCZOS",getattr(_PILImage,"ANTIALIAS",1))
+                            pw,ph=pil.size; ratio=min(IMG_W2/max(pw,1),IMG_H2/max(ph,1))
+                            pil=pil.resize((max(1,int(pw*ratio)),max(1,int(ph*ratio))),rs)
+                            img=_PILImageTk.PhotoImage(pil); break
+                    except Exception: pass
+                _st2["img_cache"][path]=img
+                _safe_after(bwin,0,lambda i2=i:_fill_image2(i2))
+        def _lazy_fill2(*_):
+            if not _st2["pairs"]: return
+            cv.update_idletasks()
+            top=cv.canvasy(0); bottom=cv.canvasy(cv.winfo_height()); visible=[]
+            for idx in range(len(_st2["pairs"])):
+                _,ty=_tile_xy2(idx)
+                if ty+TILE_H2>=top and ty<=bottom: _draw_tile2(idx); visible.append(idx)
+            last=max(visible) if visible else 0
+            ahead=list(range(last+1,min(last+41,len(_st2["pairs"]))))
+            to_load=[i for i in (visible+ahead) if _st2["pairs"][i][1] not in _st2["img_cache"]]
+            if to_load:
+                snap=list(_st2["pairs"])
+                threading.Thread(target=_bg_load2,args=(snap,to_load),daemon=True).start()
+        def _rebuild2(pairs):
+            cv.delete("all"); _st2.update({"pairs":pairs,"drawn":set(),"canvas_ids":{},"sel_idx":None})
+            if not pairs: status_lbl.config(text="0 icons"); return
+            status_lbl.config(text="%d icons"%len(pairs))
+            rows=(len(pairs)+COLS2-1)//COLS2
+            cv.configure(scrollregion=(0,0,PAD2+COLS2*(TILE_W2+PAD2),PAD2+rows*(TILE_H2+PAD2)))
+            cv.yview_moveto(0); _safe_after_idle(bwin,_lazy_fill2)
+        def _collect_files2(folder_path):
+            ft=search_var.get().strip().lower(); pairs=[]
+            for rd,dirs,fnames in os.walk(folder_path):
+                dirs.sort()
+                for fname in sorted(fnames):
+                    if not fname.lower().endswith((".dds",".png",".tga")): continue
+                    if ft and ft not in fname.lower(): continue
+                    stem=os.path.splitext(fname)[0]
+                    pairs.append(("GFX_idea_"+stem, os.path.join(rd,fname)))
+            return pairs
+        def _load_folder2(folder_path):
+            status_lbl.config(text="scanning..."); bwin.update_idletasks()
+            _rebuild2(_collect_files2(folder_path))
+        def _on_folder_select2(evt=None):
+            s=folder_lb.curselection()
+            if s: _load_folder2(folders[s[0]][1])
+        cv.bind("<Configure>",lambda e:_safe_after_idle(bwin,_lazy_fill2))
+        for _ev in ("<MouseWheel>","<Button-4>","<Button-5>"):
+            cv.bind(_ev,lambda e:[cv.yview_scroll(-1 if (e.delta>0 or e.num==4) else 1,"units"),
+                                  _safe_after_idle(bwin,_lazy_fill2)])
+        folder_lb.bind("<<ListboxSelect>>",_on_folder_select2)
+        search_var.trace_add("write",lambda *_:_safe_after(bwin,300,
+            lambda:_on_folder_select2() if folder_lb.curselection() else None))
+        if folders: folder_lb.selection_set(0); _load_folder2(folders[0][1])
+    tk.Button(_icon_row, text="Browse GFX ▸", command=_open_dynmod_gfx_browser,
+              bg=BG_CARD, fg=TEXT_DIM, relief="flat",
+              font=("Helvetica",9), cursor="hand2", padx=8, pady=4
+              ).pack(side="right", padx=(4,0))
+
+    lbl("Enable Trigger  (optional — modifier removed when trigger becomes false)\ne.g.  has_country_flag = TAG_modifier_active")
+    v_enable = tk.Text(frm,bg=BG_CARD,fg=TEXT,insertbackground=BLUE,font=("Courier",10),
+                       relief="flat",highlightthickness=1,highlightbackground=BORDER_G,
+                       height=3,wrap="none"); v_enable.pack(fill="x",padx=12,pady=2)
+
+    sep()
+    lbl("VARIABLE MODIFIERS  (modifier_key = variable_name = tooltip_key, one per line)",bold=True)
+    lbl("Format:  stability_factor = TAG_stability_var = stability_factor_tt\n"
+        "The 3rd value is the tooltip localisation key shown to the player in the focus reward.\n"
+        "Leave tooltip blank to omit it:  stability_factor = TAG_stability_var")
+    v_mods = tk.Text(frm,bg=BG_CARD,fg=TEXT,insertbackground=BLUE,font=("Courier",10),
+                     relief="flat",highlightthickness=1,highlightbackground=BORDER_G,
+                     height=8,wrap="none"); v_mods.pack(fill="x",padx=12,pady=2)
+    v_mods.insert("1.0",
+        "stability_factor = TAG_stability_factor_var = stability_factor_tt\n"
+        "industrial_capacity_factory = TAG_industrial_capacity_factory_var = industrial_capacity_factory_tt\n"
+        "political_power_factor = TAG_political_power_var = political_power_gain_tt")
+
+    sep()
+    lbl("CONSTANT MODIFIERS  (modifier_key = 0.05, one per line)\nExample:  political_power_gain = 0.1",bold=True)
+    lbl("These are fixed values (not variable-driven).")
+    v_const = tk.Text(frm,bg=BG_CARD,fg=TEXT,insertbackground=BLUE,font=("Courier",10),
+                      relief="flat",highlightthickness=1,highlightbackground=BORDER_G,
+                      height=4,wrap="none"); v_const.pack(fill="x",padx=12,pady=2)
+
+    sep()
+    lbl("LOCALISATION  (for the modifier's display name & description)",bold=True)
+    lbl("Display Name  (shown in national spirits panel)")
+    v_loc_name = tk.StringVar(value="My Dynamic Modifier")
+    entry(v_loc_name)
+    lbl("Description")
+    v_loc_desc = tk.StringVar(value="Scaling bonuses from economic variables.")
+    entry(v_loc_desc)
+
+    sep()
+    # ── Right pane: preview header + text ────────────────
+    dm_prev_hdr = tk.Frame(dm_right, bg=BG_DARK)
+    dm_prev_hdr.pack(fill="x", pady=(8,2))
+    tk.Label(dm_prev_hdr, text="  OUTPUT PREVIEW", bg=BG_DARK, fg=TEXT_DIM,
+             font=("Helvetica",9,"bold"), anchor="w").pack(side="left")
+    _dm_edit_mode    = [False]
+    _dm_raw_override = [None]
+
+    _dm_edit_btn = tk.Button(dm_prev_hdr, text="✎ Edit",
+                              bg=BG_CARD, fg=TEXT_DIM, relief="flat",
+                              font=("Helvetica",8,"bold"), padx=8, pady=1,
+                              cursor="hand2",
+                              highlightthickness=1, highlightbackground=BORDER_G)
+    _dm_edit_btn.pack(side="right", padx=4)
+
+    _dm_save_raw_btn = tk.Button(dm_prev_hdr, text="💾 Save Raw",
+                                  bg=BG_CARD, fg=TEXT_DIM, relief="flat",
+                                  font=("Helvetica",8,"bold"), padx=8, pady=1,
+                                  cursor="hand2",
+                                  highlightthickness=1, highlightbackground=BORDER_G)
+    _dm_save_raw_btn.pack(side="right", padx=2)
+
+
+    _dm_lock_lbl = tk.Label(dm_prev_hdr, text="live", bg=BG_DARK, fg=TEXT_DIM,
+                             font=("Helvetica",7,"italic"))
+    _dm_lock_lbl.pack(side="right")
+    dm_prev_sb = tk.Scrollbar(dm_right, orient="vertical")
+    dm_prev_sb.pack(side="right", fill="y", padx=(0,4))
+    preview = tk.Text(dm_right, bg="#0d1117", fg="#a8d8a8", font=("Courier",9),
+                      relief="flat", highlightthickness=1, highlightbackground=BORDER_G,
+                      wrap="none", state="disabled",
+                      yscrollcommand=dm_prev_sb.set)
+    dm_prev_sb.config(command=preview.yview)
+    preview.pack(fill="both", expand=True, padx=(8,0), pady=(0,8))
+
+    def _dm_get_output():
+        if _dm_raw_override[0] is not None: return _dm_raw_override[0]
+        return _build_output()
+
+    def _dm_toggle_edit():
+        _dm_edit_mode[0] = not _dm_edit_mode[0]
+        if _dm_edit_mode[0]:
+            preview.config(state="normal", bg="#0d1a0d",
+                           highlightbackground="#4ade80")
+            _dm_edit_btn.config(text="✖ Cancel Edit", fg=TEXT_DIM, bg=BG_CARD)
+            _dm_lock_lbl.config(text="editing…", fg="#fbbf24")
+        else:
+            preview.config(state="normal", bg="#0d1117",
+                           highlightbackground=BORDER_G)
+            _dm_show_preview()
+            preview.config(state="disabled")
+            _dm_raw_override[0] = None
+            _dm_edit_btn.config(text="✎ Edit", fg=TEXT_DIM, bg=BG_CARD)
+            _dm_save_raw_btn.config(text="💾 Save Raw", fg=TEXT_DIM, bg=BG_CARD)
+            preview.config(bg="#0d1117", highlightbackground=BORDER_G)
+            _dm_lock_lbl.config(text="live", fg=TEXT_DIM)
+
+    def _dm_save_raw():
+        """Save raw preview: sync safe scalar fields back, store override,
+        notify user of anything that couldn't be auto-synced."""
+        import re as _re
+
+        preview.config(state="normal")
+        txt = preview.get("1.0","end").strip()
+        _dm_raw_override[0] = txt
+        _dm_edit_mode[0] = False
+        preview.config(state="disabled", bg="#0d1117",
+                       highlightbackground=ORANGE)
+        _dm_edit_btn.config(text="✎ Edit", fg=TEXT_DIM, bg=BG_CARD)
+
+
+        changes = []
+        warnings = []
+
+        # Only parse up to the FOCUS SNIPPET section
+        stop_at = next((i for i,l in enumerate(txt.splitlines())
+                        if l.strip().startswith("# FOCUS SNIPPET") or
+                           l.strip().startswith("# LOCALISATION")), None)
+        dm_lines = txt.splitlines()[:stop_at] if stop_at is not None else txt.splitlines()
+
+        in_block = False
+        in_enable = False
+        enable_depth = 0
+        enable_buf = []
+
+        for ln in dm_lines:
+            s = ln.strip()
+            if not s or s.startswith("#"): continue
+
+            if not in_block:
+                m = _re.match(r"^(\w+)\s*=\s*\{", s)
+                if m:
+                    new_id = m.group(1)
+                    if new_id != v_id.get():
+                        v_id.set(new_id)
+                        changes.append(f"Modifier ID → {new_id!r}")
+                    in_block = True
+                continue
+
+            if s == "}" and enable_depth == 0 and not in_enable:
+                in_block = False; continue
+
+            if in_enable:
+                if "{" in s: enable_depth += 1
+                if "}" in s:
+                    enable_depth -= 1
+                    if enable_depth == 0:
+                        in_enable = False
+                        content = "\n".join(
+                            l[2:] if l.startswith("\t\t") else l
+                            for l in enable_buf).strip()
+                        old = v_enable.get("1.0","end").strip()
+                        if content != old:
+                            v_enable.delete("1.0","end")
+                            if content: v_enable.insert("1.0", content)
+                            changes.append("enable trigger updated")
+                        enable_buf = []; continue
+                enable_buf.append(ln); continue
+
+            m = _re.match(r"scope\s*=\s*(\w+)", s)
+            if m:
+                if m.group(1) != v_scope.get():
+                    v_scope.set(m.group(1))
+                    changes.append(f"Scope → {m.group(1)!r}")
+                continue
+            m = _re.match(r"icon\s*=\s*(\S+)", s)
+            if m:
+                if m.group(1) != v_icon.get():
+                    v_icon.set(m.group(1))
+                    changes.append(f"Icon GFX → {m.group(1)!r}")
+                continue
+            if _re.match(r"enable\s*=\s*\{", s):
+                in_enable = True; enable_depth = 1; enable_buf = []; continue
+
+            # Variable / constant modifiers — can't safely map back to v_mods lines
+            m = _re.match(r"^(\w+)\s*=\s*(\S+)$", s)
+            if m:
+                key, val = m.group(1), m.group(2)
+                if key in ("scope", "icon"): continue
+                try:
+                    float(val)
+                    warnings.append(f"Constant modifier {key} = {val} — check Constant Modifiers field")
+                except ValueError:
+                    warnings.append(f"Variable modifier {key} = {val} — check Variable Modifiers field")
+
+        # Localisation
+        loc_idx = next((i for i,l in enumerate(txt.splitlines())
+                        if "# LOCALISATION" in l), None)
+        if loc_idx:
+            for ln in txt.splitlines()[loc_idx:]:
+                m = _re.match(r'^\s*(\S+?):0\s+"(.*)"', ln)
+                if m:
+                    key, val = m.group(1), m.group(2)
+                    if key.endswith("_desc"):
+                        if val != v_loc_desc.get():
+                            v_loc_desc.set(val); changes.append(f"Description → {val!r}")
+                    elif "_tt" not in key:
+                        if val != v_loc_name.get():
+                            v_loc_name.set(val); changes.append(f"Display name → {val!r}")
+
+        _dm_lock_lbl.config(text="raw override active", fg=ORANGE)
+
+        parts = []
+        if changes:
+            parts.append("Fields updated from your code:\n" +
+                         "\n".join(f"  • {c}" for c in changes))
+        if warnings:
+            parts.append("Please check these fields manually:\n" +
+                         "\n".join(f"  ⚠ {w}" for w in warnings))
+        if not changes and not warnings:
+            parts.append("No field changes detected. Raw override saved.")
+        parts.append("\nThe output will export exactly as shown in the preview.")
+
+        messagebox.showinfo("Saved — Review Changes", "\n\n".join(parts), parent=win)
+
+
+    def _dm_show_preview():
+        preview.config(state="normal")
+        preview.delete("1.0","end")
+        preview.insert("1.0", _dm_get_output())
+        if not _dm_edit_mode[0]:
+            preview.config(state="disabled")
+
+    _dm_edit_btn.config(command=_dm_toggle_edit)
+    _dm_save_raw_btn.config(command=_dm_save_raw)
+
+    def _parse_mod_line(ln):
+        """Parse 'modifier_key = var_name = tooltip_key' or 'modifier_key = var_name'"""
+        parts = [p.strip() for p in ln.split("=",2)]
+        modifier = parts[0] if len(parts) > 0 else ""
+        var      = parts[1] if len(parts) > 1 else ""
+        tooltip  = parts[2] if len(parts) > 2 else ""
+        return modifier, var, tooltip
+
+    def _build_output():
+        mid   = v_id.get().strip() or "TAG_my_dynamic_modifier"
+        scope = v_scope.get().strip()
+        icon  = v_icon.get().strip()
+        enable= v_enable.get("1.0","end").strip()
+        mods_raw  = v_mods.get("1.0","end").strip()
+        const = v_const.get("1.0","end").strip()
+        name  = v_loc_name.get().strip()
+        desc  = v_loc_desc.get().strip()
+
+        mod_entries = []
+        for ln in mods_raw.splitlines():
+            ln = ln.strip()
+            if ln and not ln.startswith("#"):
+                modifier, var, tooltip = _parse_mod_line(ln)
+                if modifier and var:
+                    mod_entries.append((modifier, var, tooltip))
+
+        # ── FILE 1: common/dynamic_modifiers/mid.txt ─────────
+        dm = [f"# ============================================================",
+              f"# FILE: common/dynamic_modifiers/{mid}.txt",
+              f"# ============================================================",
+              f"",
+              f"{mid} = {{"]
+        if scope != "country":
+            dm.append(f"\tscope = {scope}")
+        if icon:
+            dm.append(f"\ticon = {icon}")
+        if enable:
+            dm.append("\tenable = {")
+            for ln in enable.splitlines():
+                if ln.strip(): dm.append(f"\t\t{ln.strip()}")
+            dm.append("\t}")
+        dm.append("")
+        if mod_entries:
+            dm.append("\t# Variable modifiers — read daily from variables")
+            for modifier, var, _ in mod_entries:
+                dm.append(f"\t{modifier} = {var}")
+        if const:
+            dm.append("")
+            dm.append("\t# Constant modifiers")
+            for ln in const.splitlines():
+                ln=ln.strip()
+                if ln and not ln.startswith("#"):
+                    dm.append(f"\t{ln}")
+        dm.append("}")
+        dm.append("")
+
+        # ── FILE 2: Focus snippet showing modern usage ────────
+        dm += ["",
+               f"# ============================================================",
+               f"# FOCUS SNIPPET — modern add_to_variable pattern",
+               f"# Use this inside completion_reward = {{ }}",
+               f"# ============================================================",
+               f"",
+               f"\t\tcompletion_reward = {{",
+               f"\t\t\t# Show player which dynamic modifier is being changed",
+               f"\t\t\tcustom_effect_tooltip = {{",
+               f"\t\t\t\tlocalization_key = modifies_dynamic_modifier_tt",
+               f"\t\t\t\tMODIFIER = {mid}",
+               f"\t\t\t}}"]
+        for modifier, var, tooltip in mod_entries:
+            if tooltip:
+                dm.append(f"\t\t\tadd_to_variable = {{ {var} = 0.05 tooltip = {tooltip} }}")
+            else:
+                dm.append(f"\t\t\tadd_to_variable = {{ {var} = 0.05 }}")
+        dm += [f"\t\t}}", ""]
+
+        # ── FILE 3: Localisation ──────────────────────────────
+        dm += ["",
+               f"# ============================================================",
+               f"# LOCALISATION — paste into localisation/english/TAG_l_english.yml",
+               f"# File must be UTF-8-BOM encoded",
+               f"# ============================================================",
+               f"",
+               f" {mid}: \"{name}\"",
+               f" {mid}_desc: \"{desc}\"",
+               f" modifies_dynamic_modifier_tt: \"Modifies $MODIFIER$\"  # add if not already in your loc"]
+        if mod_entries:
+            dm.append("")
+            dm.append(" # Tooltip keys for each modifier stat:")
+            for modifier, var, tooltip in mod_entries:
+                if tooltip:
+                    dm.append(f" {tooltip}: \"PLACEHOLDER — describe the {modifier} change\"")
+
+        return "\n".join(dm)
+
+
+    def _preview(*_):
+        if _dm_edit_mode[0]: return
+        if _dm_raw_override[0] is not None: return
+        preview.config(state="normal")
+        preview.delete("1.0","end")
+        preview.insert("1.0",_build_output())
+        preview.config(state="disabled")
+
+    # live preview on any change
+    for sv in (v_id,v_scope,v_icon,v_loc_name,v_loc_desc):
+        sv.trace_add("write",_preview)
+    for t in (v_enable,v_mods,v_const):
+        t.bind("<KeyRelease>",_preview)
+    _preview()
+
+    def _save_file():
+        import os, re as _re
+
+        mid   = v_id.get().strip() or "TAG_my_dynamic_modifier"
+        icon  = v_icon.get().strip()
+        name  = v_loc_name.get().strip()
+        desc  = v_loc_desc.get().strip()
+        scope = v_scope.get().strip()
+        enable= v_enable.get("1.0","end").strip()
+
+        mod_entries = []
+        for ln in v_mods.get("1.0","end").strip().splitlines():
+            ln = ln.strip()
+            if ln and not ln.startswith("#"):
+                modifier, var, tooltip = _parse_mod_line(ln)
+                if modifier and var:
+                    mod_entries.append((modifier, var, tooltip))
+
+        const_lines = [ln.strip() for ln in v_const.get("1.0","end").strip().splitlines()
+                       if ln.strip() and not ln.strip().startswith("#")]
+
+        # ── Ask for mod root ──────────────────────────────────
+        mod_root = filedialog.askdirectory(
+            title="Select your MOD ROOT folder (the folder that contains common/, localisation/, …)")
+        if not mod_root: return
+
+        results = []   # (rel_path, action, note)
+        errors  = []
+
+        # ── Helpers ───────────────────────────────────────────
+        def full(rel):
+            return os.path.join(mod_root, rel)
+
+        def read_existing(rel, encoding="utf-8"):
+            p = full(rel)
+            if not os.path.exists(p):
+                return None
+            try:
+                with open(p, encoding=encoding, errors="replace") as f:
+                    return f.read()
+            except Exception:
+                return None
+
+        def write(rel, content, encoding="utf-8"):
+            p = full(rel)
+            os.makedirs(os.path.dirname(p), exist_ok=True)
+            try:
+                with open(p, "w", encoding=encoding) as f:
+                    f.write(content)
+                return True
+            except Exception as e:
+                errors.append(f"{rel}: {e}"); return False
+
+        # ════════════════════════════════════════════════════════
+        # FILE 1 — common/dynamic_modifiers/  (one file per modifier)
+        # Strategy: if file exists, replace the block for `mid`;
+        #           if not, create it fresh.
+        # ════════════════════════════════════════════════════════
+        dm_rel  = os.path.join("common","dynamic_modifiers",f"{mid}.txt")
+        dm_existing = read_existing(dm_rel)
+
+        # Build the new block
+        icon_gfx = (icon if icon.startswith("GFX_") else f"GFX_idea_{icon}") if icon else ""
+        dm_block_lines = [f"{mid} = {{"]
+        if scope != "country":
+            dm_block_lines.append(f"\tscope = {scope}")
+        if icon_gfx:
+            dm_block_lines.append(f"\ticon = {icon_gfx}")
+        if enable:
+            dm_block_lines.append("\tenable = {")
+            for ln in enable.splitlines():
+                if ln.strip(): dm_block_lines.append(f"\t\t{ln.strip()}")
+            dm_block_lines.append("\t}")
+        dm_block_lines.append("")
+        for modifier, var, _ in mod_entries:
+            dm_block_lines.append(f"\t{modifier} = {var}")
+        if const_lines:
+            dm_block_lines.append("")
+            for ln in const_lines:
+                dm_block_lines.append(f"\t{ln}")
+        dm_block_lines.append("}")
+        dm_new_block = "\n".join(dm_block_lines)
+
+        if dm_existing is None:
+            # Fresh file
+            dm_final = dm_new_block + "\n"
+            action = "created"
+        else:
+            # Replace existing block for `mid` if present, else append
+            # Match: mid = { ... } at top level (handles nested braces)
+            def replace_or_append(src, block_id, new_block):
+                # Find "block_id = {" and extract to matching "}"
+                pattern = _re.compile(
+                    r'^\s*' + _re.escape(block_id) + r'\s*=\s*\{', _re.MULTILINE)
+                m = pattern.search(src)
+                if not m:
+                    # Not found — append
+                    return src.rstrip() + "\n\n" + new_block + "\n", "appended"
+                # Walk forward counting braces to find closing }
+                depth = 0; i = m.start()
+                while i < len(src):
+                    if src[i] == "{": depth += 1
+                    elif src[i] == "}":
+                        depth -= 1
+                        if depth == 0:
+                            # Replace from m.start() to i+1
+                            replaced = src[:m.start()] + new_block + src[i+1:]
+                            return replaced, "updated"
+                    i += 1
+                return src.rstrip() + "\n\n" + new_block + "\n", "appended"
+
+            dm_final, action = replace_or_append(dm_existing, mid, dm_new_block)
+
+        if write(dm_rel, dm_final):
+            results.append((dm_rel, action, f"{len(mod_entries)} variable modifiers"))
+
+        # ════════════════════════════════════════════════════════
+        # FILE 2 — localisation/english/
+        # Strategy: scan ALL .yml files under localisation/english/
+        # for existing keys; only add missing ones.
+        # Write to mid_l_english.yml (create or append).
+        # ════════════════════════════════════════════════════════
+        loc_dir = os.path.join(mod_root, "localisation", "english")
+        existing_keys = set()
+
+        # Collect all keys already in any loc file
+        if os.path.isdir(loc_dir):
+            for fname in os.listdir(loc_dir):
+                if fname.endswith(".yml"):
+                    content = read_existing(
+                        os.path.join("localisation","english",fname), "utf-8-sig")
+                    if content:
+                        for m in _re.finditer(r'^\s*(\S+?):0?\s', content, _re.MULTILINE):
+                            existing_keys.add(m.group(1))
+
+        # Build only the missing entries
+        if MOD.edit_loc_file and os.path.isfile(MOD.edit_loc_file):
+            loc_rel = os.path.relpath(MOD.edit_loc_file, mod_root) if mod_root else MOD.edit_loc_file
+        else:
+            loc_rel = os.path.join("localisation","english",f"{mid}_l_english.yml")
+        loc_existing = read_existing(loc_rel, "utf-8-sig")
+
+        new_loc_lines = []
+        def add_loc(key, value):
+            if key not in existing_keys:
+                new_loc_lines.append(f" {key}:0 \"{value}\"")
+
+        add_loc(mid,      name)
+        add_loc(f"{mid}_desc", desc)
+        add_loc("modifies_dynamic_modifier_tt", "Modifies $MODIFIER$")
+        for modifier, var, tooltip in mod_entries:
+            if tooltip:
+                add_loc(tooltip, modifier.replace("_"," ").title())
+
+        if new_loc_lines:
+            if loc_existing is None:
+                loc_final = "l_english:\n" + "\n".join(new_loc_lines) + "\n"
+                loc_action = "created"
+            else:
+                # Append after last non-empty line, preserving file
+                loc_final = loc_existing.rstrip() + "\n\n" + \
+                            f" # {mid} — added by Focus Maker\n" + \
+                            "\n".join(new_loc_lines) + "\n"
+                loc_action = f"appended {len(new_loc_lines)} new keys"
+            if write(loc_rel, loc_final, "utf-8-sig"):
+                results.append((loc_rel, loc_action, f"{len(new_loc_lines)} loc keys"))
+        else:
+            results.append((loc_rel, "skipped", "all keys already exist"))
+
+        # ════════════════════════════════════════════════════════
+        # FILE 3 — focus snippet (always overwrite — it's a helper)
+        # ════════════════════════════════════════════════════════
+        snip_rel = os.path.join("_focus_snippets",f"{mid}_focus_snippet.txt")
+        snippet  = [
+            f"# Focus snippet for: {mid}",
+            f"# Paste inside completion_reward = {{ }}",
+            f"",
+            f"\t\t\tcustom_effect_tooltip = {{",
+            f"\t\t\t\tlocalization_key = modifies_dynamic_modifier_tt",
+            f"\t\t\t\tMODIFIER = {mid}",
+            f"\t\t\t}}",
+        ]
+        for modifier, var, tooltip in mod_entries:
+            tt = f" tooltip = {tooltip}" if tooltip else ""
+            snippet.append(f"\t\t\tadd_to_variable = {{ {var} = 0.05{tt} }}")
+        if write(snip_rel, "\n".join(snippet) + "\n"):
+            results.append((snip_rel, "created", "paste into your focus file"))
+
+        # ════════════════════════════════════════════════════════
+        # FILE 4 — interface/ideas.gfx (if icon set)
+        # Strategy: if file exists, check if spriteType already there;
+        #           if not, append it before the last closing }.
+        # ════════════════════════════════════════════════════════
+        if icon_gfx:
+            icon_name = icon_gfx.replace("GFX_idea_","").replace("GFX_","")
+            sprite_block = (
+                f'\tspriteType = {{\n'
+                f'\t\tname = "{icon_gfx}"\n'
+                f'\t\ttexturefile = "gfx/interface/ideas/{icon_name}.dds"\n'
+                f'\t}}'
+            )
+            gfx_rel = os.path.join("interface","ideas.gfx")
+            gfx_existing = read_existing(gfx_rel)
+            if gfx_existing is None:
+                gfx_final = (
+                    f"spriteTypes = {{\n\n"
+                    f"{sprite_block}\n\n"
+                    f"}}\n"
+                )
+                gfx_action = "created"
+            elif icon_gfx in gfx_existing:
+                gfx_final  = gfx_existing
+                gfx_action = "skipped (icon already defined)"
+            else:
+                # Insert before last closing }
+                last = gfx_existing.rfind("}")
+                if last >= 0:
+                    gfx_final = gfx_existing[:last] + f"\n{sprite_block}\n\n}}\n"
+                else:
+                    gfx_final = gfx_existing.rstrip() + f"\n{sprite_block}\n"
+                gfx_action = "appended sprite"
+            if gfx_action != "skipped (icon already defined)":
+                if write(gfx_rel, gfx_final):
+                    results.append((gfx_rel, gfx_action,
+                                    f"icon: {icon_gfx} → gfx/interface/ideas/{icon_name}.dds"))
+            else:
+                results.append((gfx_rel, gfx_action, ""))
+
+        # ── Summary ───────────────────────────────────────────
+        if errors:
+            messagebox.showerror("Errors during file generation",
+                "\n".join(errors))
+
+        lines = [f"Mod root: {mod_root}\n"]
+        for rel, action, note in results:
+            note_str = f"  ({note})" if note else ""
+            lines.append(f"  [{action}]  {rel}{note_str}")
+        lines += [
+            "",
+            "Next steps:",
+            "  1. Copy snippet from _focus_snippets/ into your focus .txt",
+            "  2. Add add_dynamic_modifier effect to activate the modifier",
+            "  3. Add icon .dds to gfx/interface/ideas/ if needed",
+            "  4. Restart HOI4 (dynamic modifiers require full restart)",
+        ]
+        messagebox.showinfo("Done" if not errors else "Done (with errors)",
+                            "\n".join(lines))
+
+    bf=tk.Frame(win,bg=BG_DARK); bf.pack(fill="x",padx=12,pady=8)
+    tk.Button(bf,text="⟳ Refresh",command=_preview,bg=BG_CARD,fg=TEXT,
+              font=("Helvetica",9,"bold"),relief="flat",padx=12,pady=5,
+              cursor="hand2",highlightthickness=1,highlightbackground=BORDER_G).pack(side="left",padx=2)
+    def _dm_copy():
+        txt = _dm_get_output()
+        win.clipboard_clear(); win.clipboard_append(txt)
+    tk.Button(bf,text="⎘ Copy",command=_dm_copy,bg=BG_CARD,fg=TEXT,
+              font=("Helvetica",9,"bold"),relief="flat",padx=12,pady=5,
+              cursor="hand2",highlightthickness=1,highlightbackground=BORDER_G).pack(side="left",padx=2)
+    tk.Button(bf,text="Generate All Files →",command=_save_file,
+              bg="#14532d",fg="#0a0a0a",font=("Helvetica",10,"bold"),
+              relief="flat",padx=14,pady=6,cursor="hand2",highlightthickness=0).pack(side="right",padx=2)
+
+
+# ─────────────────── STATUS BAR ──────────────────────────────
+
+
+
+
+def open_event_wizard(app):
+    """HOI4 Event Maker — uses main app theme (BG_DARK / BG_PANEL etc.)."""
+    import os as _os
+
+    # ── GFX lists ────────────────────────────────────────────────────
+    GFX_COUNTRY = sorted([
+        "GFX_report_event_generic_sign_treaty2","GFX_report_event_generic_handshake",
+        "GFX_report_event_generic_conference","GFX_report_event_generic_battle",
+        "GFX_report_event_generic_military_parade","GFX_report_event_generic_parliament",
+        "GFX_report_event_generic_factory","GFX_report_event_generic_communist_congress",
+        "GFX_report_event_generic_panzer_attack","GFX_report_event_generic_bombers",
+        "GFX_report_event_generic_funeral","GFX_report_event_generic_mussolini",
+        "GFX_report_event_generic_naval_treaty","GFX_report_event_generic_destroyed_vehicles",
+        "GFX_report_event_generic_italian_celebration","GFX_report_event_generic_italian_fascists",
+        "GFX_report_event_generic_lend_lease","GFX_report_event_generic_read_write",
+        "GFX_report_event_generic_croatia_handshake",
+        "GFX_report_event_dead_soldiers","GFX_report_event_soldiers_marching",
+        "GFX_report_event_soldiers_parade","GFX_report_event_soldiers_in_france",
+        "GFX_report_event_british_artillery","GFX_report_event_british_inspect_troops",
+        "GFX_report_event_canadian_soldiers","GFX_report_event_chinese_soldiers_fighting",
+        "GFX_report_event_chinese_soldiers","GFX_report_event_chinese_army_training",
+        "GFX_report_event_polish_army","GFX_report_event_polish_tanks_01",
+        "GFX_report_event_romanian_soldiers","GFX_report_event_african_soldiers",
+        "GFX_report_event_bulgarian_soldiers","GFX_report_event_swedish_soldier",
+        "GFX_report_event_france_parade","GFX_report_event_degaulle_inspect_troops",
+        "GFX_report_event_destroyers","GFX_report_event_ast_navy",
+        "GFX_report_event_sailors_in_working_rig","GFX_report_event_usa_destroyers",
+        "GFX_report_event_election_vote","GFX_report_event_gathering_protest",
+        "GFX_report_event_fascist_speech","GFX_report_event_fascist_militia",
+        "GFX_report_event_fascist_gathering","GFX_report_event_fascists_posing",
+        "GFX_report_event_chamberlain_announce","GFX_report_event_vienna_award_negotiations",
+        "GFX_report_event_vienna_award_hungary","GFX_report_event_finnish_letter",
+        "GFX_report_event_sign_treaty2","GFX_report_event_eng_royal_family",
+        "GFX_report_event_europe_funeral","GFX_report_event_crowd_in_prague",
+        "GFX_report_event_communists_in_riga","GFX_report_event_german_speech",
+        "GFX_report_event_german_troops","GFX_report_event_japan_europe_pact",
+        "GFX_report_event_japanese_transport_soldiers",
+        "GFX_report_event_stalin_01","GFX_report_event_stalin_02",
+        "GFX_report_event_stalin_meeting","GFX_report_event_stalin_propaganda",
+        "GFX_report_event_soviet_tanks","GFX_report_event_soviet_tanks_snow",
+        "GFX_report_event_soviet_tank_parade","GFX_report_event_soviet_soldiers_tank",
+        "GFX_report_event_soviet_purge_officers_01","GFX_report_event_soviet_purge_trial",
+        "GFX_report_event_soviet_german_soldier_handshake","GFX_report_event_soviet_japanese_pact",
+        "GFX_report_event_soviet_invasion_map",
+        "GFX_report_event_fighters","GFX_report_event_airplane_crash",
+        "GFX_report_event_radar_01","GFX_report_event_physics_lab_01",
+        "GFX_report_event_physics_lab_02","GFX_report_event_tank_factory",
+        "GFX_report_event_spain_civil_war_soldiers","GFX_report_event_spr_anarchists",
+        "GFX_report_event_ITA_grand_council","GFX_report_event_ITA_air_crash",
+        "GFX_report_event_ITA_italian_civil_war","GFX_report_event_ITA_partisans",
+        "GFX_report_event_SOV_demands","GFX_report_event_ENG_middle_eastern_conflict",
+        "GFX_report_event_ETH_ethiopian_warriors","GFX_report_event_IRQ_bakr_sidqi",
+        "GFX_report_event_PER_persepolis_party","GFX_report_event_bul_boris_military",
+        "GFX_report_event_albanian_king_zog","GFX_report_event_china_politicians_captured",
+        "GFX_report_event_czech_soldiers_01","GFX_report_event_czech_soldiers_02",
+        "GFX_report_event_french_british_officers","GFX_report_event_worried_french",
+        "GFX_report_event_tur_ataturk_death","GFX_report_event_tur_ataturk_impassioned_speech",
+        "GFX_report_event_tur_britain","GFX_report_event_tur_industry",
+        "GFX_report_event_tur_inonu_diplomacy","GFX_report_event_tur_kemalist_officers",
+        "GFX_report_event_tur_political_rally","GFX_report_event_tur_turkish_soldiers",
+        "GFX_report_event_tur_the_montreux_convention",
+        "GFX_report_event_GetHitlerHandshakeEventPicture",
+    ])
+    GFX_NEWS = sorted([
+        "GFX_news_event_generic_sign_treaty2","GFX_news_event_generic_sign_treaty3",
+        "GFX_news_event_generic_parliament","GFX_news_event_generic_read_write",
+        "GFX_news_event_generic_arab_revolt","GFX_news_event_cze_little_entente",
+    ])
+
+    # ── Data model ───────────────────────────────────────────────────
+    _n = [1]
+    class _Ev:
+        def __init__(self):
+            self.uid          = str(id(self))
+            self.etype        = "country_event"
+            self.eid          = f"my_namespace.{_n[0]}"
+            _n[0]            += 1
+            self.title_text   = "My Event Title"
+            self.desc_text    = "Describe what is happening in this event."
+            self.picture      = "GFX_report_event_generic_handshake"
+            self.major        = False
+            self.fire_once    = False
+            self.triggered    = True
+            self.hidden       = False
+            self.mtth_days    = ""
+            self.mtth_months  = ""
+            self.trigger_code = ""
+            self.immediate    = ""
+            self.options      = [
+                {"name": f"{self.eid}.a", "text": "Option A",
+                 "effects": "add_political_power = 50", "ai_chance": "75"},
+            ]
+
+    events = []
+    sel    = [None]   # sel[0] = active _Ev
+
+    # ── Window ───────────────────────────────────────────────────────
+    win = tk.Toplevel(app)
+    win.title("Event Maker")
+    win.configure(bg=BG_DARK)
+    win.geometry("1320x820")
+    win.resizable(True, True)
+    win.grab_set()
+
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # INNER FUNCTIONS — all defined before any widget building
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    # ── GFX helpers ──────────────────────────────────────────────────
+    def _get_active_dims():
+        prof   = getattr(MOD,"event_dim_profiles",{"vanilla":{"country":(210,176),"news":(397,165)}})
+        active = getattr(MOD,"event_dim_active_profile","vanilla")
+        dims   = prof.get(active, prof.get("vanilla",{"country":(210,176),"news":(397,165)}))
+        cw,ch  = dims.get("country",(210,176))
+        nw,nh  = dims.get("news",(397,165))
+        return cw,ch,nw,nh
+
+    def _find_gfx_file(gfx_name):
+        if not gfx_name: return None
+        if MOD.loaded:
+            # 1. Exact match from scanned sprites dict
+            if gfx_name in MOD.sprites: return MOD.sprites[gfx_name]
+            ev_dir = _os.path.join(MOD.root, getattr(MOD,"path_event_pictures",
+                                   _os.path.join("gfx","event_pictures")))
+            for prefix in ("GFX_report_event_","GFX_news_event_","GFX_"):
+                if gfx_name.startswith(prefix):
+                    stem = gfx_name[len(prefix):]
+                    # 2. Flat lookup in ev_dir
+                    for ext in (".dds",".tga",".png"):
+                        p = _os.path.join(ev_dir, stem+ext)
+                        if os.path.isfile(p): return p
+                    # 3. Deep walk — images may be in subdirectories
+                    if _os.path.isdir(ev_dir):
+                        for rd, dirs, fnames in _os.walk(ev_dir):
+                            for ext in (".dds",".tga",".png"):
+                                if (stem+ext) in fnames:
+                                    return _os.path.join(rd, stem+ext)
+                                # Also try case-insensitive match
+                                for fname in fnames:
+                                    if fname.lower() == (stem+ext).lower():
+                                        return _os.path.join(rd, fname)
+        return None
+
+    def _read_image_size(path):
+        try:
+            with open(path,"rb") as f: magic = f.read(4)
+            if magic == b"DDS ":
+                with open(path,"rb") as f:
+                    f.seek(12)
+                    h = int.from_bytes(f.read(4),"little")
+                    w = int.from_bytes(f.read(4),"little")
+                return w,h
+            img = tk.PhotoImage(file=path)
+            return img.width(), img.height()
+        except: return None
+
+    # ── Preview scheduler (defined early so all callbacks can reference it) ──
+    _prev_job = [None]
+    _prev_img_cache = {}   # (gfx_key, w, h) -> PhotoImage or None
+
+    def _schedule_preview(*_):
+        if _prev_job[0]: win.after_cancel(_prev_job[0])
+        _prev_job[0] = win.after(80, _render_preview)
+
+    # ── Preview renderer (forward-references canvas widget, safe as lambda'd) ──
+    def _render_preview():
+        _prev_job[0] = None
+        cv = preview_cv
+        cv.delete("all")
+        ev = sel[0]
+        W  = max(cv.winfo_width(),  420)
+        H  = max(cv.winfo_height(), 420)
+
+        # ── empty state ──────────────────────────────────────────────
+        if ev is None:
+            cv.create_text(W//2, H//2,
+                text="＋ Create or select an event\nto see preview",
+                fill="#5a6070", font=("Helvetica",11,"italic"), justify="center")
+            return
+
+        # ── authentic HOI4 colour palette ────────────────────────────
+        # ── HOI4 in-game dark theme (matches Image 2 reference) ─────
+        HOI_WIN_BG  = "#0f1520"     # dark navy event window background
+        HOI_PIC_BG  = "#090d12"     # near-black picture area
+        HOI_BORDER  = "#2a3d2a"     # dark green outer frame border
+        HOI_DIVIDER = "#1a2a3a"     # subtle navy divider
+        HOI_INNER   = "#0c1018"     # inner bevel (darker)
+        HOI_BADGE   = "#3a6b3a"     # green "COUNTRY EVENT" badge colour
+        HOI_PIC_DSH = "#3a6b3a"     # dashed green picture placeholder border
+        HOI_TITLE   = "#8a9ab0"     # dim blue-grey title text
+        HOI_BODY    = "#c8d4e0"     # light grey body text
+        HOI_DIM     = "#3a5060"     # muted placeholder text
+        HOI_BODY_BG = "#131c2b"     # title+body section background
+        HOI_OPT_BG  = "#0f1a2a"     # dark navy option button bg
+        HOI_OPT_BDR = "#2a3a4a"     # option border
+        HOI_OPT_TXT = "#e0e8f0"     # near-white option text
+        SHADOW      = "#000000"
+
+        # ── layout ───────────────────────────────────────────────────
+        is_news = (ev.etype == "news_event")
+        # news events are wider & shorter; country events taller
+        BASE_W  = 560 if is_news else 500
+        BASE_H  = 280 if is_news else 420
+        PIC_H_B = 140 if is_news else 180   # base picture area height
+
+        scale = min((W - 50) / BASE_W, (H - 60) / BASE_H, 1.2)
+        ev_w  = int(BASE_W * scale)
+        ev_h  = int(BASE_H * scale)
+        pic_h = int(PIC_H_B * scale)
+
+        x0 = (W - ev_w) // 2
+        y0 = max(30, (H - ev_h - 30) // 2)
+
+        # ── drop shadow ──────────────────────────────────────────────
+        for off in (8, 5, 3):
+            alpha = 80 + (8 - off) * 20
+            cv.create_rectangle(x0+off, y0+off, x0+ev_w+off, y0+ev_h+off,
+                                 fill=SHADOW, outline="")
+
+        # ── window background ────────────────────────────────────────
+        cv.create_rectangle(x0, y0, x0+ev_w, y0+ev_h,
+                             fill=HOI_WIN_BG, outline=HOI_BORDER, width=2)
+        # inner bevel line
+        cv.create_rectangle(x0+3, y0+3, x0+ev_w-3, y0+ev_h-3,
+                             fill="", outline=HOI_INNER, width=1)
+
+        # ── picture area ─────────────────────────────────────────────
+        pic_y0 = y0 + 2
+        pic_y1 = y0 + pic_h
+        cv.create_rectangle(x0+2, pic_y0, x0+ev_w-2, pic_y1,
+                             fill=HOI_PIC_BG, outline="")
+
+        # ── Picture: load via PIL (supports DDS/TGA/PNG) ────────────────
+        cx = x0 + ev_w // 2
+        cy = (pic_y0 + pic_y1) // 2
+        pic_w_px = ev_w - 4
+        pic_h_px = pic_h - 4
+        fpath     = _find_gfx_file(ev.picture)
+        cache_key = (ev.picture, pic_w_px, pic_h_px)
+        pic_shown = False
+
+        if cache_key in _prev_img_cache:
+            cached = _prev_img_cache[cache_key]
+            if cached is not None:
+                cv._img_ref = cached
+                cv.create_image(cx, cy, image=cached, anchor="center")
+                pic_shown = True
+            # else: already tried and failed, show placeholder
+
+        elif fpath:
+            # Draw placeholder immediately, then load image in background
+            def _load_and_show(path=fpath, key=cache_key,
+                                wcv=cv, wcx=cx, wcy=cy,
+                                wpw=pic_w_px, wph=pic_h_px,
+                                wev_uid=ev.uid if hasattr(ev,'uid') else id(ev)):
+                img_ref = None
+                try:
+                    if _PIL_OK:
+                        pil = _PILImage.open(path).convert("RGBA")
+                        rs  = getattr(_PILImage, "LANCZOS",
+                                      getattr(_PILImage, "ANTIALIAS", 1))
+                        # scale to fill picture area, keep aspect ratio
+                        pw, ph = pil.size
+                        ratio  = min(wpw / max(pw,1), wph / max(ph,1))
+                        nw2    = max(1, int(pw * ratio))
+                        nh2    = max(1, int(ph * ratio))
+                        pil    = pil.resize((nw2, nh2), rs)
+                        img_ref = _PILImageTk.PhotoImage(pil)
+                    elif path.lower().endswith(".png"):
+                        raw = tk.PhotoImage(file=path)
+                        sx  = max(1, raw.width()  // wpw)
+                        sy  = max(1, raw.height() // wph)
+                        s   = max(sx, sy)
+                        img_ref = raw.subsample(s, s) if s > 1 else raw
+                except Exception as _pil_err:
+                    # PIL failed (e.g. unsupported DDS compression BC1/BC3)
+                    # Try alternative: look for a PNG/TGA version of the same stem
+                    if img_ref is None and path:
+                        stem2 = _os.path.splitext(path)[0]
+                        for alt_ext in (".png", ".tga", ".jpg"):
+                            alt_path = stem2 + alt_ext
+                            if not _os.path.exists(alt_path):
+                                # Try finding it via case-insensitive walk
+                                folder = _os.path.dirname(path)
+                                base   = _os.path.basename(stem2).lower() + alt_ext
+                                try:
+                                    for fname in _os.listdir(folder):
+                                        if fname.lower() == base:
+                                            alt_path = _os.path.join(folder, fname)
+                                            break
+                                except Exception:
+                                    pass
+                            if _os.path.exists(alt_path):
+                                try:
+                                    if _PIL_OK:
+                                        pil2 = _PILImage.open(alt_path).convert("RGBA")
+                                        rs2  = getattr(_PILImage,"LANCZOS",
+                                                       getattr(_PILImage,"ANTIALIAS",1))
+                                        pw2, ph2 = pil2.size
+                                        ratio2 = min(wpw/max(pw2,1), wph/max(ph2,1))
+                                        nw3 = max(1,int(pw2*ratio2))
+                                        nh3 = max(1,int(ph2*ratio2))
+                                        pil2 = pil2.resize((nw3,nh3), rs2)
+                                        img_ref = _PILImageTk.PhotoImage(pil2)
+                                        break
+                                except Exception:
+                                    pass
+                _prev_img_cache[key] = img_ref
+                # Re-render on main thread only if same event is still selected
+                def _repaint():
+                    if sel[0] and (sel[0].uid if hasattr(sel[0],'uid') else id(sel[0])) == wev_uid:
+                        _render_preview()
+                win.after(0, _repaint)
+            import threading as _thr
+            _thr.Thread(target=_load_and_show, daemon=True).start()
+
+        if not pic_shown:
+            # Placeholder — GFX key + expected dims
+            cw2, ch2, nw2, nh2 = _get_active_dims()
+            exp_w2, exp_h2 = (nw2, nh2) if is_news else (cw2, ch2)
+            fs_gfx = max(7, int(8 * scale))
+            pw = min(int(exp_w2 * scale * 0.55), ev_w - 24)
+            ph = min(int(exp_h2 * scale * 0.55), pic_h - 20)
+            bx0p, bx1p = cx - pw//2, cx + pw//2
+            by0p, by1p = cy - ph//2, cy + ph//2
+            cv.create_rectangle(bx0p, by0p, bx1p, by1p,
+                                  fill="", outline=HOI_PIC_DSH, dash=(4,3), width=1)
+            gfx_short = ev.picture
+            if len(gfx_short) > 36: gfx_short = gfx_short[:33] + "..."
+            cv.create_text(cx, cy - int(8*scale), text=f"[ {gfx_short} ]",
+                            fill=HOI_PIC_DSH, font=("Courier", fs_gfx), width=ev_w-20)
+            cv.create_text(cx, cy + int(10*scale), text=f"{exp_w2} × {exp_h2}",
+                            fill=HOI_INNER, font=("Courier", max(6, fs_gfx-1)))
+
+        # ── gold divider ─────────────────────────────────────────────
+        cv.create_line(x0+1, pic_y1, x0+ev_w-1, pic_y1,
+                        fill=HOI_DIVIDER, width=2)
+        # thin inner highlight below divider
+        cv.create_line(x0+1, pic_y1+2, x0+ev_w-1, pic_y1+2,
+                        fill=HOI_INNER, width=1)
+
+        # ── title+body section background ───────────────────────────
+        cv.create_rectangle(x0+2, pic_y1+2, x0+ev_w-2, y0+ev_h-2,
+                             fill=HOI_BODY_BG, outline="")
+
+        # ── title ────────────────────────────────────────────────────
+        fs_t   = max(8, int(11 * scale))
+        title_y = pic_y1 + int(7 * scale)
+        cv.create_text(x0 + ev_w//2, title_y,
+                        text=(ev.title_text or "Event Title").upper(),
+                        fill=HOI_TITLE,
+                        font=("Georgia", fs_t, "bold"),
+                        anchor="n", width=ev_w - 24)
+
+        # ── description ──────────────────────────────────────────────
+        fs_d   = max(7, int(9 * scale))
+        desc_y = title_y + int(fs_t * 2.2 * scale)
+        cv.create_text(x0 + 14, desc_y,
+                        text=ev.desc_text or "Event description.",
+                        fill=HOI_BODY,
+                        font=("Georgia", fs_d),
+                        anchor="nw", width=ev_w - 28, justify="left")
+
+        # ── options ──────────────────────────────────────────────────
+        n_opts = max(1, len(ev.options))
+        opt_h  = int(26 * scale)
+        gap    = int(4 * scale)
+        total_opts_h = n_opts * opt_h + (n_opts - 1) * gap
+        opts_y = y0 + ev_h - total_opts_h - int(12 * scale)
+
+        # separator above options
+        cv.create_line(x0+8, opts_y - int(5*scale),
+                        x0+ev_w-8, opts_y - int(5*scale),
+                        fill=HOI_OPT_BDR, width=1)
+
+        fs_o = max(7, int(9 * scale))
+        for i, opt in enumerate(ev.options):
+            oy  = opts_y + i * (opt_h + gap)
+            ox0 = x0 + 8;  ox1 = x0 + ev_w - 8
+            # (no shadow — matches app theme)
+            # button bg with gradient feel (two rects)
+            cv.create_rectangle(ox0, oy, ox1, oy+opt_h,
+                                  fill=HOI_OPT_BG, outline=HOI_OPT_BDR, width=1)
+            # (no highlight line — matches app theme)
+            label = opt.get("text", "Option")
+            if len(label) > 50:
+                label = label[:47] + "..."
+            cv.create_text((ox0+ox1)//2, oy + opt_h//2,
+                            text=label,
+                            fill=HOI_OPT_TXT,
+                            font=("Georgia", fs_o))
+
+        # ── type badge (top-left corner tab) ─────────────────────────
+        badge     = "NEWS EVENT" if is_news else "COUNTRY EVENT"
+        badge_fg  = HOI_BADGE
+        badge_bg  = HOI_WIN_BG
+        fs_b      = max(7, int(8 * scale))
+        bpad      = 6
+        bw        = len(badge) * int(6.5 * scale) + bpad * 2
+        bh        = 18
+        bx0 = x0;  bx1 = x0 + bw
+        by0 = y0 - bh;  by1 = y0
+        cv.create_rectangle(bx0, by0, bx1, by1,
+                             fill=badge_bg, outline=HOI_BORDER, width=1)
+        cv.create_text(bx0 + bw//2, by0 + bh//2,
+                        text=badge, fill=badge_fg,
+                        font=("Courier", fs_b, "bold"))
+
+        # ── major badge (top-right) ───────────────────────────────────
+        if ev.major:
+            cv.create_text(x0 + ev_w - 6, y0 - bh//2,
+                            text="★  MAJOR EVENT",
+                            fill="#f0c040",
+                            font=("Courier", fs_b, "bold"),
+                            anchor="e")
+
+    # ── GFX picker helpers ───────────────────────────────────────────
+    def _gfx_list_for_type():
+        ev_type = sel[0].etype if sel[0] else "country_event"
+        base = list(GFX_NEWS) if ev_type=="news_event" else list(GFX_COUNTRY)
+        if MOD.loaded and MOD.root:
+            ev_dir = _os.path.join(MOD.root, getattr(MOD,"path_event_pictures",
+                                   _os.path.join("gfx","event_pictures")))
+            if _os.path.isdir(ev_dir):
+                for fname in _os.listdir(ev_dir):
+                    stem,ext = _os.path.splitext(fname)
+                    if ext.lower() in (".dds",".tga",".png"):
+                        k = f"GFX_report_event_{stem}"
+                        if k not in base: base.append(k)
+        return sorted(set(base))
+
+
+    def _refresh_list():
+        for w in list_inner.winfo_children(): w.destroy()
+        filt = _ev_filter.get().strip().lower()
+        visible_events = [ev for ev in events
+                          if not filt or filt in ev.eid.lower()
+                          or filt in (ev.title_text or "").lower()] if filt else events
+        for ev in visible_events:
+            is_sel = (sel[0] and sel[0].uid==ev.uid)
+            bg = BG_CARD if is_sel else BG_PANEL
+            fr = tk.Frame(list_inner, bg=bg,
+                          highlightthickness=1,
+                          highlightbackground=BORDER_G if is_sel else BORDER)
+            fr.pack(fill="x", padx=4, pady=2)
+            badge_col = BLUE if ev.etype=="news_event" else GREEN
+            tk.Label(fr, text="N" if ev.etype=="news_event" else "C",
+                     bg=badge_col, fg=BG_DARK,
+                     font=("Courier",8,"bold"), width=2).pack(side="left")
+            tk.Label(fr, text=ev.eid, bg=bg,
+                     fg=TEXT if is_sel else TEXT_DIM,
+                     font=("Courier",9), anchor="w", cursor="hand2"
+                     ).pack(side="left", fill="x", expand=True, padx=4)
+            for w in fr.winfo_children():
+                w.bind("<Button-1>", lambda e,ev=ev: _select(ev))
+            fr.bind("<Button-1>", lambda e,ev=ev: _select(ev))
+
+    def _select(ev):
+        sel[0] = ev
+        _populate(ev)
+        _refresh_list()
+        _refresh_gfx_list()
+        _schedule_preview()
+
+    def _populate(ev):
+        v_etype.set(ev.etype)
+        v_eid.set(ev.eid)
+        v_title_text.set(ev.title_text)
+        v_desc_text.delete("1.0","end"); v_desc_text.insert("1.0",ev.desc_text)
+        v_picture.set(ev.picture)
+        v_major.set(ev.major);     v_fire_once.set(ev.fire_once)
+        v_triggered.set(ev.triggered); v_hidden.set(ev.hidden)
+        v_mtth_d.set(ev.mtth_days);  v_mtth_m.set(ev.mtth_months)
+        t_trigger.delete("1.0","end");   t_trigger.insert("1.0",ev.trigger_code)
+        t_immediate.delete("1.0","end"); t_immediate.insert("1.0",ev.immediate)
+        _refresh_opts()
+
+    def _apply_event():
+        ev = sel[0]
+        if not ev: return
+        _prev_img_cache.clear()   # force image reload when picture key changes
+        ev.etype        = v_etype.get()
+        ev.eid          = v_eid.get().strip()
+        ev.title_text   = v_title_text.get().strip()
+        ev.desc_text    = v_desc_text.get("1.0","end-1c").strip()
+        ev.picture      = v_picture.get().strip()
+        ev.major        = v_major.get()
+        ev.fire_once    = v_fire_once.get()
+        ev.triggered    = v_triggered.get()
+        ev.hidden       = v_hidden.get()
+        ev.mtth_days    = v_mtth_d.get().strip()
+        ev.mtth_months  = v_mtth_m.get().strip()
+        ev.trigger_code = t_trigger.get("1.0","end-1c").strip()
+        ev.immediate    = t_immediate.get("1.0","end-1c").strip()
+        _refresh_list(); _render_preview()
+        status_lbl.config(text=f"  ✓  Applied {ev.eid}")
+
+    def _on_type_change():
+        if sel[0]: sel[0].etype = v_etype.get()
+        _refresh_gfx_list()
+        _schedule_preview()
+
+    # ── Options ──────────────────────────────────────────────────────
+    def _refresh_opts():
+        for w in opt_box.winfo_children(): w.destroy()
+        if not sel[0]: return
+        for i,opt in enumerate(sel[0].options):
+            _build_opt_row(opt_box, i, opt)
+
+    def _open_effect_picker(target_text):
+        """
+        Popup effect selector — mirrors the focus wizard's effect tab.
+        Inserts rendered HOI4 code into target_text (a tk.Text widget).
+        """
+        pwin = tk.Toplevel(win)
+        pwin.title("Effect Picker")
+        pwin.configure(bg=BG_DARK)
+        pwin.geometry("620x580")
+        pwin.resizable(True, True)
+        pwin.grab_set()
+
+        # ── header ────────────────────────────────────────────────────
+        hdr = tk.Frame(pwin, bg=BG_DARK)
+        hdr.pack(fill="x", padx=10, pady=(8,0))
+        tk.Label(hdr, text="🔍", bg=BG_DARK, fg=TEXT_DIM,
+                 font=("Helvetica",11)).pack(side="left", padx=(0,4))
+        eff_search_var = tk.StringVar(value="Search effects…")
+        eff_search_ent = tk.Entry(hdr, textvariable=eff_search_var,
+                                   bg=BG_CARD, fg=TEXT_DIM,
+                                   insertbackground=BLUE,
+                                   font=("Helvetica",10), relief="flat",
+                                   highlightthickness=1,
+                                   highlightbackground=BORDER_G)
+        eff_search_ent.pack(fill="x", expand=True, ipady=4)
+        def _ph_in(e):
+            if eff_search_var.get() == "Search effects…":
+                eff_search_var.set(""); eff_search_ent.config(fg=TEXT)
+        def _ph_out(e):
+            if not eff_search_var.get():
+                eff_search_var.set("Search effects…")
+                eff_search_ent.config(fg=TEXT_DIM)
+        eff_search_ent.bind("<FocusIn>",  _ph_in)
+        eff_search_ent.bind("<FocusOut>", _ph_out)
+
+        # ── category + effect dropdown ─────────────────────────────────
+        cat_row = tk.Frame(pwin, bg=BG_DARK)
+        cat_row.pack(fill="x", padx=10, pady=(4,0))
+        tk.Label(cat_row, text="Category:", bg=BG_DARK, fg=TEXT_DIM,
+                 font=("Helvetica",9)).pack(side="left")
+        eff_cat = tk.StringVar(value=EFFECT_CATS[0])
+        cat_menu = tk.OptionMenu(cat_row, eff_cat, *EFFECT_CATS,
+                                  command=lambda _: _rebuild_dd())
+        cat_menu.config(bg=BG_CARD, fg=TEXT, activebackground=BORDER_G,
+                        font=("Helvetica",9), relief="flat",
+                        highlightthickness=1, highlightbackground=BORDER_G,
+                        width=12, anchor="w")
+        cat_menu["menu"].config(bg=BG_CARD, fg=TEXT,
+                                activebackground=BORDER_G, font=("Helvetica",9))
+        cat_menu.pack(side="left", padx=4)
+
+        eff_type = tk.StringVar()
+        dd_frame = tk.Frame(cat_row, bg=BG_DARK)
+        dd_frame.pack(side="left", fill="x", expand=True)
+
+        def _rebuild_dd(items=None):
+            for w in dd_frame.winfo_children(): w.destroy()
+            if items is None:
+                items = effects_in_cat(eff_cat.get())
+            if not items: return
+            eff_type.set(items[0][0])
+            om = tk.OptionMenu(dd_frame, eff_type, *[k for k,_ in items])
+            menu = om["menu"]; menu.delete(0, "end")
+            for k, lbl in items:
+                menu.add_command(label=f"{k}  —  {lbl}",
+                                  command=lambda v=k: [eff_type.set(v), _refresh_fields()])
+            om.config(bg=BG_CARD, fg=TEXT, activebackground=SEL_BG,
+                      font=("Helvetica",9), relief="flat",
+                      highlightthickness=1, highlightbackground=BORDER_G,
+                      anchor="w", width=30)
+            om["menu"].config(bg=BG_CARD, fg=TEXT,
+                               activebackground=SEL_BG, font=("Helvetica",9))
+            om.pack(fill="x", expand=True)
+            _refresh_fields()
+
+        def _filter_dd(*_):
+            raw = eff_search_var.get()
+            if raw == "Search effects…" or not raw.strip():
+                _rebuild_dd(); return
+            q = raw.strip().lower()
+            matches = [(k, v["label"]) for k,v in EFFECT_DEFS.items()
+                       if q in k.lower() or q in v["label"].lower()
+                       or q in v.get("cat","").lower()]
+            for w in dd_frame.winfo_children(): w.destroy()
+            if not matches:
+                tk.Label(dd_frame, text="No effects found",
+                          bg=BG_DARK, fg=TEXT_DIM,
+                          font=("Helvetica",9)).pack(anchor="w")
+                return
+            eff_type.set(matches[0][0])
+            om = tk.OptionMenu(dd_frame, eff_type, *[k for k,_ in matches])
+            menu = om["menu"]; menu.delete(0, "end")
+            for k, lbl in matches:
+                cat = EFFECT_DEFS[k].get("cat","")
+                menu.add_command(
+                    label=f"[{cat}]  {k}  —  {lbl}",
+                    command=lambda v=k: [eff_type.set(v), _refresh_fields()])
+            om.config(bg=BG_CARD, fg=TEXT, activebackground=SEL_BG,
+                      font=("Helvetica",9), relief="flat",
+                      highlightthickness=1, highlightbackground=BORDER_G,
+                      anchor="w", width=34)
+            om["menu"].config(bg=BG_CARD, fg=TEXT,
+                               activebackground=SEL_BG, font=("Helvetica",9))
+            om.pack(fill="x", expand=True)
+            _refresh_fields()
+
+        eff_search_var.trace_add("write", _filter_dd)
+        eff_type.trace_add("write",       lambda *_: _refresh_fields())
+
+        # ── fields panel ───────────────────────────────────────────────
+        tk.Frame(pwin, bg=BORDER_G, height=1).pack(fill="x", padx=8, pady=(6,0))
+
+        fields_outer = tk.Frame(pwin, bg=BG_PANEL)
+        fields_outer.pack(fill="both", expand=True, padx=8, pady=4)
+
+        fields_cv = tk.Canvas(fields_outer, bg=BG_PANEL, highlightthickness=0)
+        fields_sb = tk.Scrollbar(fields_outer, orient="vertical",
+                                  command=fields_cv.yview)
+        fields_frm = tk.Frame(fields_cv, bg=BG_PANEL)
+        fields_win = fields_cv.create_window((0,0), window=fields_frm, anchor="nw")
+        fields_cv.configure(yscrollcommand=fields_sb.set)
+        fields_frm.bind("<Configure>",
+                        lambda e: fields_cv.configure(
+                            scrollregion=fields_cv.bbox("all")))
+        fields_cv.bind("<Configure>",
+                       lambda e: fields_cv.itemconfig(fields_win, width=e.width))
+        fields_cv.bind("<MouseWheel>",
+                       lambda e: fields_cv.yview_scroll(
+                           int(-1*(e.delta/120)), "units"))
+        fields_cv.pack(side="left", fill="both", expand=True)
+        fields_sb.pack(side="right", fill="y")
+
+        # live field value store: {field_name: StringVar or Text ref}
+        _fvars = {}
+
+        def _refresh_fields(*_):
+            for w in fields_frm.winfo_children(): w.destroy()
+            _fvars.clear()
+            key  = eff_type.get()
+            defn = EFFECT_DEFS.get(key, {})
+            if not defn:
+                tk.Label(fields_frm,
+                          text=f"  Unknown effect: {key!r}\n  Will be inserted as raw snippet.",
+                          bg=BG_PANEL, fg=ORANGE,
+                          font=("Helvetica",9,"italic"),
+                          justify="left").pack(anchor="w", padx=8, pady=8)
+                return
+
+            tk.Label(fields_frm,
+                      text=f"  [{defn.get('cat','')}]  {defn.get('label',key)}",
+                      bg=BG_PANEL, fg=TEXT,
+                      font=("Helvetica",10,"bold"),
+                      anchor="w").pack(fill="x", padx=8, pady=(8,2))
+            tk.Frame(fields_frm, bg=BORDER_G, height=1).pack(
+                fill="x", padx=8, pady=(0,6))
+
+            for fname, wtype, default, hint in defn.get("fields", []):
+                row = tk.Frame(fields_frm, bg=BG_PANEL)
+                row.pack(fill="x", padx=8, pady=3)
+                tk.Label(row, text=f"{fname}:", bg=BG_PANEL, fg=TEXT_DIM,
+                          font=("Helvetica",9), width=14,
+                          anchor="w").pack(side="left")
+
+                if wtype == "multiline":
+                    t = tk.Text(row, bg=BG_CARD, fg=TEXT,
+                                 insertbackground=BLUE,
+                                 font=("Courier",9), relief="flat",
+                                 highlightthickness=1,
+                                 highlightbackground=BORDER_G,
+                                 height=4, wrap="none")
+                    t.insert("1.0", default)
+                    t.pack(side="left", fill="x", expand=True, ipady=2)
+                    _fvars[fname] = ("text", t)
+
+                elif wtype.startswith("dropdown:"):
+                    opts = wtype.split(":")[1].split(",")
+                    sv = tk.StringVar(value=default if default in opts else opts[0])
+                    om = tk.OptionMenu(row, sv, *opts)
+                    om.config(bg=BG_CARD, fg=TEXT,
+                               activebackground=BORDER_G,
+                               font=("Helvetica",9), relief="flat",
+                               highlightthickness=1,
+                               highlightbackground=BORDER_G,
+                               anchor="w")
+                    om["menu"].config(bg=BG_CARD, fg=TEXT,
+                                       activebackground=BORDER_G,
+                                       font=("Helvetica",9))
+                    om.pack(side="left", padx=2, fill="x", expand=True)
+                    _fvars[fname] = ("var", sv)
+
+                else:
+                    sv = tk.StringVar(value=default)
+                    tk.Entry(row, textvariable=sv,
+                              bg=BG_CARD, fg=TEXT,
+                              insertbackground=BLUE,
+                              font=("Helvetica",10), relief="flat",
+                              highlightthickness=1,
+                              highlightbackground=BORDER_G
+                              ).pack(side="left", fill="x", expand=True,
+                                     ipady=3, padx=2)
+                    _fvars[fname] = ("var", sv)
+
+                if hint:
+                    tk.Label(row, text=f"  {hint}",
+                              bg=BG_PANEL, fg=TEXT_DIM,
+                              font=("Helvetica",7,"italic"),
+                              anchor="w").pack(side="left", padx=(4,0))
+
+        # ── render HOI4 snippet ────────────────────────────────────────
+        def _render_snippet():
+            key  = eff_type.get().strip()
+            defn = EFFECT_DEFS.get(key, {})
+            if not defn:
+                return f"\t{key} = yes\n"
+            fields = defn.get("fields", [])
+            if len(fields) == 1:
+                fname, wtype, _, _ = fields[0]
+                kind, ref = _fvars.get(fname, ("var", tk.StringVar()))
+                val = ref.get("1.0","end-1c").strip() if kind=="text" else ref.get().strip()
+                return f"\t{key} = {val}\n"
+            else:
+                lines = [f"\t{key} = {{"]
+                for fname, wtype, _, _ in fields:
+                    kind, ref = _fvars.get(fname, ("var", tk.StringVar()))
+                    val = ref.get("1.0","end-1c").strip() if kind=="text" else ref.get().strip()
+                    lines.append(f"\t\t{fname} = {val}")
+                lines.append("\t}")
+                return "\n".join(lines) + "\n"
+
+        # ── live preview ───────────────────────────────────────────────
+        tk.Frame(pwin, bg=BORDER_G, height=1).pack(fill="x", padx=8)
+        prev_frame = tk.Frame(pwin, bg=BG_DARK)
+        prev_frame.pack(fill="x", padx=8, pady=(4,0))
+        tk.Label(prev_frame, text="  Preview:", bg=BG_DARK, fg=TEXT_DIM,
+                  font=("Helvetica",8,"bold")).pack(anchor="w")
+        prev_lbl = tk.Label(prev_frame, text="", bg=BG_DARK, fg=GREEN,
+                             font=("Courier",9), anchor="w", justify="left",
+                             padx=8, pady=2)
+        prev_lbl.pack(fill="x")
+
+        def _update_preview(*_):
+            try:
+                prev_lbl.config(text=_render_snippet())
+            except Exception: pass
+        # rebind all field changes to also update preview — wire after a small delay
+        def _wire_preview_traces():
+            for fname, (kind, ref) in _fvars.items():
+                if kind == "var":
+                    ref.trace_add("write", _update_preview)
+                else:
+                    ref.bind("<KeyRelease>", _update_preview)
+            _update_preview()
+        pwin.after(50, _wire_preview_traces)
+
+        # ── bottom bar ─────────────────────────────────────────────────
+        tk.Frame(pwin, bg=BORDER_G, height=1).pack(fill="x", padx=8, pady=(4,0))
+        bot = tk.Frame(pwin, bg=BG_DARK)
+        bot.pack(fill="x", padx=10, pady=6)
+
+        tk.Button(bot, text="Cancel", command=pwin.destroy,
+                   bg=BG_CARD, fg=TEXT, relief="flat",
+                   font=("Helvetica",9), padx=10, pady=4,
+                   cursor="hand2").pack(side="right", padx=4)
+
+        def _insert_effect():
+            snippet = _render_snippet()
+            target_text.insert("end", snippet)
+            _schedule_preview()
+            pwin.destroy()
+
+        tk.Button(bot, text="＋  Insert Effect",
+                   command=_insert_effect,
+                   bg="#14532d", fg=GREEN, relief="flat",
+                   font=("Helvetica",10,"bold"),
+                   padx=14, pady=5,
+                   cursor="hand2").pack(side="right")
+
+        tk.Label(bot,
+                  text="Inserts snippet at end of effects box",
+                  bg=BG_DARK, fg=TEXT_DIM,
+                  font=("Helvetica",8,"italic")).pack(side="left", padx=4)
+
+        # ── init ───────────────────────────────────────────────────────
+        _rebuild_dd()
+
+
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # BUILD UI — all functions defined above, safe to reference them now
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    # ── Top bar ──────────────────────────────────────────────────────
+    topbar = tk.Frame(win, bg=BG_DARK, height=44)
+    topbar.pack(fill="x"); topbar.pack_propagate(False)
+
+    tk.Label(topbar, text="EVENT MAKER", bg=BG_DARK, fg=TEXT,
+             font=("Helvetica",11,"bold"), padx=12).pack(side="left")
+    tk.Frame(topbar, bg=BORDER_G, width=1, height=24).pack(side="left", padx=4, pady=10)
+
+    status_lbl = tk.Label(topbar, text="", bg=BG_DARK, fg=TEXT_DIM,
+                          font=("Helvetica",8,"italic"))
+    status_lbl.pack(side="right", padx=14)
+
+    def _build_opt_row(parent, idx, opt):
+        frm = tk.Frame(parent, bg=BG_CARD,
+                       highlightthickness=1, highlightbackground=BORDER_G)
+        frm.pack(fill="x", pady=2)
+        hdr = tk.Frame(frm, bg=BG_DARK); hdr.pack(fill="x")
+        tk.Label(hdr, text=f"  Option {idx+1}", bg=BG_DARK, fg=TEXT_DIM,
+                 font=("Helvetica",8,"bold")).pack(side="left")
+        tk.Button(hdr, text="✕", command=lambda i=idx: _del_option(i),
+                  bg=BG_DARK, fg=RED, relief="flat",
+                  font=("Helvetica",9), cursor="hand2", padx=4).pack(side="right")
+        def _row(lbl, key, is_text=False, height=3):
+            r = tk.Frame(frm, bg=BG_CARD); r.pack(fill="x", padx=6, pady=2)
+            tk.Label(r, text=lbl, bg=BG_CARD, fg=TEXT_DIM,
+                     font=("Helvetica",8), width=10, anchor="w").pack(side="left")
+            if is_text:
+                t = tk.Text(r, bg=BG_DARK, fg=TEXT, insertbackground=BLUE,
+                            font=("Courier",9), relief="flat",
+                            highlightthickness=1, highlightbackground=BORDER,
+                            height=height, wrap="none")
+                t.insert("1.0", opt.get(key,""))
+                t.pack(side="left", fill="x", expand=True, ipady=2)
+                t.bind("<KeyRelease>",
+                    lambda e,k=key,w=t: [opt.update({k:w.get("1.0","end-1c")}),_schedule_preview()])
+            else:
+                sv = tk.StringVar(value=str(opt.get(key,"")))
+                tk.Entry(r, textvariable=sv, bg=BG_DARK, fg=TEXT,
+                         insertbackground=BLUE, font=("Helvetica",9), relief="flat",
+                         highlightthickness=1, highlightbackground=BORDER
+                         ).pack(side="left", fill="x", expand=True, ipady=2)
+                sv.trace_add("write",
+                    lambda *a,k=key,v=sv: [opt.update({k:v.get()}),_schedule_preview()])
+        _row("name:",      "name")
+        _row("text:",      "text")
+        # Effects row with picker button
+        eff_hdr_r = tk.Frame(frm, bg=BG_CARD); eff_hdr_r.pack(fill="x", padx=6, pady=(4,0))
+        tk.Label(eff_hdr_r, text="effects:", bg=BG_CARD, fg=TEXT_DIM,
+                 font=("Helvetica",8), width=10, anchor="w").pack(side="left")
+        # Build effects textbox manually so we have a direct reference for the picker
+        eff_text_r = tk.Frame(frm, bg=BG_CARD); eff_text_r.pack(fill="x", padx=6, pady=(0,2))
+        tk.Label(eff_text_r, text="", bg=BG_CARD, fg=TEXT_DIM,
+                 font=("Helvetica",8), width=10, anchor="w").pack(side="left")
+        eff_t = tk.Text(eff_text_r, bg=BG_DARK, fg=TEXT, insertbackground=BLUE,
+                        font=("Courier",9), relief="flat",
+                        highlightthickness=1, highlightbackground=BORDER,
+                        height=3, wrap="none")
+        eff_t.insert("1.0", opt.get("effects",""))
+        eff_t.pack(side="left", fill="x", expand=True, ipady=2)
+        eff_t.bind("<KeyRelease>",
+            lambda e, k="effects", w=eff_t: [opt.update({k: w.get("1.0","end-1c")}), _schedule_preview()])
+        tk.Button(eff_hdr_r, text="🔍 Effect Picker",
+                  bg=BG_CARD, fg=BLUE, relief="flat",
+                  font=("Helvetica",8), cursor="hand2", padx=6, pady=1,
+                  highlightthickness=1, highlightbackground=BORDER,
+                  command=lambda t=eff_t: _open_effect_picker(t)
+                  ).pack(side="right")
+        _row("ai_chance:", "ai_chance")
+
+    def _add_option():
+        if not sel[0]: return
+        n = len(sel[0].options)+1
+        sel[0].options.append({
+            "name":f"{sel[0].eid}.{chr(96+n)}","text":f"Option {n}",
+            "effects":"","ai_chance":"1"
+        })
+        _refresh_opts(); _schedule_preview()
+
+    def _del_option(idx):
+        if not sel[0]: return
+        if len(sel[0].options)<=1:
+            messagebox.showwarning("Options","An event must have at least one option.",parent=win); return
+        sel[0].options.pop(idx); _refresh_opts(); _schedule_preview()
+
+    # ── Output generation ─────────────────────────────────────────────
+    def _render_event_txt(ev):
+        def ind(text, n=2):
+            return "\n".join("\t"*n+ln for ln in text.splitlines()) if text.strip() else ""
+        out = [f"{ev.etype} = {{"]
+        out.append(f"\tid = {ev.eid}")
+        out.append(f"\ttitle = {ev.eid}.t")
+        out.append(f"\tdesc = {ev.eid}.d")
+        out.append(f"\tpicture = {ev.picture}")
+        out.append("")
+        if ev.major:     out.append("\tmajor = yes")
+        if ev.fire_once: out.append("\tfire_only_once = yes")
+        if ev.triggered: out.append("\tis_triggered_only = yes")
+        if ev.hidden:    out.append("\thidden = yes")
+        if ev.trigger_code.strip():
+            out.append("\ttrigger = {")
+            out.append(ind(ev.trigger_code)); out.append("\t}")
+        if ev.mtth_days or ev.mtth_months:
+            out.append("\tmean_time_to_happen = {")
+            if ev.mtth_days:   out.append(f"\t\tdays = {ev.mtth_days}")
+            if ev.mtth_months: out.append(f"\t\tmonths = {ev.mtth_months}")
+            out.append("\t}")
+        if ev.immediate.strip():
+            out.append("\timmediate = {")
+            out.append(ind(ev.immediate)); out.append("\t}")
+        out.append("")
+        for opt in ev.options:
+            out.append(f"\toption = {{  # {opt.get('text','')}")
+            out.append(f"\t\tname = {opt.get('name','opt')}")
+            out.append(f"\t\tai_chance = {{ base = {opt.get('ai_chance','1')} }}")
+            if opt.get("effects","").strip():
+                out.append(ind(opt["effects"]))
+            out.append("\t}")
+        out.append("}")
+        return "\n".join(out)
+
+    def _generate_all_txt():
+        if not events: return ""
+        ns_set = list(dict.fromkeys(ev.eid.split(".")[0] for ev in events))
+        lines  = ["# Generated by HOI4 Content Maker",""]
+        for ns in ns_set: lines.append(f"add_namespace = {ns}")
+        lines.append("")
+        for ev in events:
+            lines.append(_render_event_txt(ev)); lines.append("")
+        return "\n".join(lines)
+
+    def _generate_yml():
+        if not events: return ""
+        lines = ["l_english:",""]
+        for ev in events:
+            lines.append(f' {ev.eid}.t:0 "{ev.title_text}"')
+            lines.append(f' {ev.eid}.d:0 "{ev.desc_text}"')
+            for opt in ev.options:
+                lines.append(f' {opt["name"]}:0 "{opt.get("text",opt["name"])}"')
+            lines.append("")
+        return "\n".join(lines)
+
+    # ── Top bar actions ───────────────────────────────────────────────
+    def _new_event():
+        ev = _Ev(); events.append(ev)
+        _select(ev); _refresh_list()
+        status_lbl.config(text=f"  ✓  New event: {ev.eid}")
+
+    def _delete_event():
+        if not sel[0]: return
+        if not messagebox.askyesno("Delete",f"Delete '{sel[0].eid}'?",parent=win): return
+        events.remove(sel[0]); sel[0]=None
+        if events: _select(events[-1])
+        else: preview_cv.delete("all")
+        _refresh_list()
+
+    def _export_txt():
+        if not events: messagebox.showwarning("Export","No events.",parent=win); return
+        path = filedialog.asksaveasfilename(parent=win, defaultextension=".txt",
+            filetypes=[("HOI4 Events","*.txt"),("All","*.*")],
+            title="Export Events .txt")
+        if not path: return
+        with open(path,"w",encoding="utf-8-sig") as f: f.write(_generate_all_txt())
+        status_lbl.config(text=f"  ✓  Exported {len(events)} events")
+
+    def _copy_yml():
+        if not events: messagebox.showwarning("YML","No events.",parent=win); return
+        win.clipboard_clear(); win.clipboard_append(_generate_yml())
+        status_lbl.config(text="  ✓  Localisation YML copied!")
+        messagebox.showinfo("Copied",
+            "Localisation YML copied to clipboard.\n\nPaste into:\n"
+            "  localisation/english/[modname]_l_english.yml", parent=win)
+
+    def _save_to_mod():
+        if not events:
+            messagebox.showwarning("Save", "No events to save.", parent=win); return
+
+        ns = events[0].eid.split(".")[0]
+        saved = []; errs = []; warnings = []
+
+        # ── Determine mod root and target files ───────────────────────────
+        if MOD.edit_events_file:
+            ev_file  = MOD.edit_events_file
+            mod_root = MOD.root or _os.path.dirname(_os.path.dirname(ev_file))
+        else:
+            mod_root = filedialog.askdirectory(parent=win,
+                title="Select MOD ROOT folder (events appended to events/<ns>.txt)")
+            if not mod_root: return
+            ev_file = _os.path.join(mod_root, "events", f"{ns}.txt")
+
+        loc_file = _os.path.join(mod_root, "localisation", "english",
+                                 f"{ns}_l_english.yml")
+        _os.makedirs(_os.path.dirname(ev_file),  exist_ok=True)
+        _os.makedirs(_os.path.dirname(loc_file), exist_ok=True)
+
+        # ── EVENTS: safe append — never touch existing content ────────────
+        try:
+            existing_ids = set()
+            file_exists  = _os.path.isfile(ev_file)
+            if file_exists:
+                with open(ev_file, "r", encoding="utf-8", errors="replace") as f:
+                    raw = f.read()
+                # Collect every id = X already in the file
+                for m in re.finditer(r'\bid\s*=\s*(\S+)', raw):
+                    existing_ids.add(m.group(1).strip())
+
+            to_append = [ev for ev in events if ev.eid not in existing_ids]
+            skipped   = [ev.eid for ev in events if ev.eid in existing_ids]
+            if skipped:
+                warnings.append("Already in file (skipped): " + ", ".join(skipped))
+
+            if to_append:
+                lines = []
+                if not file_exists:
+                    # Brand-new file — write namespace header first
+                    lines.append(f"add_namespace = {ns}")
+                    lines.append("")
+                else:
+                    lines.append("")
+                    lines.append("# ── Appended by HOI4 Content Maker ─────────────────────────────────")
+                for ev in to_append:
+                    lines.append("")
+                    lines.append(_render_event_txt(ev))
+
+                with open(ev_file, "a" if file_exists else "w",
+                          encoding="utf-8") as f:
+                    f.write("\n".join(lines) + "\n")
+                rel = _os.path.relpath(ev_file, mod_root)
+                saved.append(f"{rel}  (+{len(to_append)} event{'s' if len(to_append)!=1 else ''})")
+            else:
+                warnings.append("No new events to append — all IDs already present in file.")
+
+        except Exception as e:
+            errs.append("Events file: " + str(e))
+
+        # ── LOCALISATION: safe append — skip keys already present ─────────
+        try:
+            yml_new_lines = []
+            for line in _generate_yml().splitlines():
+                if not line.strip() or line.strip().startswith("l_english"): continue
+                yml_new_lines.append(line)
+
+            existing_yml_keys = set()
+            yml_exists = _os.path.isfile(loc_file)
+            if yml_exists:
+                with open(loc_file, "r", encoding="utf-8-sig", errors="replace") as f:
+                    for line in f:
+                        m = re.match(r'\s+(\S+?):\d+', line)
+                        if m: existing_yml_keys.add(m.group(1))
+
+            to_add = [ln for ln in yml_new_lines
+                      if not re.match(r'\s+(\S+?):\d+', ln) or
+                         re.match(r'\s+(\S+?):\d+', ln).group(1) not in existing_yml_keys]
+
+            if to_add:
+                if not yml_exists:
+                    with open(loc_file, "w", encoding="utf-8-sig") as f:
+                        f.write("l_english:\n")
+                with open(loc_file, "a", encoding="utf-8-sig") as f:
+                    f.write("\n".join(to_add) + "\n")
+                rel = _os.path.relpath(loc_file, mod_root)
+                saved.append(f"{rel}  (+{len(to_add)} keys)")
+            else:
+                warnings.append("No new localisation keys to append.")
+
+        except Exception as e:
+            errs.append("Localisation: " + str(e))
+
+        # ── SCRIPTED LOC ─────────────────────────────────────────────────
+        if MOD.edit_scripted_loc_file:
+            sloc_blocks = []
+            eid = v_id.get().strip() if "v_id" in dir() else ""
+            if not eid:
+                # try to grab event id from the generated output
+                import re as _re3
+                m3 = _re3.search(r"id\s*=\s*([\w\.]+)", _get_output_text() if callable(lambda: _get_output_text()) else "")
+                eid = m3.group(1) if m3 else ""
+            if eid:
+                sloc_blocks.append({"name": f"GET_{eid}_title",  "texts": [], "default": f"{eid}.t"})
+                sloc_blocks.append({"name": f"GET_{eid}_desc",   "texts": [], "default": f"{eid}.d"})
+            _append_scripted_loc(MOD.edit_scripted_loc_file,
+                                  sloc_blocks, saved, errs, mod_root)
+
+        # ── Report ────────────────────────────────────────────────────────
+        msg = ""
+        if saved:    msg += "Saved:\n" + "\n".join(saved)
+        if warnings: msg += ("\n\n" if msg else "") + "Notes:\n" + "\n".join(warnings)
+        if errs:     msg += ("\n\n" if msg else "") + "Errors:\n" + "\n".join(errs)
+        if not msg:  msg = "Nothing to save."
+        messagebox.showinfo("Saved to Mod", msg, parent=win)
+        if saved: status_lbl.config(text="  \u2713  Saved to mod")
+
+    def _import_txt():
+        path = filedialog.askopenfilename(parent=win,
+            filetypes=[("HOI4 Events","*.txt"),("All","*.*")],
+            title="Import HOI4 Events .txt")
+        if not path: return
+        try:
+            with open(path,"r",encoding="utf-8",errors="replace") as f: raw=f.read()
+        except Exception as e:
+            messagebox.showerror("Import Error",str(e),parent=win); return
+        stripped=[]
+        for ln in raw.splitlines():
+            idx=ln.find("#"); stripped.append(ln[:idx] if idx>=0 else ln)
+        txt="\n".join(stripped)
+        def _tok(s):
+            tokens=[]; i=0
+            while i<len(s):
+                c=s[i]
+                if c in " \t\n\r": i+=1; continue
+                if c in "{}=": tokens.append(c); i+=1; continue
+                if c=='"':
+                    j=i+1
+                    while j<len(s) and s[j]!='"': j+=1
+                    tokens.append(s[i+1:j]); i=j+1; continue
+                j=i
+                while j<len(s) and s[j] not in ' \t\n\r{}="': j+=1
+                if j>i: tokens.append(s[i:j])
+                i=j
+            return tokens
+        def _pblk(tokens,pos):
+            result={}; pos+=1
+            while pos<len(tokens) and tokens[pos]!="}":
+                key=tokens[pos]; pos+=1
+                if pos>=len(tokens): break
+                if tokens[pos]=="=":
+                    pos+=1
+                    if pos>=len(tokens): break
+                    if tokens[pos]=="{": val,pos=_pblk(tokens,pos)
+                    else: val=tokens[pos]; pos+=1
+                    if key in result:
+                        ex=result[key]
+                        if not isinstance(ex,list): result[key]=[ex]
+                        result[key].append(val)
+                    else: result[key]=val
+                else: result.setdefault("_values",[]).append(key)
+            return result,pos+1
+        tokens=_tok(txt); imported=[]; i=0
+        while i<len(tokens):
+            if tokens[i] in ("country_event","news_event") and i+1<len(tokens) and tokens[i+1]=="=":
+                etype=tokens[i]; blk,i=_pblk(tokens,i+2)
+                ev=_Ev()
+                ev.etype=etype; ev.eid=blk.get("id",ev.eid)
+                ev.title_text=blk.get("title","").replace("."," ")
+                ev.desc_text=blk.get("desc","").replace("."," ")
+                ev.picture=blk.get("picture","GFX_report_event_generic_handshake")
+                ev.major=blk.get("major","no")=="yes"
+                ev.fire_once=blk.get("fire_only_once","no")=="yes"
+                ev.triggered=blk.get("is_triggered_only","no")=="yes"
+                ev.hidden=blk.get("hidden","no")=="yes"
+                mtth=blk.get("mean_time_to_happen",{})
+                if isinstance(mtth,dict):
+                    ev.mtth_days=mtth.get("days",""); ev.mtth_months=mtth.get("months","")
+                opts_raw=blk.get("option",[])
+                if isinstance(opts_raw,dict): opts_raw=[opts_raw]
+                ev.options=[]
+                for ob in opts_raw:
+                    if not isinstance(ob,dict): continue
+                    ai=ob.get("ai_chance",{}); ai_v=ai.get("base",ai.get("factor","1")) if isinstance(ai,dict) else str(ai)
+                    ev.options.append({"name":ob.get("name","opt"),"text":ob.get("name","opt").replace("."," "),"effects":"","ai_chance":str(ai_v)})
+                if not ev.options:
+                    ev.options=[{"name":f"{ev.eid}.a","text":"Option A","effects":"","ai_chance":"1"}]
+                imported.append(ev)
+            else: i+=1
+        if not imported:
+            messagebox.showwarning("Import","No events found.",parent=win); return
+        events.extend(imported); _select(imported[0]); _refresh_list()
+        status_lbl.config(text=f"  ✓  Imported {len(imported)} events")
+
+    def _show_tab(which):
+        if which=="preview":
+            gfx_panel.pack_forget()
+            preview_panel.pack(fill="both", expand=True)
+            tab_preview_btn.config(bg=BORDER_G, fg=TEXT)
+            tab_gfx_btn.config(bg=BG_DARK, fg=TEXT_DIM)
+        else:
+            preview_panel.pack_forget()
+            gfx_panel.pack(fill="both", expand=True)
+            tab_gfx_btn.config(bg=BORDER_G, fg=TEXT)
+            tab_preview_btn.config(bg=BG_DARK, fg=TEXT_DIM)
+
+
+    def _open_event_gfx_browser():
+        """Event picture browser — identical layout/behaviour to Ideas/Focus GFX browser."""
+        ev_type = sel[0].etype if sel[0] else "country_event"
+
+        # ── Resolve root folder ───────────────────────────────────────
+        ev_root = None
+        if MOD.loaded and MOD.root:
+            candidate = os.path.join(
+                MOD.root,
+                getattr(MOD, "path_event_pictures",
+                        os.path.join("gfx", "event_pictures")))
+            if os.path.isdir(candidate):
+                ev_root = candidate
+        if not ev_root:
+            ev_root = filedialog.askdirectory(
+                title="Select event pictures folder  (gfx/event_pictures/)",
+                parent=win)
+            if not ev_root: return
+
+        # ── Build folder list ─────────────────────────────────────────
+        folders = []
+        try:
+            loose = [f for f in os.listdir(ev_root)
+                     if f.lower().endswith((".dds",".png",".tga"))]
+            if loose:
+                folders.append(("[event_pictures]", ev_root))
+            for entry in sorted(os.listdir(ev_root)):
+                full = os.path.join(ev_root, entry)
+                if os.path.isdir(full):
+                    folders.append((entry, full))
+        except Exception:
+            pass
+        if not folders:
+            folders.append(("[selected folder]", ev_root))
+
+        # ── Window ────────────────────────────────────────────────────
+        bwin = tk.Toplevel(win)
+        bwin.title("GFX Browser  —  Event Pictures")
+        bwin.configure(bg=BG_DARK)
+        bwin.geometry("900x580")
+        bwin.resizable(True, True)
+        bwin.grab_set()
+
+        panes = tk.Frame(bwin, bg=BG_DARK)
+        panes.pack(fill="both", expand=True, padx=8, pady=8)
+
+        # ── LEFT: folder list (text only, instant) ────────────────────
+        lf = tk.Frame(panes, bg=BG_PANEL, width=200)
+        lf.pack(side="left", fill="y", padx=(0,6))
+        lf.pack_propagate(False)
+        tk.Label(lf, text="  FOLDERS", bg=BG_PANEL, fg=TEXT_DIM,
+                 font=("Helvetica",9,"bold"), anchor="w", pady=6).pack(fill="x")
+        tk.Frame(lf, bg=BORDER_G, height=1).pack(fill="x")
+        folder_lb = tk.Listbox(lf, bg=BG_CARD, fg=TEXT,
+                               selectbackground=BLUE, selectforeground=TEXT,
+                               font=("Courier",9), relief="flat", bd=0,
+                               activestyle="none", highlightthickness=0)
+        fsb = tk.Scrollbar(lf, orient="vertical", command=folder_lb.yview)
+        folder_lb.configure(yscrollcommand=fsb.set)
+        fsb.pack(side="right", fill="y")
+        folder_lb.pack(fill="both", expand=True, padx=2, pady=4)
+        for display, _ in folders:
+            folder_lb.insert("end", "  " + display)
+
+        # ── RIGHT panel ───────────────────────────────────────────────
+        rf = tk.Frame(panes, bg=BG_DARK)
+        rf.pack(side="left", fill="both", expand=True)
+
+        top_r = tk.Frame(rf, bg=BG_DARK)
+        top_r.pack(fill="x", pady=(0,6))
+        tk.Label(top_r, text="Filter:", bg=BG_DARK, fg=TEXT_DIM,
+                 font=("Helvetica",9)).pack(side="left")
+        search_var = tk.StringVar()
+        tk.Entry(top_r, textvariable=search_var, bg=BG_CARD, fg=TEXT,
+                 insertbackground=BLUE, font=("Helvetica",10),
+                 relief="flat", highlightthickness=1,
+                 highlightbackground=BORDER_G).pack(
+                     side="left", padx=6, fill="x", expand=True, ipady=3)
+        status_lbl = tk.Label(top_r, text="select a folder", bg=BG_DARK,
+                              fg=TEXT_DIM, font=("Helvetica",9))
+        status_lbl.pack(side="right", padx=6)
+
+        cv_frame = tk.Frame(rf, bg=BG_PANEL)
+        cv_frame.pack(fill="both", expand=True)
+        cv = tk.Canvas(cv_frame, bg=BG_PANEL, highlightthickness=0)
+        vsb = tk.Scrollbar(cv_frame, orient="vertical", command=cv.yview)
+        cv.configure(yscrollcommand=vsb.set)
+        vsb.pack(side="right", fill="y")
+        cv.pack(side="left", fill="both", expand=True)
+
+        # ── Bottom bar ────────────────────────────────────────────────
+        bot = tk.Frame(bwin, bg=BG_DARK)
+        bot.pack(fill="x", padx=10, pady=6)
+        selected_var = tk.StringVar(value="")
+        _initial_gfx = v_picture.get() if 'v_picture' in dir() else ""
+        tk.Label(bot, textvariable=selected_var, bg=BG_DARK,
+                 fg=BLUE, font=("Helvetica",9)).pack(side="left", padx=4)
+        tk.Button(bot, text="Cancel", command=bwin.destroy,
+                  bg=BG_CARD, fg=TEXT, relief="flat",
+                  font=("Helvetica",9), padx=10, pady=4,
+                  cursor="hand2").pack(side="right", padx=4)
+
+        def _apply():
+            gfx = selected_var.get()
+            if gfx:
+                v_picture.set(gfx)
+                _update_gfx_compat()
+                _draw_gfx_placeholder()
+                _schedule_preview()
+            bwin.destroy()
+
+        _sel_btn = tk.Button(bot, text="Select ->", command=_apply,
+                             bg="#1a3322", fg="#4b7a5e", relief="flat",
+                             font=("Helvetica",10,"bold"), padx=14, pady=5,
+                             cursor="arrow", state="disabled")
+        _sel_btn.pack(side="right")
+
+        def _on_sel_change(*_):
+            v = selected_var.get()
+            if v:
+                _sel_btn.config(bg="#14532d", fg="#c8f0d8",
+                                cursor="hand2", state="normal")
+            else:
+                _sel_btn.config(bg="#1a3322", fg="#4b7a5e",
+                                cursor="arrow", state="disabled")
+        selected_var.trace_add("write", _on_sel_change)
+
+        # ── Grid constants (same as Ideas browser) ────────────────────
+        COLS   = 5
+        TILE_W = 110
+        TILE_H = 100
+        PAD    = 6
+        # Images resized to fit tile (keep aspect ratio within 80x70)
+        IMG_W  = 80
+        IMG_H  = 70
+
+        # ── State ─────────────────────────────────────────────────────
+        _st = {
+            "pairs":      [],
+            "img_cache":  {},
+            "drawn":      set(),
+            "canvas_ids": {},
+            "sel_idx":    None,
+        }
+
+        def _tile_xy(idx):
+            col = idx % COLS
+            row = idx // COLS
+            return PAD + col*(TILE_W+PAD), PAD + row*(TILE_H+PAD)
+
+        def _select_tile(idx):
+            old = _st["sel_idx"]
+            if old is not None and old in _st["canvas_ids"]:
+                rid,_,_ = _st["canvas_ids"][old]
+                cv.itemconfig(rid, fill=BG_CARD, outline=BORDER_G)
+            _st["sel_idx"] = idx
+            gfx_key = _st["pairs"][idx][0]
+            selected_var.set(gfx_key)
+            if idx in _st["canvas_ids"]:
+                rid,_,_ = _st["canvas_ids"][idx]
+                cv.itemconfig(rid, fill=SEL_BG, outline=BLUE)
+
+        def _draw_tile(idx):
+            if idx in _st["drawn"]: return
+            _st["drawn"].add(idx)
+            gfx_key, path = _st["pairs"][idx]
+            x, y = _tile_xy(idx)
+            is_sel = (gfx_key == selected_var.get())
+            rid = cv.create_rectangle(
+                x, y, x+TILE_W, y+TILE_H,
+                fill=SEL_BG if is_sel else BG_CARD,
+                outline=BLUE if is_sel else BORDER_G,
+                width=2, tags=("tile", "t%d"%idx))
+            iid = cv.create_text(
+                x+TILE_W//2, y+44, text="...", fill=TEXT_DIM,
+                font=("Helvetica",14), tags=("tile","t%d"%idx))
+            # Strip GFX prefix for label
+            short = gfx_key
+            for pfx in ("GFX_report_event_","GFX_news_event_","GFX_event_","GFX_"):
+                short = short.replace(pfx,""); break
+            short = (short[:16]+"...") if len(short)>16 else short
+            lid = cv.create_text(
+                x+TILE_W//2, y+TILE_H-14, text=short,
+                fill=TEXT_DIM, font=("Helvetica",7),
+                width=TILE_W-8, tags=("tile","t%d"%idx))
+            _st["canvas_ids"][idx] = (rid, iid, lid)
+            for item in (rid, iid, lid):
+                cv.tag_bind(item,"<Button-1>",
+                            lambda e,i=idx: _select_tile(i))
+                cv.tag_bind(item,"<Double-Button-1>",
+                            lambda e,i=idx: [_select_tile(i), _apply()])
+            if path in _st["img_cache"]:
+                _fill_image(idx)
+
+        def _fill_image(idx):
+            if idx not in _st["canvas_ids"]: return
+            rid, iid, lid = _st["canvas_ids"][idx]
+            gfx_key, path = _st["pairs"][idx]
+            img = _st["img_cache"].get(path)
+            cv.delete(iid)
+            if img:
+                new_iid = cv.create_image(
+                    _tile_xy(idx)[0]+TILE_W//2,
+                    _tile_xy(idx)[1]+42,
+                    anchor="center", image=img,
+                    tags=("tile","t%d"%idx))
+            else:
+                new_iid = cv.create_text(
+                    _tile_xy(idx)[0]+TILE_W//2,
+                    _tile_xy(idx)[1]+30,
+                    text="?", fill=TEXT_DIM,
+                    font=("Helvetica",20),
+                    tags=("tile","t%d"%idx))
+            _st["canvas_ids"][idx] = (rid, new_iid, lid)
+            for item in (rid, new_iid, lid):
+                cv.tag_bind(item,"<Button-1>",
+                            lambda e,i=idx: _select_tile(i))
+                cv.tag_bind(item,"<Double-Button-1>",
+                            lambda e,i=idx: [_select_tile(i), _apply()])
+
+        def _bg_load_images(pairs_snapshot, indices):
+            for idx in indices:
+                if idx >= len(pairs_snapshot): break
+                gfx_key, path = pairs_snapshot[idx]
+                if path in _st["img_cache"]: continue
+                img = None
+                stem_p2 = os.path.splitext(path)[0]
+                paths_to_try2 = [path] + [stem_p2+alt for alt in (".png",".tga",".jpg")
+                                           if os.path.exists(stem_p2+alt) and stem_p2+alt!=path]
+                for try_path2 in paths_to_try2:
+                    try:
+                        if _PIL_OK and os.path.exists(try_path2):
+                            pil = _PILImage.open(try_path2).convert("RGBA")
+                            rs  = getattr(_PILImage,"LANCZOS",
+                                          getattr(_PILImage,"ANTIALIAS",1))
+                            pw, ph = pil.size
+                            ratio = min(IMG_W/max(pw,1), IMG_H/max(ph,1))
+                            nw = max(1,int(pw*ratio)); nh = max(1,int(ph*ratio))
+                            pil = pil.resize((nw, nh), rs)
+                            img = _PILImageTk.PhotoImage(pil)
+                            break
+                    except Exception:
+                        pass
+                _st["img_cache"][path] = img
+                _safe_after(bwin, 0, lambda i=idx: _fill_image(i))
+
+        def _lazy_fill(*_):
+            if not _st["pairs"]: return
+            cv.update_idletasks()
+            top    = cv.canvasy(0)
+            bottom = cv.canvasy(cv.winfo_height())
+            visible = []
+            for idx in range(len(_st["pairs"])):
+                _, ty = _tile_xy(idx)
+                if ty + TILE_H >= top and ty <= bottom:
+                    _draw_tile(idx)
+                    visible.append(idx)
+            last  = max(visible) if visible else 0
+            ahead = list(range(last+1, min(last+41, len(_st["pairs"]))))
+            to_load = [i for i in (visible+ahead)
+                       if _st["pairs"][i][1] not in _st["img_cache"]]
+            if to_load:
+                snapshot = list(_st["pairs"])
+                threading.Thread(target=_bg_load_images,
+                                  args=(snapshot, to_load),
+                                  daemon=True).start()
+
+        def _rebuild(pairs):
+            cv.delete("all")
+            _st["pairs"]      = pairs
+            _st["drawn"].clear()
+            _st["canvas_ids"].clear()
+            _st["sel_idx"]    = None
+            if not pairs:
+                status_lbl.config(text="0 icons"); return
+            status_lbl.config(text="%d icons" % len(pairs))
+            rows    = (len(pairs)+COLS-1)//COLS
+            total_h = PAD + rows*(TILE_H+PAD)
+            total_w = PAD + COLS*(TILE_W+PAD)
+            cv.configure(scrollregion=(0,0,total_w,total_h))
+            cv.yview_moveto(0)
+            _safe_after_idle(bwin, _lazy_fill)
+
+        def _collect_files(folder_path):
+            ft = search_var.get().lower()
+            pairs = []
+            prefix = "GFX_news_event_" if ev_type=="news_event" else "GFX_report_event_"
+            for root_d, dirs, fnames in os.walk(folder_path):
+                dirs.sort()
+                for fname in sorted(fnames):
+                    if not fname.lower().endswith((".dds",".png",".tga")): continue
+                    if ft and ft not in fname.lower(): continue
+                    stem = os.path.splitext(fname)[0]
+                    gfx_key = prefix + stem
+                    pairs.append((gfx_key, os.path.join(root_d, fname)))
+            return pairs
+
+        def _load_folder(folder_path):
+            status_lbl.config(text="scanning...")
+            bwin.update_idletasks()
+            pairs = _collect_files(folder_path)
+            _rebuild(pairs)
+
+        def _on_folder_select(evt=None):
+            s = folder_lb.curselection()
+            if not s: return
+            _load_folder(folders[s[0]][1])
+
+        cv.bind("<Configure>", lambda e: _safe_after_idle(bwin, _lazy_fill))
+        for event in ("<MouseWheel>","<Button-4>","<Button-5>"):
+            cv.bind(event, lambda e: [
+                cv.yview_scroll(-1 if (e.delta>0 or e.num==4) else 1, "units"),
+                _safe_after_idle(bwin, _lazy_fill)])
+        folder_lb.bind("<<ListboxSelect>>", _on_folder_select)
+        search_var.trace_add("write", lambda *_: _safe_after(bwin, 300,
+            lambda: _on_folder_select() if folder_lb.curselection() else None))
+
+        # Auto-select first folder
+        if folders:
+            folder_lb.selection_set(0)
+            _load_folder(folders[0][1])
+
+
+    # BUILD UI body: three-pane layout + inline GFX grid + preview canvas
+
+    def _tb_btn(lbl, cmd, fg=TEXT):
+        b = tk.Button(topbar, text=lbl, command=cmd,
+                      bg=BG_CARD, fg=fg,
+                      activebackground=BORDER_G, activeforeground=TEXT,
+                      font=("Helvetica",9), relief="flat",
+                      padx=9, pady=4, cursor="hand2",
+                      highlightthickness=1, highlightbackground=BORDER)
+        b.pack(side="left", padx=2, pady=6)
+        return b
+
+    _tb_btn("+ New",       _new_event,    GREEN)
+    _tb_btn("Import .txt", _import_txt,   BLUE)
+    _tb_btn("Export .txt", _export_txt,   TEXT)
+    _tb_btn("Copy .yml",   _copy_yml,     GOLD)
+    _tb_btn("Save to Mod", _save_to_mod,  GREEN)
+    _tb_btn("Delete",      _delete_event, RED)
+
+    tk.Frame(win, bg=BORDER_G, height=1).pack(fill="x")
+
+    body = tk.Frame(win, bg=BG_DARK)
+    body.pack(fill="both", expand=True)
+
+    # LEFT: event list
+    left_frm = tk.Frame(body, bg=BG_PANEL, width=200)
+    left_frm.pack(side="left", fill="y"); left_frm.pack_propagate(False)
+    tk.Label(left_frm, text="  EVENTS", bg=BG_DARK, fg=TEXT_DIM,
+             font=("Helvetica",9,"bold"), pady=6).pack(fill="x")
+    tk.Frame(left_frm, bg=BORDER, height=1).pack(fill="x")
+    # ── Event search bar ────────────────────────────────────────────────
+    _ev_filter = tk.StringVar()
+    ev_search_row = tk.Frame(left_frm, bg=BG_PANEL); ev_search_row.pack(fill="x", padx=4, pady=3)
+    tk.Label(ev_search_row, text="🔍", bg=BG_PANEL, fg=TEXT_DIM,
+             font=("Helvetica",9)).pack(side="left", padx=(2,0))
+    ev_filter_ent = tk.Entry(ev_search_row, textvariable=_ev_filter,
+                              bg=BG_CARD, fg=TEXT, insertbackground=BLUE,
+                              relief="flat", font=("Helvetica",9),
+                              highlightthickness=1, highlightbackground=BORDER_G)
+    ev_filter_ent.pack(side="left", fill="x", expand=True, ipady=3, padx=4)
+    tk.Button(ev_search_row, text="✕",
+              command=lambda: _ev_filter.set(""),
+              bg=BG_PANEL, fg=TEXT_DIM, relief="flat",
+              font=("Helvetica",8), cursor="hand2", padx=2).pack(side="left")
+    tk.Frame(left_frm, bg=BORDER_G, height=1).pack(fill="x")
+
+    list_inner = tk.Frame(left_frm, bg=BG_PANEL)
+    list_inner.pack(fill="both", expand=True)
+    _ev_filter.trace_add("write", lambda *_: _refresh_list())
+    tk.Frame(body, bg=BORDER_G, width=1).pack(side="left", fill="y")
+
+    # MIDDLE: scrollable form
+    mid_frm = tk.Frame(body, bg=BG_PANEL, width=420)
+    mid_frm.pack(side="left", fill="y"); mid_frm.pack_propagate(False)
+    tk.Label(mid_frm, text="  EVENT PROPERTIES", bg=BG_DARK, fg=TEXT_DIM,
+             font=("Helvetica",9,"bold"), pady=6).pack(fill="x")
+    tk.Frame(mid_frm, bg=BORDER, height=1).pack(fill="x")
+    form_wrap = tk.Frame(mid_frm, bg=BG_PANEL)
+    form_wrap.pack(fill="both", expand=True)
+    form_cv  = tk.Canvas(form_wrap, bg=BG_PANEL, highlightthickness=0)
+    form_sb  = tk.Scrollbar(form_wrap, orient="vertical", command=form_cv.yview)
+    F        = tk.Frame(form_cv, bg=BG_PANEL)
+    PAD      = {"padx": 8, "pady": 2}
+    _fwid    = form_cv.create_window((0,0), window=F, anchor="nw")
+    form_cv.configure(yscrollcommand=form_sb.set)
+    F.bind("<Configure>", lambda e: form_cv.configure(scrollregion=form_cv.bbox("all")))
+    form_cv.bind("<Configure>", lambda e: form_cv.itemconfig(_fwid, width=e.width))
+    form_cv.bind("<MouseWheel>", lambda e: form_cv.yview_scroll(int(-1*(e.delta/120)),"units"))
+    form_cv.pack(side="left", fill="both", expand=True)
+    form_sb.pack(side="right", fill="y")
+    tk.Frame(body, bg=BORDER_G, width=1).pack(side="left", fill="y")
+
+    # RIGHT: tab panel
+    right_frm = tk.Frame(body, bg=BG_DARK)
+    right_frm.pack(side="left", fill="both", expand=True)
+
+    tab_bar = tk.Frame(right_frm, bg=BG_DARK); tab_bar.pack(fill="x")
+    tab_preview_btn = tk.Button(tab_bar, text="  LIVE PREVIEW  ",
+                                bg=BORDER_G, fg=TEXT,
+                                font=("Helvetica",9,"bold"), relief="flat",
+                                padx=10, pady=5, cursor="hand2",
+                                command=lambda: _show_tab("preview"))
+    tab_preview_btn.pack(side="left")
+    tab_gfx_btn = tk.Button(tab_bar, text="  GFX PICKER  ",
+                            bg=BG_DARK, fg=TEXT_DIM,
+                            font=("Helvetica",9,"bold"), relief="flat",
+                            padx=10, pady=5, cursor="hand2",
+                            command=lambda: _show_tab("gfx"))
+    tab_gfx_btn.pack(side="left")
+    tk.Frame(tab_bar, bg=BORDER, height=1).pack(fill="x", side="bottom")
+
+    # LIVE PREVIEW panel
+    preview_panel = tk.Frame(right_frm, bg=BG_DARK)
+    tk.Label(preview_panel, text="  approximate in-game appearance",
+             bg=BG_DARK, fg=TEXT_DIM, font=("Helvetica",7,"italic"), pady=2).pack(fill="x")
+    tk.Frame(preview_panel, bg=BORDER, height=1).pack(fill="x")
+    preview_cv = tk.Canvas(preview_panel, bg=BG_DARK, highlightthickness=0)
+    preview_cv.pack(fill="both", expand=True, padx=8, pady=8)
+    preview_cv.bind("<Configure>", lambda e: _schedule_preview())
+
+    # GFX PICKER panel — inline image-grid (same as Ideas/Focus browser)
+    gfx_panel = tk.Frame(right_frm, bg=BG_DARK)
+
+    _gfx_hdr = tk.Frame(gfx_panel, bg=BG_DARK); _gfx_hdr.pack(fill="x")
+    tk.Label(_gfx_hdr, text="  EVENT PICTURE BROWSER",
+             bg=BG_DARK, fg=TEXT_DIM,
+             font=("Helvetica",9,"bold"), pady=6).pack(side="left")
+    gfx_dim_lbl = tk.Label(_gfx_hdr, text="", bg=BG_DARK, fg=TEXT_DIM,
+                           font=("Helvetica",8,"italic"), anchor="e", padx=8)
+    gfx_dim_lbl.pack(side="right")
+    tk.Frame(gfx_panel, bg=BORDER, height=1).pack(fill="x")
+
+    _gfx_flt = tk.Frame(gfx_panel, bg=BG_DARK); _gfx_flt.pack(fill="x", padx=8, pady=4)
+    tk.Label(_gfx_flt, text="Filter:", bg=BG_DARK, fg=TEXT_DIM,
+             font=("Helvetica",9)).pack(side="left")
+    v_gfx_search = tk.StringVar()
+    tk.Entry(_gfx_flt, textvariable=v_gfx_search, bg=BG_CARD, fg=TEXT,
+             insertbackground=BLUE, font=("Helvetica",10), relief="flat",
+             highlightthickness=1, highlightbackground=BORDER_G
+             ).pack(side="left", padx=6, fill="x", expand=True, ipady=3)
+    gfx_status_lbl = tk.Label(_gfx_flt, text="load a mod or Browse GFX >",
+                               bg=BG_DARK, fg=TEXT_DIM, font=("Helvetica",8))
+    gfx_status_lbl.pack(side="right", padx=4)
+
+    gfx_compat_lbl = tk.Label(gfx_panel, text="", bg=BG_DARK, fg=TEXT_DIM,
+                               font=("Helvetica",8,"bold"), anchor="w", padx=10)
+    gfx_compat_lbl.pack(fill="x")
+
+    _gfx_cv_frame = tk.Frame(gfx_panel, bg=BG_PANEL)
+    _gfx_cv_frame.pack(fill="both", expand=True)
+    gfx_cv  = tk.Canvas(_gfx_cv_frame, bg=BG_PANEL, highlightthickness=0)
+    _gfx_vsb = tk.Scrollbar(_gfx_cv_frame, orient="vertical", command=gfx_cv.yview)
+    gfx_cv.configure(yscrollcommand=_gfx_vsb.set)
+    _gfx_vsb.pack(side="right", fill="y")
+    gfx_cv.pack(side="left", fill="both", expand=True)
+
+    _gfx_bot = tk.Frame(gfx_panel, bg=BG_DARK); _gfx_bot.pack(fill="x", padx=8, pady=6)
+    _gfx_sel_lbl = tk.Label(_gfx_bot, text="", bg=BG_DARK, fg=BLUE, font=("Helvetica",9))
+    _gfx_sel_lbl.pack(side="left", padx=4)
+    tk.Button(_gfx_bot, text="Browse GFX >",
+              command=_open_event_gfx_browser,
+              bg=BG_CARD, fg=TEXT_DIM, relief="flat",
+              font=("Helvetica",9), cursor="hand2", padx=10, pady=4
+              ).pack(side="right", padx=4)
+    _gfx_sel_btn = tk.Button(_gfx_bot, text="Select ->",
+                             bg="#1a3322", fg="#4b7a5e", relief="flat",
+                             font=("Helvetica",10,"bold"), padx=14, pady=4,
+                             cursor="arrow", state="disabled")
+    _gfx_sel_btn.pack(side="right", padx=2)
+
+    GFX_COLS   = 5
+    GFX_TILE_W = 110
+    GFX_TILE_H = 100
+    GFX_PAD    = 6
+    GFX_IMG_W  = 80
+    GFX_IMG_H  = 70
+
+    _gfx_st = {"pairs":[],"img_cache":{},"drawn":set(),"canvas_ids":{},"sel_idx":None,"selected":""}
+
+    def _gfx_tile_xy(idx):
+        col = idx % GFX_COLS; row = idx // GFX_COLS
+        return GFX_PAD + col*(GFX_TILE_W+GFX_PAD), GFX_PAD + row*(GFX_TILE_H+GFX_PAD)
+
+    def _gfx_select_tile(idx):
+        old = _gfx_st["sel_idx"]
+        if old is not None and old in _gfx_st["canvas_ids"]:
+            rid,_,_ = _gfx_st["canvas_ids"][old]
+            gfx_cv.itemconfig(rid, fill=BG_CARD, outline=BORDER_G)
+        _gfx_st["sel_idx"] = idx
+        gfx_key = _gfx_st["pairs"][idx][0]
+        _gfx_st["selected"] = gfx_key
+        _gfx_sel_lbl.config(text=gfx_key[-40:] if len(gfx_key)>40 else gfx_key)
+        _gfx_sel_btn.config(bg="#14532d", fg="#c8f0d8", cursor="hand2", state="normal")
+        if idx in _gfx_st["canvas_ids"]:
+            rid,_,_ = _gfx_st["canvas_ids"][idx]
+            gfx_cv.itemconfig(rid, fill=SEL_BG, outline=BLUE)
+        # Live-update the preview immediately on every tile click
+        v_picture.set(gfx_key)
+        if sel[0]: sel[0].picture = gfx_key
+        _update_gfx_compat(gfx_key)
+        _schedule_preview()
+
+    def _gfx_apply_sel():
+        gfx = _gfx_st.get("selected","")
+        if gfx:
+            v_picture.set(gfx)
+            if sel[0]: sel[0].picture = gfx
+            _update_gfx_compat(gfx)
+            _schedule_preview()
+            _show_tab("preview")
+
+    _gfx_sel_btn.config(command=_gfx_apply_sel)
+
+    def _gfx_draw_tile(idx):
+        if idx in _gfx_st["drawn"]: return
+        _gfx_st["drawn"].add(idx)
+        gfx_key, path = _gfx_st["pairs"][idx]
+        x, y = _gfx_tile_xy(idx)
+        is_sel = (gfx_key == _gfx_st.get("selected",""))
+        rid = gfx_cv.create_rectangle(
+            x, y, x+GFX_TILE_W, y+GFX_TILE_H,
+            fill=SEL_BG if is_sel else BG_CARD,
+            outline=BLUE if is_sel else BORDER_G,
+            width=2, tags=("gtile","gt%d"%idx))
+        iid = gfx_cv.create_text(
+            x+GFX_TILE_W//2, y+44, text="...", fill=TEXT_DIM,
+            font=("Helvetica",14), tags=("gtile","gt%d"%idx))
+        short = gfx_key
+        for pfx in ("GFX_report_event_","GFX_news_event_","GFX_event_","GFX_"):
+            if short.startswith(pfx): short = short[len(pfx):]; break
+        short = (short[:16]+"...") if len(short)>16 else short
+        lid = gfx_cv.create_text(
+            x+GFX_TILE_W//2, y+GFX_TILE_H-14, text=short,
+            fill=TEXT_DIM, font=("Helvetica",7),
+            width=GFX_TILE_W-8, tags=("gtile","gt%d"%idx))
+        _gfx_st["canvas_ids"][idx] = (rid, iid, lid)
+        for item in (rid, iid, lid):
+            gfx_cv.tag_bind(item,"<Button-1>", lambda e,i=idx: _gfx_select_tile(i))
+            gfx_cv.tag_bind(item,"<Double-Button-1>", lambda e,i=idx: [_gfx_select_tile(i),_gfx_apply_sel()])
+        if path in _gfx_st["img_cache"]: _gfx_fill_image(idx)
+
+    def _gfx_fill_image(idx):
+        if idx not in _gfx_st["canvas_ids"]: return
+        rid, iid, lid = _gfx_st["canvas_ids"][idx]
+        gfx_key, path = _gfx_st["pairs"][idx]
+        img = _gfx_st["img_cache"].get(path)
+        gfx_cv.delete(iid)
+        if img:
+            new_iid = gfx_cv.create_image(
+                _gfx_tile_xy(idx)[0]+GFX_TILE_W//2,
+                _gfx_tile_xy(idx)[1]+44,
+                anchor="center", image=img, tags=("gtile","gt%d"%idx))
+        else:
+            new_iid = gfx_cv.create_text(
+                _gfx_tile_xy(idx)[0]+GFX_TILE_W//2, _gfx_tile_xy(idx)[1]+34,
+                text="?", fill=TEXT_DIM, font=("Helvetica",20),
+                tags=("gtile","gt%d"%idx))
+        _gfx_st["canvas_ids"][idx] = (rid, new_iid, lid)
+        for item in (rid, new_iid, lid):
+            gfx_cv.tag_bind(item,"<Button-1>", lambda e,i=idx: _gfx_select_tile(i))
+            gfx_cv.tag_bind(item,"<Double-Button-1>", lambda e,i=idx: [_gfx_select_tile(i),_gfx_apply_sel()])
+
+    def _gfx_bg_load(pairs_snap, indices):
+        for i in indices:
+            if i >= len(pairs_snap): break
+            _, path = pairs_snap[i]
+            if path in _gfx_st["img_cache"]: continue
+            img = None
+            paths_to_try = [path]
+            # Also queue alt extensions in case primary (DDS) fails
+            stem_p = os.path.splitext(path)[0]
+            for alt in (".png", ".tga", ".jpg"):
+                ap = stem_p + alt
+                if ap != path and os.path.exists(ap):
+                    paths_to_try.append(ap)
+            for try_path in paths_to_try:
+                try:
+                    if _PIL_OK and os.path.exists(try_path):
+                        pil = _PILImage.open(try_path).convert("RGBA")
+                        rs  = getattr(_PILImage,"LANCZOS",getattr(_PILImage,"ANTIALIAS",1))
+                        pw, ph = pil.size
+                        ratio = min(GFX_IMG_W/max(pw,1), GFX_IMG_H/max(ph,1))
+                        nw2 = max(1,int(pw*ratio)); nh2 = max(1,int(ph*ratio))
+                        pil = pil.resize((nw2, nh2), rs)
+                        img = _PILImageTk.PhotoImage(pil)
+                        break  # success — stop trying
+                except Exception:
+                    pass
+            _gfx_st["img_cache"][path] = img
+            _safe_after(win, 0, lambda i2=i: _gfx_fill_image(i2))
+
+    def _gfx_lazy_fill(*_):
+        if not _gfx_st["pairs"]: return
+        gfx_cv.update_idletasks()
+        top    = gfx_cv.canvasy(0)
+        bottom = gfx_cv.canvasy(gfx_cv.winfo_height())
+        visible = []
+        for idx in range(len(_gfx_st["pairs"])):
+            _, ty = _gfx_tile_xy(idx)
+            if ty + GFX_TILE_H >= top and ty <= bottom:
+                _gfx_draw_tile(idx); visible.append(idx)
+        last  = max(visible) if visible else 0
+        ahead = list(range(last+1, min(last+41, len(_gfx_st["pairs"]))))
+        to_load = [i for i in (visible+ahead) if _gfx_st["pairs"][i][1] not in _gfx_st["img_cache"]]
+        if to_load:
+            snap = list(_gfx_st["pairs"])
+            threading.Thread(target=_gfx_bg_load, args=(snap, to_load), daemon=True).start()
+
+    def _gfx_rebuild(pairs):
+        gfx_cv.delete("all")
+        _gfx_st.update({"pairs":pairs,"drawn":set(),"canvas_ids":{},"sel_idx":None})
+        if not pairs: gfx_status_lbl.config(text="0 icons"); return
+        gfx_status_lbl.config(text="%d icons" % len(pairs))
+        rows    = (len(pairs)+GFX_COLS-1)//GFX_COLS
+        total_h = GFX_PAD + rows*(GFX_TILE_H+GFX_PAD)
+        total_w = GFX_PAD + GFX_COLS*(GFX_TILE_W+GFX_PAD)
+        gfx_cv.configure(scrollregion=(0,0,total_w,total_h))
+        gfx_cv.yview_moveto(0)
+        _safe_after_idle(win, _gfx_lazy_fill)
+
+    def _refresh_gfx_list(*_):
+        ev_type = sel[0].etype if sel[0] else "country_event"
+        cw,ch,nw,nh = _get_active_dims()
+        pname = getattr(MOD,"event_dim_active_profile","vanilla")
+        if ev_type=="news_event":
+            gfx_dim_lbl.config(text="news_event: %dx%d  profile: %s  GFX_news_event_*"%(nw,nh,pname), fg=GREEN)
+        else:
+            gfx_dim_lbl.config(text="country_event: %dx%d  profile: %s  GFX_report_event_*"%(cw,ch,pname), fg=TEXT_DIM)
+        if MOD.loaded and MOD.root:
+            ev_dir = os.path.join(MOD.root, getattr(MOD,"path_event_pictures", os.path.join("gfx","event_pictures")))
+            if os.path.isdir(ev_dir):
+                prefix = "GFX_news_event_" if ev_type=="news_event" else "GFX_report_event_"
+                ft = v_gfx_search.get().lower()
+                pairs = []
+                for rd, dirs, fnames in os.walk(ev_dir):
+                    dirs.sort()
+                    for fname in sorted(fnames):
+                        if not fname.lower().endswith((".dds",".png",".tga")): continue
+                        if ft and ft not in fname.lower(): continue
+                        stem = os.path.splitext(fname)[0]
+                        pairs.append((prefix+stem, os.path.join(rd, fname)))
+                _gfx_rebuild(pairs); return
+        gfx_status_lbl.config(text="load a mod or Browse GFX >")
+
+    def _update_gfx_compat(gfx_name=None):
+        if gfx_name is None: gfx_name = v_picture.get() if sel[0] else ""
+        if not gfx_name: gfx_compat_lbl.config(text="", fg=TEXT_DIM); return
+        ev_type = sel[0].etype if sel[0] else "country_event"
+        cw,ch,nw,nh = _get_active_dims()
+        exp_w,exp_h = (cw,ch) if ev_type=="country_event" else (nw,nh)
+        pname = getattr(MOD,"event_dim_active_profile","vanilla")
+        fpath = _find_gfx_file(gfx_name)
+        if fpath:
+            dims = _read_image_size(fpath)
+            if dims:
+                fw,fh = dims
+                if fw==exp_w and fh==exp_h:
+                    gfx_compat_lbl.config(text="  ok  %dx%d matches %s %s"%(fw,fh,pname,ev_type), fg=GREEN)
+                else:
+                    gfx_compat_lbl.config(text="  warn  %dx%d expected %dx%d (%s)"%(fw,fh,exp_w,exp_h,pname), fg=ORANGE)
+                return
+        is_r = gfx_name.startswith("GFX_report_event_")
+        is_n = gfx_name.startswith("GFX_news_event_")
+        if ev_type=="country_event":
+            if is_r: gfx_compat_lbl.config(text="  ok  correct prefix (expected %dx%d)"%(exp_w,exp_h), fg=GREEN)
+            elif is_n: gfx_compat_lbl.config(text="  warn  GFX_news_event_* is for news_event", fg=ORANGE)
+            else: gfx_compat_lbl.config(text="  load mod to validate (%dx%d)"%(exp_w,exp_h), fg=TEXT_DIM)
+        else:
+            if is_n: gfx_compat_lbl.config(text="  ok  correct prefix (expected %dx%d)"%(exp_w,exp_h), fg=GREEN)
+            elif is_r: gfx_compat_lbl.config(text="  warn  GFX_report_event_* is for country_event", fg=ORANGE)
+            else: gfx_compat_lbl.config(text="  load mod to validate (%dx%d)"%(exp_w,exp_h), fg=TEXT_DIM)
+
+    def _on_gfx_select(evt=None): pass
+    def _draw_gfx_placeholder(gfx_name=None): pass
+
+    gfx_cv.bind("<Configure>", lambda e: _safe_after_idle(win, _gfx_lazy_fill))
+    for _gev in ("<MouseWheel>","<Button-4>","<Button-5>"):
+        gfx_cv.bind(_gev, lambda e: [
+            gfx_cv.yview_scroll(-1 if (e.delta>0 or e.num==4) else 1, "units"),
+            _safe_after_idle(win, _gfx_lazy_fill)])
+    v_gfx_search.trace_add("write", lambda *_: _safe_after(win, 300, _refresh_gfx_list))
+
+    def _hsep():
+        tk.Frame(F, bg=BORDER, height=1).pack(fill="x", padx=6, pady=4)
+
+    def _sec(text):
+        tk.Label(F, text=f"  {text}", bg=BG_PANEL, fg=TEXT_DIM,
+                 font=("Helvetica",8,"bold"), pady=3).pack(fill="x")
+
+    def _lbl(text):
+        tk.Label(F, text=text, bg=BG_PANEL, fg=TEXT_DIM,
+                 font=("Helvetica",7,"italic"), anchor="w", padx=10).pack(fill="x")
+
+    def _entry_var(label, default=""):
+        if label:
+            tk.Label(F, text=label, bg=BG_PANEL, fg=TEXT_DIM,
+                     font=("Helvetica",8), anchor="w").pack(fill="x", padx=8, pady=(3,0))
+        sv = tk.StringVar(value=default)
+        tk.Entry(F, textvariable=sv, bg=BG_CARD, fg=TEXT,
+                 insertbackground=BLUE, font=("Helvetica",10), relief="flat",
+                 highlightthickness=1, highlightbackground=BORDER
+                 ).pack(fill="x", padx=8, ipady=3, pady=(0,1))
+        sv.trace_add("write", _schedule_preview)
+        return sv
+
+    def _textbox(label, height=3):
+        if label:
+            tk.Label(F, text=label, bg=BG_PANEL, fg=TEXT_DIM,
+                     font=("Helvetica",8), anchor="w").pack(fill="x", padx=8, pady=(3,0))
+        t = tk.Text(F, bg=BG_CARD, fg=TEXT, insertbackground=BLUE,
+                    font=("Courier",9), relief="flat",
+                    highlightthickness=1, highlightbackground=BORDER,
+                    height=height, wrap="word")
+        t.pack(fill="x", padx=8, pady=(0,2))
+        t.bind("<KeyRelease>", _schedule_preview)
+        return t
+
+    # ── Type ──────────────────────────────────────────────────────
+    _sec("TYPE")
+    type_row = tk.Frame(F, bg=BG_PANEL); type_row.pack(fill="x", **PAD)
+    v_etype = tk.StringVar(value="country_event")
+    for val, lbl in [("country_event","Country Event"),("news_event","News Event")]:
+        tk.Radiobutton(type_row, text=lbl, variable=v_etype, value=val,
+                       bg=BG_PANEL, fg=TEXT, selectcolor=BG_DARK,
+                       activebackground=BG_PANEL, font=("Helvetica",9),
+                       command=_on_type_change).pack(side="left", padx=8)
+    v_etype.trace_add("write", _schedule_preview)   # safe: _schedule_preview defined above
+
+    # ── Identity ──────────────────────────────────────────────────
+    _hsep(); _sec("IDENTITY")
+    v_eid        = _entry_var("Event ID  (namespace.number):", "my_namespace.1")
+    v_title_text = _entry_var("Title text  (shown in preview):", "My Event Title")
+
+    _lbl("  Description:")
+    v_desc_text  = _textbox("", height=4)
+
+    # ── Picture ───────────────────────────────────────────────────
+    _hsep(); _sec("PICTURE")
+    pic_row = tk.Frame(F, bg=BG_PANEL); pic_row.pack(fill="x", padx=8, pady=2)
+    tk.Label(pic_row, text="GFX key:", bg=BG_PANEL, fg=TEXT_DIM,
+             font=("Helvetica",8)).pack(side="left")
+    v_picture = tk.StringVar(value="GFX_report_event_generic_handshake")
+    tk.Entry(pic_row, textvariable=v_picture, bg=BG_CARD, fg=TEXT,
+             insertbackground=BLUE, font=("Helvetica",9), relief="flat",
+             highlightthickness=1, highlightbackground=BORDER
+             ).pack(side="left", fill="x", expand=True, ipady=2, padx=(4,4))
+    tk.Button(pic_row, text="Browse GFX ▸", command=_open_event_gfx_browser,
+              bg=BG_CARD, fg=TEXT_DIM, relief="flat",
+              font=("Helvetica",8), cursor="hand2", padx=6
+              ).pack(side="right")
+    v_picture.trace_add("write", _schedule_preview)
+    _lbl("  Click 'Browse GFX' to open the image browser")
+
+    # ── Flags ─────────────────────────────────────────────────────
+    _hsep(); _sec("FLAGS")
+    v_major = tk.BooleanVar(value=False); v_fire_once = tk.BooleanVar(value=False)
+    v_triggered = tk.BooleanVar(value=True); v_hidden = tk.BooleanVar(value=False)
+    flags_row = tk.Frame(F, bg=BG_PANEL); flags_row.pack(fill="x", padx=8)
+    for v,lbl in [(v_major,"major"),(v_fire_once,"fire_only_once"),
+                  (v_triggered,"is_triggered_only"),(v_hidden,"hidden")]:
+        tk.Checkbutton(flags_row, text=lbl, variable=v, bg=BG_PANEL, fg=TEXT_DIM,
+                       selectcolor=BG_DARK, activebackground=BG_PANEL,
+                       font=("Helvetica",8), cursor="hand2"
+                       ).pack(anchor="w")
+        v.trace_add("write", _schedule_preview)
+
+    # ── MTTH ──────────────────────────────────────────────────────
+    _hsep(); _sec("MEAN TIME TO HAPPEN  (leave blank for is_triggered_only)")
+    mtth_row = tk.Frame(F, bg=BG_PANEL); mtth_row.pack(fill="x", padx=8, pady=2)
+    tk.Label(mtth_row, text="days:", bg=BG_PANEL, fg=TEXT_DIM,
+             font=("Helvetica",8), width=7).pack(side="left")
+    v_mtth_d = tk.StringVar()
+    tk.Entry(mtth_row, textvariable=v_mtth_d, bg=BG_CARD, fg=TEXT,
+             insertbackground=BLUE, font=("Helvetica",9), relief="flat",
+             highlightthickness=1, highlightbackground=BORDER, width=6
+             ).pack(side="left", ipady=2, padx=(0,10))
+    tk.Label(mtth_row, text="months:", bg=BG_PANEL, fg=TEXT_DIM,
+             font=("Helvetica",8), width=8).pack(side="left")
+    v_mtth_m = tk.StringVar()
+    tk.Entry(mtth_row, textvariable=v_mtth_m, bg=BG_CARD, fg=TEXT,
+             insertbackground=BLUE, font=("Helvetica",9), relief="flat",
+             highlightthickness=1, highlightbackground=BORDER, width=6
+             ).pack(side="left", ipady=2)
+    v_mtth_d.trace_add("write", _schedule_preview)
+    v_mtth_m.trace_add("write", _schedule_preview)
+
+    # ── Trigger / Immediate ───────────────────────────────────────
+    _hsep(); _sec("TRIGGER  (raw HOI4 — leave blank if is_triggered_only)")
+    t_trigger = _textbox("", height=3)
+    _hsep()
+    imm_hdr = tk.Frame(F, bg=BG_PANEL); imm_hdr.pack(fill="x", padx=8, pady=(4,0))
+    tk.Label(imm_hdr, text="IMMEDIATE EFFECTS  (optional)",
+             bg=BG_PANEL, fg=TEXT_DIM,
+             font=("Helvetica",8,"bold")).pack(side="left")
+    tk.Button(imm_hdr, text="🔍 Effect Picker",
+              bg=BG_CARD, fg=BLUE, relief="flat",
+              font=("Helvetica",8), cursor="hand2", padx=6, pady=1,
+              highlightthickness=1, highlightbackground=BORDER,
+              command=lambda: _open_effect_picker(t_immediate)
+              ).pack(side="right")
+    t_immediate = _textbox("", height=3)
+
+    # ── Options ───────────────────────────────────────────────────
+    _hsep()
+    opt_hdr = tk.Frame(F, bg=BG_PANEL); opt_hdr.pack(fill="x", padx=8, pady=2)
+    tk.Label(opt_hdr, text="OPTIONS", bg=BG_PANEL, fg=TEXT_DIM,
+             font=("Helvetica",8,"bold")).pack(side="left")
+    tk.Button(opt_hdr, text="＋ Add Option", command=_add_option,
+              bg=BG_CARD, fg=GREEN, relief="flat",
+              font=("Helvetica",8), cursor="hand2", padx=6, pady=2,
+              highlightthickness=1, highlightbackground=BORDER
+              ).pack(side="right")
+    opt_box = tk.Frame(F, bg=BG_PANEL)
+    opt_box.pack(fill="x", padx=6, pady=4)
+
+    # ── Apply button ──────────────────────────────────────────────
+    _hsep()
+    tk.Button(F, text="💾  Apply Changes", command=_apply_event,
+              bg=BG_CARD, fg=GREEN, font=("Helvetica",10,"bold"),
+              relief="flat", pady=5, cursor="hand2",
+              highlightthickness=1, highlightbackground=BORDER_G
+              ).pack(fill="x", padx=8, pady=(0,12))
+
+    # ── Init ─────────────────────────────────────────────────────
+    _refresh_gfx_list()
+    _new_event()
+    _show_tab("preview")
+    win.after(50, _schedule_preview)   # wait for canvas to get real dimensions
+
+
+
+def _dict_to_raw(d, indent="	"):
+    """Recursively convert a parsed dict back to HOI4 script lines."""
+    if not isinstance(d, dict): return str(d)
+    lines = []
+    for k, v in d.items():
+        if str(k).startswith("_"): continue
+        if isinstance(v, list):
+            for item in v:
+                if isinstance(item, dict):
+                    inner = _dict_to_raw(item, indent+"	")
+                    lines.append(f"{indent}{k} = {{\n{inner}\n{indent}}}")
+                else:
+                    lines.append(f"{indent}{k} = {item}")
+        elif isinstance(v, dict):
+            inner = _dict_to_raw(v, indent+"	")
+            lines.append(f"{indent}{k} = {{\n{inner}\n{indent}}}")
+        else:
+            lines.append(f"{indent}{k} = {v}")
+    return "\n".join(lines)
+
+def _normalize_effect_fields(etype, raw):
+    """Map raw parsed HOI4 values -> correct EFFECT_DEFS field names."""
+    defn = EFFECT_DEFS.get(etype, {})
+    field_names = [fd[0] for fd in defn.get("fields", [])]
+
+    if isinstance(raw, dict):
+        clean = {k:v for k,v in raw.items() if not k.startswith("_")}
+        if field_names:
+            out = {}
+            raw_vals = list(clean.values())
+            for i,fname in enumerate(field_names):
+                if fname in clean:
+                    out[fname] = str(clean[fname])
+                elif i < len(raw_vals):
+                    out[fname] = str(raw_vals[i])
+            # carry over any extra keys not in field_names
+            for k,v in clean.items():
+                if k not in out:
+                    out[k] = str(v)
+            return out
+        return {k:str(v) for k,v in clean.items()}
+
+    val = str(raw).strip()
+    # add_to_variable: {"AM_var": "0.05", "tooltip": "stat_tt"}
+    # First non-tooltip key = variable name, its value = amount
+    if etype == "add_to_variable" and isinstance(raw, dict):
+        clean = {k:v for k,v in raw.items() if not str(k).startswith("_")}
+        tooltip = str(clean.pop("tooltip",""))
+        items = list(clean.items())
+        if items:
+            return {"variable": str(items[0][0]), "amount": str(items[0][1]), "tooltip": tooltip}
+        return {"variable":"AM_my_stat_var","amount":"0.05","tooltip":tooltip}
+
+    # custom_effect_tooltip block form: {"localization_key": ..., "MODIFIER": ...}
+    # Remap to custom_effect_tooltip_block so the UI shows the right widget
+    if etype == "custom_effect_tooltip" and isinstance(raw, dict):
+        clean = {k:v for k,v in raw.items() if not str(k).startswith("_")}
+        if "localization_key" in clean or "MODIFIER" in clean:
+            return {"_block_form": "1",
+                    "localization_key": str(clean.get("localization_key","modifies_dynamic_modifier_tt")),
+                    "MODIFIER": str(clean.get("MODIFIER","TAG_modifier"))}
+
+    # set_variable raw dict: {"CAN_stability_factor_var": "0.01"}
+    # We store as var_name + value
+    if etype == "set_variable" and isinstance(raw, dict):
+        clean = {k:v for k,v in raw.items() if not str(k).startswith("_")}
+        items = list(clean.items())
+        if items:
+            return {"var_name": str(items[0][0]), "value": str(items[0][1])}
+        return {"var_name": "my_var", "value": "0"}
+
+    _flat = {
+        "add_political_power":     {"amount": val},
+        "add_stability":           {"amount": val},
+        "add_war_support":         {"amount": val},
+        "add_ideas":               {"idea_name": val},
+        "remove_ideas":            {"idea_name": val},
+        "set_country_flag":        {"flag": val},
+        "clr_country_flag":        {"flag": val},
+        "set_global_flag":         {"flag": val},
+        "release_puppet":          {"target": val},
+        "give_military_access":    {"target": val},
+        "add_to_faction":          {"target": val},
+        "create_faction":          {"name": val},
+        "custom_effect_tooltip":   {"tooltip": val},
+        "add_manpower":            {"value": val},
+        "army_experience":         {"value": val},
+        "navy_experience":         {"value": val},
+        "air_experience":          {"value": val},
+        "complete_national_focus": {"focus_id": val},
+    }
+    if etype in _flat:
+        return _flat[etype]
+    if field_names:
+        return {field_names[0]: val}
+    return {"raw": val}
+
+
+# ─────────────────────────── DATA MODEL ─────────────────────────
+# ══════════════════════════════════════════════════════════════════════
+# MOD CONTEXT — scans a mod folder and indexes all assets
+# ══════════════════════════════════════════════════════════════════════
+import threading
+
+class ModContext:
+    """Holds all discovered mod assets: sprites, events, ideas, decisions, etc."""
+    def __init__(self):
+        self.root        = None          # mod root path
+        self.sprites     = {}            # gfx_name -> abs_path  (all spriteTypes)
+        self.sprite_imgs = {}            # gfx_name -> PhotoImage (loaded on demand)
+        self.focus_ids   = []            # all focus IDs across national_focus/
+        self.event_ids   = {}            # file_stem -> [id, ...]
+        self.idea_ids    = []            # all idea/spirit IDs
+        self.decision_ids= []            # all decision IDs
+        self.decision_cats=[]            # all decision category IDs
+        self.dyn_mod_ids = []            # common/dynamic_modifiers/*
+        self.country_tags= []            # TAG list
+        self.variables   = set()         # known variable names from set_variable/add_to_variable
+        self.loaded      = False
+        self.is_md       = False   # True when Millennium Dawn is detected
+        self.mod_name    = ""      # basename of mod root
+        self._status     = ""
+        self._img_errors = []  # list of error strings for debugging
+        # Extra asset stores
+        self.idea_sprites     = {}   # gfx_name -> abs_path  (ideas GFX)
+        self.decision_sprites = {}   # gfx_name -> abs_path  (decisions GFX)
+        self.custom_gfx_dirs  = []   # user-added extra GFX dirs
+        self.country_tag_names = {}  # TAG -> display name  e.g. {"SOV": "Soviet Union"}
+        self.loc_token_style   = "colon"  # "colon" = [TAG:NameWithFlag], "dot" = [TAG.GetName]
+        # Configurable scan paths (can be changed in Settings)
+        self.path_goals    = os.path.join("gfx","interface","goals")
+        self.path_ideas_gfx      = os.path.join("gfx","interface","ideas")
+        self.path_event_pictures = os.path.join("gfx","event_pictures")
+        # Event GFX dimension profiles (vanilla defaults)
+        self.event_dim_profiles = {
+            "vanilla": {"country": (210,176), "news": (397,165)}
+        }
+        self.event_dim_active_profile = "vanilla"
+        # User-selected edit targets (set after mod load prompt)
+        self.edit_ideas_file  = ""   # abs path to ideas .txt to append new spirits to
+        self.edit_events_file = ""   # abs path to events .txt to append new events to
+        self.edit_events_ns   = ""   # namespace detected from that events file
+        self.edit_loc_file         = ""   # abs path to localisation .yml to append new loc entries to
+        self.edit_scripted_loc_file = ""   # abs path to scripted_localisation .txt to append to
+        # Load any previously saved config
+        self._load_config()
+
+    def _load_config(self):
+        """Apply saved config values to this ModContext instance."""
+        cfg = _cfg_load()
+        if cfg.get("path_goals"):       self.path_goals       = cfg["path_goals"]
+        if cfg.get("path_ideas_gfx"):        self.path_ideas_gfx           = cfg["path_ideas_gfx"]
+        if cfg.get("path_event_pictures"):   self.path_event_pictures      = cfg["path_event_pictures"]
+        if cfg.get("event_dim_profiles"):    self.event_dim_profiles       = cfg["event_dim_profiles"]
+        if cfg.get("event_dim_active_profile"): self.event_dim_active_profile = cfg["event_dim_active_profile"]
+        if cfg.get("custom_mod_path"):  self.custom_mod_path  = cfg["custom_mod_path"]
+        if cfg.get("custom_gfx_dirs"):  self.custom_gfx_dirs  = cfg["custom_gfx_dirs"]
+        if cfg.get("country_tag_names") is not None: self.country_tag_names = cfg["country_tag_names"]
+        if cfg.get("loc_token_style"):  self.loc_token_style  = cfg["loc_token_style"]
+        if cfg.get("is_md_override") is not None:
+            self.is_md = cfg["is_md_override"]
+        # Restore window geometry (deferred until App is created)
+        self._saved_geometry = cfg.get("window_geometry", "")
+        # Restore recent mods list
+        self._recent_mods = cfg.get("recent_mods", [])
+
+    def save_config(self):
+        """Persist current path/preference settings to disk."""
+        _cfg_save({
+            "path_goals":              self.path_goals,
+            "path_ideas_gfx":          self.path_ideas_gfx,
+            "path_event_pictures":     getattr(self, "path_event_pictures", os.path.join("gfx","event_pictures")),
+            "event_dim_profiles":      getattr(self, "event_dim_profiles", {"vanilla":{"country":(210,176),"news":(397,165)}}),
+            "event_dim_active_profile":getattr(self, "event_dim_active_profile", "vanilla"),
+            "custom_mod_path":         getattr(self, "custom_mod_path", ""),
+            "custom_gfx_dirs":         getattr(self, "custom_gfx_dirs", []),
+            # Window + session
+            "window_geometry":         (_app_ref.wm_geometry() if "_app_ref" in globals() and _app_ref else ""),
+            "last_mod_path":           self.root if self.loaded else "",
+            "recent_mods":             getattr(self, "_recent_mods", []),
+        })
+
+    # ── HOI4 script tokeniser (same as main parser) ─────────────────
+    @staticmethod
+    def _tokenize(s):
+        tokens=[]; i=0
+        while i<len(s):
+            c=s[i]
+            if c in " \t\n\r": i+=1; continue
+            if c in "{}": tokens.append(c); i+=1; continue
+            if c=="=": tokens.append("="); i+=1; continue
+            if c=="#":
+                while i<len(s) and s[i]!="\n": i+=1
+                continue
+            if c=="\"":
+                j=i+1
+                while j<len(s) and s[j]!="\"": j+=1
+                tokens.append(s[i+1:j]); i=j+1; continue
+            j=i
+            while j<len(s) and s[j] not in " \t\n\r{}=\"#": j+=1
+            if j>i: tokens.append(s[i:j])
+            i=j
+        return tokens
+
+    @staticmethod
+    def _parse_block(tokens, pos):
+        result={}; pos+=1
+        while pos<len(tokens) and tokens[pos]!="}":
+            key=tokens[pos]; pos+=1
+            if pos>=len(tokens): break
+            if tokens[pos]=="=":
+                pos+=1
+                if pos>=len(tokens): break
+                if tokens[pos]=="{":
+                    val,pos=ModContext._parse_block(tokens,pos)
+                else:
+                    val=tokens[pos]; pos+=1
+                if key in result:
+                    ex=result[key]
+                    if not isinstance(ex,list): result[key]=[ex]
+                    result[key].append(val)
+                else:
+                    result[key]=val
+            else:
+                if key not in ("","=","{","}"):
+                    result.setdefault("_values",[]).append(key)
+        return result, pos+1
+
+    def _read(self, path):
+        for enc in ("utf-8-sig","utf-8","latin-1"):
+            try:
+                with open(path, encoding=enc, errors="replace") as f:
+                    return f.read()
+            except: pass
+        return ""
+
+    def _parse_file(self, path):
+        """Parse a HOI4 script file into a dict tree."""
+        try:
+            src = self._read(path)
+            tokens = self._tokenize(src)
+            # Wrap in a virtual root block
+            tokens = ["{"] + tokens + ["}"]
+            result, _ = self._parse_block(tokens, 0)
+            return result
+        except: return {}
+
+    # ── Scanners ─────────────────────────────────────────────────────
+    def _scan_gfx(self):
+        """Scan ONLY gfx/interface/goals/ — the focus icon folder."""
+        goals_dir = os.path.join(self.root, "gfx", "interface", "goals")
+        if not os.path.isdir(goals_dir):
+            # fallback: try without goals subfolder
+            goals_dir = os.path.join(self.root, "gfx", "interface")
+        if not os.path.isdir(goals_dir): return
+
+        pat_name = re.compile(r'\bname\s*=\s*"([^"]+)"')
+        pat_tex  = re.compile(r'\btexturefile\s*=\s*"([^"]+)"')
+
+        # Also parse .gfx files in interface/ that reference goals textures
+        iface = os.path.join(self.root, "interface")
+        if os.path.isdir(iface):
+            pat_block = re.compile(r'spriteType\s*=\s*\{')
+            for fname in os.listdir(iface):
+                if not fname.endswith(".gfx"): continue
+                content = self._read(os.path.join(iface, fname))
+                i = 0
+                while i < len(content):
+                    m = pat_block.search(content, i)
+                    if not m: break
+                    depth = 1; j = m.end()
+                    while j < len(content) and depth > 0:
+                        if content[j] == '{': depth += 1
+                        elif content[j] == '}': depth -= 1
+                        j += 1
+                    block = content[m.start():j]
+                    nm = pat_name.search(block)
+                    tx = pat_tex.search(block)
+                    if nm and tx:
+                        tex_raw = tx.group(1).strip().replace("\\\\","/").replace("\\","/")
+                        # Only keep sprites whose texture is in goals/
+                        if "goals" in tex_raw.lower() or "focus" in tex_raw.lower():
+                            name = nm.group(1).strip()
+                            self.sprites[name] = os.path.join(
+                                self.root, tex_raw.replace("/", os.sep))
+                    i = j
+
+        # Also directly index every .dds/.png in gfx/interface/goals/
+        # as GFX_focus_FILENAME so they're browsable even without a .gfx entry
+        for root_dir, dirs, files in os.walk(goals_dir):
+            for fname in files:
+                if fname.lower().endswith((".dds",".png",".tga")):
+                    stem = os.path.splitext(fname)[0]
+                    gfx_key = "GFX_focus_" + stem
+                    full = os.path.join(root_dir, fname)
+                    if gfx_key not in self.sprites:
+                        self.sprites[gfx_key] = full
+
+    def _scan_idea_gfx(self):
+        """Scan gfx/interface/ideas/ (and any custom GFX dirs) for idea sprites."""
+        self.idea_sprites.clear()
+        dirs_to_scan = []
+        # Primary: configured ideas gfx path
+        ideas_dir = os.path.join(self.root, self.path_ideas_gfx)
+        if os.path.isdir(ideas_dir):
+            dirs_to_scan.append(("GFX_idea_", ideas_dir))
+        # Also scan interface/*.gfx for idea-related sprites
+        iface = os.path.join(self.root, "interface")
+        pat_name  = re.compile(r'\bname\s*=\s*"([^"]+)"')
+        pat_tex   = re.compile(r'\btexturefile\s*=\s*"([^"]+)"')
+        pat_block = re.compile(r'spriteType\s*=\s*\{')
+        if os.path.isdir(iface):
+            for fname in os.listdir(iface):
+                if not fname.endswith(".gfx"): continue
+                content = self._read(os.path.join(iface, fname))
+                i = 0
+                while i < len(content):
+                    m = pat_block.search(content, i)
+                    if not m: break
+                    depth = 1; j = m.end()
+                    while j < len(content) and depth > 0:
+                        if content[j] == "{": depth += 1
+                        elif content[j] == "}": depth -= 1
+                        j += 1
+                    block = content[m.start():j]
+                    nm = pat_name.search(block)
+                    tx = pat_tex.search(block)
+                    if nm and tx:
+                        tex_raw = tx.group(1).strip().replace("\\\\","/").replace("\\","/")
+                        if "ideas" in tex_raw.lower() or "idea" in tex_raw.lower():
+                            name = nm.group(1).strip()
+                            self.idea_sprites[name] = os.path.join(
+                                self.root, tex_raw.replace("/", os.sep))
+                    i = j
+        # Walk all dirs_to_scan for raw image files
+        for prefix, scan_dir in dirs_to_scan:
+            for root_dir, dirs, files in os.walk(scan_dir):
+                for fname in files:
+                    if fname.lower().endswith((".dds",".png",".tga")):
+                        stem = os.path.splitext(fname)[0]
+                        gfx_key = prefix + stem
+                        full = os.path.join(root_dir, fname)
+                        if gfx_key not in self.idea_sprites:
+                            self.idea_sprites[gfx_key] = full
+        # Custom extra GFX dirs
+        for cdir in self.custom_gfx_dirs:
+            if not os.path.isdir(cdir): continue
+            for root_dir, dirs, files in os.walk(cdir):
+                for fname in files:
+                    if fname.lower().endswith((".dds",".png",".tga")):
+                        stem = os.path.splitext(fname)[0]
+                        gfx_key = "GFX_idea_" + stem
+                        full = os.path.join(root_dir, fname)
+                        if gfx_key not in self.idea_sprites:
+                            self.idea_sprites[gfx_key] = full
+
+    def _scan_decision_gfx(self):
+        """Scan ALL .gfx files in interface/ (recursively) for any spriteType.
+        Results are cached in a JSON sidecar file (.hoi4cm_gfx_cache.json) to
+        avoid re-walking the gfx/ tree on every mod load."""
+        self.decision_sprites.clear()
+        # ── Try loading from cache first ─────────────────────────────────────
+        cache_file = os.path.join(self.root, ".hoi4cm_gfx_cache.json")
+        if os.path.isfile(cache_file):
+            try:
+                import json as _jc
+                with open(cache_file, "r", encoding="utf-8") as f:
+                    cached = _jc.load(f)
+                # Validate: only use cache if interface/ mtime hasn't changed
+                iface_mtime = 0
+                iface = os.path.join(self.root, "interface")
+                if os.path.isdir(iface):
+                    for fn in os.listdir(iface):
+                        fp = os.path.join(iface, fn)
+                        try: iface_mtime = max(iface_mtime, os.path.getmtime(fp))
+                        except Exception: pass
+                if abs(cached.get("iface_mtime", 0) - iface_mtime) < 2:
+                    self.decision_sprites.update(cached.get("sprites", {}))
+                    return  # cache hit — skip full scan
+            except Exception:
+                pass
+        pat_name  = re.compile(r'\bname\s*=\s*"([^"]+)"')
+        pat_tex   = re.compile(r'\btexturefile\s*=\s*"([^"]+)"')
+        pat_block = re.compile(r'spriteType\s*=\s*\{')
+
+        # ── Step 1: parse every .gfx file under interface/ recursively ──────
+        iface = os.path.join(self.root, "interface")
+        if os.path.isdir(iface):
+            for root_dir, dirs, files in os.walk(iface):
+                for fname in files:
+                    if not fname.lower().endswith(".gfx"): continue
+                    content = self._read(os.path.join(root_dir, fname))
+                    i = 0
+                    while i < len(content):
+                        m = pat_block.search(content, i)
+                        if not m: break
+                        depth = 1; j = m.end()
+                        while j < len(content) and depth > 0:
+                            if content[j] == "{": depth += 1
+                            elif content[j] == "}": depth -= 1
+                            j += 1
+                        block = content[m.start():j]
+                        nm = pat_name.search(block)
+                        tx = pat_tex.search(block)
+                        if nm and tx:
+                            name = nm.group(1).strip()
+                            tex_raw = tx.group(1).strip().replace("\\\\","/").replace("\\","/")
+                            # Store ALL sprites — we want complete coverage
+                            full = os.path.join(self.root, tex_raw.replace("/", os.sep))
+                            self.decision_sprites[name] = full
+                        i = j
+
+        # ── Step 2: also directly index image files under gfx/ ──────────────
+        # Walk entire gfx/ tree, register every image with GFX_<stem> key
+        gfx_root = os.path.join(self.root, "gfx")
+        if os.path.isdir(gfx_root):
+            for root_dir, dirs, files in os.walk(gfx_root):
+                for fname in files:
+                    if not fname.lower().endswith((".dds",".png",".tga")): continue
+                    stem = os.path.splitext(fname)[0]
+                    full = os.path.join(root_dir, fname)
+                    rel  = os.path.relpath(full, self.root).replace(os.sep,"/").lower()
+                    # Auto-prefix based on subfolder location
+                    if "decisions" in rel:
+                        for key in (f"GFX_decision_{stem}",
+                                    f"GFX_decision_category_{stem}"):
+                            self.decision_sprites.setdefault(key, full)
+                    elif "ideas" in rel:
+                        self.decision_sprites.setdefault(f"GFX_idea_{stem}", full)
+                    elif "goals" in rel or "focus" in rel:
+                        pass  # handled by _scan_gfx
+                    else:
+                        # generic fallback — available but low priority
+                        self.decision_sprites.setdefault(f"GFX_{stem}", full)
+
+        # ── Write cache ───────────────────────────────────────────────────────
+        try:
+            import json as _jw
+            iface_mtime = 0
+            iface = os.path.join(self.root, "interface")
+            if os.path.isdir(iface):
+                for fn in os.listdir(iface):
+                    fp = os.path.join(iface, fn)
+                    try: iface_mtime = max(iface_mtime, os.path.getmtime(fp))
+                    except Exception: pass
+            cache_data = {"iface_mtime": iface_mtime,
+                          "sprites": dict(self.decision_sprites)}
+            with open(cache_file, "w", encoding="utf-8") as f:
+                _jw.dump(cache_data, f, ensure_ascii=False)
+        except Exception:
+            pass
+
+    def _scan_focuses(self):
+        d = os.path.join(self.root,"common","national_focus")
+        if not os.path.isdir(d): return
+        for fname in os.listdir(d):
+            if not fname.endswith(".txt"): continue
+            src = self._read(os.path.join(d,fname))
+            for m in re.finditer(r'\bid\s*=\s*(\S+)', src):
+                fid = m.group(1).strip()
+                if fid not in self.focus_ids:
+                    self.focus_ids.append(fid)
+
+    def _scan_events(self):
+        d = os.path.join(self.root,"events")
+        if not os.path.isdir(d): return
+        for fname in os.listdir(d):
+            if not fname.endswith(".txt"): continue
+            stem = fname[:-4]
+            src  = self._read(os.path.join(d,fname))
+            ids  = []
+            for m in re.finditer(r'\bid\s*=\s*(\S+)', src):
+                eid = m.group(1).strip()
+                if re.match(r'[A-Za-z_][A-Za-z0-9_]*\.\d+', eid) or re.match(r'\d+', eid):
+                    ids.append(eid)
+            if ids:
+                self.event_ids[stem] = ids
+
+    def _scan_ideas(self):
+        d = os.path.join(self.root,"common","ideas")
+        if not os.path.isdir(d): return
+        for fname in os.listdir(d):
+            if not fname.endswith(".txt"): continue
+            src = self._read(os.path.join(d,fname))
+            data = self._parse_file(os.path.join(d,fname))
+            ideas_block = data.get("ideas",{})
+            if isinstance(ideas_block,dict):
+                for cat,cat_block in ideas_block.items():
+                    if isinstance(cat_block,dict):
+                        for idea_id in cat_block:
+                            if not idea_id.startswith("_") and idea_id not in self.idea_ids:
+                                self.idea_ids.append(idea_id)
+
+    def _scan_decisions(self):
+        for sub in ("decisions","common/decisions"):
+            d = os.path.join(self.root, sub.replace("/",os.sep))
+            if not os.path.isdir(d): continue
+            for fname in os.listdir(d):
+                if not fname.endswith(".txt"): continue
+                src = self._read(os.path.join(d,fname))
+                for m in re.finditer(r'^([A-Za-z][A-Za-z0-9_]+)\s*=\s*\{', src, re.MULTILINE):
+                    did = m.group(1)
+                    if did not in ("category","target_trigger","available","visible","modifier","cost"):
+                        if did not in self.decision_ids:
+                            self.decision_ids.append(did)
+            # categories
+            cats_d = os.path.join(d,"categories")
+            if os.path.isdir(cats_d):
+                for fname in os.listdir(cats_d):
+                    if not fname.endswith(".txt"): continue
+                    src = self._read(os.path.join(cats_d,fname))
+                    for m in re.finditer(r'^([A-Za-z][A-Za-z0-9_]+)\s*=\s*\{', src, re.MULTILINE):
+                        cid = m.group(1)
+                        if cid not in self.decision_cats:
+                            self.decision_cats.append(cid)
+
+    def _scan_dyn_mods(self):
+        d = os.path.join(self.root,"common","dynamic_modifiers")
+        if not os.path.isdir(d): return
+        for fname in os.listdir(d):
+            if not fname.endswith(".txt"): continue
+            src = self._read(os.path.join(d,fname))
+            for m in re.finditer(r'^([A-Za-z][A-Za-z0-9_]+)\s*=\s*\{', src, re.MULTILINE):
+                mid = m.group(1)
+                if mid not in self.dyn_mod_ids:
+                    self.dyn_mod_ids.append(mid)
+
+    def _scan_tags(self):
+        d = os.path.join(self.root,"common","country_tags")
+        if not os.path.isdir(d): return
+        for fname in os.listdir(d):
+            if not fname.endswith(".txt"): continue
+            src = self._read(os.path.join(d,fname))
+            for m in re.finditer(r'^([A-Z]{2,3})\s*=', src, re.MULTILINE):
+                tag = m.group(1)
+                if tag not in self.country_tags:
+                    self.country_tags.append(tag)
+
+    def _scan_variables(self):
+        """Scan national_focus files for set_variable / add_to_variable names."""
+        d = os.path.join(self.root,"common","national_focus")
+        if not os.path.isdir(d): return
+        for fname in os.listdir(d):
+            if not fname.endswith(".txt"): continue
+            src = self._read(os.path.join(d,fname))
+            for m in re.finditer(r'(?:set_variable|add_to_variable)\s*=\s*\{\s*([A-Za-z][A-Za-z0-9_]*)\s*=', src):
+                self.variables.add(m.group(1))
+
+    # ── Load image for a sprite ───────────────────────────────────────
+    def get_image(self, gfx_name, size=(64,64)):
+        """Return a PhotoImage for gfx_name, or None. Logs errors to self._img_errors."""
+        if not gfx_name: return None
+        key = (gfx_name, size)
+        if key in self.sprite_imgs:
+            v = self.sprite_imgs[key]
+            return v  # None means previously failed
+
+        path = self.sprites.get(gfx_name)
+        if not path:
+            self.sprite_imgs[key] = None
+            self._img_errors.append("NOT IN SPRITES: " + gfx_name)
+            return None
+        if not os.path.exists(path):
+            self.sprite_imgs[key] = None
+            self._img_errors.append("FILE NOT FOUND: " + path)
+            return None
+
+        # Try loading — attempt DDS, then PNG fallback (same base name)
+        loaded = None
+        last_err = ""
+        try_paths = [path]
+        # If DDS, also try .png and .tga with same stem
+        stem, ext = os.path.splitext(path)
+        if ext.lower() == ".dds":
+            for alt_ext in (".png", ".tga", ".jpg"):
+                alt = stem + alt_ext
+                if os.path.exists(alt):
+                    try_paths.append(alt)
+
+        if not _PIL_OK:
+            self.sprite_imgs[key] = None
+            self._img_errors.append("Pillow not available")
+            return None
+        for try_path in try_paths:
+            try:
+                img = _PILImage.open(try_path)
+                img = img.convert("RGBA")
+                resample = getattr(_PILImage,"LANCZOS",getattr(_PILImage,"ANTIALIAS",1))
+                img = img.resize(size, resample)
+                photo = _PILImageTk.PhotoImage(img)
+                self.sprite_imgs[key] = photo
+                return photo
+            except Exception as e:
+                last_err = "%s: %s" % (os.path.basename(try_path), e)
+
+        self.sprite_imgs[key] = None
+        self._img_errors.append("LOAD FAILED %s: %s" % (gfx_name, last_err))
+        return None
+
+    def scan(self, root, progress_cb=None):
+        self.root = root
+        self.mod_name = os.path.basename(root)
+        self.sprites.clear(); self.sprite_imgs.clear(); self._img_errors.clear()
+        self.decision_sprites.clear()
+        self.focus_ids.clear(); self.event_ids.clear()
+        self.idea_ids.clear(); self.decision_ids.clear()
+        self.decision_cats.clear(); self.dyn_mod_ids.clear()
+        self.country_tags.clear(); self.variables.clear()
+        self.loaded = False
+        # ── MD detection ────────────────────────────────────────────
+        name_lower = self.mod_name.lower()
+        self.is_md = ("millennium" in name_lower or "md" == name_lower
+                      or "millennium_dawn" in name_lower)
+        # Also check for descriptor.mod if name alone is ambiguous
+        if not self.is_md:
+            desc_path = os.path.join(root, "descriptor.mod")
+            if os.path.exists(desc_path):
+                desc_txt = self._read(desc_path).lower()
+                self.is_md = "millennium" in desc_txt
+
+        steps = [
+            ("GFX sprites",      self._scan_gfx),
+            ("Idea GFX",         self._scan_idea_gfx),
+            ("Decision GFX",     self._scan_decision_gfx),
+            ("Focus IDs",        self._scan_focuses),
+            ("Events",           self._scan_events),
+            ("Ideas/Spirits",    self._scan_ideas),
+            ("Decisions",        self._scan_decisions),
+            ("Dynamic Modifiers",self._scan_dyn_mods),
+            ("Country Tags",     self._scan_tags),
+            ("Variables",        self._scan_variables),
+        ]
+        for i,(label,fn) in enumerate(steps):
+            if progress_cb: progress_cb(i, len(steps), label)
+            try: fn()
+            except Exception as e: pass
+
+        self.loaded = True
+        if progress_cb: progress_cb(len(steps), len(steps), "Done")
+
+    def summary(self):
+        md_badge = "  [MD]" if self.is_md else ""
+        return (f"{len(self.sprites)} focus sprites  •  {len(self.idea_sprites)} idea sprites  •  {len(self.decision_sprites)} decision sprites  •  "
+                f"{len(self.focus_ids)} focus IDs  •  {len(self.idea_ids)} ideas  •  "
+                f"{len(self.dyn_mod_ids)} dyn modifiers  •  {len(self.country_tags)} tags{md_badge}")
+
+
+# Global mod context instance
+MOD = ModContext()
+
+
+class Focus:
+    _next = 0
+    def __init__(self, x=0, y=0):
+        Focus._next += 1
+        self.id       = Focus._next
+        self.name     = "focus_%d" % self.id
+        self.icon     = "⚔"
+        self.gfx      = "GFX_goal_generic_political_pressure"
+        self.x        = x
+        self.y        = y
+        self.cost     = 10
+        self.desc     = ""
+        self.effects  = []          # [{"type":str,"fields":{name:val}}]
+        self.prereqs  = []          # [[fid,...]] AND of OR-groups
+        self.mutex    = []          # [fid,...]
+        self.cancel_if_invalid       = True
+        self.continue_if_invalid     = False
+        self.available_if_capitulated= False
+        self.ai_will_do = 1
+        self.ai_will_do_raw = ""   # full raw ai_will_do block if imported
+        self.relative_position_id = None  # preserved from import
+        self.search_filters = "FOCUS_FILTER_POLITICAL"  # raw filter string
+        self.available_cond = ""   # raw HOI4 block content (inside available = { })
+        self.bypass_cond    = ""   # raw HOI4 block content (inside bypass = { })
+        self.cancel_cond    = ""   # raw HOI4 block content (inside cancel = { })
+        self._items   = []
+        self._draw_key = None
+
+    def to_dict(self):
+        return {k:v for k,v in self.__dict__.items() if not k.startswith("_")}
+
+    @staticmethod
+    def from_dict(d):
+        f = object.__new__(Focus); f._items = []; f._draw_key = None
+        for k,v in d.items(): setattr(f,k,v)
+        # Migrate old pixel-based coords to grid integers
+        if f.x >= 96 and f.x % 96 == 0: f.x = f.x // 96
+        if f.y >= 96 and f.y % 96 == 0: f.y = f.y // 96
+        for attr,default in [("mutex",[]),("cancel_if_invalid",True),
+            ("continue_if_invalid",False),("available_if_capitulated",False),
+            ("ai_will_do",1),("gfx","GFX_goal_generic_political_pressure"),
+            ("search_filters","FOCUS_FILTER_POLITICAL"),
+            ("available_cond",""),("bypass_cond",""),("cancel_cond",""),
+            ("ai_will_do_raw","")]:
+            if not hasattr(f,attr): setattr(f,attr,default)
+        if f.id >= Focus._next: Focus._next = f.id+1
+        return f
+
+# ─────────────────────────── APP ────────────────────────────────
+
+def show_splash(callback):
+    """Cinematic launch splash — dark themed, animated title."""
+    import math, time
+
+    root = tk.Tk()
+    root.overrideredirect(True)          # borderless
+    root.attributes("-topmost", True)
+    root.configure(bg="#000000")
+
+    SW = root.winfo_screenwidth()
+    SH = root.winfo_screenheight()
+    W, H = 860, 480
+    root.geometry(f"{W}x{H}+{(SW-W)//2}+{(SH-H)//2}")
+
+    # Layered canvas
+    cv = tk.Canvas(root, width=W, height=H, bg="#000000", highlightthickness=0)
+    cv.pack(fill="both", expand=True)
+
+    # ── Background gradient blocks ──────────────────────────────────
+    for i in range(H):
+        ratio = i / H
+        r_c = int(6  + 8  * ratio)
+        g_c = int(10 + 6  * ratio)
+        b_c = int(16 + 12 * ratio)
+        cv.create_line(0, i, W, i, fill=f"#{r_c:02x}{g_c:02x}{b_c:02x}")
+
+    # Subtle grid lines
+    for x in range(0, W, 55):
+        cv.create_line(x, 0, x, H, fill="#0d1520", width=1)
+    for y in range(0, H, 55):
+        cv.create_line(0, y, W, y, fill="#0d1520", width=1)
+
+    # Corner accent lines
+    acc = "#1e3a6e"
+    cv.create_line(0,   0,  120, 0,   fill=acc, width=2)
+    cv.create_line(0,   0,  0,   80,  fill=acc, width=2)
+    cv.create_line(W,   0,  W-120,0,  fill=acc, width=2)
+    cv.create_line(W,   0,  W,    80, fill=acc, width=2)
+    cv.create_line(0,   H,  120,  H,  fill=acc, width=2)
+    cv.create_line(0,   H,  0,    H-80,fill=acc,width=2)
+    cv.create_line(W,   H,  W-120,H,  fill=acc, width=2)
+    cv.create_line(W,   H,  W,    H-80,fill=acc,width=2)
+
+    # Blue top accent bar
+    cv.create_rectangle(0, 0, W, 3, fill="#3b82f6", outline="")
+
+    # ── Static elements ─────────────────────────────────────────────
+    # Melon decoration
+    deco = cv.create_text(W//2, 115, text="🍉", fill="#ffffff",
+                          font=("Segoe UI Emoji", 60), anchor="center")
+
+    # Subtitle line above
+    sub1 = cv.create_text(W//2, 165, text="CONTENT MAKER FOR",
+                          fill="#1e3a6e", font=("Courier", 11, "bold"),
+                          anchor="center")
+
+    # Main title — starts invisible
+    title = cv.create_text(W//2, 230, text="Hearts of Iron 4",
+                           fill="#000000", font=("Georgia", 44, "bold"),
+                           anchor="center")
+
+    # By line — starts invisible
+    byline = cv.create_text(W//2, 295, text="by  Blazer",
+                            fill="#000000", font=("Courier", 14),
+                            anchor="center")
+
+    # Version / loading bar container
+    bar_bg = cv.create_rectangle(W//2-180, 370, W//2+180, 382,
+                                  fill="#0d1117", outline="#21262d")
+    bar_fill = cv.create_rectangle(W//2-180, 370, W//2-180, 382,
+                                    fill="#3b82f6", outline="")
+    bar_lbl  = cv.create_text(W//2, 395, text="Initializing…",
+                               fill="#374151", font=("Courier", 9),
+                               anchor="center")
+
+    # Bottom credit
+    cv.create_text(W//2, 460, text="hoi4_focus_maker  •  v2.0",
+                   fill="#1e2a3a", font=("Courier", 8), anchor="center")
+
+    # ── Animation state ─────────────────────────────────────────────
+    state = {"frame": 0, "done": False}
+    TOTAL_FRAMES = 120   # ~4 seconds at 30fps
+
+    PHASES = [
+        # (start_frame, end_frame, description)
+        (0,   20,  "deco_pulse"),
+        (10,  45,  "title_fade"),
+        (30,  60,  "byline_fade"),
+        (50, 100,  "bar_fill"),
+        (100, 115, "hold"),
+        (115, 120, "close"),
+    ]
+
+    def lerp(a, b, t): return a + (b - a) * max(0, min(1, t))
+    def ease_out(t): return 1 - (1-t)**3
+    def ease_in_out(t): return t*t*(3-2*t)
+
+    def to_hex(r, g, b):
+        return f"#{int(r):02x}{int(g):02x}{int(b):02x}"
+
+    def animate():
+        f = state["frame"]
+        if state["done"]:
+            return
+
+        # ── Deco pulse (frames 0-20) ──
+        if f <= 30:
+            t = ease_out(f / 20)
+            ri = int(lerp(0x1e, 0x58, t))
+            gi = int(lerp(0x3a, 0xa6, t))
+            bi = int(lerp(0x6e, 0xff, t))
+            cv.itemconfig(deco, fill=to_hex(ri, gi, bi))
+            cv.itemconfig(sub1, fill=to_hex(
+                int(lerp(0x1e, 0x6e, t)),
+                int(lerp(0x3a, 0x76, t)),
+                int(lerp(0x6e, 0x81, t))))
+
+        # ── Title fade in (frames 10-45) ──
+        if 10 <= f <= 55:
+            t = ease_out((f - 10) / 35)
+            ri = int(lerp(0, 0xe6, t))
+            gi = int(lerp(0, 0xed, t))
+            bi = int(lerp(0, 0xf3, t))
+            cv.itemconfig(title, fill=to_hex(ri, gi, bi))
+            # Slight float-in effect via y position
+            y_pos = lerp(250, 230, t)
+            cv.coords(title, W//2, y_pos)
+
+        # ── Byline fade in (frames 30-60) ──
+        if 30 <= f <= 70:
+            t = ease_out((f - 30) / 30)
+            ri = int(lerp(0, 0x58, t))
+            gi = int(lerp(0, 0xa6, t))
+            bi = int(lerp(0, 0xff, t))
+            cv.itemconfig(byline, fill=to_hex(ri, gi, bi))
+
+        # ── Progress bar (frames 50-100) ──
+        if 50 <= f <= 100:
+            t = ease_in_out((f - 50) / 50)
+            x_end = lerp(W//2 - 180, W//2 + 180, t)
+            cv.coords(bar_fill, W//2-180, 370, x_end, 382)
+            labels = ["Initializing…", "Loading assets…", "Building canvas…",
+                      "Applying dark theme…", "Ready."]
+            idx = int(t * (len(labels)-1))
+            cv.itemconfig(bar_lbl, text=labels[min(idx, len(labels)-1)])
+
+        # ── Fade out everything (frames 110-120) ──
+        if f >= 110:
+            t = (f - 110) / 10
+            alpha_inv = int(lerp(0, 255, t))
+            # Darken by overlaying black rectangle
+            if not hasattr(state, "overlay"):
+                state["overlay"] = cv.create_rectangle(
+                    0, 0, W, H, fill="#000000", outline="", stipple="gray50")
+            if t >= 1.0:
+                root.destroy()
+                state["done"] = True
+                callback()
+                return
+
+        state["frame"] += 1
+        root.after(33, animate)   # ~30 fps
+
+    root.after(80, animate)
+    root.mainloop()
+
+
+
+# ── Safe after() wrapper ── guards against Python 3.14 _tclCommands bug ──
+def _safe_after(widget, ms, fn):
+    """Schedule fn only if widget still exists. Fixes AttributeError on Python 3.14."""
+    def _guarded():
+        try:
+            if widget.winfo_exists():
+                fn()
+        except Exception:
+            pass
+    try:
+        widget.after(ms, _guarded)
+    except Exception:
+        pass
+
+def _safe_after_idle(widget, fn):
+    """Schedule fn via after_idle only if widget still exists."""
+    def _guarded():
+        try:
+            if widget.winfo_exists():
+                fn()
+        except Exception:
+            pass
+    try:
+        widget.after_idle(_guarded)
+    except Exception:
+        pass
+
+class Tooltip:
+    """Show a dark tooltip after a short hover delay (1.2s)."""
+    DELAY = 1200   # ms before showing
+    BG    = "#161b22"
+    FG    = "#c9d1d9"
+    BORDER= "#3b82f6"
+
+    def __init__(self, widget, text):
+        self.widget  = widget
+        self.text    = text
+        self._job    = None
+        self._tip    = None
+        widget.bind("<Enter>",    self._schedule, add="+")
+        widget.bind("<Leave>",    self._cancel,   add="+")
+        widget.bind("<Button>",   self._cancel,   add="+")
+
+    def _schedule(self, _=None):
+        self._cancel()
+        self._job = self.widget.after(self.DELAY, self._show)
+
+    def _cancel(self, _=None):
+        if self._job:
+            self.widget.after_cancel(self._job)
+            self._job = None
+        if self._tip:
+            self._tip.destroy()
+            self._tip = None
+
+    def _show(self):
+        if self._tip: return
+        x = self.widget.winfo_rootx() + self.widget.winfo_width() // 2
+        y = self.widget.winfo_rooty() + self.widget.winfo_height() + 6
+        self._tip = tw = tk.Toplevel(self.widget)
+        tw.wm_overrideredirect(True)
+        tw.wm_attributes("-topmost", True)
+        # Outer frame for border effect
+        outer = tk.Frame(tw, bg=self.BORDER, bd=1)
+        outer.pack()
+        tk.Label(outer, text=self.text,
+                 bg=self.BG, fg=self.FG,
+                 font=("Helvetica", 9), padx=10, pady=5,
+                 justify="left", wraplength=260).pack()
+        tw.update_idletasks()
+        tw.wm_geometry(f"+{x - tw.winfo_width()//2}+{y}")
+
+_app_ref = None   # module-level ref so ModContext.save_config can access the window
+
+class App(tk.Tk):
+    def __init__(self):
+        global _app_ref
+        super().__init__()
+        _app_ref = self
+        self.title("HOI4 Content Maker  —  no tree  [Wiki Accurate v2]")
+        # Restore saved geometry if available, else use default
+        saved_geom = getattr(MOD, "_saved_geometry", "")
+        self.geometry(saved_geom if saved_geom else "1440x880")
+        self.configure(bg=BG_DARK); self.resizable(True,True)
+        self.focuses={}; self.selected=None
+        self._multi_sel=set()   # set of fids in multi-select
+        self._multisel_mode=False  # True when multi-select mode active
+        self._default_focus_prefix = ""   # set by tag detection
+        self.conn_src=None; self.mutex_src=None; self.mutex_mode=False
+        self._lines=[]; self._temp_line=None
+        self.offset=[80,60]; self._pan_start=None; self.zoom=1.5; self._drag={}
+        self._redraw_pending=False
+        self._redraw_job=None
+        self._grid_img=None; self._grid_item=None; self._grid_key=None
+        self._sash_x=0
+        self._build_ui(); self._redraw()
+
+    # ── TOP BAR ─────────────────────────────────────────────────
+    # ── Widget factories (use for all new UI code) ───────────────────
+    def _mk_btn(self, parent, text, cmd=None, fg=None, bg=None,
+                font_size=9, bold=True, padx=10, pady=4, tip=None):
+        """Flat hand-cursor button. Returns the Button widget."""
+        b = tk.Button(parent,
+                      text=text, command=cmd or (lambda: None),
+                      bg=bg or BG_CARD, fg=fg or TEXT,
+                      activebackground=BORDER_G, activeforeground=TEXT,
+                      font=("Helvetica", font_size, "bold" if bold else "normal"),
+                      relief="flat", padx=padx, pady=pady,
+                      cursor="hand2", highlightthickness=1,
+                      highlightbackground=BORDER_G, bd=0)
+        if tip: Tooltip(b, tip)
+        return b
+
+    def _mk_lbl(self, parent, text, fg=None, bg=None, font_size=9,
+                bold=False, dim=False, anchor="w", padx=6, pady=2):
+        """Standard label, dim or normal."""
+        return tk.Label(parent,
+                        text=text,
+                        bg=bg or BG_PANEL, fg=fg or (TEXT_DIM if dim else TEXT),
+                        font=("Helvetica", font_size, "bold" if bold else "normal"),
+                        anchor=anchor, padx=padx, pady=pady)
+
+    def _mk_entry(self, parent, var, width=None):
+        """Standard dark entry bound to StringVar."""
+        kw = dict(textvariable=var, bg=BG_CARD, fg=TEXT,
+                  insertbackground=BLUE, font=("Helvetica", 10),
+                  relief="flat", highlightthickness=1,
+                  highlightbackground=BORDER_G)
+        if width: kw["width"] = width
+        return tk.Entry(parent, **kw)
+
+    def _mk_hsep(self, parent, padx=6, pady=4):
+        """1px horizontal separator."""
+        f = tk.Frame(parent, bg=BORDER_G, height=1)
+        f.pack(fill="x", padx=padx, pady=pady)
+        return f
+
+    def _build_ui(self):
+        """Orchestrate full UI construction."""
+        self._init_error_log()
+        self._undo_stack = []; self._undo_max = 60
+        self._tree_id = tk.StringVar(value="TAG_focus_tree")
+        toolbar = tk.Frame(self, bg=BG_DARK)
+        toolbar.pack(fill="x")
+        self._build_menubar(toolbar)
+        self._build_toolbar_row2(toolbar)
+        self._build_keybinds()
+        self._build_layout()
+
+    def _build_menubar(self, toolbar):
+        """Build menu bar with File/Edit/View/Tools dropdowns."""
+        # ── MENU BAR ──────────────────────────────────────────────
+        menubar = tk.Frame(toolbar, bg="#080b10", height=30)
+        menubar.pack(fill="x"); menubar.pack_propagate(False)
+        tk.Frame(menubar, bg=BORDER_G, height=1).place(relx=0, rely=1, relwidth=1)
+
+        # Branding
+        tk.Label(menubar, text="HOI4 CONTENT MAKER", bg="#080b10", fg=TEXT_DIM,
+                 font=("Helvetica",9,"bold"), padx=12).pack(side="left")
+        tk.Frame(menubar, bg=BORDER_G, width=1, height=18).pack(side="left", padx=2)
+
+        # ── Menu helpers ──────────────────────────────────────────
+        self._open_menu_win = [None]  # [current Toplevel or None]
+        self._open_menu_btn = [None]  # [button that opened it]
+
+        def _close_menu():
+            w = self._open_menu_win[0]
+            b = self._open_menu_btn[0]
+            if w:
+                try: w.destroy()
+                except: pass
+            self._open_menu_win[0] = None
+            self._open_menu_btn[0] = None
+            if b:
+                try: b.config(bg="#080b10", fg=TEXT_DIM)
+                except: pass
+
+        def _menu_btn(parent, label, items):
+            btn = tk.Button(parent, text=label,
+                            bg="#080b10", fg=TEXT_DIM,
+                            font=("Helvetica",9,"bold"), relief="flat",
+                            padx=10, pady=0, cursor="hand2", bd=0,
+                            activebackground="#1a2030", activeforeground=TEXT)
+            btn.pack(side="left")
+
+            def _open(b=btn):
+                # If this menu is already open, close it
+                if self._open_menu_btn[0] is b:
+                    _close_menu(); return
+                _close_menu()
+                b.config(bg="#1a2030", fg=TEXT)
+                # Build a Toplevel dropdown
+                b.update_idletasks()
+                rx = b.winfo_rootx()
+                ry = b.winfo_rooty() + b.winfo_height()
+                drop = tk.Toplevel(self)
+                drop.wm_overrideredirect(True)
+                drop.configure(bg="#0d1218")
+                drop.attributes("-topmost", True)
+                # build contents
+                inner = tk.Frame(drop, bg="#0d1218",
+                                 highlightthickness=1,
+                                 highlightbackground=BORDER_G)
+                inner.pack(fill="both", expand=True)
+                min_w = 340
+                for item in items:
+                    if item is None:
+                        tk.Frame(inner, bg=BORDER_G, height=1).pack(fill="x", padx=0, pady=2)
+                    elif isinstance(item, str):
+                        tk.Label(inner, text=item.upper(), bg="#0d1218", fg=TEXT_DIM,
+                                 font=("Helvetica",8,"bold"), anchor="w",
+                                 padx=16, pady=3).pack(fill="x")
+                    else:
+                        lbl_i, cmd_i, *rest = item
+                        kbd     = rest[0] if len(rest) > 0 else ""
+                        tip_txt = rest[1] if len(rest) > 1 else ""
+                        item_bg_n = "#0d1218"
+                        item_bg_h = "#141c2a"
+                        row_f = tk.Frame(inner, bg=item_bg_n)
+                        row_f.pack(fill="x")
+                        def _make_cmd(c=cmd_i):
+                            def _do():
+                                _close_menu()
+                                if c:
+                                    self.after(10, c)
+                            return _do
+                        # main label + kbd shortcut row
+                        top_row = tk.Frame(row_f, bg=item_bg_n)
+                        top_row.pack(fill="x")
+                        ib = tk.Button(top_row, text=lbl_i, command=_make_cmd(),
+                                       bg=item_bg_n, fg=TEXT_DIM,
+                                       font=("Helvetica",9,"bold"), relief="flat",
+                                       anchor="w", padx=16, pady=4,
+                                       cursor="hand2", bd=0,
+                                       activebackground=item_bg_h,
+                                       activeforeground=TEXT)
+                        ib.pack(side="left", fill="x", expand=True)
+                        if kbd:
+                            tk.Label(top_row, text=kbd, bg=item_bg_n, fg="#3a4a60",
+                                     font=("Courier",8), padx=12).pack(side="right")
+                        # tooltip description line (dim, indented)
+                        if tip_txt:
+                            tip_lbl = tk.Label(row_f, text=tip_txt,
+                                               bg=item_bg_n, fg="#3d5068",
+                                               font=("Helvetica",8), anchor="w",
+                                               padx=26, pady=0)
+                            tip_lbl.pack(fill="x")
+                        else:
+                            tip_lbl = None
+                        # hover: highlight entire row including tip
+                        all_widgets = [row_f, top_row, ib] + ([tip_lbl] if tip_lbl else [])
+                        def _enter(e, ws=all_widgets, kl=top_row, tl=tip_lbl, ib_=ib):
+                            for w in ws: w.config(bg=item_bg_h)
+                            ib_.config(fg=TEXT)
+                            if tl: tl.config(fg="#6b849a")
+                        def _leave(e, ws=all_widgets, tl=tip_lbl, ib_=ib):
+                            for w in ws: w.config(bg=item_bg_n)
+                            ib_.config(fg=TEXT_DIM)
+                            if tl: tl.config(fg="#3d5068")
+                        for w in all_widgets:
+                            w.bind("<Enter>", _enter)
+                            w.bind("<Leave>", _leave)
+                # position and show
+                drop.update_idletasks()
+                dw = max(drop.winfo_reqwidth(), min_w)
+                dh = drop.winfo_reqheight()
+                drop.geometry(f"{dw}x{dh}+{rx}+{ry}")
+                # close on any click outside
+                drop.bind("<FocusOut>", lambda e: self.after(100, lambda: _close_menu()
+                          if self._open_menu_win[0] is drop else None))
+                self._open_menu_win[0] = drop
+                self._open_menu_btn[0] = b
+
+            btn.config(command=_open)
+            btn.bind("<Enter>", lambda e, b=btn: b.config(fg=TEXT)
+                     if self._open_menu_btn[0] is not b else None)
+            btn.bind("<Leave>", lambda e, b=btn: b.config(fg=TEXT_DIM, bg="#080b10")
+                     if self._open_menu_btn[0] is not b else None)
+            return btn
+
+        # ── FILE MENU ─────────────────────────────────────────────
+        _menu_btn(menubar, "File", [
+            "Project",
+            ("✦  New Tree",         self._new_tree_dialog, "Ctrl+N",
+             "Start fresh — set country tag and auto-prefix all focus IDs."),
+            ("💾  Save Project",     self._save,            "Ctrl+S",
+             "Save as .json so you can reopen and keep editing later."),
+            ("📂  Load Project",     self._load,            "Ctrl+O",
+             "Open a previously saved .json project file."),
+            None,
+            "Recent",
+            *([("  (no recent files)", None)] if not getattr(MOD,"_recent_mods",[])
+              else [(f"  {r}", lambda p=r: self._load_mod_path(p))
+                    for r in (getattr(MOD,"_recent_mods",[]) or [])]),
+            None,
+            "Import / Export",
+            ("⬆  Export .txt",      self._export,          "Ctrl+E",
+             "Write HOI4-ready script to a .txt file for your mod folder."),
+            ("⬆  Export to Mod",    self._export,          "Ctrl+Shift+E",
+             "Write directly into your loaded mod's national_focus folder."),
+            ("⬇  Import .txt",      self._import_txt,      "",
+             "Read an existing HOI4 focus tree .txt and populate the canvas."),
+            ("📐  Import Draw.io",   self._import_drawio,   "",
+             "Convert a Draw.io diagram into focus nodes and prereq arrows."),
+        ])
+
+        # ── EDIT MENU ─────────────────────────────────────────────
+        _menu_btn(menubar, "Edit", [
+            ("↩  Undo",               self._undo,               "Ctrl+Z",
+             "Revert the last canvas action (move, add, delete, edit)."),
+            None,
+            ("⧉  Duplicate Focus",    self._duplicate_focus,    "",
+             "Copy the selected focus — gets a _copy suffix, shifted one column right."),
+            ("⟳  Bulk Rename Prefix", self._bulk_rename_dialog, "",
+             "Replace a prefix across all focus IDs, prereqs and mutex links at once."),
+            None,
+            ("☐  Select All",         self._select_all_focuses, "Ctrl+A",
+             "Enable multi-select and mark every focus on the canvas."),
+            ("🗑  Delete Selected",    self._delete_selected,    "Del",
+             "Remove all multi-selected focuses after confirmation."),
+        ])
+
+        # ── VIEW MENU ─────────────────────────────────────────────
+        _menu_btn(menubar, "View", [
+            ("⊞  Toggle Grid",        self._toggle_grid,        "G",
+             "Show or hide the background snap grid on the canvas."),
+            ("🗺  Toggle Minimap",     self._toggle_minimap,     "M",
+             "Show or hide the minimap overview in the bottom-right corner."),
+            ("📋  Toggle Focus List",  self._toggle_focus_list,  "F",
+             "Collapse or expand the left-side focus list panel."),
+            None,
+            ("⊡  Fit All Focuses",    self._fit_all,            "0",
+             "Zoom and pan so every focus on the canvas is visible at once."),
+        ])
+
+        # ── TOOLS MENU ────────────────────────────────────────────
+        _menu_btn(menubar, "Tools", [
+            ("🛡  National Spirit Builder", self._national_spirit_wizard, "",
+             "Create ideas/spirits with a modifier editor and live HOI4 preview."),
+            ("⚙  Dynamic Modifier",         self._dyn_mod_wizard,         "",
+             "Build add_dynamic_modifier effects with variable-driven scaling."),
+            ("⚖  Decision Maker",          self._decision_wizard,        "",
+             "Build decisions and decision categories with GFX placement editor."),
+            ("📜  Event Maker",              self._event_wizard,           "",
+             "Build country_event / news_event blocks with options and live preview."),
+            None,
+            ("✓  Validate Tree",            self._validate_tree,          "",
+             "Check for broken prereqs, missing effects, and bad GFX references."),
+            ("📦  Load Mod",                self._load_mod,               "",
+             "Point to your mod root folder to browse GFX and enable direct export."),
+            ("🎯  Set Edit Targets",         self._show_post_load_prompt,  "",
+             "Choose which existing ideas/events files new content should be appended to."),
+            ("⚙  Settings",                 self._open_settings,          "",
+             "Configure mod path, GFX directories, MD detection, and UI options."),
+        ])
+
+        # Right side of menu bar
+        self._errlog_btn = tk.Button(menubar, text="⚠ Log",
+                                     command=self._show_error_log,
+                                     bg="#080b10", fg="#6e7681",
+                                     font=("Helvetica",8,"bold"), relief="flat",
+                                     padx=8, pady=0, cursor="hand2", bd=0,
+                                     activebackground=BG_CARD, activeforeground=TEXT)
+        self._errlog_btn.pack(side="right", padx=4)
+        Tooltip(self._errlog_btn, "View in-app error log.\nTurns red if any errors are caught during the session.")
+        tk.Frame(menubar, bg=BORDER_G, width=1, height=16).pack(side="right", padx=2)
+        self._mod_lbl = tk.Label(menubar, text="No mod loaded", bg="#080b10", fg=TEXT_DIM,
+                                 font=("Helvetica",8,"italic"), padx=8)
+        self._mod_lbl.pack(side="right")
+        # close menu when clicking on canvas
+        self.bind("<Button-1>", lambda e: _close_menu()
+                  if self._open_menu_win[0] and
+                  not str(e.widget).startswith(str(self._open_menu_win[0]))
+                  else None, add="+")
+
+        # hint label (used by _hint() method)
+        self._hint_lbl = tk.Label(toolbar,
+            text="Right-click canvas to place a focus  •  Ctrl+drag to pan  •  Scroll to zoom",
+            bg=BG_DARK, fg=TEXT_DIM, font=("Helvetica",8,"italic"), anchor="w", padx=10)
+        self._hint_lbl.pack(fill="x", pady=1)
+
+
+    def _build_toolbar_row2(self, toolbar):
+        """Build toolbar row 2: canvas action buttons and coord display."""
+        # ROW 2 — canvas tools (clean grouped toolbar)
+        row2 = tk.Frame(toolbar, bg="#090d14", height=36)
+        row2.pack(fill="x"); row2.pack_propagate(False)
+        self._conn_btn = None; self._mutex_btn = None
+
+        def _tb_sep():
+            tk.Frame(row2, bg=BORDER_G, width=1, height=20).pack(side="left", padx=5)
+        def _tb_lbl(t):
+            tk.Label(row2, text=t, bg="#090d14", fg=TEXT_DIM,
+                     font=("Helvetica",8,"bold"), padx=4).pack(side="left")
+        def _tb_btn(lbl, cmd, fg, bg, tip, padx=2):
+            b = tk.Button(row2, text=lbl, command=cmd, bg=bg, fg=fg,
+                          activebackground=BORDER_G, activeforeground=TEXT,
+                          font=("Helvetica",9,"bold"), relief="flat",
+                          padx=9, pady=2, cursor="hand2",
+                          highlightthickness=1, highlightbackground=BORDER_G)
+            b.pack(side="left", padx=padx, pady=3)
+            Tooltip(b, tip); return b
+
+        _tb_lbl("Canvas")
+        _tb_btn("＋ Focus", self._add_focus, TEXT, "#1e3a6e",
+                "Add a new focus.\nAlso: right-click the canvas.")
+        self._conn_btn = _tb_btn("⇄ Prereq", self._toggle_connect, TEXT, BG_CARD,
+                "Draw a prerequisite line between two focuses.")
+        self._mutex_btn = _tb_btn("⊗ Mutex", self._toggle_mutex, ORANGE, BG_CARD,
+                "Draw a mutually exclusive link.")
+        _tb_sep()
+        _tb_lbl("Tools")
+        _tb_btn("🛡 Ideas", self._national_spirit_wizard, TEXT, "#1a2040",
+                "Build National Spirits / Ideas.")
+        _tb_btn("⚙ Dyn Mod", self._dyn_mod_wizard, TEXT, BG_CARD,
+                "Dynamic Modifier wizard.")
+        _tb_btn("⚖ Decisions", self._decision_wizard, TEXT, BG_CARD,
+                "Decision / Decision Category maker.")
+        _tb_btn("📜 Events", self._event_wizard, TEXT, BG_CARD,
+                "Event Maker wizard.")
+        _tb_sep()
+        _tb_lbl("Select")
+        self._msel_btn = _tb_btn("☐ Multi", self._toggle_multisel, TEXT, "#1a1a2e",
+                "Toggle multi-select mode.\nCtrl+click focuses, then Delete.")
+        _tb_btn("🗑 Del Selected", self._delete_selected, TEXT, "#4a1010",
+                "Delete all selected focuses.")
+        _tb_sep()
+        _tb_btn("✕ Clear All", self._clear_all, TEXT, "#7f1d1d",
+                "Delete ALL focuses from the canvas.\nSave first!")
+
+        # Coord display right side
+        self._coord_lbl = tk.Label(row2, text="  x=0  y=0  ", bg="#090d14",
+                                   fg=TEXT_DIM, font=("Courier",9), padx=4)
+        self._coord_lbl.pack(side="right", padx=4)
+        tk.Label(row2, text="Cursor:", bg="#090d14", fg=TEXT_DIM,
+                 font=("Helvetica",8)).pack(side="right")
+
+    def _build_keybinds(self):
+        """Bind all global keyboard shortcuts."""
+        self.bind("<Control-z>", lambda e: self._undo())
+        self.bind("<Control-Z>", lambda e: self._undo())
+        self.bind("<Control-n>", lambda e: self._new_tree_dialog())
+        self.bind("<Control-s>", lambda e: self._save())
+        self.bind("<Control-o>", lambda e: self._load())
+        self.bind("<Control-e>", lambda e: self._export())
+        self.bind("<Control-d>", lambda e: self._duplicate_focus())
+        self.bind("<Control-a>", lambda e: self._select_all_focuses())
+        self.bind("<Delete>",    lambda e: self._key_delete())
+        self.bind("<BackSpace>", lambda e: self._key_delete())
+        self.bind("<KeyPress-g>", lambda e: self._toggle_grid())
+        self.bind("<KeyPress-m>", lambda e: self._toggle_minimap())
+        self.bind("<KeyPress-f>", lambda e: self._toggle_focus_list())
+        self.bind("<KeyPress-0>", lambda e: self._fit_all())
+
+    def _build_layout(self):
+        """Build body: status bar, left panel, canvas, sash, sidebar."""
+        # ── Status bar (packed BEFORE body so it stays at bottom) ──
+        self._statusbar = tk.Frame(self, bg="#060810", height=24)
+        self._statusbar.pack(side="bottom", fill="x")
+        self._statusbar.pack_propagate(False)
+        tk.Frame(self._statusbar, bg=BORDER_G, height=1).place(relx=0, rely=0, relwidth=1)
+        def _sb_item(text, fg=TEXT_DIM, var=None):
+            f = tk.Frame(self._statusbar, bg="#060810")
+            f.pack(side="left", fill="y")
+            lbl = tk.Label(f, text=text, bg="#060810", fg=fg,
+                           font=("Courier",9), padx=10, pady=3)
+            lbl.pack(side="left")
+            tk.Frame(f, bg=BORDER_G, width=1).pack(side="right", fill="y")
+            if var: lbl.config(textvariable=var)
+            return lbl
+        self._sb_tree_lbl  = _sb_item("Tree: ", TEXT_DIM)
+        self._sb_tree_val  = tk.Label(self._statusbar, text="no tree",
+                                       bg="#060810", fg=YELLOW,
+                                       font=("Courier",9), padx=0)
+        self._sb_tree_val.pack(side="left")
+        tk.Frame(self._statusbar, bg=BORDER_G, width=1).pack(side="left", fill="y", padx=(6,0))
+        self._sb_focus_lbl = _sb_item("Focuses: 0")
+        self._sb_sel_lbl   = _sb_item("Selected: —")
+        self._sb_zoom_lbl  = _sb_item("Zoom: 100%")
+        self._sb_mod_lbl2  = _sb_item("Mod: none")
+        tk.Label(self._statusbar, text="HOI4 Content Maker  [Wiki Accurate v2]",
+                 bg="#060810", fg="#2a3548", font=("Courier",8), padx=10
+                 ).pack(side="right")
+
+        body=tk.Frame(self,bg=BG_DARK); body.pack(fill="both",expand=True)
+
+        # ── Left focus list panel ──────────────────────────────────
+        self._left_panel_visible = True
+        self._left_panel = tk.Frame(body, bg=BG_PANEL, width=188)
+        self._left_panel.pack(side="left", fill="y")
+        self._left_panel.pack_propagate(False)
+        tk.Frame(self._left_panel, bg="#060810", height=28).pack(fill="x")
+        # header
+        lp_hdr = tk.Frame(self._left_panel, bg="#060810")
+        lp_hdr.place(x=0, y=0, relwidth=1, height=28)
+        tk.Label(lp_hdr, text="🎯 FOCUSES", bg="#060810", fg=TEXT_DIM,
+                 font=("Helvetica",8,"bold"), padx=8).pack(side="left")
+        self._lp_collapse_btn = tk.Button(lp_hdr, text="◀",
+                                           command=self._toggle_focus_list,
+                                           bg="#060810", fg=TEXT_DIM,
+                                           font=("Helvetica",9), relief="flat",
+                                           padx=6, cursor="hand2", bd=0)
+        self._lp_collapse_btn.pack(side="right")
+        tk.Frame(self._left_panel, bg=BORDER_G, height=1).pack(fill="x")
+        # search
+        lp_search = tk.Frame(self._left_panel, bg=BG_PANEL)
+        lp_search.pack(fill="x", padx=6, pady=4)
+        self._lp_search_var = tk.StringVar()
+        lp_ent = tk.Entry(lp_search, textvariable=self._lp_search_var,
+                           bg=BG_CARD, fg=TEXT_DIM, insertbackground=BLUE,
+                           font=("Helvetica",9), relief="flat",
+                           highlightthickness=1, highlightbackground=BORDER_G)
+        lp_ent.pack(fill="x", ipady=3)
+        lp_ent.insert(0, "Search…")
+        lp_ent.bind("<FocusIn>",  lambda e: (lp_ent.delete(0,"end"), lp_ent.config(fg=TEXT))
+                                             if lp_ent.get()=="Search…" else None)
+        lp_ent.bind("<FocusOut>", lambda e: (lp_ent.insert(0,"Search…"), lp_ent.config(fg=TEXT_DIM))
+                                             if not lp_ent.get() else None)
+        self._lp_search_var.trace_add("write", lambda *_: self._refresh_focus_list())
+        # list
+        lp_list_frame = tk.Frame(self._left_panel, bg=BG_PANEL)
+        lp_list_frame.pack(fill="both", expand=True)
+        lp_sb = tk.Scrollbar(lp_list_frame, orient="vertical")
+        lp_sb.pack(side="right", fill="y")
+        self._lp_canvas = tk.Canvas(lp_list_frame, bg=BG_PANEL,
+                                     highlightthickness=0,
+                                     yscrollcommand=lp_sb.set)
+        lp_sb.config(command=self._lp_canvas.yview)
+        self._lp_canvas.pack(fill="both", expand=True)
+        self._lp_inner = tk.Frame(self._lp_canvas, bg=BG_PANEL)
+        self._lp_win = self._lp_canvas.create_window((0,0), window=self._lp_inner, anchor="nw")
+        self._lp_inner.bind("<Configure>", lambda e: self._lp_canvas.configure(
+            scrollregion=self._lp_canvas.bbox("all")))
+        self._lp_canvas.bind("<Configure>", lambda e: self._lp_canvas.itemconfig(
+            self._lp_win, width=e.width))
+        self._lp_canvas.bind("<MouseWheel>", lambda e: self._lp_canvas.yview_scroll(
+            int(-1*(e.delta/120)), "units"))
+        tk.Frame(self._left_panel, bg=BORDER_G, width=1).place(relx=1, rely=0, relheight=1, x=-1)
+
+        self.cv=tk.Canvas(body,bg=CANVAS_BG,highlightthickness=0,cursor="fleur")
+        self.cv.pack(side="left",fill="both",expand=True); self._bind_canvas()
+        # ── Draggable resize handle ──────────────────────────────
+        self._sb_width=360
+        self._sash=tk.Frame(body,bg=BG_CARD,width=5,cursor="sb_h_double_arrow")
+        self._sash.pack(side="left",fill="y")
+        # Visible drag handle with arrows
+        sash_lbl=tk.Label(self._sash,text="⋮",bg=BG_CARD,fg=TEXT_DIM,
+                          font=("Helvetica",10),cursor="sb_h_double_arrow")
+        sash_lbl.place(relx=0.5,rely=0.5,anchor="center")
+        for w in (self._sash, sash_lbl):
+            w.bind("<ButtonPress-1>",  self._sash_pr)
+            w.bind("<B1-Motion>",       self._sash_mv)
+            w.bind("<ButtonRelease-1>", self._sash_rl)
+            w.bind("<Enter>", lambda e: self._sash.config(bg=BORDER_G))
+            w.bind("<Leave>", lambda e: self._sash.config(bg=BG_CARD))
+        self._sb_frame=tk.Frame(body,bg=BG_PANEL,width=self._sb_width)
+        self._sb_frame.pack(side="right",fill="y"); self._sb_frame.pack_propagate(False)
+        self._build_sidebar(self._sb_frame)
+
+
+
+    def _init_error_log(self):
+        """Set up in-app error log — captures all Python exceptions."""
+        import sys as _sys, traceback as _tb
+
+        self._error_entries = []
+
+        _orig_except = _sys.excepthook
+        app_ref = self
+
+        def _custom_excepthook(exc_type, exc_val, exc_tb):
+            msg = "".join(_tb.format_exception(exc_type, exc_val, exc_tb))
+            app_ref._log_error(msg)
+            _orig_except(exc_type, exc_val, exc_tb)
+
+        _sys.excepthook = _custom_excepthook
+
+    def _log_error(self, msg):
+        """Record an error and update the log badge if window is open."""
+        import datetime
+        ts = datetime.datetime.now().strftime("%H:%M:%S")
+        self._error_entries.append((ts, msg.strip()))
+        # Flash the error log button if it exists
+        if hasattr(self, "_errlog_btn"):
+            count = len(self._error_entries)
+            self._errlog_btn.config(
+                text=f"⚠ Errors ({count})",
+                fg="#f87171", bg="#450a0a")
+            self.after(3000, lambda: self._errlog_btn.config(
+                text=f"⚠ Log ({count})",
+                fg="#f87171", bg="#450a0a") if count > 0 else None)
+
+    def _show_error_log(self):
+        """Open the in-app error log window."""
+        win = tk.Toplevel(self)
+        win.title("Error Log")
+        win.configure(bg="#0d1117")
+        win.geometry("760x480")
+        win.resizable(True, True)
+
+        # Header
+        hdr = tk.Frame(win, bg="#080c12", pady=8); hdr.pack(fill="x")
+        tk.Label(hdr, text="  ⚠  Error Log", bg="#080c12", fg="#f87171",
+                 font=("Courier", 12, "bold")).pack(side="left", padx=8)
+        tk.Button(hdr, text="🗑 Clear", command=lambda: _clear(),
+                  bg="#450a0a", fg="#f87171", font=("Helvetica", 9),
+                  relief="flat", padx=8, pady=3, cursor="hand2").pack(side="right", padx=8)
+        tk.Button(hdr, text="✕", command=win.destroy,
+                  bg="#080c12", fg="#6e7681", font=("Helvetica", 10),
+                  relief="flat", cursor="hand2", padx=8).pack(side="right")
+        tk.Frame(win, bg="#21262d", height=1).pack(fill="x")
+
+        # No errors label
+        no_err = tk.Label(win,
+                          text="\n\n  ✓  No errors recorded.\n\n  The program is running cleanly.",
+                          bg="#0d1117", fg="#22c55e",
+                          font=("Courier", 11), justify="left", anchor="nw")
+
+        # Scrollable log area
+        frm = tk.Frame(win, bg="#0d1117"); frm.pack(fill="both", expand=True)
+        sb = tk.Scrollbar(frm, orient="vertical")
+        sb.pack(side="right", fill="y")
+        txt = tk.Text(frm, bg="#0a0f18", fg="#c9d1d9",
+                      font=("Courier", 9), relief="flat",
+                      yscrollcommand=sb.set, wrap="none",
+                      state="disabled", selectbackground="#1e3a6e")
+        txt.pack(side="left", fill="both", expand=True)
+        sb.config(command=txt.yview)
+
+        txt.tag_configure("ts",  foreground="#374151")
+        txt.tag_configure("sep", foreground="#21262d")
+        txt.tag_configure("err", foreground="#f87171")
+        txt.tag_configure("tb",  foreground="#c9d1d9")
+
+        def _refresh():
+            txt.config(state="normal"); txt.delete("1.0", "end")
+            if not self._error_entries:
+                no_err.pack(fill="both", expand=True)
+                frm.pack_forget()
+            else:
+                no_err.pack_forget()
+                frm.pack(fill="both", expand=True)
+                for ts, msg in self._error_entries:
+                    txt.insert("end", f"[{ts}]  ", "ts")
+                    lines = msg.splitlines()
+                    txt.insert("end", lines[0] + "\n", "err")
+                    for line in lines[1:]:
+                        txt.insert("end", line + "\n", "tb")
+                    txt.insert("end", "─" * 80 + "\n", "sep")
+            txt.config(state="disabled")
+            txt.see("end")
+
+        def _clear():
+            self._error_entries.clear()
+            if hasattr(self, "_errlog_btn"):
+                self._errlog_btn.config(text="⚠ Log", fg="#6e7681", bg="#161b22")
+            _refresh()
+
+        _refresh()
+
+
+    # ── UNDO ────────────────────────────────────────────────────
+    def _snapshot(self):
+        """Return a deep snapshot of all focuses (for undo)."""
+        import copy
+        return copy.deepcopy({fid: f.to_dict() for fid, f in self.focuses.items()})
+
+    def _push_undo(self, label="action"):
+        """Call BEFORE making a change to save current state."""
+        snap = self._snapshot()
+        self._undo_stack.append((label, snap))
+        if len(self._undo_stack) > self._undo_max:
+            self._undo_stack.pop(0)
+
+    def _undo(self):
+        """Restore the previous state."""
+        if not self._undo_stack:
+            self._hint("Nothing to undo.")
+            return
+        label, snap = self._undo_stack.pop()
+        # Rebuild focuses from snapshot
+        self.cv.delete("all")
+        self.focuses.clear()
+        self._lines.clear()
+        self._grid_item = None
+        self._grid_key  = None
+        self._grid_img  = None
+        self.selected   = None
+        for fd in snap.values():
+            f = Focus.from_dict(fd)
+            f._draw_key = None
+            self.focuses[f.id] = f
+        self._hide_form()
+        self._redraw()
+        self._hint(f"↩ Undid: {label}")
+
+    def _vsep(self,p): tk.Frame(p,bg=BORDER_G,width=1,height=24).pack(side="left",padx=5)
+    def _hint(self,t): self._hint_lbl.config(text=t)
+
+    # ── SIDEBAR ──────────────────────────────────────────────────
+    def _build_sidebar(self, sb):
+        # ── Header ───────────────────────────────────────────────────
+        hdr = tk.Frame(sb, bg=BG_DARK); hdr.pack(fill="x")
+        tk.Label(hdr, text="  FOCUS PROPERTIES", bg=BG_DARK, fg=TEXT,
+                 font=("Helvetica", 10, "bold"), anchor="w", pady=8).pack(side="left", fill="x", expand=True)
+        tk.Frame(sb, bg=BORDER_G, height=1).pack(fill="x")
+
+        # ── "No selection" placeholder ────────────────────────────────
+        wrap = tk.Frame(sb, bg=BG_PANEL); wrap.pack(fill="both", expand=True)
+        self._sb_none = tk.Label(wrap,
+            text="\n\n  Click a focus to\n  edit its properties.\n\n"
+                 "  Right-click the canvas\n  to create a new focus.",
+            bg=BG_PANEL, fg=TEXT_DIM, font=("Helvetica", 10, "italic"),
+            justify="left", anchor="nw")
+        self._sb_none.pack(fill="both", expand=True)
+
+        # ── Tab container ─────────────────────────────────────────────
+        self._tab_outer = tk.Frame(wrap, bg=BG_PANEL)
+
+        # Tab bar
+        tab_bar = tk.Frame(self._tab_outer, bg=BG_DARK); tab_bar.pack(fill="x")
+        self._tab_btns = {}
+        self._active_tab = tk.StringVar(value="Properties")
+
+        def _switch_tab(name):
+            self._active_tab.set(name)
+            for n, (btn, panel) in self._tab_btns.items():
+                if n == name:
+                    btn.config(bg=BG_PANEL, fg=BLUE,
+                               relief="flat",
+                               highlightbackground=BORDER_G)
+                    panel.pack(fill="both", expand=True)
+                    # Active tab underline
+                    btn._line.config(bg=BLUE)
+                else:
+                    btn.config(bg=BG_DARK, fg=TEXT_DIM, relief="flat",
+                               highlightbackground=BG_DARK)
+                    panel.pack_forget()
+                    btn._line.config(bg=BG_DARK)
+
+        tab_names = ["Properties", "Effects", "Conditions", "Code"]
+
+        for tname in tab_names:
+            col = tk.Frame(tab_bar, bg=BG_DARK); col.pack(side="left", expand=True, fill="x")
+            btn = tk.Button(col, text=tname, bg=BG_DARK, fg=TEXT_DIM,
+                            font=("Helvetica", 9, "bold"), relief="flat",
+                            activebackground=BG_PANEL, activeforeground=BLUE,
+                            cursor="hand2", pady=6, bd=0, highlightthickness=0,
+                            command=lambda n=tname: _switch_tab(n))
+            btn.pack(fill="x")
+            line = tk.Frame(col, bg=BG_DARK, height=2)
+            line.pack(fill="x")
+            btn._line = line
+            # Scrollable panel per tab
+            panel_outer = tk.Frame(self._tab_outer, bg=BG_PANEL)
+            self._tab_btns[tname] = (btn, panel_outer)
+
+        tk.Frame(self._tab_outer, bg=BORDER_G, height=1).pack(fill="x")
+
+        # Per-tab scroll frames set up below
+        self._sb_frm_props  = None
+        self._sb_frm_eff    = None
+        self._sb_frm_cond   = None
+
+        def _make_scroll_panel(parent):
+            cv = tk.Canvas(parent, bg=BG_PANEL, highlightthickness=0)
+            scr = tk.Scrollbar(parent, orient="vertical", command=cv.yview)
+            frm = tk.Frame(cv, bg=BG_PANEL)
+            win = cv.create_window((0, 0), window=frm, anchor="nw")
+            cv.configure(yscrollcommand=scr.set)
+            frm.bind("<Configure>", lambda e, c=cv: c.configure(scrollregion=c.bbox("all")))
+            cv.bind("<Configure>", lambda e, c=cv, w=win: c.itemconfig(w, width=e.width))
+            for ev in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+                cv.bind(ev, self._sb_scroll)
+            scr.pack(side="right", fill="y")
+            cv.pack(side="left", fill="both", expand=True)
+            return frm
+
+        # ── Tabs 1-4: built by dedicated sub-methods ──────────────────
+        self._build_sidebar_props(self._tab_btns["Properties"][1], _make_scroll_panel)
+        self._build_sidebar_effects(self._tab_btns["Effects"][1], _make_scroll_panel)
+        self._build_sidebar_conditions(self._tab_btns["Conditions"][1], _make_scroll_panel)
+        self._build_sidebar_code(self._tab_btns["Code"][1])
+        # ── Show tab container (hidden until focus selected) ───────────
+        # _show_form / _hide_form manage this
+        self._tab_host = self._tab_outer  # alias used by show/hide
+
+        # Activate Properties tab by default
+        _switch_tab("Properties")
+        self._switch_tab_fn = _switch_tab
+
+    def _build_sidebar_props(self, p, _make_scroll_panel):
+        # ── TAB 1: Properties ─────────────────────────────────────────
+        self._sb_frm = _make_scroll_panel(p)
+        self._sb_frm_props = self._sb_frm
+
+        self._fv_name = self._sb_entry("Focus ID (tag):", "TAG_focus_1")
+        self._fv_icon = self._sb_optmenu("Icon (display only):", ICONS)
+        self._fv_icon.trace_add("write", self._on_icon_change)
+        self._fv_gfx  = self._sb_gfx_picker()
+
+        xyrow = tk.Frame(self._sb_frm, bg=BG_PANEL); xyrow.pack(fill="x", padx=8, pady=2)
+        tk.Label(xyrow, text="X:", bg=BG_PANEL, fg=TEXT_DIM, font=("Helvetica", 10), width=2).pack(side="left")
+        self._fv_x = tk.StringVar(value="0")
+        tk.Entry(xyrow, textvariable=self._fv_x, bg=BG_CARD, fg=TEXT, insertbackground=BLUE,
+                 font=("Helvetica", 10), relief="flat", highlightthickness=1,
+                 highlightbackground=BORDER_G, width=5).pack(side="left", ipady=4, padx=(0, 6))
+        tk.Label(xyrow, text="Y:", bg=BG_PANEL, fg=TEXT_DIM, font=("Helvetica", 10), width=2).pack(side="left")
+        self._fv_y = tk.StringVar(value="0")
+        tk.Entry(xyrow, textvariable=self._fv_y, bg=BG_CARD, fg=TEXT, insertbackground=BLUE,
+                 font=("Helvetica", 10), relief="flat", highlightthickness=1,
+                 highlightbackground=BORDER_G, width=5).pack(side="left", ipady=4)
+        tk.Label(xyrow, text="(grid)", bg=BG_PANEL, fg=TEXT_DIM, font=("Helvetica", 8, "italic")).pack(side="left", padx=4)
+
+        self._fv_cost = self._sb_entry("Cost (1 = 7 days):", "10")
+
+        # AI will_do raw block
+        f_ai = tk.Frame(self._sb_frm, bg=BG_PANEL); f_ai.pack(fill="x", padx=8, pady=2)
+        hdr_ai = tk.Frame(f_ai, bg=BG_PANEL); hdr_ai.pack(fill="x")
+        tk.Label(hdr_ai, text="ai_will_do = {", bg=BG_PANEL, fg=TEXT_DIM,
+                 font=("Helvetica", 9), anchor="w").pack(side="left", fill="x", expand=True)
+        tk.Label(hdr_ai, text="}", bg=BG_PANEL, fg=TEXT_DIM,
+                 font=("Helvetica", 9)).pack(side="right")
+        self._fv_ai_raw = tk.Text(f_ai, bg=BG_CARD, fg=TEXT, insertbackground=BLUE,
+                                   font=("Courier", 9), relief="flat", height=5,
+                                   highlightthickness=1, highlightbackground=BORDER_G,
+                                   wrap="none", undo=True)
+        self._fv_ai_raw.pack(fill="x")
+        self._fv_ai_raw.insert("1.0", "    base = 1")
+        self._fv_ai = None
+
+        self._fv_desc = self._sb_text("Description (localisation):")
+
+        tk.Frame(self._sb_frm, bg=BORDER_G, height=1).pack(fill="x", padx=6, pady=6)
+
+        # PREREQS & MUTEX inside Properties tab
+        self._sb_lbl("PREREQUISITES")
+        self._prereq_box = tk.Frame(self._sb_frm, bg=BG_PANEL)
+        self._prereq_box.pack(fill="x", padx=8)
+        tk.Button(self._sb_frm, text="+ Connect Mode – draw prereq line",
+                  command=self._toggle_connect,
+                  bg=BG_CARD, fg=BLUE, font=("Helvetica", 9), relief="flat",
+                  padx=6, pady=4, cursor="hand2",
+                  highlightthickness=1, highlightbackground=BLUE).pack(fill="x", padx=8, pady=3)
+
+        tk.Frame(self._sb_frm, bg=BORDER_G, height=1).pack(fill="x", padx=6, pady=6)
+        self._sb_lbl("MUTUALLY EXCLUSIVE")
+        self._mutex_box = tk.Frame(self._sb_frm, bg=BG_PANEL)
+        self._mutex_box.pack(fill="x", padx=8)
+        tk.Button(self._sb_frm, text="✖  Mutex Mode – draw exclusion line",
+                  command=self._toggle_mutex,
+                  bg=BG_CARD, fg=ORANGE, font=("Helvetica", 9), relief="flat",
+                  padx=6, pady=4, cursor="hand2",
+                  highlightthickness=1, highlightbackground=ORANGE).pack(fill="x", padx=8, pady=3)
+
+        tk.Frame(self._sb_frm, bg=BORDER_G, height=1).pack(fill="x", padx=6, pady=6)
+
+        # Save / Delete / View Code
+        tk.Button(self._sb_frm, text="Save Changes", command=self._apply,
+                  bg="#14532d", fg="#0a0a0a", font=("Helvetica", 10, "bold"),
+                  relief="flat", pady=6, cursor="hand2",
+                  highlightthickness=0).pack(fill="x", padx=8, pady=2)
+        tk.Button(self._sb_frm, text="Delete Focus", command=self._delete_focus,
+                  bg="#7f1d1d", fg="#0a0a0a", font=("Helvetica", 10),
+                  relief="flat", pady=5, cursor="hand2",
+                  highlightthickness=0).pack(fill="x", padx=8, pady=2)
+        tk.Button(self._sb_frm, text="View Focus Code  { }",
+                  command=self._view_code,
+                  bg=BG_CARD, fg=TEXT, font=("Helvetica", 10), relief="flat",
+                  pady=5, cursor="hand2",
+                  highlightthickness=1, highlightbackground=BORDER_G).pack(fill="x", padx=8, pady=(2, 10))
+
+
+    def _build_sidebar_effects(self, p, _make_scroll_panel):
+        # ── TAB 2: Effects ─────────────────────────────────────────────
+        eff_frm_outer = _make_scroll_panel(p)
+        self._sb_frm_eff = eff_frm_outer
+
+        # 🔍 Effect search bar
+        search_frame = tk.Frame(eff_frm_outer, bg=BG_PANEL)
+        search_frame.pack(fill="x", padx=8, pady=(8, 4))
+        tk.Label(search_frame, text="🔍", bg=BG_PANEL, fg=TEXT_DIM,
+                 font=("Helvetica", 11)).pack(side="left", padx=(0, 4))
+        self._eff_search_var = tk.StringVar()
+        eff_search_entry = tk.Entry(
+            search_frame, textvariable=self._eff_search_var,
+            bg=BG_CARD, fg=TEXT, insertbackground=BLUE,
+            font=("Helvetica", 10), relief="flat",
+            highlightthickness=1, highlightbackground=BORDER_G)
+        # Placeholder hint
+        def _ph_in(e):
+            if self._eff_search_var.get() == "Search effects…":
+                self._eff_search_var.set(""); eff_search_entry.config(fg=TEXT)
+        def _ph_out(e):
+            if not self._eff_search_var.get():
+                self._eff_search_var.set("Search effects…"); eff_search_entry.config(fg=TEXT_DIM)
+        self._eff_search_var.set("Search effects…")
+        eff_search_entry.config(fg=TEXT_DIM)
+        eff_search_entry.bind("<FocusIn>", _ph_in)
+        eff_search_entry.bind("<FocusOut>", _ph_out)
+        eff_search_entry.pack(fill="x", expand=True, ipady=4)
+        # Category filter
+        cat_row = tk.Frame(eff_frm_outer, bg=BG_PANEL); cat_row.pack(fill="x", padx=8, pady=(0, 4))
+        tk.Label(cat_row, text="Category:", bg=BG_PANEL, fg=TEXT_DIM,
+                 font=("Helvetica", 9)).pack(side="left")
+        self._eff_cat = tk.StringVar(value=EFFECT_CATS[0])
+        cm = tk.OptionMenu(cat_row, self._eff_cat, *EFFECT_CATS,
+                           command=lambda _: self._rebuild_eff_dd())
+        cm.config(bg=BG_CARD, fg=TEXT, activebackground=BORDER_G, font=("Helvetica", 9),
+                  relief="flat", highlightthickness=1, highlightbackground=BORDER_G,
+                  width=12, anchor="w")
+        cm["menu"].config(bg=BG_CARD, fg=TEXT, activebackground=BORDER_G, font=("Helvetica", 9))
+        cm.pack(side="left", padx=4)
+
+        # Effect type dropdown
+        dd_row = tk.Frame(eff_frm_outer, bg=BG_PANEL); dd_row.pack(fill="x", padx=8, pady=2)
+        self._eff_type = tk.StringVar()
+        self._eff_dd_frame = tk.Frame(dd_row, bg=BG_PANEL)
+        self._eff_dd_frame.pack(side="left", fill="x", expand=True)
+        self._rebuild_eff_dd()
+
+        # + Add Effect button — prominent, full width, TOP of effects
+        tk.Button(eff_frm_outer, text="＋  Add Effect",
+                  command=self._add_effect,
+                  bg="#14532d", fg="#4ade80",
+                  font=("Helvetica", 10, "bold"), relief="flat",
+                  pady=7, cursor="hand2",
+                  highlightthickness=0).pack(fill="x", padx=8, pady=(2, 6))
+
+        tk.Frame(eff_frm_outer, bg=BORDER_G, height=1).pack(fill="x", padx=6)
+        tk.Label(eff_frm_outer, text="  ADDED EFFECTS", bg=BG_PANEL, fg=TEXT_DIM,
+                 font=("Helvetica", 8, "bold"), anchor="w").pack(fill="x", pady=(4, 2))
+
+        # Container for effect cards (same as before, referenced by _add_effect/_render_effects)
+        self._eff_box = tk.Frame(eff_frm_outer, bg=BG_PANEL)
+        self._eff_box.pack(fill="x", padx=8)
+
+        # Wire up search filter
+        def _filter_eff_dd(*_):
+            raw = self._eff_search_var.get()
+            if raw == "Search effects…": return
+            query = raw.lower().strip()
+            for w in self._eff_dd_frame.winfo_children():
+                w.destroy()
+            if query:
+                # Show filtered results across ALL categories
+                matches = [(k, v["label"], v["cat"])
+                           for k, v in EFFECT_DEFS.items()
+                           if query in k.lower() or query in v["label"].lower()
+                           or query in v.get("cat", "").lower()]
+                if not matches:
+                    tk.Label(self._eff_dd_frame, text="No effects found",
+                             bg=BG_PANEL, fg=TEXT_DIM, font=("Helvetica", 9),
+                             anchor="w").pack(fill="x")
+                    return
+                self._eff_type.set(matches[0][0])
+                om = tk.OptionMenu(self._eff_dd_frame, self._eff_type,
+                                   *[k for k, _, _ in matches])
+                menu = om["menu"]; menu.delete(0, "end")
+                for k, lbl, cat in matches:
+                    menu.add_command(
+                        label=f"[{cat}]  {k}  —  {lbl}",
+                        command=lambda v=k: self._eff_type.set(v))
+                om.config(bg=BG_CARD, fg=TEXT, activebackground=SEL_BG,
+                          font=("Georgia", 8), relief="flat",
+                          highlightthickness=1, highlightbackground=BORDER,
+                          anchor="w", width=30)
+                om["menu"].config(bg=BG_CARD, fg=TEXT, activebackground=SEL_BG,
+                                  font=("Georgia", 8))
+                om.pack(fill="x", expand=True)
+            else:
+                self._rebuild_eff_dd()
+
+        self._eff_search_var.trace_add("write", _filter_eff_dd)
+
+
+    def _build_sidebar_conditions(self, p, _make_scroll_panel):
+        # ── TAB 3: Conditions ──────────────────────────────────────────
+        cond_frm = _make_scroll_panel(p)
+        self._sb_frm_cond = cond_frm
+
+        # Temporarily point _sb_frm at cond frame for helpers
+        _saved = self._sb_frm
+        self._sb_frm = cond_frm
+
+        self._sb_lbl("SEARCH FILTERS")
+        self._fv_search  = self._sb_entry("search_filters:", "FOCUS_FILTER_POLITICAL")
+        tk.Frame(cond_frm, bg=BORDER_G, height=1).pack(fill="x", padx=6, pady=4)
+        self._sb_lbl("AVAILABILITY")
+        self._fv_avail   = self._sb_rawblock("available = {")
+        tk.Frame(cond_frm, bg=BORDER_G, height=1).pack(fill="x", padx=6, pady=4)
+        self._sb_lbl("BYPASS")
+        self._fv_bypass  = self._sb_rawblock("bypass = {")
+        tk.Frame(cond_frm, bg=BORDER_G, height=1).pack(fill="x", padx=6, pady=4)
+        self._sb_lbl("CANCEL")
+        self._fv_cancel2 = self._sb_rawblock("cancel = {")
+        tk.Frame(cond_frm, bg=BORDER_G, height=1).pack(fill="x", padx=6, pady=4)
+        self._sb_lbl("FLAGS")
+        fr = tk.Frame(cond_frm, bg=BG_PANEL); fr.pack(fill="x", padx=8, pady=2)
+        self._fv_cancel   = self._sb_check(fr, "cancel_if_invalid", True)
+        self._fv_continue = self._sb_check(fr, "continue_if_invalid", False)
+        self._fv_cap      = self._sb_check(fr, "available_if_capitulated", False)
+
+        self._sb_frm = _saved  # restore to Properties frame
+
+
+    def _build_sidebar_code(self, p):
+        # ── TAB 4: Code ────────────────────────────────────────────────
+        code_outer = tk.Frame(p, bg=BG_DARK)
+        code_outer.pack(fill="both", expand=True)
+        # toolbar row
+        code_hdr = tk.Frame(code_outer, bg=BG_DARK)
+        code_hdr.pack(fill="x", padx=8, pady=(6,2))
+        self._code_edit_mode = [False]
+        self._code_edit_btn = tk.Button(code_hdr, text="✎ Edit",
+                                         bg=BG_CARD, fg=TEXT_DIM, relief="flat",
+                                         font=("Helvetica",8,"bold"), padx=8, pady=2,
+                                         cursor="hand2",
+                                         highlightthickness=1, highlightbackground=BORDER_G)
+        self._code_edit_btn.pack(side="right", padx=2)
+        self._code_mode_lbl = tk.Label(code_hdr, text="live", bg=BG_DARK, fg=TEXT_DIM,
+                                        font=("Helvetica",7,"italic"))
+        self._code_mode_lbl.pack(side="right")
+        def _copy_code():
+            txt = self._code_txt.get("1.0","end").strip()
+            self.clipboard_clear(); self.clipboard_append(txt)
+        tk.Button(code_hdr, text="⎘ Copy", command=_copy_code,
+                  bg=BG_CARD, fg=TEXT_DIM, relief="flat",
+                  font=("Helvetica",8,"bold"), padx=8, pady=2,
+                  cursor="hand2",
+                  highlightthickness=1, highlightbackground=BORDER_G).pack(side="right", padx=2)
+        def _toggle_code_edit():
+            self._code_edit_mode[0] = not self._code_edit_mode[0]
+            if self._code_edit_mode[0]:
+                self._code_txt.config(state="normal", bg="#0d1a0d",
+                                      highlightbackground="#4ade80")
+                self._code_edit_btn.config(text="🔒 Lock", fg="#4ade80", bg="#1a2c1a")
+                self._code_mode_lbl.config(text="editing", fg="#4ade80")
+            else:
+                self._code_txt.config(state="normal", bg="#050810",
+                                      highlightbackground=BORDER_G)
+                if self.selected:
+                    self._refresh_code_tab(self.selected)
+                self._code_txt.config(state="disabled")
+                self._code_edit_btn.config(text="✎ Edit", fg=TEXT_DIM, bg=BG_CARD)
+                self._code_mode_lbl.config(text="live", fg=TEXT_DIM)
+        self._code_edit_btn.config(command=_toggle_code_edit)
+        # code text widget
+        code_sb = tk.Scrollbar(code_outer, orient="vertical")
+        code_sb.pack(side="right", fill="y", padx=(0,4))
+        self._code_txt = tk.Text(code_outer, bg="#050810", fg="#8aad8a",
+                                  font=("Courier",9), relief="flat",
+                                  highlightthickness=1, highlightbackground=BORDER_G,
+                                  wrap="none", state="disabled",
+                                  yscrollcommand=code_sb.set)
+        code_sb.config(command=self._code_txt.yview)
+        self._code_txt.pack(fill="both", expand=True, padx=(8,0), pady=(0,8))
+
+
+    def _sb_scroll(self, e):
+        # Scroll whichever canvas is currently visible
+        delta = -1 if (e.num == 4 or e.delta > 0) else 1
+        w = e.widget
+        # Walk up to find the canvas
+        while w and not isinstance(w, tk.Canvas):
+            try: w = w.master
+            except: break
+        if w and isinstance(w, tk.Canvas):
+            w.yview_scroll(delta, "units")
+
+    def _hsep(self):
+        tk.Frame(self._sb_frm, bg=BORDER_G, height=1).pack(fill="x", padx=6, pady=6)
+
+    def _sb_lbl(self, t):
+        tk.Label(self._sb_frm, text=f"  {t}", bg=BG_PANEL, fg=TEXT_DIM,
+                 font=("Helvetica", 8, "bold"), anchor="w").pack(fill="x", pady=(4, 1))
+
+    def _sb_entry(self, label, default):
+        f = tk.Frame(self._sb_frm, bg=BG_PANEL); f.pack(fill="x", padx=8, pady=2)
+        tk.Label(f, text=label, bg=BG_PANEL, fg=TEXT_DIM,
+                 font=("Helvetica", 9), anchor="w").pack(fill="x")
+        var = tk.StringVar(value=default)
+        tk.Entry(f, textvariable=var, bg=BG_CARD, fg=TEXT,
+                 insertbackground=BLUE, font=("Helvetica", 10),
+                 relief="flat", highlightthickness=1,
+                 highlightbackground=BORDER_G).pack(fill="x", ipady=3)
+        return var
+
+    def _sb_optmenu(self, label, options):
+        f = tk.Frame(self._sb_frm, bg=BG_PANEL); f.pack(fill="x", padx=8, pady=2)
+        tk.Label(f, text=label, bg=BG_PANEL, fg=TEXT_DIM,
+                 font=("Georgia", 8), anchor="w").pack(fill="x")
+        var = tk.StringVar(value=options[0])
+        om = tk.OptionMenu(f, var, *options)
+        om.config(bg=BG_CARD, fg=TEXT, activebackground=BORDER_G,
+                  font=("Helvetica", 13), relief="flat",
+                  highlightthickness=1, highlightbackground=BORDER_G, anchor="w")
+        om["menu"].config(bg=BG_CARD, fg=TEXT, activebackground=BORDER_G)
+        om.pack(fill="x"); return var
+
+    def _sb_text(self, label):
+        f = tk.Frame(self._sb_frm, bg=BG_PANEL); f.pack(fill="x", padx=8, pady=2)
+        tk.Label(f, text=label, bg=BG_PANEL, fg=TEXT_DIM,
+                 font=("Helvetica", 9), anchor="w").pack(fill="x")
+        t = tk.Text(f, bg=BG_CARD, fg=TEXT, insertbackground=BLUE,
+                    font=("Helvetica", 10), relief="flat",
+                    highlightthickness=1, highlightbackground=BORDER,
+                    height=3, wrap="word")
+        t.pack(fill="x"); return t
+
+    def _sb_rawblock(self, label):
+        f = tk.Frame(self._sb_frm, bg=BG_PANEL); f.pack(fill="x", padx=8, pady=2)
+        hdr = tk.Frame(f, bg=BG_PANEL); hdr.pack(fill="x")
+        tk.Label(hdr, text=label, bg=BG_PANEL, fg=TEXT_DIM,
+                 font=("Helvetica", 9), anchor="w").pack(side="left", fill="x", expand=True)
+        tk.Label(hdr, text="}", bg=BG_PANEL, fg=TEXT_DIM,
+                 font=("Helvetica", 9), anchor="e").pack(side="right")
+        t = tk.Text(f, bg=BG_CARD, fg=TEXT, insertbackground=BLUE,
+                    font=("Courier", 10), relief="flat",
+                    highlightthickness=1, highlightbackground=BORDER_G,
+                    height=3, wrap="none", undo=True)
+        t.pack(fill="x"); return t
+
+    def _sb_check(self, parent, label, default):
+        var = tk.BooleanVar(value=default)
+        tk.Checkbutton(parent, text=label, variable=var,
+                       bg=BG_PANEL, fg=TEXT, selectcolor=BG_CARD,
+                       activebackground=BG_PANEL, font=("Helvetica", 10),
+                       anchor="w", cursor="hand2").pack(fill="x")
+        return var
+
+    def _show_form(self):
+        self._sb_none.pack_forget()
+        self._tab_host.pack(fill="both", expand=True)
+        # Also expose legacy _sb_cv / _sb_scr references (no-ops now)
+        self._sb_cv  = None
+        self._sb_scr = None
+
+    def _hide_form(self):
+        self._tab_host.pack_forget()
+        self._sb_none.pack(fill="both", expand=True)
+
+    def _rebuild_eff_dd(self):
+        for w in self._eff_dd_frame.winfo_children(): w.destroy()
+        cat=self._eff_cat.get(); types=effects_in_cat(cat)
+        if not types: return
+        self._eff_type.set(types[0][0])
+        om=tk.OptionMenu(self._eff_dd_frame,self._eff_type,*[k for k,_ in types])
+        menu=om["menu"]; menu.delete(0,"end")
+        for k,lbl in types:
+            menu.add_command(label=f"{k}  —  {lbl}",command=lambda v=k:self._eff_type.set(v))
+        om.config(bg=BG_CARD,fg=TEXT,activebackground=SEL_BG,font=("Georgia",8),relief="flat",
+                  highlightthickness=1,highlightbackground=BORDER,anchor="w",width=30)
+        om["menu"].config(bg=BG_CARD,fg=TEXT,activebackground=SEL_BG,font=("Georgia",8))
+        om.pack(fill="x",expand=True)
+
+    # ── CANVAS ──────────────────────────────────────────────────
+    def _bind_canvas(self):
+        c=self.cv
+        c.bind("<ButtonPress-1>",self._lmb_dn); c.bind("<B1-Motion>",self._lmb_mv)
+        c.bind("<ButtonRelease-1>",self._lmb_up)
+        c.bind("<ButtonPress-2>",self._pan_pr); c.bind("<B2-Motion>",self._pan_mv)
+        c.bind("<ButtonRelease-2>",self._pan_rl)
+        c.bind("<Control-ButtonPress-1>",self._pan_pr); c.bind("<Control-B1-Motion>",self._pan_mv)
+        c.bind("<Control-ButtonRelease-1>",self._pan_rl)
+        c.bind("<ButtonPress-3>",self._rmb)
+        c.bind("<MouseWheel>",self._scroll); c.bind("<Button-4>",self._scroll); c.bind("<Button-5>",self._scroll)
+        c.bind("<Motion>",self._motion); c.bind("<Configure>",lambda e:self._redraw())
+        c.bind("<Leave>",lambda e:self._coord_lbl.config(text="  —  "))
+
+    def w2c(self,gx,gy):
+        """HOI4 grid integer coords -> canvas pixel coords.
+        xGridSize=96, yGridSize=130 (from hoi4modutilities contentbuilder.ts)
+        """
+        return gx*XGRID*self.zoom+self.offset[0], gy*YGRID*self.zoom+self.offset[1]
+    def c2w(self,cx,cy):
+        """Canvas pixel -> HOI4 grid integer coords (snapped)."""
+        return round((cx-self.offset[0])/(XGRID*self.zoom)), round((cy-self.offset[1])/(YGRID*self.zoom))
+    def snap(self,gx,gy): return int(gx),int(gy)
+
+    def _redraw(self):
+        """Throttled full redraw — cancels any pending and schedules one 16ms out."""
+        if self._redraw_job:
+            self.cv.after_cancel(self._redraw_job)
+        self._redraw_job = self.cv.after(16, self._do_redraw)
+
+    def _do_redraw(self):
+        self._redraw_job = None
+        self._redraw_pending = False
+        cw = max(1, self.cv.winfo_width()); ch = max(1, self.cv.winfo_height())
+        self._draw_grid()
+        self._draw_coord_labels()
+        self._draw_lines()
+        for f in self.focuses.values():
+            self._draw_focus(f)
+        self._update_statusbar()
+        self._update_focus_list_selection()
+
+    def _redraw_now(self):
+        """Immediate redraw for zoom/resize — skips throttle."""
+        if self._redraw_job:
+            self.cv.after_cancel(self._redraw_job)
+            self._redraw_job = None
+        self._redraw_pending = False
+        cw = max(1, self.cv.winfo_width());  ch = max(1, self.cv.winfo_height())
+        self._draw_grid()
+        self._draw_coord_labels()
+        self._draw_lines()
+        for f in self.focuses.values():
+            self._draw_focus(f)
+
+    def _draw_grid(self):
+        """Render grid as a single PhotoImage — O(1) canvas objects regardless of size."""
+        if not getattr(self, "_grid_on", True):
+            if hasattr(self, "_grid_item") and self._grid_item:
+                self.cv.itemconfig(self._grid_item, state="hidden")
+            return
+        W = max(1, self.cv.winfo_width())
+        H = max(1, self.cv.winfo_height())
+        stepx  = XGRID * self.zoom   # horizontal cell size
+        stepy  = YGRID * self.zoom   # vertical cell size (130px, taller than wide)
+        step   = stepx               # kept for cache key compat
+        step2  = stepx * 2
+        # Skip grid entirely at very low zoom (too dense to see anyway)
+        if XGRID * self.zoom < 4:
+            if self._grid_item: self.cv.itemconfig(self._grid_item, state="hidden")
+            return
+        elif self._grid_item:
+            self.cv.itemconfig(self._grid_item, state="normal")
+        if step < 2: step = 2
+        if step2 < 4: step2 = 4
+
+        # Build key to detect if we can reuse cached image
+        key = (int(step*4), int(self.offset[0]*4)%(int(step2*4)+1),
+               int(self.offset[1]*4)%(int(step2*4)+1), W, H)
+        if key == self._grid_key and self._grid_img:
+            return  # nothing changed — skip entirely
+
+        self._grid_key = key
+
+        # Draw grid into a raw PPM byte array — much faster than tk line-by-line
+        # Use bytearray for speed; build row by row
+        bg = ( 17,  24,  39)    # CANVAS_BG dark
+        mn = ( 30,  41,  59)    # minor grid
+        mj = ( 45,  58,  78)    # major grid (brighter)
+
+        # Pre-compute which columns are minor/major grid lines
+        stepy2 = stepy * 2
+        ox_minor = self.offset[0] % stepx
+        ox_major = self.offset[0] % step2
+        oy_minor = self.offset[1] % stepy
+        oy_major = self.offset[1] % stepy2
+
+        step_i   = max(1, int(stepx))
+        step2_i  = max(2, int(step2))
+        stepy_i  = max(1, int(stepy))
+        stepy2_i = max(2, int(stepy2))
+
+        # Build column color lookup
+        col_color = [None] * W
+        for x in range(W):
+            rx_major = (x - ox_major) % step2_i
+            rx_minor = (x - ox_minor) % step_i
+            if rx_major == 0 or rx_major == step2_i - 1:
+                col_color[x] = mj
+            elif step_i >= 20 and (rx_minor == 0 or rx_minor == step_i - 1):
+                col_color[x] = mn
+            else:
+                col_color[x] = bg
+
+        # Build row color lookup (uses YGRID spacing)
+        row_color = [None] * H
+        for y in range(H):
+            ry_major = (y - oy_major) % stepy2_i
+            ry_minor = (y - oy_minor) % stepy_i
+            if ry_major == 0 or ry_major == stepy2_i - 1:
+                row_color[y] = mj
+            elif stepy_i >= 20 and (ry_minor == 0 or ry_minor == stepy_i - 1):
+                row_color[y] = mn
+            else:
+                row_color[y] = None  # use col color
+
+        # Build PPM data
+        ppm_header = f"P6\n{W} {H}\n255\n".encode()
+        row_bytes = bytearray(W * 3)
+        rows = []
+        for y in range(H):
+            rc = row_color[y]
+            if rc:
+                # entire row is a grid line
+                for x in range(W):
+                    row_bytes[x*3]   = rc[0]
+                    row_bytes[x*3+1] = rc[1]
+                    row_bytes[x*3+2] = rc[2]
+            else:
+                for x in range(W):
+                    c = col_color[x]
+                    row_bytes[x*3]   = c[0]
+                    row_bytes[x*3+1] = c[1]
+                    row_bytes[x*3+2] = c[2]
+            rows.append(bytes(row_bytes))
+
+        ppm_data = ppm_header + b"".join(rows)
+        self._grid_img = tk.PhotoImage(data=ppm_data)
+
+        # Single canvas item for entire grid
+        if self._grid_item:
+            self.cv.itemconfig(self._grid_item, image=self._grid_img)
+            self.cv.coords(self._grid_item, 0, 0)
+        else:
+            self._grid_item = self.cv.create_image(0, 0, anchor="nw",
+                                                   image=self._grid_img, tags="grid")
+        self.cv.tag_lower("grid")
+
+    def _draw_coord_labels(self):
+        """Draw HOI4 x/y grid numbers along top and left — so you always know exact position."""
+        self.cv.delete("coord_lbl")
+        W = max(1, self.cv.winfo_width())
+        H = max(1, self.cv.winfo_height())
+        stepx = XGRID * self.zoom
+        stepy = YGRID * self.zoom
+        step  = min(stepx, stepy)   # use smaller axis for density checks
+        if step < 16: return   # too dense at low zoom
+
+        # Label every unit when zoomed in, every 2 when small
+        interval = 1 if step >= 80 else 2
+        fsz = max(7, min(10, int(step * 0.075)))
+        font = ("Courier", fsz, "bold")
+
+        # ── X axis labels (top row) ──────────────────────────
+        world_left = -self.offset[0] / (XGRID * self.zoom)
+        gx = int(world_left) - 1
+        cx = gx * XGRID * self.zoom + self.offset[0]
+        while cx < W + step:
+            if gx % interval == 0:
+                col = "#6a9a4a" if gx % 2 == 0 else "#4a6a2a"
+                # Background chip
+                self.cv.create_rectangle(cx-fsz, 1, cx+fsz, fsz*2+2,
+                    fill="#0a0e08", outline="", tags="coord_lbl")
+                self.cv.create_text(cx, fsz+1, text=str(gx),
+                    fill=col, font=font, anchor="center", tags="coord_lbl")
+            cx += XGRID * self.zoom; gx += 1
+
+        # ── Y axis labels (left column) ──────────────────────
+        world_top = -self.offset[1] / (YGRID * self.zoom)
+        gy = int(world_top) - 1
+        cy = gy * YGRID * self.zoom + self.offset[1]
+        while cy < H + step:
+            if gy % interval == 0:
+                col = "#6a9a4a" if gy % 2 == 0 else "#4a6a2a"
+                lbl = str(gy)
+                w = fsz * len(lbl)
+                self.cv.create_rectangle(1, cy-fsz, w+6, cy+fsz,
+                    fill="#0a0e08", outline="", tags="coord_lbl")
+                self.cv.create_text(w//2+3, cy, text=lbl,
+                    fill=col, font=font, anchor="center", tags="coord_lbl")
+            cy += YGRID * self.zoom; gy += 1
+
+        # ── (0,0) origin marker — bright cross so you always know the anchor ──
+        ox, oy = self.w2c(0, 0)
+        ms = max(6, int(12 * self.zoom))  # marker size
+        self.cv.create_line(ox-ms, oy, ox+ms, oy, fill="#4aaa4a", width=2,
+                            tags="coord_lbl")
+        self.cv.create_line(ox, oy-ms, ox, oy+ms, fill="#4aaa4a", width=2,
+                            tags="coord_lbl")
+        self.cv.create_text(ox+ms+3, oy-ms-3, text="(0,0)",
+                            fill="#4aaa4a", font=("Courier",8,"bold"),
+                            anchor="sw", tags="coord_lbl")
+
+        # Keep above grid image, below focuses
+        if self._grid_item:
+            try: self.cv.tag_raise("coord_lbl", "grid")
+            except: pass
+
+    def _draw_lines(self):
+        """Draw edges: solid blue elbow+arrowhead for prereqs; dashed orange for mutex."""
+        cv   = self.cv
+        half = BOX * self.zoom / 2
+        lw   = max(1, int(2.0 * self.zoom))          # line width scales with zoom
+        asz  = max(4, int(10 * self.zoom))           # arrowhead half-width
+        aht  = max(5, int(14 * self.zoom))           # arrowhead height
+
+        edges = []
+        for f in self.focuses.values():
+            for grp in f.prereqs:
+                for pid in grp:
+                    if pid in self.focuses:
+                        edges.append(("arr", pid, f.id))
+            for mid in f.mutex:
+                if mid in self.focuses and mid > f.id:
+                    edges.append(("mut", f.id, mid))
+
+        need = len(edges) * 2   # 1 line + 1 arrowhead polygon per edge
+        while len(self._lines) < need:
+            ln = cv.create_line(0,0,0,0, fill=PREREQ_COL, width=2, tags="line")
+            ar = cv.create_polygon(0,0,0,0,0,0, fill=PREREQ_COL, outline="", tags="line")
+            self._lines += [ln, ar]
+
+        for idx, (etype, aid, bid) in enumerate(edges):
+            ln, ar = self._lines[idx*2], self._lines[idx*2+1]
+            a = self.focuses[aid]; b = self.focuses[bid]
+            ax, ay = self.w2c(a.x, a.y)
+            bx, by = self.w2c(b.x, b.y)
+
+            if etype == "arr":
+                # Elbow connector: bottom of parent → midpoint → top of child
+                x0, y0 = ax, ay + half
+                x1, y1 = bx, by - half
+                mid_y  = (y0 + y1) / 2
+                cv.coords(ln, x0, y0, x0, mid_y, x1, mid_y, x1, y1)
+                # Solid filled triangle arrowhead pointing down into child
+                cv.coords(ar, x1, y1,  x1 - asz, y1 - aht,  x1 + asz, y1 - aht)
+                cv.itemconfig(ln, fill=PREREQ_COL, width=lw, dash=(), state="normal")
+                cv.itemconfig(ar, fill=PREREQ_COL, outline=PREREQ_COL, state="normal")
+            else:
+                # Mutex: dashed orange diagonal between the two focuses
+                cv.coords(ln, ax, ay, bx, by)
+                cv.coords(ar, bx, by, bx, by, bx, by)  # degenerate = invisible
+                dl = max(4, int(9 * self.zoom))
+                cv.itemconfig(ln, fill=MUTEX_COL, width=max(1, lw - 1),
+                              dash=(dl, dl), state="normal")
+                cv.itemconfig(ar, state="hidden")
+
+        for idx in range(len(edges) * 2, len(self._lines)):
+            cv.itemconfig(self._lines[idx], state="hidden")
+
+        if self._lines:
+            cv.tag_lower("line")
+            cv.tag_lower("grid")
+            # Labels sit below lines so arrows always draw on top of text
+            # Guard: tag_lower("focus_lbl","line") crashes if "line" tag has no items
+            if cv.find_withtag("focus_lbl"):
+                cv.tag_lower("focus_lbl", "line")
+
+    def _draw_focus(self, f):
+        """Create once; skip update entirely if state unchanged — near-zero cost on idle frames."""
+        cx, cy = self.w2c(f.x, f.y)
+        # No viewport culling — _draw_key cache handles performance
+        # Culling caused ghost positions when panning back into view
+        z     = self.zoom
+        slot  = XGRID * z   # horizontal slot width
+        box   = BOX   * z
+        h     = box / 2
+        sd    = max(1, int(2   * z))
+        mp    = max(1, int(2   * z))
+        cs    = max(1, int(2.0 * z))
+        ico_size = max(5, int(h * 1.0))
+        lbl_size = max(5, int(6 * z))
+        # Label sits just below the focus box
+        lbl_y    = cy + h + max(3, int(4 * z))
+
+        sel  = bool(self.selected   and self.selected.id  == f.id)
+        msel = f.id in self._multi_sel
+        con  = bool(self.conn_src   and self.conn_src.id  == f.id)
+        mut  = bool(self.mutex_mode and self.mutex_src    and self.mutex_src.id == f.id)
+
+        border_col = FC_SEL_BD if sel else ("#00e5ff" if msel else (BLUE if con else (ORANGE if mut else FC_BORDER)))
+        fill_col   = FC_SEL    if sel else ("#0a2030" if msel else FC_BG)
+        bw         = 3 if sel else (2 if msel else 1)
+
+        if z >= 1.2:    label_text = f.name
+        elif z >= 0.8:  label_text = f.name[:13] + ("..." if len(f.name)>13 else "")
+        elif z >= 0.5:  label_text = f.name[:8]  + ("..." if len(f.name)>8  else "")
+        elif z >= 0.3:  label_text = f.name[:5]  + ("..." if len(f.name)>5  else "")
+        else:           label_text = ""
+
+        # Fast-exit: skip if nothing changed since last draw
+        state_key = (round(cx,1), round(cy,1), round(h,1), sel, msel, con, mut, label_text, ico_size, lbl_size, getattr(f,"gfx",""))
+        if f._items and getattr(f, "_draw_key", None) == state_key:
+            return
+        f._draw_key = state_key
+
+        tag = "F"+str(f.id)
+        fid = f.id
+        cv  = self.cv
+
+        if not f._items:
+            # Create all items exactly once, bind events once
+            shadow   = cv.create_rectangle(0,0,1,1, outline="",         fill="#060a10",    tags=("focus",tag))
+            mat      = cv.create_rectangle(0,0,1,1, outline=FC_BORDER,  fill=BG_CARD,      tags=("focus",tag))
+            box_rect = cv.create_rectangle(0,0,1,1, outline=border_col, fill=fill_col,     tags=("focus",tag))
+            rv0      = cv.create_rectangle(0,0,1,1, fill=border_col,    outline="",        tags=("focus",tag))
+            rv1      = cv.create_rectangle(0,0,1,1, fill=border_col,    outline="",        tags=("focus",tag))
+            rv2      = cv.create_rectangle(0,0,1,1, fill=border_col,    outline="",        tags=("focus",tag))
+            rv3      = cv.create_rectangle(0,0,1,1, fill=border_col,    outline="",        tags=("focus",tag))
+            glow     = cv.create_rectangle(0,0,1,1, outline=FC_SEL_BD,  fill="", width=2,  tags=("focus",tag))
+            ico      = cv.create_text(0, 0, text=f.icon,
+                                      font=("TkDefaultFont",ico_size), fill=TEXT,           tags=("focus",tag))
+            img_item = cv.create_image(0, 0, anchor="center",                               tags=("focus",tag))
+            lbl_bg   = cv.create_rectangle(0,0,1,1, fill="#0d1525", outline="",
+                                            stipple="gray50",          tags=("focus","focus_lbl",tag))
+            lbl      = cv.create_text(0, 0, text=label_text,
+                                      font=("Helvetica",lbl_size), fill="#e2e8f0",
+                                      anchor="n",                    tags=("focus","focus_lbl",tag))
+            f._items = [shadow,mat,box_rect,rv0,rv1,rv2,rv3,glow,ico,img_item,lbl_bg,lbl]
+            for item in f._items:
+                cv.tag_bind(item,"<ButtonPress-1>",  lambda e,i=fid:self._foc_pr(i,e))
+                cv.tag_bind(item,"<B1-Motion>",       lambda e,i=fid:self._foc_mv(i,e))
+                cv.tag_bind(item,"<ButtonRelease-1>", lambda e,i=fid:self._foc_rl(i))
+                cv.tag_bind(item,"<Enter>",           lambda e,i=fid:self._foc_en(i))
+                cv.tag_bind(item,"<Leave>",           lambda e:self._hint(
+                    "Right-click canvas to place focus  •  Ctrl+drag to pan  •  Scroll to zoom"))
+
+        # Guard: recreate if item count is stale (added lbl_bg = 12 items now)
+        if len(f._items) < 12:
+            for item in f._items: cv.delete(item)
+            f._items = []; f._draw_key = None
+            self._draw_focus(f); return
+        shadow,mat,box_rect,rv0,rv1,rv2,rv3,glow,ico,img_item,lbl_bg,lbl = f._items
+
+        # Update positions (cheap coords calls, no create/delete)
+        cv.coords(shadow,   cx-h+sd, cy-h+sd, cx+h+sd, cy+h+sd)
+        cv.coords(mat,      cx-h-mp, cy-h-mp, cx+h+mp, cy+h+mp)
+        cv.coords(box_rect, cx-h,    cy-h,    cx+h,    cy+h)
+        for rv,(dx,dy) in zip((rv0,rv1,rv2,rv3),((-1,-1),(1,-1),(-1,1),(1,1))):
+            cv.coords(rv, cx+dx*h-cs, cy+dy*h-cs, cx+dx*h+cs, cy+dy*h+cs)
+        cv.coords(glow, cx-h-4, cy-h-4, cx+h+4, cy+h+4)
+        cv.coords(ico,      cx, cy)
+        cv.coords(img_item, cx, cy)
+        # Label shading background — sized to fit text with small padding
+        lbl_pad  = max(2, int(lbl_size * 0.6))
+        lbl_half = max(20, int(len(label_text) * lbl_size * 0.34))
+        cv.coords(lbl_bg, cx - lbl_half, lbl_y - lbl_pad,
+                          cx + lbl_half, lbl_y + lbl_size + lbl_pad)
+        cv.coords(lbl,      cx, lbl_y)
+
+        # Update appearance (cheap itemconfig calls)
+        cv.itemconfig(box_rect, outline=border_col, fill=fill_col, width=bw)
+        for rv in (rv0,rv1,rv2,rv3): cv.itemconfig(rv, fill=border_col)
+        cv.itemconfig(glow, state="normal" if sel else "hidden")
+        # Use mod GFX image — fixed 64px tile, cached once, no per-zoom resize
+        gfx_name = getattr(f, "gfx", "")
+        mod_img  = MOD.get_image(gfx_name) if MOD.loaded and gfx_name else None
+        if mod_img:
+            cv.itemconfig(ico,      state="hidden")
+            cv.itemconfig(img_item, image=mod_img, state="normal")
+            f._canvas_img = mod_img   # prevent GC
+        else:
+            cv.itemconfig(ico,      state="normal",
+                          text=f.icon, font=("TkDefaultFont", ico_size), fill=TEXT)
+            cv.itemconfig(img_item, state="hidden")
+        cv.itemconfig(lbl_bg, state="normal" if label_text else "hidden")
+        cv.itemconfig(lbl,  text=label_text, font=("Helvetica",lbl_size),
+                      fill="#e2e8f0", width=0, anchor="n",
+                      state="normal" if label_text else "hidden")
+
+
+    # ── MOUSE EVENTS ────────────────────────────────────────────
+    def _lmb_dn(self,e):
+        hits=self.cv.find_overlapping(e.x-2,e.y-2,e.x+2,e.y+2)
+        if not any("focus" in self.cv.gettags(i) for i in hits):
+            if not self.conn_src and not self.mutex_mode: self._deselect()
+    def _lmb_mv(self,e): pass
+    def _lmb_up(self,e): pass
+    def _pan_pr(self,e): self._pan_start=(e.x,e.y); self.cv.config(cursor="sizing")
+    def _pan_mv(self,e):
+        if not self._pan_start: return
+        dx=e.x-self._pan_start[0]; dy=e.y-self._pan_start[1]
+        self.offset[0]+=dx; self.offset[1]+=dy
+        self._pan_start=(e.x,e.y)
+        # Slide all items instantly for smooth pan feel
+        self.cv.move("focus",     dx, dy)
+        self.cv.move("line",      dx, dy)
+        self.cv.move("templine",  dx, dy)
+        self.cv.move("coord_lbl", dx, dy)
+        # Invalidate draw keys + schedule full redraw so everything is correct
+        for f in self.focuses.values(): f._draw_key = None
+        self._grid_key = None
+        self._redraw()
+    def _redraw_grid_only(self):
+        """During pan: only redraw grid + coord labels. Focus items already moved by cv.move()."""
+        if self._redraw_job: self.cv.after_cancel(self._redraw_job)
+        self._redraw_job = self.cv.after(16, self._do_grid_only)
+
+    def _do_grid_only(self):
+        self._redraw_job = None
+        self._draw_grid()
+        self._draw_coord_labels()
+        # Redraw only newly-visible focuses (those without items or with stale state)
+        cw = max(1, self.cv.winfo_width()); ch = max(1, self.cv.winfo_height())
+        mg = XGRID * self.zoom
+        self._vp = (-mg, -mg, cw+mg, ch+mg)
+        for f in self.focuses.values():
+            cx, cy = self.w2c(f.x, f.y)
+            if self._vp[0] <= cx <= self._vp[2] and self._vp[1] <= cy <= self._vp[3]:
+                if not f._items:
+                    self._draw_focus(f)
+
+    def _pan_rl(self,e):
+        self._pan_start=None; self.cv.config(cursor="fleur")
+        # Force a clean full redraw on release to fix any residual positioning
+        for f in self.focuses.values(): f._draw_key = None
+        self._redraw_now()
+
+    # ── SIDEBAR RESIZE SASH ─────────────────────────────────────
+
+    # ════════════════════════════════════════════════════════════════
+    # MOD LOADING
+    # ════════════════════════════════════════════════════════════════
+    def _load_mod_path(self, root):
+        """Load a mod directly from a known path (used by Recent Mods menu)."""
+        if not root or not os.path.isdir(root):
+            messagebox.showerror("Mod Not Found",
+                f"The folder no longer exists:\n{root}", parent=self)
+            # Remove stale entry
+            if hasattr(MOD, "_recent_mods") and root in MOD._recent_mods:
+                MOD._recent_mods.remove(root)
+                MOD.save_config()
+            return
+        # Reuse _load_mod flow by temporarily monkeypatching the dialog
+        orig = __import__("tkinter.filedialog", fromlist=["askdirectory"]).askdirectory
+        import tkinter.filedialog as _fd
+        _fd.askdirectory = lambda **kw: root
+        try:
+            self._load_mod()
+        finally:
+            _fd.askdirectory = orig
+
+    def _load_mod(self):
+        _hoi4_mod_dir = os.path.join(
+            os.path.expanduser("~"), "Documents", "Paradox Interactive",
+            "Hearts of Iron IV", "mod")
+        _custom = getattr(MOD, "custom_mod_path", "")
+        _init_dir = (_custom if _custom and os.path.isdir(_custom)
+                     else _hoi4_mod_dir if os.path.isdir(_hoi4_mod_dir)
+                     else os.path.expanduser("~"))
+        root = filedialog.askdirectory(
+            title="Select Mod Root Folder (contains common/, events/, gfx/, …)",
+            initialdir=_init_dir)
+        if not root: return
+
+        # ── Record in recent mods ─────────────────────────────────────────────
+        if not hasattr(MOD, "_recent_mods"): MOD._recent_mods = []
+        if root in MOD._recent_mods: MOD._recent_mods.remove(root)
+        MOD._recent_mods.insert(0, root)
+        MOD._recent_mods = MOD._recent_mods[:8]  # keep 8 most recent
+        MOD.save_config()
+
+        # Progress window
+        pw = tk.Toplevel(self); pw.title("Loading Mod…")
+        pw.configure(bg=BG_DARK); pw.geometry("420x140")
+        pw.resizable(False,False); pw.grab_set()
+        pw.protocol("WM_DELETE_WINDOW", lambda: None)  # block close during load
+
+        tk.Label(pw, text="Scanning mod folder…", bg=BG_DARK, fg=TEXT,
+                 font=("Helvetica",10,"bold"), pady=12).pack()
+        prog_lbl = tk.Label(pw, text="", bg=BG_DARK, fg=TEXT_DIM,
+                            font=("Helvetica",9))
+        prog_lbl.pack()
+        bar_frame = tk.Frame(pw, bg=BORDER_G, height=6, width=380)
+        bar_frame.pack(pady=8)
+        bar_fill  = tk.Frame(bar_frame, bg=BLUE, height=6, width=0)
+        bar_fill.place(x=0,y=0,height=6)
+        status_lbl = tk.Label(pw, text="", bg=BG_DARK, fg=TEXT_DIM,
+                              font=("Helvetica",8,"italic"))
+        status_lbl.pack()
+
+        def progress(i, total, label):
+            pct = int((i/total)*380) if total else 380
+            _safe_after(pw, 0, lambda i=i, t=total, l=label, p=pct: [
+                prog_lbl.config(text=f"Step {i}/{t}: {l}"),
+                bar_fill.place_configure(width=p),
+                pw.update_idletasks()
+            ])
+
+        def worker():
+            MOD.scan(root, progress_cb=progress)
+            _safe_after(pw, 0, lambda: self._on_mod_loaded(pw, root))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_mod_loaded(self, pw, root):
+        pw.grab_release(); pw.destroy()
+        mod_name = os.path.basename(root)
+        md_badge = "  ⚡MD" if MOD.is_md else ""
+        self._mod_lbl.config(
+            text="📂 %s%s  |  %s" % (mod_name, md_badge, MOD.summary()),
+            fg="#a78bfa" if MOD.is_md else GREEN)
+        self._apply_md_visibility()
+        self._refresh_mod_dropdowns()
+        self._update_statusbar()
+        # Invalidate all focus draw caches so mod images render on next frame
+        for f in self.focuses.values():
+            f._draw_key = None
+            f._items = []
+        self.cv.delete("focus")
+        self._redraw_now()
+        # Clear all wizard image caches so new mod GFX loads fresh
+        _app_img_caches.clear()
+        # Load first sprite as a quick PIL sanity check
+        test_names = list(MOD.sprites.keys())[:1]
+        for tn in test_names:
+            MOD.get_image(tn)
+
+        sample = list(MOD.sprites.keys())[:5]
+        sample_txt = "\n".join("  " + n for n in sample) if sample else "  (none — check interface/*.gfx)"
+        paths = list(MOD.sprites.values())[:50]
+        missing = sum(1 for p in paths if not os.path.exists(p))
+        disk_note = ("\n\n⚠ %d/50 sampled textures not on disk\n"
+                     "(gfx/ must be inside the mod root)" % missing) if missing else ""
+        err_note = ""
+        if MOD._img_errors:
+            err_note = "\n\n⚠ Image errors (first 3):\n" + "\n".join(MOD._img_errors[:3])
+        messagebox.showinfo("Mod Loaded",
+            "Mod: %s\n\n%s\n\nSample GFX names:\n%s%s%s" % (
+                mod_name, MOD.summary().replace("  •  ", "\n"),
+                sample_txt, disk_note, err_note))
+        # Prompt user to pick edit targets for ideas/events files
+        self.after(150, self._show_post_load_prompt)
+
+    def _show_post_load_prompt(self):
+        """Dialog to pick which existing ideas/events files to append new content to."""
+        if not (MOD.loaded and MOD.root):
+            messagebox.showinfo("No Mod", "Please load a mod first.", parent=self)
+            return
+        root = MOD.root
+        ideas_dir  = os.path.join(root, "common", "ideas")
+        events_dir = os.path.join(root, "events")
+        idea_files  = sorted([f for f in os.listdir(ideas_dir)  if f.endswith(".txt")]) if os.path.isdir(ideas_dir)  else []
+        event_files = sorted([f for f in os.listdir(events_dir) if f.endswith(".txt")]) if os.path.isdir(events_dir) else []
+
+        dlg = tk.Toplevel(self)
+        dlg.title("Set Edit Targets")
+        dlg.configure(bg=BG_DARK)
+        dlg.geometry("640x780")
+        dlg.resizable(True, True)
+        dlg.grab_set()
+
+        # ── Header ────────────────────────────────────────────────────────
+        tk.Label(dlg, text="  SET EDIT TARGETS", bg=BG_DARK, fg=TEXT,
+                 font=("Helvetica",11,"bold"), pady=10, anchor="w").pack(fill="x")
+        tk.Label(dlg,
+                 text="  Choose which existing files new content will be appended to.\n"
+                      "  New content is always placed at the END of the file — nothing existing is changed.",
+                 bg=BG_DARK, fg=TEXT_DIM, font=("Helvetica",9), justify="left", anchor="w"
+                 ).pack(fill="x", padx=10)
+        tk.Frame(dlg, bg=BORDER_G, height=1).pack(fill="x", pady=(6,0))
+
+        body = tk.Frame(dlg, bg=BG_DARK)
+        body.pack(fill="both", expand=True, padx=14, pady=10)
+
+        ideas_path_var  = tk.StringVar(value=MOD.edit_ideas_file)
+        events_path_var = tk.StringVar(value=MOD.edit_events_file)
+        loc_path_var          = tk.StringVar(value=MOD.edit_loc_file)
+        scripted_loc_path_var = tk.StringVar(value=MOD.edit_scripted_loc_file)
+
+        def _make_section(parent, title, path_var, file_list, browse_dir, browse_title,
+                          browse_ftypes=(("HOI4 txt","*.txt"),("All","*.*"))):
+            """Build a section with entry + browse + quick-pick listbox."""
+            tk.Label(parent, text=title, bg=BG_DARK, fg=TEXT,
+                     font=("Helvetica",9,"bold"), anchor="w").pack(fill="x", pady=(10,2))
+            row = tk.Frame(parent, bg=BG_DARK); row.pack(fill="x")
+            ent = tk.Entry(row, textvariable=path_var, bg=BG_CARD, fg=TEXT,
+                           insertbackground=BLUE, font=("Courier",9), relief="flat",
+                           highlightthickness=1, highlightbackground=BORDER_G)
+            ent.pack(side="left", fill="x", expand=True, ipady=3, padx=(0,4))
+            def _browse(pv=path_var, bd=browse_dir, bt=browse_title, ft=browse_ftypes):
+                p = filedialog.askopenfilename(parent=dlg, title=bt,
+                    initialdir=bd if os.path.isdir(bd) else root,
+                    filetypes=ft)
+                if p: pv.set(p)
+            tk.Button(row, text="Browse…", command=_browse,
+                      bg=BG_CARD, fg=TEXT_DIM, relief="flat",
+                      font=("Helvetica",9), cursor="hand2", padx=8, pady=3
+                      ).pack(side="right")
+            if file_list:
+                tk.Label(parent, text="  Quick-pick (double-click to select):",
+                         bg=BG_DARK, fg=TEXT_DIM, font=("Helvetica",8,"italic"), anchor="w"
+                         ).pack(fill="x", pady=(4,0))
+                lbf = tk.Frame(parent, bg=BG_DARK); lbf.pack(fill="x")
+                lb  = tk.Listbox(lbf, bg=BG_CARD, fg=TEXT_DIM,
+                                 selectbackground=SEL_BG, selectforeground=TEXT,
+                                 font=("Courier",9), height=min(4, len(file_list)),
+                                 relief="flat", bd=0, highlightthickness=1,
+                                 highlightbackground=BORDER_G, activestyle="none")
+                sb  = tk.Scrollbar(lbf, orient="vertical", command=lb.yview)
+                lb.configure(yscrollcommand=sb.set)
+                sb.pack(side="right", fill="y")
+                lb.pack(side="left", fill="x", expand=True)
+                for f in file_list:
+                    lb.insert("end", "  " + f)
+                # Highlight current selection if it matches
+                cur = os.path.basename(path_var.get())
+                for i, f in enumerate(file_list):
+                    if f == cur:
+                        lb.selection_set(i); lb.see(i); break
+                def _pick(evt, fl=file_list, bd=browse_dir, pv=path_var):
+                    s = lb.curselection()
+                    if s: pv.set(os.path.join(bd, fl[s[0]]))
+                lb.bind("<<ListboxSelect>>", _pick)
+            # Show "none set" hint if empty
+            hint_var = tk.StringVar()
+            def _update_hint(*_):
+                v = path_var.get().strip()
+                if v and os.path.isfile(v):
+                    hint_var.set("  ✓  " + os.path.basename(v))
+                elif v:
+                    hint_var.set("  ⚠  File not found — new file will be created")
+                else:
+                    hint_var.set("  —  Leave blank to create a new file on save")
+            path_var.trace_add("write", _update_hint); _update_hint()
+            tk.Label(parent, textvariable=hint_var, bg=BG_DARK, fg=TEXT_DIM,
+                     font=("Helvetica",8,"italic"), anchor="w").pack(fill="x")
+
+        _make_section(body,
+            "💡  Ideas / National Spirits file  (new spirits appended at end):",
+            ideas_path_var, idea_files, ideas_dir,
+            "Select Ideas .txt file")
+        tk.Frame(body, bg=BORDER, height=1).pack(fill="x", pady=6)
+        _make_section(body,
+            "📋  Events file  (new events appended at end, existing content untouched):",
+            events_path_var, event_files, events_dir,
+            "Select Events .txt file")
+
+        tk.Frame(body, bg=BORDER, height=1).pack(fill="x", pady=6)
+
+        # ── auto-detect loc files in the mod ──────────────────────────
+        loc_files = []
+        loc_dir = ""
+        if MOD.root and os.path.isdir(MOD.root):
+            _ld = os.path.join(MOD.root, "localisation")
+            if os.path.isdir(_ld):
+                loc_dir = _ld
+                loc_files = sorted(
+                    f for f in os.listdir(_ld)
+                    if f.lower().endswith(".yml") and "english" in f.lower()
+                )
+                if not loc_files:
+                    loc_files = sorted(f for f in os.listdir(_ld) if f.lower().endswith(".yml"))
+
+        _make_section(body,
+            "🌐  Localisation file  (new loc entries appended at end, english):",
+            loc_path_var, loc_files,
+            loc_dir or (MOD.root or ""),
+            "Select localisation .yml file",
+            browse_ftypes=(("YML localisation","*.yml"),("All","*.*")))
+
+        tk.Frame(body, bg=BORDER, height=1).pack(fill="x", pady=6)
+
+        # ── auto-detect scripted_localisation files ───────────────────
+        sloc_files = []
+        sloc_dir = ""
+        if MOD.root and os.path.isdir(MOD.root):
+            _sld = os.path.join(MOD.root, "common", "scripted_localisation")
+            if os.path.isdir(_sld):
+                sloc_dir = _sld
+                sloc_files = sorted(f for f in os.listdir(_sld) if f.lower().endswith(".txt"))
+
+        _make_section(body,
+            "📝  Scripted Localisation file  (new defined_text blocks appended):",
+            scripted_loc_path_var, sloc_files,
+            sloc_dir or (MOD.root or ""),
+            "Select scripted_localisation .txt file",
+            browse_ftypes=(("HOI4 txt","*.txt"),("All","*.*")))
+
+        # ── Bottom bar ────────────────────────────────────────────────────
+        tk.Frame(dlg, bg=BORDER_G, height=1).pack(fill="x")
+        bot = tk.Frame(dlg, bg=BG_DARK); bot.pack(fill="x", padx=14, pady=10)
+        tk.Label(bot, text="You can change these any time via  🎯 Set Edit Targets  in the toolbar.",
+                 bg=BG_DARK, fg=TEXT_DIM, font=("Helvetica",8,"italic")).pack(side="left")
+
+        def _skip():
+            dlg.grab_release(); dlg.destroy()
+
+        def _confirm():
+            MOD.edit_ideas_file  = ideas_path_var.get().strip()
+            MOD.edit_events_file = events_path_var.get().strip()
+            MOD.edit_loc_file          = loc_path_var.get().strip()
+            MOD.edit_scripted_loc_file = scripted_loc_path_var.get().strip()
+            # Auto-detect namespace from events file
+            MOD.edit_events_ns = ""
+            if MOD.edit_events_file and os.path.isfile(MOD.edit_events_file):
+                try:
+                    with open(MOD.edit_events_file,"r",encoding="utf-8",errors="replace") as f:
+                        raw = f.read(4096)
+                    m = re.search(r'add_namespace\s*=\s*(\S+)', raw)
+                    MOD.edit_events_ns = m.group(1).strip() if m else os.path.splitext(os.path.basename(MOD.edit_events_file))[0]
+                except Exception:
+                    pass
+            # Update mod label
+            parts = []
+            if MOD.edit_ideas_file:  parts.append("ideas: " + os.path.basename(MOD.edit_ideas_file))
+            if MOD.edit_events_file: parts.append("events: " + os.path.basename(MOD.edit_events_file))
+            if MOD.edit_loc_file:         parts.append("loc: " + os.path.basename(MOD.edit_loc_file))
+            if MOD.edit_scripted_loc_file: parts.append("sloc: " + os.path.basename(MOD.edit_scripted_loc_file))
+            if parts and hasattr(self, "_mod_lbl"):
+                base = self._mod_lbl.cget("text").split("  |  edit:")[0]
+                self._mod_lbl.config(text=base + "  |  edit: " + "  +  ".join(parts))
+            dlg.grab_release(); dlg.destroy()
+
+        tk.Button(bot, text="Skip", command=_skip,
+                  bg=BG_CARD, fg=TEXT_DIM, relief="flat",
+                  font=("Helvetica",10), cursor="hand2", padx=12, pady=5
+                  ).pack(side="right", padx=4)
+        tk.Button(bot, text="✓  Confirm", command=_confirm,
+                  bg="#14532d", fg="#c8f0d8", relief="flat",
+                  font=("Helvetica",10,"bold"), cursor="hand2", padx=16, pady=5
+                  ).pack(side="right")
+
+    def _refresh_mod_dropdowns(self):
+        """Update all dynamic dropdowns that depend on mod data."""
+        # Refresh the GFX picker dropdown if visible
+        if hasattr(self, "_gfx_dd") and self._gfx_dd:
+            sprite_names = sorted(MOD.sprites.keys())
+            if sprite_names:
+                menu = self._gfx_dd["menu"]
+                menu.delete(0,"end")
+                for name in sprite_names:
+                    menu.add_command(label=name,
+                        command=lambda n=name: self._set_gfx(n))
+        # Rebuild effect cards if open (they may have mod-aware dropdowns)
+        if self.selected:
+            self._refresh_effects()
+
+    # ── GFX Picker sidebar widget ────────────────────────────────────
+    def _sb_gfx_picker(self):
+        """Icon GFX name entry — plain text, no sidebar preview (shown on canvas only)."""
+        f = tk.Frame(self._sb_frm, bg=BG_PANEL); f.pack(fill="x", padx=8, pady=2)
+        tk.Label(f, text="Icon GFX name (export):", bg=BG_PANEL, fg=TEXT_DIM,
+                 font=("Helvetica",9), anchor="w").pack(fill="x")
+        row = tk.Frame(f, bg=BG_PANEL); row.pack(fill="x")
+        var = tk.StringVar(value="GFX_goal_generic_political_pressure")
+        ent = tk.Entry(row, textvariable=var, bg=BG_CARD, fg=TEXT,
+                       insertbackground=BLUE, font=("Helvetica",10),
+                       relief="flat", highlightthickness=1,
+                       highlightbackground=BORDER_G)
+        ent.pack(side="left", fill="x", expand=True, ipady=3)
+        tk.Button(row, text="⊞", command=self._open_gfx_browser,
+                  bg=BG_CARD, fg=TEXT_DIM, relief="flat",
+                  font=("Helvetica",11), cursor="hand2",
+                  highlightthickness=1, highlightbackground=BORDER_G,
+                  padx=4).pack(side="right", padx=(2,0))
+        self._gfx_dd = None
+        self._gfx_preview = None  # no sidebar preview
+        return var
+
+    def _set_gfx(self, name):
+        self._fv_gfx.set(name)
+        if self.selected:
+            self.selected.gfx = name
+            self.selected._draw_key = None
+            self._redraw_now()
+
+    def _update_gfx_preview(self, gfx_name):
+        """No sidebar preview — just invalidate canvas so icon redraws."""
+        if self.selected and getattr(self.selected, "gfx", "") != gfx_name:
+            self.selected.gfx = gfx_name
+            self.selected._draw_key = None
+            self._redraw_now()
+
+
+    def _open_gfx_browser(self):
+        """
+        Instant open: folder list shows immediately (no scanning).
+        Click folder -> file list built in background thread.
+        Scroll -> images loaded on demand per visible tile only.
+        """
+        if not MOD.loaded:
+            folder = filedialog.askdirectory(title="Select folder with icon files")
+            if folder: self._gfx_browse_files(folder)
+            return
+
+        goals_root = os.path.join(MOD.root, "gfx", "interface", "goals")
+        if not os.path.isdir(goals_root):
+            messagebox.showinfo("Not Found",
+                "Could not find gfx/interface/goals/ in mod.")
+            return
+
+        # ── Instant: just list directory names, no file counting ──
+        folders = []
+        # Loose files in goals/ root
+        loose = [f for f in os.listdir(goals_root)
+                 if f.lower().endswith((".dds",".png",".tga"))]
+        if loose:
+            folders.append(("[goals root]", goals_root))
+        # Subfolders
+        for entry in sorted(os.listdir(goals_root)):
+            full = os.path.join(goals_root, entry)
+            if os.path.isdir(full):
+                folders.append((entry, full))
+        if not folders:
+            messagebox.showinfo("No Folders",
+                "No subfolders found in gfx/interface/goals/"); return
+
+        # ── Window ────────────────────────────────────────────────
+        win = tk.Toplevel(self)
+        win.title("GFX Browser")
+        win.configure(bg=BG_DARK)
+        win.geometry("900x580")
+        win.resizable(True, True)
+
+        panes = tk.Frame(win, bg=BG_DARK)
+        panes.pack(fill="both", expand=True, padx=8, pady=8)
+
+        # Left: folder list (text only, instant)
+        lf = tk.Frame(panes, bg=BG_PANEL, width=200)
+        lf.pack(side="left", fill="y", padx=(0,6))
+        lf.pack_propagate(False)
+        tk.Label(lf, text="  FOLDERS", bg=BG_PANEL, fg=TEXT_DIM,
+                 font=("Helvetica",9,"bold"), anchor="w", pady=6).pack(fill="x")
+        tk.Frame(lf, bg=BORDER_G, height=1).pack(fill="x")
+        folder_lb = tk.Listbox(lf, bg=BG_CARD, fg=TEXT,
+                               selectbackground=BLUE, selectforeground=TEXT,
+                               font=("Courier",9), relief="flat", bd=0,
+                               activestyle="none", highlightthickness=0)
+        fsb = tk.Scrollbar(lf, orient="vertical", command=folder_lb.yview)
+        folder_lb.configure(yscrollcommand=fsb.set)
+        fsb.pack(side="right", fill="y")
+        folder_lb.pack(fill="both", expand=True, padx=2, pady=4)
+        for display, _ in folders:
+            folder_lb.insert("end", "  " + display)
+
+        # Right panel
+        rf = tk.Frame(panes, bg=BG_DARK)
+        rf.pack(side="left", fill="both", expand=True)
+
+        top_r = tk.Frame(rf, bg=BG_DARK)
+        top_r.pack(fill="x", pady=(0,6))
+        tk.Label(top_r, text="Filter:", bg=BG_DARK, fg=TEXT_DIM,
+                 font=("Helvetica",9)).pack(side="left")
+        search_var = tk.StringVar()
+        tk.Entry(top_r, textvariable=search_var, bg=BG_CARD, fg=TEXT,
+                 insertbackground=BLUE, font=("Helvetica",10),
+                 relief="flat", highlightthickness=1,
+                 highlightbackground=BORDER_G).pack(
+                     side="left", padx=6, fill="x", expand=True, ipady=3)
+        status_lbl = tk.Label(top_r, text="select a folder", bg=BG_DARK,
+                              fg=TEXT_DIM, font=("Helvetica",9))
+        status_lbl.pack(side="right", padx=6)
+
+        cv_frame = tk.Frame(rf, bg=BG_PANEL)
+        cv_frame.pack(fill="both", expand=True)
+        cv = tk.Canvas(cv_frame, bg=BG_PANEL, highlightthickness=0)
+        vsb = tk.Scrollbar(cv_frame, orient="vertical", command=cv.yview)
+        cv.configure(yscrollcommand=vsb.set)
+        vsb.pack(side="right", fill="y")
+        cv.pack(side="left", fill="both", expand=True)
+
+        # Bottom bar
+        bot = tk.Frame(win, bg=BG_DARK)
+        bot.pack(fill="x", padx=10, pady=6)
+        selected_var = tk.StringVar(value="")
+        _initial_gfx = self._fv_gfx.get()
+        tk.Label(bot, textvariable=selected_var, bg=BG_DARK,
+                 fg=BLUE, font=("Helvetica",9)).pack(side="left", padx=4)
+        tk.Button(bot, text="Cancel", command=win.destroy,
+                  bg=BG_CARD, fg=TEXT, relief="flat",
+                  font=("Helvetica",9), padx=10, pady=4,
+                  cursor="hand2").pack(side="right", padx=4)
+        def _apply():
+            self._set_gfx(selected_var.get()); win.destroy()
+        _sel_btn = tk.Button(bot, text="Select ->", command=_apply,
+                             bg="#1a3322", fg="#4b7a5e", relief="flat",
+                             font=("Helvetica",10,"bold"), padx=14, pady=5,
+                             cursor="arrow", state="disabled")
+        _sel_btn.pack(side="right")
+        def _on_sel_change(*_):
+            v = selected_var.get()
+            if v and v != _initial_gfx:
+                _sel_btn.config(bg="#14532d", fg="#0a0a0a",
+                                cursor="hand2", state="normal")
+            elif v:
+                _sel_btn.config(bg="#1e6b3a", fg="#c8f0d8",
+                                cursor="hand2", state="normal")
+            else:
+                _sel_btn.config(bg="#1a3322", fg="#4b7a5e",
+                                cursor="arrow", state="disabled")
+        selected_var.trace_add("write", _on_sel_change)
+
+        # ── Grid constants ────────────────────────────────────────
+        COLS   = 5
+        TILE_W = 110
+        TILE_H = 100
+        PAD    = 6
+
+        # ── State ─────────────────────────────────────────────────
+        _st = {
+            "pairs":      [],    # [(gfx_key, path), ...]
+            "img_cache":  {},    # path -> PhotoImage | None
+            "drawn":      set(), # indices already rendered
+            "canvas_ids": {},    # idx -> (rect_id, img_id or txt_id, lbl_id)
+            "sel_idx":    None,
+            "scan_job":   None,  # pending after() job
+            "load_gen":   None,  # background thread
+        }
+
+        def _tile_xy(idx):
+            col = idx % COLS
+            row = idx // COLS
+            return PAD + col*(TILE_W+PAD), PAD + row*(TILE_H+PAD)
+
+        def _select_tile(idx):
+            old = _st["sel_idx"]
+            if old is not None and old in _st["canvas_ids"]:
+                rid,_,_ = _st["canvas_ids"][old]
+                cv.itemconfig(rid, fill=BG_CARD, outline=BORDER_G)
+            _st["sel_idx"] = idx
+            gfx_key = _st["pairs"][idx][0]
+            selected_var.set(gfx_key)
+            if idx in _st["canvas_ids"]:
+                rid,_,_ = _st["canvas_ids"][idx]
+                cv.itemconfig(rid, fill=SEL_BG, outline=BLUE)
+
+        def _draw_tile(idx):
+            """Draw placeholder immediately; image filled in by background thread."""
+            if idx in _st["drawn"]: return
+            _st["drawn"].add(idx)
+            gfx_key, path = _st["pairs"][idx]
+            x, y = _tile_xy(idx)
+            is_sel = (gfx_key == selected_var.get())
+            rid = cv.create_rectangle(
+                x, y, x+TILE_W, y+TILE_H,
+                fill=SEL_BG if is_sel else BG_CARD,
+                outline=BLUE if is_sel else BORDER_G,
+                width=2, tags=("tile","t%d"%idx))
+            # Placeholder spinner text while image loads
+            iid = cv.create_text(
+                x+TILE_W//2, y+44, text="...", fill=TEXT_DIM,
+                font=("Helvetica",14), tags=("tile","t%d"%idx))
+            short = gfx_key.replace("GFX_focus_","").replace("GFX_goal_","")
+            short = (short[:16]+"...") if len(short)>16 else short
+            lid = cv.create_text(
+                x+TILE_W//2, y+TILE_H-14, text=short,
+                fill=TEXT_DIM, font=("Helvetica",7),
+                width=TILE_W-8, tags=("tile","t%d"%idx))
+            _st["canvas_ids"][idx] = (rid, iid, lid)
+            for item in (rid, iid, lid):
+                cv.tag_bind(item,"<Button-1>",
+                            lambda e,i=idx: _select_tile(i))
+                cv.tag_bind(item,"<Double-Button-1>",
+                            lambda e,i=idx: [_select_tile(i), _apply()])
+            # If image already cached, fill it in right now
+            if path in _st["img_cache"]:
+                _fill_image(idx)
+
+        def _fill_image(idx):
+            """Replace placeholder with actual image (called from main thread)."""
+            if idx not in _st["canvas_ids"]: return
+            rid, iid, lid = _st["canvas_ids"][idx]
+            gfx_key, path = _st["pairs"][idx]
+            img = _st["img_cache"].get(path)
+            cv.delete(iid)
+            if img:
+                new_iid = cv.create_image(
+                    _tile_xy(idx)[0]+TILE_W//2,
+                    _tile_xy(idx)[1]+44,
+                    anchor="center", image=img,
+                    tags=("tile","t%d"%idx))
+            else:
+                new_iid = cv.create_text(
+                    _tile_xy(idx)[0]+TILE_W//2,
+                    _tile_xy(idx)[1]+30,
+                    text="?", fill=TEXT_DIM,
+                    font=("Helvetica",20),
+                    tags=("tile","t%d"%idx))
+            _st["canvas_ids"][idx] = (rid, new_iid, lid)
+            for item in (rid, new_iid, lid):
+                cv.tag_bind(item,"<Button-1>",
+                            lambda e,i=idx: _select_tile(i))
+                cv.tag_bind(item,"<Double-Button-1>",
+                            lambda e,i=idx: [_select_tile(i), _apply()])
+
+        def _bg_load_images(pairs_snapshot, indices):
+            """Background: load images for given indices, post update to main thread."""
+            for idx in indices:
+                if idx >= len(pairs_snapshot): break
+                gfx_key, path = pairs_snapshot[idx]
+                if path in _st["img_cache"]: continue
+                img = None
+                try:
+                    if _PIL_OK and os.path.exists(path):
+                        pil = _PILImage.open(path).convert("RGBA")
+                        rs  = getattr(_PILImage,"LANCZOS",
+                                      getattr(_PILImage,"ANTIALIAS",1))
+                        pil = pil.resize((72,72), rs)
+                        img = _PILImageTk.PhotoImage(pil)
+                except Exception:
+                    pass
+                _st["img_cache"][path] = img
+                # Tell main thread to update this tile
+                _safe_after(win, 0, lambda i=idx: _fill_image(i))
+
+        def _lazy_fill(*_):
+            """Draw placeholders for visible tiles; kick off background image load."""
+            if not _st["pairs"]: return
+            cv.update_idletasks()
+            top    = cv.canvasy(0)
+            bottom = cv.canvasy(cv.winfo_height())
+            visible = []
+            for idx in range(len(_st["pairs"])):
+                _, ty = _tile_xy(idx)
+                if ty + TILE_H >= top and ty <= bottom:
+                    _draw_tile(idx)
+                    visible.append(idx)
+            # Background load for visible + next ~40 tiles
+            last = max(visible) if visible else 0
+            ahead = list(range(last+1, min(last+41, len(_st["pairs"]))))
+            to_load = [i for i in (visible + ahead)
+                       if _st["pairs"][i][1] not in _st["img_cache"]]
+            if to_load:
+                snapshot = list(_st["pairs"])
+                t = threading.Thread(
+                    target=_bg_load_images,
+                    args=(snapshot, to_load), daemon=True)
+                t.start()
+
+        def _rebuild(pairs):
+            cv.delete("all")
+            _st["pairs"]      = pairs
+            _st["drawn"].clear()
+            _st["canvas_ids"].clear()
+            _st["sel_idx"]    = None
+            # Keep img_cache across folders — avoids reloading same files
+            if not pairs:
+                status_lbl.config(text="0 icons"); return
+            status_lbl.config(text="%d icons" % len(pairs))
+            rows   = (len(pairs)+COLS-1)//COLS
+            total_h = PAD + rows*(TILE_H+PAD)
+            total_w = PAD + COLS*(TILE_W+PAD)
+            cv.configure(scrollregion=(0,0,total_w,total_h))
+            cv.yview_moveto(0)
+            _safe_after_idle(win, _lazy_fill)
+
+        def _collect_files(folder_path):
+            """Fast file scan — no MOD.sprites lookup, just walk the folder."""
+            pairs = []
+            ft = search_var.get().lower()
+            for root_d, dirs, fnames in os.walk(folder_path):
+                dirs.sort()
+                for fname in sorted(fnames):
+                    if not fname.lower().endswith((".dds",".png",".tga")): continue
+                    if ft and ft not in fname.lower(): continue
+                    full     = os.path.join(root_d, fname)
+                    stem     = os.path.splitext(fname)[0]
+                    gfx_key  = "GFX_focus_" + stem
+                    pairs.append((gfx_key, full))
+            return pairs
+
+        def _load_folder(folder_path):
+            status_lbl.config(text="scanning...")
+            win.update_idletasks()
+            # Collect file list (fast — just filenames, no image loading)
+            pairs = _collect_files(folder_path)
+            _rebuild(pairs)
+
+        def _on_folder_select(evt):
+            sel = folder_lb.curselection()
+            if not sel: return
+            _load_folder(folders[sel[0]][1])
+
+        cv.bind("<Configure>", lambda e: _safe_after_idle(win, _lazy_fill))
+        for ev in ("<MouseWheel>","<Button-4>","<Button-5>"):
+            cv.bind(ev, lambda e: [
+                cv.yview_scroll(-1 if (e.delta>0 or e.num==4) else 1, "units"),
+                _safe_after_idle(win, _lazy_fill)])
+        folder_lb.bind("<<ListboxSelect>>", _on_folder_select)
+        search_var.trace_add("write", lambda *_: _safe_after(win, 300,
+            lambda: _on_folder_select(None) if folder_lb.curselection() else None))
+
+        # Auto-select first folder
+        if folders:
+            folder_lb.selection_set(0)
+            _load_folder(folders[0][1])
+
+    def _gfx_browse_files(self, folder):
+        """Fallback lazy browser — no mod loaded."""
+        all_files = sorted(
+            (f, os.path.join(folder,f)) for f in os.listdir(folder)
+            if f.lower().endswith((".dds",".png",".tga")))
+        if not all_files:
+            messagebox.showinfo("No Files","No .dds/.png/.tga files found.")
+            return
+        pairs = [("GFX_focus_"+os.path.splitext(f)[0], p) for f,p in all_files]
+        COLS=5; TILE_W=110; TILE_H=100; PAD=6
+        win = tk.Toplevel(self)
+        win.title("GFX Browser"); win.configure(bg=BG_DARK); win.geometry("700x480")
+        cvf = tk.Frame(win, bg=BG_PANEL)
+        cvf.pack(fill="both", expand=True, padx=8, pady=8)
+        cv  = tk.Canvas(cvf, bg=BG_PANEL, highlightthickness=0)
+        vsb = tk.Scrollbar(cvf, orient="vertical", command=cv.yview)
+        cv.configure(yscrollcommand=vsb.set)
+        vsb.pack(side="right", fill="y"); cv.pack(fill="both", expand=True)
+        rows=(len(pairs)+COLS-1)//COLS
+        cv.configure(scrollregion=(0,0,PAD+COLS*(TILE_W+PAD),PAD+rows*(TILE_H+PAD)))
+        selected_var = tk.StringVar(value=self._fv_gfx.get())
+        bot = tk.Frame(win,bg=BG_DARK); bot.pack(fill="x",padx=8,pady=6)
+        tk.Label(bot,textvariable=selected_var,bg=BG_DARK,fg=BLUE,
+                 font=("Helvetica",9)).pack(side="left")
+        tk.Button(bot,text="Cancel",command=win.destroy,bg=BG_CARD,fg=TEXT,
+                  relief="flat",font=("Helvetica",9),padx=10,pady=4,
+                  cursor="hand2").pack(side="right",padx=4)
+        def _apply():
+            self._set_gfx(selected_var.get()); win.destroy()
+        tk.Button(bot,text="Select ->",command=_apply,bg="#14532d",fg="#0a0a0a",
+                  relief="flat",font=("Helvetica",10,"bold"),padx=14,pady=5,
+                  cursor="hand2").pack(side="right")
+        _cache={}; _drawn=set(); _ids={}
+        def _txy(i): return PAD+(i%COLS)*(TILE_W+PAD), PAD+(i//COLS)*(TILE_H+PAD)
+        def _fill(idx):
+            if idx not in _ids: return
+            rid,iid,lid = _ids[idx]
+            gfx_key,path = pairs[idx]
+            img = _cache.get(path)
+            cv.delete(iid)
+            x,y = _txy(idx)
+            if img:
+                n=cv.create_image(x+TILE_W//2,y+44,anchor="center",image=img,tags="tile")
+            else:
+                n=cv.create_text(x+TILE_W//2,y+30,text="?",fill=TEXT_DIM,
+                                  font=("Helvetica",20),tags="tile")
+            _ids[idx]=(rid,n,lid)
+            for item in (rid,n,lid):
+                cv.tag_bind(item,"<Button-1>",lambda e,k=gfx_key:selected_var.set(k))
+                cv.tag_bind(item,"<Double-Button-1>",lambda e,k=gfx_key:[selected_var.set(k),_apply()])
+        def _draw(idx):
+            if idx in _drawn: return
+            _drawn.add(idx)
+            gfx_key,path = pairs[idx]
+            x,y = _txy(idx)
+            rid=cv.create_rectangle(x,y,x+TILE_W,y+TILE_H,fill=BG_CARD,
+                                     outline=BORDER_G,width=2,tags="tile")
+            iid=cv.create_text(x+TILE_W//2,y+44,text="...",fill=TEXT_DIM,
+                                font=("Helvetica",14),tags="tile")
+            short=gfx_key.replace("GFX_focus_",""); short=(short[:16]+"...") if len(short)>16 else short
+            lid=cv.create_text(x+TILE_W//2,y+TILE_H-14,text=short,fill=TEXT_DIM,
+                                font=("Helvetica",7),width=TILE_W-8,tags="tile")
+            _ids[idx]=(rid,iid,lid)
+            if path in _cache: _fill(idx)
+            for item in (rid,iid,lid):
+                cv.tag_bind(item,"<Button-1>",lambda e,k=gfx_key:selected_var.set(k))
+                cv.tag_bind(item,"<Double-Button-1>",lambda e,k=gfx_key:[selected_var.set(k),_apply()])
+        def _bg(snap,idxs):
+            for i in idxs:
+                if i>=len(snap): break
+                _,path=snap[i]
+                if path in _cache: continue
+                img=None
+                try:
+                    if _PIL_OK and os.path.exists(path):
+                        pil=_PILImage.open(path).convert("RGBA")
+                        rs=getattr(_PILImage,"LANCZOS",getattr(_PILImage,"ANTIALIAS",1))
+                        pil=pil.resize((72,72),rs); img=_PILImageTk.PhotoImage(pil)
+                except Exception: pass
+                _cache[path]=img
+                _safe_after(win, 0, lambda x=i: _fill(x))
+        def _lazy(*_):
+            top=cv.canvasy(0); bot_y=cv.canvasy(cv.winfo_height())
+            vis=[]
+            for i in range(len(pairs)):
+                _,ty=_txy(i)
+                if ty+TILE_H>=top and ty<=bot_y: _draw(i); vis.append(i)
+            last=max(vis) if vis else 0
+            ahead=list(range(last+1,min(last+41,len(pairs))))
+            to_load=[i for i in vis+ahead if pairs[i][1] not in _cache]
+            if to_load:
+                t=threading.Thread(target=_bg,args=(list(pairs),to_load),daemon=True)
+                t.start()
+        cv.bind("<Configure>",lambda e:_safe_after_idle(win,_lazy))
+        for ev in ("<MouseWheel>","<Button-4>","<Button-5>"):
+            cv.bind(ev,lambda e:[cv.yview_scroll(-1 if (e.delta>0 or e.num==4) else 1,"units"),_safe_after_idle(win,_lazy)])
+        _safe_after_idle(win,_lazy)
+
+    def _mod_autocomplete(self, parent, var, get_choices, label_text, hint=""):
+        """Entry with live autocomplete dropdown from mod data."""
+        f = tk.Frame(parent, bg=BG_CARD); f.pack(fill="x", padx=4, pady=1)
+        tk.Label(f, text=label_text+":", bg=BG_CARD, fg=TEXT_DIM,
+                 font=("Helvetica",9), width=10, anchor="w").pack(side="left")
+        ent = tk.Entry(f, textvariable=var, bg=BG_CARD, fg=TEXT,
+                       insertbackground=BLUE, font=("Helvetica",10),
+                       relief="flat", highlightthickness=1,
+                       highlightbackground=BORDER_G)
+        ent.pack(side="left", fill="x", expand=True, ipady=2, padx=2)
+
+        # Dropdown listbox popup
+        _popup = [None]
+        def _show_popup(*_):
+            q = var.get().lower()
+            choices = [c for c in get_choices() if q in c.lower()][:40]
+            if not choices:
+                _hide_popup(); return
+            if _popup[0] and _popup[0].winfo_exists():
+                _popup[0].destroy()
+            pw = tk.Toplevel(self)
+            pw.wm_overrideredirect(True)
+            pw.configure(bg=BORDER_G)
+            # Position below entry
+            ent.update_idletasks()
+            x = ent.winfo_rootx()
+            y = ent.winfo_rooty() + ent.winfo_height() + 1
+            w = max(ent.winfo_width(), 240)
+            pw.geometry(f"{w}x{min(len(choices)*22,200)}+{x}+{y}")
+            lb = tk.Listbox(pw, bg=BG_CARD, fg=TEXT, selectbackground=BLUE,
+                            font=("Courier",9), relief="flat", bd=0,
+                            activestyle="none", cursor="hand2")
+            lb.pack(fill="both", expand=True)
+            for c in choices: lb.insert("end", c)
+            def _pick(e):
+                sel = lb.curselection()
+                if sel:
+                    var.set(lb.get(sel[0]))
+                _hide_popup()
+            lb.bind("<ButtonRelease-1>", _pick)
+            lb.bind("<Return>", _pick)
+            _popup[0] = pw
+
+        def _hide_popup(*_):
+            if _popup[0] and _popup[0].winfo_exists():
+                _popup[0].destroy()
+            _popup[0] = None
+
+        ent.bind("<KeyRelease>", _show_popup)
+        ent.bind("<FocusOut>",   lambda e: self.after(150, _hide_popup))
+        ent.bind("<Escape>",     _hide_popup)
+
+        if hint:
+            hl = tk.Label(f, text="?", bg=BG_CARD, fg=TEXT_DIM,
+                          font=("Helvetica",8), cursor="question_arrow")
+            hl.pack(side="right", padx=2)
+            hl.bind("<Enter>", lambda e: self._hint(hint))
+            hl.bind("<Leave>", lambda e: self._hint(
+                "Right-click canvas to place focus  •  Ctrl+drag to pan  •  Scroll to zoom"))
+        return var
+
+    def _attach_autocomplete(self, entry_widget, var, get_choices_fn):
+        """Attach a live autocomplete popup to any Entry widget."""
+        _popup = [None]
+
+        def _show(*_):
+            if _popup[0] and _popup[0].winfo_exists():
+                _popup[0].destroy()
+            q = var.get().lower()
+            choices = [c for c in get_choices_fn() if q in c.lower()][:50]
+            if not choices: return
+            pw = tk.Toplevel(self)
+            pw.wm_overrideredirect(True)
+            pw.configure(bg=BORDER_G)
+            entry_widget.update_idletasks()
+            x = entry_widget.winfo_rootx()
+            y = entry_widget.winfo_rooty() + entry_widget.winfo_height() + 1
+            w = max(entry_widget.winfo_width(), 260)
+            h = min(len(choices)*22 + 4, 220)
+            pw.geometry(f"{w}x{h}+{x}+{y}")
+            pw.lift()
+            lb = tk.Listbox(pw, bg=BG_CARD, fg=TEXT, selectbackground=BLUE,
+                            font=("Courier",9), relief="flat", bd=1,
+                            activestyle="none", cursor="hand2",
+                            selectforeground=TEXT)
+            sb = tk.Scrollbar(pw, orient="vertical", command=lb.yview)
+            lb.configure(yscrollcommand=sb.set)
+            sb.pack(side="right", fill="y")
+            lb.pack(fill="both", expand=True)
+            for c in choices: lb.insert("end", c)
+
+            def _pick(e=None):
+                sel = lb.curselection()
+                if sel: var.set(lb.get(sel[0]))
+                _hide()
+            def _hide(*_):
+                if _popup[0] and _popup[0].winfo_exists():
+                    _popup[0].destroy()
+                _popup[0] = None
+
+            lb.bind("<ButtonRelease-1>", _pick)
+            lb.bind("<Return>",          _pick)
+            pw.bind("<Escape>",          _hide)
+            _popup[0] = pw
+
+        def _hide(*_):
+            _safe_after(self, 150, lambda: _popup[0].destroy() if _popup[0] and _popup[0].winfo_exists() else None)
+            _popup[0] = None
+
+        entry_widget.bind("<KeyRelease>", _show)
+        entry_widget.bind("<FocusOut>",   _hide)
+
+    def _get_mod_suggestions(self, etype, fname):
+        """Return a list of mod-aware suggestions for a given effect+field."""
+        if not MOD.loaded: return []
+        # Events
+        if etype in ("country_event","news_event") and fname == "id":
+            ids = []
+            for lst in MOD.event_ids.values(): ids.extend(lst)
+            return sorted(set(ids))
+        # Ideas
+        if etype in ("add_ideas","remove_ideas") and fname == "idea_name":
+            return sorted(MOD.idea_ids)
+        if etype == "swap_ideas" and fname in ("remove_idea","add_idea"):
+            return sorted(MOD.idea_ids)
+        if etype == "add_timed_idea" and fname == "idea":
+            return sorted(MOD.idea_ids)
+        # Dynamic modifiers
+        if etype in ("add_dynamic_modifier","remove_dynamic_modifier") and fname == "modifier":
+            return sorted(MOD.dyn_mod_ids)
+        if etype == "custom_effect_tooltip_block" and fname == "MODIFIER":
+            return sorted(MOD.dyn_mod_ids)
+        # Decisions
+        if "decision_category" in fname or (etype == "unlock_decision_category_tooltip" and fname == "category"):
+            return sorted(MOD.decision_cats)
+        if "decision" in fname or (etype == "unlock_decision_tooltip" and fname == "decision"):
+            return sorted(MOD.decision_ids)
+        # add_to_variable / set_variable — variable names
+        if etype in ("add_to_variable","set_variable") and fname in ("variable","var_name"):
+            return sorted(MOD.variables)
+        # Country tags
+        if fname in ("target","country","tag","producer") and etype not in ("add_tech_bonus",):
+            return sorted(MOD.country_tags)
+        # Focus IDs
+        if fname == "focus_id" or (etype == "complete_national_focus" and fname == "focus_id"):
+            return sorted(MOD.focus_ids)
+        return []
+
+    def _sash_pr(self,e): self._sash_x=e.x_root
+    def _sash_mv(self,e):
+        dx=self._sash_x-e.x_root   # dragging left = wider sidebar
+        self._sash_x=e.x_root
+        new_w=max(260,min(700,self._sb_width+dx))
+        if new_w!=self._sb_width:
+            self._sb_width=new_w
+            self._sb_frame.config(width=new_w)
+    def _sash_rl(self,e): pass
+    def _scroll(self,e):
+        f=1.1 if(e.num==4 or e.delta>0)else 0.9; old=self.zoom
+        self.zoom=max(0.10,min(4.0,self.zoom*f))
+        self.offset[0]=e.x-(e.x-self.offset[0])*(self.zoom/old)
+        self.offset[1]=e.y-(e.y-self.offset[1])*(self.zoom/old); self._redraw_now()
+        self._update_statusbar()
+    def _rmb(self,e):
+        hits=self.cv.find_overlapping(e.x-2,e.y-2,e.x+2,e.y+2)
+        if any("focus" in self.cv.gettags(i) for i in hits): return
+        gx,gy=self.c2w(e.x,e.y)
+        if any(f.x==gx and f.y==gy for f in self.focuses.values()): return
+        self._new_focus_at(gx,gy)
+    def _motion(self,e):
+        if not self._drag:
+            gx,gy = self.c2w(e.x,e.y)
+            self._coord_lbl.config(text=f"  x={gx}  y={gy}  ")
+        if self._temp_line:
+            src=self.conn_src or self.mutex_src
+            if src:
+                cx,cy=self.w2c(src.x,src.y)
+                self.cv.coords(self._temp_line,cx,cy,e.x,e.y)
+    def _foc_pr(self,fid,e):
+        f=self.focuses[fid]
+        if self.conn_src:
+            if self.conn_src.id!=fid: self._make_prereq(self.conn_src,f)
+            self._end_connect(); return
+        if self.mutex_mode:
+            if self.mutex_src.id!=fid: self._make_mutex(self.mutex_src,f)
+            self._end_mutex(); return
+        # Ctrl+click = toggle multi-select
+        if self._multisel_mode or (e.state & 0x0004):  # 0x0004 = Ctrl held
+            if fid in self._multi_sel:
+                self._multi_sel.discard(fid)
+            else:
+                self._multi_sel.add(fid)
+            self._redraw(); return
+        self._drag={"id":fid,"sx":f.x,"sy":f.y,"cx":e.x,"cy":e.y,
+                    "moved":False,"last_snap":(f.x,f.y)}
+        self._select(f)
+
+    def _foc_mv(self,fid,e):
+        d=self._drag
+        if not d or d.get("id")!=fid or self.conn_src or self.mutex_mode: return
+        dx=e.x-d["cx"]; dy=e.y-d["cy"]
+        if abs(dx)>4 or abs(dy)>4: d["moved"]=True
+        if not d["moved"]: return
+        f=self.focuses[fid]
+        ngx = round(d["sx"] + dx/(XGRID*self.zoom))
+        ngy = round(d["sy"] + dy/(YGRID*self.zoom))
+        if (ngx,ngy)==d["last_snap"]: return
+        if any(o.x==ngx and o.y==ngy and o.id!=fid for o in self.focuses.values()): return
+        old_cx,old_cy = self.w2c(f.x,f.y)
+        f.x,f.y = ngx,ngy
+        new_cx,new_cy = self.w2c(f.x,f.y)
+        px,py = new_cx-old_cx, new_cy-old_cy
+        for item in f._items:
+            self.cv.move(item, px, py)
+        d["last_snap"]=(ngx,ngy)
+        self._fv_x.set(str(ngx)); self._fv_y.set(str(ngy))
+        self._hint(f"Dragging {self.focuses[fid].name}  →  x={ngx}  y={ngy}")
+        self._draw_lines()
+
+    def _foc_rl(self,fid):
+        if self._drag.get("moved"):
+            self._redraw()   # final clean redraw on release
+        self._drag={}
+    def _foc_en(self,fid):
+        f=self.focuses[fid]
+        self._hint(f"{f.name}  •  Cost:{f.cost}  •  Effects:{len(f.effects)}  •  Prereqs:{sum(len(g) for g in f.prereqs)}")
+
+    # ── SELECTION ───────────────────────────────────────────────
+    def _on_icon_change(self,*_):
+        if not self.selected: return
+        self.selected.icon=self._fv_icon.get(); self.selected._draw_key=None; self._redraw_now()
+
+    def _autosave(self):
+        if not self.selected: return
+        f=self.selected; raw=self._fv_name.get().strip()
+        if not raw: return
+        try:
+            f.name=re.sub(r"[^A-Za-z0-9_]","_",raw); f.icon=self._fv_icon.get()
+            f.gfx=self._fv_gfx.get().strip() or "GFX_goal_generic_political_pressure"
+            f.cost=int(self._fv_cost.get())
+            raw_ai = self._fv_ai_raw.get("1.0","end").strip()
+            f.ai_will_do_raw = raw_ai
+            # Extract base value for display
+            import re as _re
+            m = _re.search(r"base\s*=\s*([\d.]+)", raw_ai)
+            f.ai_will_do = int(float(m.group(1))) if m else 1
+            nx=int(self._fv_x.get()); ny=int(self._fv_y.get())
+            if not any(o.x==nx and o.y==ny and o.id!=f.id for o in self.focuses.values()): f.x=nx; f.y=ny
+            f.desc=self._fv_desc.get("1.0","end").strip()
+            f.search_filters=self._fv_search.get().strip() or "FOCUS_FILTER_POLITICAL"
+            f.available_cond=self._fv_avail.get("1.0","end").strip()
+            f.bypass_cond   =self._fv_bypass.get("1.0","end").strip()
+            f.cancel_cond   =self._fv_cancel2.get("1.0","end").strip()
+            f.cancel_if_invalid=self._fv_cancel.get(); f.continue_if_invalid=self._fv_continue.get()
+            f.available_if_capitulated=self._fv_cap.get(); f._draw_key=None
+        except (ValueError, Exception): pass
+
+    def _select(self,f):
+        if self.selected and self.selected.id!=f.id: self._autosave()
+        self.selected=f; self._redraw(); self._show_form(); self._populate(f)
+        self._update_focus_list_selection(); self._update_statusbar()
+    def _deselect(self):
+        self.selected=None; self._hide_form(); self._redraw()
+    def _populate(self,f):
+        self._fv_name.set(f.name)
+        self._fv_icon.set(f.icon)
+        gfx = getattr(f, "gfx", "GFX_goal_generic_political_pressure")
+        self._fv_gfx.set(gfx)
+        self._fv_x.set(str(f.x)); self._fv_y.set(str(f.y))
+        self._fv_cost.set(str(f.cost))
+        self._fv_ai_raw.delete("1.0", "end")
+        raw = getattr(f, "ai_will_do_raw", "").strip()
+        if raw:
+            self._fv_ai_raw.insert("1.0", raw)
+        else:
+            self._fv_ai_raw.insert("1.0", "    base = %s" % f.ai_will_do)
+        self._fv_desc.delete("1.0","end"); self._fv_desc.insert("1.0",f.desc)
+        self._fv_search.set(getattr(f,"search_filters","FOCUS_FILTER_POLITICAL"))
+        for tv,attr in [(self._fv_avail,"available_cond"),(self._fv_bypass,"bypass_cond"),(self._fv_cancel2,"cancel_cond")]:
+            tv.delete("1.0","end"); tv.insert("1.0",getattr(f,attr,""))
+        self._fv_cancel.set(f.cancel_if_invalid)
+        self._fv_continue.set(f.continue_if_invalid)
+        self._fv_cap.set(f.available_if_capitulated)
+        self._refresh_prereqs(); self._refresh_mutex(); self._refresh_effects()
+        self._refresh_code_tab(f)
+
+    def _refresh_code_tab(self, f):
+        """Update the Code tab live preview for focus f."""
+        if not hasattr(self, "_code_txt"): return
+        if self._code_edit_mode[0]: return
+        out = self._build_focus_code(f)
+        self._code_txt.config(state="normal")
+        self._code_txt.delete("1.0","end")
+        self._code_txt.insert("1.0", out)
+        self._code_txt.config(state="disabled")
+
+    def _build_focus_code(self, f):
+        """Render a single focus block as HOI4 script (used by Code tab)."""
+        I = "\t\t"
+        out = ["focus = {",
+               f"{I}id = {f.name}",
+               f"{I}icon = {getattr(f,'gfx','GFX_goal_generic_political_pressure')}",
+               ""]
+        rel_id = getattr(f, "relative_position_id", None)
+        if rel_id and any(foc.name == rel_id for foc in self.focuses.values()):
+            parent = next((foc for foc in self.focuses.values() if foc.name == rel_id), None)
+            if parent:
+                out += [f"{I}x = {f.x - parent.x}",
+                        f"{I}y = {f.y - parent.y}",
+                        f"{I}relative_position_id = {rel_id}"]
+        else:
+            out += [f"{I}x = {f.x}", f"{I}y = {f.y}"]
+        out += ["", f"{I}cost = {f.cost}", ""]
+        for grp in f.prereqs:
+            valid = [p for p in grp if p in self.focuses]
+            if valid:
+                inner = " ".join(f"focus = {self.focuses[p].name}" for p in valid)
+                out.append(f"\t\tprerequisite = {{ {inner} }}")
+        for mid in f.mutex:
+            if mid in self.focuses:
+                out.append(f"\t\tmutually_exclusive = {{ focus = {self.focuses[mid].name} }}")
+        sf = getattr(f, "search_filters","").strip()
+        if sf and sf != "FOCUS_FILTER_POLITICAL":
+            out.append(f"{I}search_filters = {{ {sf} }}")
+        avail = getattr(f,"available_cond","").strip()
+        if avail:
+            out.append(f"{I}available = {{")
+            for ln in avail.splitlines(): out.append(f"{I}\t{ln.strip()}")
+            out.append(f"{I}}}")
+        if not f.cancel_if_invalid:
+            out.append(f"{I}cancel_if_invalid = no")
+        if f.continue_if_invalid:
+            out.append(f"{I}continue_if_invalid = yes")
+        if f.available_if_capitulated:
+            out.append(f"{I}available_if_capitulated = yes")
+        out += ["", f"{I}completion_reward = {{"]
+        if f.effects:
+            for eff in f.effects:
+                out.append(self._render_effect(eff))
+        else:
+            out.append(f"{I}\t# add effects here")
+        out.append(f"{I}}}")
+        raw_ai = getattr(f,"ai_will_do_raw","").strip()
+        out += ["", f"{I}ai_will_do = {{",
+                f"{I}\t{raw_ai}" if raw_ai else f"{I}\tbase = {f.ai_will_do}",
+                f"{I}}}", "}"]
+        return "\n".join(out)
+    def _refresh_prereqs(self):
+        for w in self._prereq_box.winfo_children(): w.destroy()
+        if not self.selected or not self.selected.prereqs:
+            tk.Label(self._prereq_box,text="None",bg=BG_PANEL,fg=TEXT_DIM,font=("Helvetica",9,"italic")).pack(anchor="w"); return
+        for gi,grp in enumerate(self.selected.prereqs):
+            names=[self.focuses[p].name if p in self.focuses else f"?{p}" for p in grp]
+            row=tk.Frame(self._prereq_box,bg=BG_CARD,highlightthickness=1,highlightbackground=BORDER); row.pack(fill="x",pady=1)
+            tk.Label(row,text="AND: "+" OR ".join(names),bg=BG_CARD,fg=TEXT,font=("Helvetica",9),anchor="w",padx=4).pack(side="left",fill="x",expand=True)
+            tk.Button(row,text="✕",command=lambda g=gi:self._rm_prereq(g),bg=BG_CARD,fg=RED,relief="flat",font=("Georgia",8),cursor="hand2",padx=3).pack(side="right")
+    def _refresh_mutex(self):
+        for w in self._mutex_box.winfo_children(): w.destroy()
+        if not self.selected or not self.selected.mutex:
+            tk.Label(self._mutex_box,text="None",bg=BG_PANEL,fg=TEXT_DIM,font=("Georgia",9,"italic")).pack(anchor="w"); return
+        for i,mid in enumerate(self.selected.mutex):
+            name=self.focuses[mid].name if mid in self.focuses else f"?{mid}"
+            row=tk.Frame(self._mutex_box,bg=BG_CARD,highlightthickness=1,highlightbackground="#5a2020"); row.pack(fill="x",pady=1)
+            tk.Label(row,text=f"✖ {name}",bg=BG_CARD,fg=ORANGE,font=("Georgia",8),anchor="w",padx=4).pack(side="left",fill="x",expand=True)
+            tk.Button(row,text="✕",command=lambda idx=i:self._rm_mutex(idx),bg=BG_CARD,fg=RED,relief="flat",font=("Georgia",8),cursor="hand2",padx=3).pack(side="right")
+
+    def _refresh_effects(self):
+        for w in self._eff_box.winfo_children(): w.destroy()
+        if not self.selected or not self.selected.effects:
+            tk.Label(self._eff_box,text="None",bg=BG_PANEL,fg=TEXT_DIM,font=("Helvetica",9,"italic")).pack(anchor="w"); return
+        for i,eff in enumerate(self.selected.effects): self._draw_eff_card(i,eff)
+
+    def _draw_eff_card(self,i,eff):
+        etype=eff.get("type",""); defn=EFFECT_DEFS.get(etype,{})
+        known = bool(defn)
+        label=defn.get("label",etype) if known else etype
+        cat  =defn.get("cat","raw")   if known else "raw"
+        hdr_bg = "#0d1117" if known else "#1a1020"
+        lbl_fg = TEXT_DIM  if known else ORANGE
+
+        ef=tk.Frame(self._eff_box,bg=BG_CARD,highlightthickness=1,
+                    highlightbackground=BORDER_G if known else ORANGE)
+        ef.pack(fill="x",pady=3)
+        hdr=tk.Frame(ef,bg=hdr_bg); hdr.pack(fill="x")
+        tk.Label(hdr,text=f"[{cat}]  {label}",bg=hdr_bg,fg=lbl_fg,
+                 font=("Helvetica",9,"bold"),anchor="w",padx=6).pack(side="left",fill="x",expand=True)
+        tk.Button(hdr,text="✕",command=lambda idx=i:self._rm_effect(idx),
+                  bg=hdr_bg,fg=RED,relief="flat",font=("Georgia",9),
+                  cursor="hand2",padx=4).pack(side="right")
+
+        def _entry_row(parent, key, val, idx, fkey):
+            """Render an editable key=value row."""
+            row=tk.Frame(parent,bg=BG_CARD); row.pack(fill="x",padx=4,pady=1)
+            # key label (editable only for raw effects)
+            if not known:
+                kvar=tk.StringVar(value=key)
+                ke=tk.Entry(row,textvariable=kvar,bg=BG_CARD,fg=TEXT_DIM,
+                            insertbackground=BLUE,font=("Courier",9),relief="flat",
+                            highlightthickness=1,highlightbackground=BORDER_G,width=12)
+                ke.pack(side="left",ipady=2,padx=(0,2))
+                def _on_key_change(*a,old=key,kv=kvar,efidx=idx):
+                    if self.selected and efidx<len(self.selected.effects):
+                        fields=self.selected.effects[efidx].setdefault("fields",{})
+                        if old in fields:
+                            fields[kv.get()]=fields.pop(old)
+                kvar.trace_add("write",_on_key_change)
+            else:
+                tk.Label(row,text=f"{key}:",bg=BG_CARD,fg=TEXT_DIM,
+                         font=("Georgia",8),width=14,anchor="w").pack(side="left")
+            # value entry
+            vvar=tk.StringVar(value=str(val) if not isinstance(val,dict) else json.dumps(val))
+            ve=tk.Entry(row,textvariable=vvar,bg=BG_CARD,fg=TEXT,
+                        insertbackground=BLUE,font=("Helvetica",10),relief="flat",
+                        highlightthickness=1,highlightbackground=BORDER_G)
+            ve.pack(side="left",fill="x",expand=True,ipady=2,padx=2)
+            vvar.trace_add("write",lambda *a,efidx=idx,fn=fkey,v=vvar:
+                           self._live_eff_field(efidx,fn,v))
+
+        if known:
+            # Render structured fields from EFFECT_DEFS
+            for fname,wtype,default,hint in defn.get("fields",[]):
+                saved=eff.get("fields",{}).get(fname,default)
+                ff=tk.Frame(ef,bg=BG_CARD); ff.pack(fill="x",padx=6,pady=1)
+                tk.Label(ff,text=f"{fname}:",bg=BG_CARD,fg=TEXT_DIM,
+                         font=("Helvetica",9),width=10,anchor="w").pack(side="left")
+                if wtype=="multiline":
+                    t=tk.Text(ff,bg=BG_CARD,fg=TEXT,insertbackground=BLUE,
+                              font=("Courier",10),relief="flat",
+                              highlightthickness=1,highlightbackground=BORDER_G,height=4,wrap="none")
+                    t.insert("1.0",saved); t.pack(side="left",fill="x",expand=True,ipady=2)
+                    t.bind("<KeyRelease>",lambda e,idx=i,fn=fname,tw=t:self._live_eff_text(idx,fn,tw))
+                elif wtype.startswith("dropdown:"):
+                    opts=wtype.split(":")[1].split(",")
+                    var=tk.StringVar(value=saved if saved in opts else opts[0])
+                    om=tk.OptionMenu(ff,var,*opts)
+                    om.config(bg=BG_CARD,fg=TEXT,activebackground=BORDER_G,font=("Helvetica",9),
+                              relief="flat",highlightthickness=1,highlightbackground=BORDER_G,
+                              anchor="w")
+                    om["menu"].config(bg=BG_CARD,fg=TEXT,activebackground=BORDER_G,font=("Helvetica",9))
+                    om.pack(side="left",padx=2,fill="x",expand=True)
+                    var.trace_add("write",lambda *a,idx=i,fn=fname,v=var:self._live_eff_field(idx,fn,v))
+                else:
+                    var=tk.StringVar(value=saved)
+                    suggestions = self._get_mod_suggestions(etype, fname)
+                    ent=tk.Entry(ff,textvariable=var,bg=BG_CARD,fg=TEXT,insertbackground=BLUE,
+                             font=("Helvetica",10),relief="flat",highlightthickness=1,
+                             highlightbackground=BORDER_G)
+                    ent.pack(side="left",padx=2,ipady=2,fill="x",expand=True)
+                    var.trace_add("write",lambda *a,idx=i,fn=fname,v=var:self._live_eff_field(idx,fn,v))
+                    # Wire autocomplete if mod has data for this field
+                    if suggestions or MOD.loaded:
+                        self._attach_autocomplete(ent, var, lambda et=etype,fn=fname: self._get_mod_suggestions(et,fn))
+                if hint:
+                    hl=tk.Label(ff,text="?",bg=BG_CARD,fg=TEXT_DIM,font=("Helvetica",8),cursor="question_arrow")
+                    hl.pack(side="left",padx=2)
+                    hl.bind("<Enter>",lambda e,h=hint:self._hint(h))
+                    hl.bind("<Leave>",lambda e:self._hint(
+                        "Right-click canvas to place focus  •  Ctrl+drag to pan  •  Scroll to zoom"))
+        else:
+            # Unknown / imported effect — show all raw key=value fields as editable entries
+            fields=eff.get("fields",{})
+            # _raw_block: verbatim HOI4 code — show as editable multiline code box
+            if etype == "_raw_block":
+                raw_val = fields.get("raw","")
+                tk.Label(ef, text="  raw HOI4  (imported verbatim — editable):",
+                         bg=BG_CARD, fg=TEXT_DIM,
+                         font=("Helvetica",8,"italic")).pack(anchor="w", padx=6, pady=(2,0))
+                raw_txt = tk.Text(ef, bg="#0d1117", fg="#a8d8a8",
+                                  insertbackground=BLUE, font=("Courier",9),
+                                  relief="flat", highlightthickness=1,
+                                  highlightbackground=ORANGE,
+                                  height=max(2, min(raw_val.count("\n")+2, 8)),
+                                  wrap="none")
+                raw_txt.insert("1.0", raw_val)
+                raw_txt.pack(fill="x", padx=6, pady=(0,4))
+                def _on_raw_edit(e, efidx=i, tw=raw_txt):
+                    if self.selected and efidx < len(self.selected.effects):
+                        self.selected.effects[efidx]["fields"]["raw"] = tw.get("1.0","end").strip()
+                raw_txt.bind("<KeyRelease>", _on_raw_edit)
+            elif not fields:
+                tk.Label(ef,text="  (no fields — exported as-is)",
+                         bg=BG_CARD,fg=TEXT_DIM,font=("Georgia",8,"italic")).pack(anchor="w",padx=6)
+            else:
+                for fkey,fval in list(fields.items()):
+                    if fkey.startswith("_"): continue
+                    _entry_row(ef,fkey,fval,i,fkey)
+            # add-field button for raw effects
+            def _add_raw_field(efidx=i,box=ef):
+                if self.selected and efidx<len(self.selected.effects):
+                    fields=self.selected.effects[efidx].setdefault("fields",{})
+                    nk=f"key{len(fields)}"; fields[nk]="value"
+                    self._refresh_effects()
+            tk.Button(ef,text="+ add field",command=_add_raw_field,
+                      bg=BG_CARD,fg=TEXT_DIM,relief="flat",font=("Helvetica",8),
+                      cursor="hand2",pady=1).pack(anchor="w",padx=6,pady=(0,3))
+
+    def _view_code(self):
+        """Pop up a window to view AND edit the HOI4 script for the selected focus."""
+        f = self.selected
+        if not f:
+            messagebox.showinfo("View Code", "No focus selected.\nClick a focus on the canvas first.")
+            return
+
+        # ── Build the focus block text ──────────────────────────────────
+        out = []
+        out.append("focus = {")
+        out.append(f"    id = {f.name}")
+        out.append(f"    icon = {getattr(f, 'gfx', 'GFX_goal_generic_political_pressure')}")
+        out.append("")
+        out.append(f"    x = {f.x}")
+        out.append(f"    y = {f.y}")
+        out.append("")
+        out.append(f"    cost = {f.cost}")
+        out.append("")
+        if f.prereqs:
+            for grp in f.prereqs:
+                valid = [p for p in grp if p in self.focuses]
+                if not valid: continue
+                inner = " ".join(f"focus = {self.focuses[p].name}" for p in valid)
+                out.append(f"    prerequisite = {{ {inner} }}")
+        else:
+            out.append("    # no prerequisites")
+        if f.mutex:
+            for mid in f.mutex:
+                if mid in self.focuses:
+                    out.append(f"    mutually_exclusive = {{ focus = {self.focuses[mid].name} }}")
+        out.append("")
+        # Only emit flags that differ from HOI4 defaults
+        if not f.cancel_if_invalid:
+            out.append("    cancel_if_invalid = no")
+        if f.continue_if_invalid:
+            out.append("    continue_if_invalid = yes")
+        if f.available_if_capitulated:
+            out.append("    available_if_capitulated = yes")
+        out.append("")
+        out.append("    completion_reward = {")
+        if f.effects:
+            for eff in f.effects:
+                out.append("    " + self._render_effect(eff))
+        else:
+            out.append("        # add effects here")
+        out.append("    }")
+        out.append("}")
+        code = "\n".join(out)
+
+        # ── Popup window ────────────────────────────────────────────────
+        win = tk.Toplevel(self)
+        win.title(f"Focus Code — {f.name}")
+        win.configure(bg="#0d1117")
+        win.geometry("680x580")
+        win.resizable(True, True)
+
+        # Header
+        hdr = tk.Frame(win, bg="#161b22", pady=6)
+        hdr.pack(fill="x")
+        tk.Label(hdr, text=f"  📄  {f.name}",
+                 bg="#161b22", fg=TEXT,
+                 font=("Courier", 11, "bold")).pack(side="left", padx=6)
+        tk.Button(hdr, text="✕", command=win.destroy,
+                  bg="#161b22", fg=TEXT_DIM, font=("Helvetica", 10),
+                  relief="flat", cursor="hand2",
+                  activebackground=BORDER_G).pack(side="right", padx=8)
+
+        # Copy button row
+        btn_row = tk.Frame(win, bg=BG_PANEL, pady=4)
+        btn_row.pack(fill="x", padx=8)
+        def copy_code():
+            content = txt.get("1.0", "end")
+            win.clipboard_clear(); win.clipboard_append(content)
+            copy_btn.config(text="✓  Copied!")
+            _safe_after(win, 1600, lambda: copy_btn.config(text="📋  Copy"))
+        copy_btn = tk.Button(btn_row, text="📋  Copy",
+                             command=copy_code, bg="#161b22", fg=BLUE,
+                             font=("Helvetica", 9, "bold"), relief="flat",
+                             padx=8, pady=3, cursor="hand2",
+                             highlightthickness=1, highlightbackground=BORDER_G)
+        copy_btn.pack(side="left", padx=(0,4))
+
+        # Edit / Apply / Discard buttons
+        def toggle_edit():
+            if not _edit_mode[0]:
+                # Enter edit mode
+                _edit_mode[0] = True
+                txt.config(state="normal", bg="#0d1117",
+                           highlightthickness=1, highlightbackground=BLUE)
+                edit_btn.config(text="💾  Apply Changes", bg="#14532d", fg="#4ade80")
+                discard_btn.pack(side="left", padx=4)
+                mode_lbl.config(text="✏  Edit mode — changes apply to this focus")
+            else:
+                # Apply: parse the edited code back into the focus
+                new_code = txt.get("1.0", "end").strip()
+                _apply_edited_code(new_code)
+                _edit_mode[0] = False
+                txt.config(state="disabled", bg="#0a0f18",
+                           highlightthickness=0)
+                edit_btn.config(text="✏  Edit Code", bg="#161b22", fg=TEXT)
+                discard_btn.pack_forget()
+                mode_lbl.config(text="Read-only  •  press Edit to modify")
+
+        def discard_edit():
+            _edit_mode[0] = False
+            txt.config(state="normal")
+            txt.delete("1.0", "end")
+            txt.insert("1.0", code)
+            txt.config(state="disabled", bg="#0a0f18", highlightthickness=0)
+            edit_btn.config(text="✏  Edit Code", bg="#161b22", fg=TEXT)
+            discard_btn.pack_forget()
+            mode_lbl.config(text="Read-only  •  press Edit to modify")
+
+        def _apply_edited_code(new_code):
+            """Parse edited focus block back into the focus object fields."""
+            import re as _re
+            try:
+                # Extract id
+                m = _re.search(r"\bid\s*=\s*(\S+)", new_code)
+                if m: f.name = m.group(1)
+                # Extract icon/gfx
+                m = _re.search(r"\bicon\s*=\s*(\S+)", new_code)
+                if m: f.gfx = m.group(1)
+                # Extract x, y, cost
+                m = _re.search(r"\bx\s*=\s*(\d+)", new_code)
+                if m: f.x = int(m.group(1))
+                m = _re.search(r"\by\s*=\s*(\d+)", new_code)
+                if m: f.y = int(m.group(1))
+                m = _re.search(r"\bcost\s*=\s*(\d+)", new_code)
+                if m: f.cost = int(m.group(1))
+                # Extract ai_will_do block
+                m = _re.search(r"ai_will_do\s*=\s*\{([^}]*)\}", new_code, _re.DOTALL)
+                if m: f.ai_will_do_raw = m.group(1).strip()
+                # Update sidebar fields if this focus is selected
+                if self.selected and self.selected.id == f.id:
+                    self._populate(f)
+                self._redraw()
+                messagebox.showinfo("Code Applied",
+                    f"Changes saved to {f.name}.\n\nNote: effects and prerequisites\nare managed via the sidebar.", parent=win)
+            except Exception as ex:
+                self._log_error(str(ex))
+                messagebox.showerror("Parse Error",
+                    f"Could not fully parse your edits:\n{ex}\n\nCheck the Error Log for details.", parent=win)
+
+        edit_btn = tk.Button(btn_row, text="✏  Edit Code",
+                             command=toggle_edit, bg="#161b22", fg=TEXT,
+                             font=("Helvetica", 9, "bold"), relief="flat",
+                             padx=8, pady=3, cursor="hand2",
+                             highlightthickness=1, highlightbackground=BORDER_G)
+        edit_btn.pack(side="left", padx=(0,4))
+        discard_btn = tk.Button(btn_row, text="✕  Discard",
+                                command=discard_edit, bg="#450a0a", fg="#f87171",
+                                font=("Helvetica", 9), relief="flat",
+                                padx=8, pady=3, cursor="hand2")
+        # discard_btn starts hidden — shown in edit mode
+        mode_lbl = tk.Label(btn_row, text="Read-only  •  press Edit to modify",
+                            bg=BG_PANEL, fg=TEXT_DIM,
+                            font=("Helvetica", 8, "italic"))
+        mode_lbl.pack(side="right", padx=4)
+
+        # Scrollable code area
+        frm = tk.Frame(win, bg=BG_PANEL)
+        frm.pack(fill="both", expand=True, padx=8, pady=(0, 8))
+        sb_y = tk.Scrollbar(frm, orient="vertical")
+        sb_y.pack(side="right", fill="y")
+        sb_x = tk.Scrollbar(frm, orient="horizontal")
+        sb_x.pack(side="bottom", fill="x")
+        # Edit mode toggle
+        _edit_mode = [False]
+        txt = tk.Text(frm, bg="#0a0f18", fg="#c9d1d9",
+                      font=("Courier", 10), relief="flat",
+                      yscrollcommand=sb_y.set, xscrollcommand=sb_x.set,
+                      wrap="none", state="normal",
+                      insertbackground="#58a6ff",
+                      selectbackground="#1e3a6e")
+        txt.pack(fill="both", expand=True)
+        sb_y.config(command=txt.yview)
+        sb_x.config(command=txt.xview)
+
+        txt.insert("1.0", code)
+
+        # Syntax highlighting tags
+        txt.tag_configure("kw",      foreground="#58a6ff", font=("Courier", 10, "bold"))
+        txt.tag_configure("val",     foreground="#fbbf24")
+        txt.tag_configure("brace",   foreground="#6e7681")
+        txt.tag_configure("comment", foreground="#22c55e", font=("Courier", 10, "italic"))
+        txt.tag_configure("str_val", foreground="#f97316")
+
+        import re as _re
+        for tag, pat in [
+            ("comment", r"(?m)#.*$"),
+            ("kw",      r"(?m)^\s{0,8}[a-z_]+ (?==)"),
+            ("brace",   r"[{}]"),
+            ("str_val", r"=\s*[A-Z_][A-Z0-9_]+"),
+            ("val",     r"=\s*\d[\d.]*"),
+        ]:
+            for m in _re.finditer(pat, code):
+                s, e = m.start(), m.end()
+                n0 = code.count("\n", 0, s) + 1
+                c0 = s - (code.rfind("\n", 0, s) + 1)
+                n1 = code.count("\n", 0, e) + 1
+                c1 = e - (code.rfind("\n", 0, e) + 1)
+                txt.tag_add(tag, f"{n0}.{c0}", f"{n1}.{c1}")
+
+        txt.config(state="disabled")  # starts read-only; Edit button unlocks
+
+    # ── FOCUS CRUD ──────────────────────────────────────────────
+    def _update_title(self):
+        """Reflect current tree ID in the window title bar."""
+        tid = self._tree_id.get() or "untitled"
+        self.title("HOI4 Content Maker  —  %s  [Wiki Accurate v2]" % tid)
+        self._update_statusbar()
+
+    def _new_tree_dialog(self):
+        """Dialog to set up a brand-new focus tree with country tag and naming."""
+        win = tk.Toplevel(self)
+        win.title("New Focus Tree")
+        win.configure(bg=BG_DARK)
+        win.geometry("480x420")
+        win.resizable(False, True)
+        win.grab_set()
+
+        def _row(label):
+            f = tk.Frame(win, bg=BG_DARK); f.pack(fill="x", padx=24, pady=6)
+            tk.Label(f, text=label, bg=BG_DARK, fg=TEXT_DIM,
+                     font=("Helvetica",9), width=22, anchor="w").pack(side="left")
+            var = tk.StringVar()
+            e = tk.Entry(f, textvariable=var, bg=BG_CARD, fg=TEXT,
+                         insertbackground=BLUE, font=("Helvetica",11),
+                         relief="flat", highlightthickness=1,
+                         highlightbackground=BORDER_G)
+            e.pack(side="left", fill="x", expand=True, ipady=4)
+            return var, e
+
+        tk.Label(win, text="NEW FOCUS TREE", bg=BG_DARK, fg=TEXT,
+                 font=("Helvetica",12,"bold"), pady=14).pack()
+        tk.Frame(win, bg=BORDER_G, height=1).pack(fill="x", padx=16)
+
+        var_tag,  ent_tag  = _row("Country Tag  (e.g. JAP):")
+        var_name, ent_name = _row("Country Name (e.g. Japan):")
+        var_tree, ent_tree = _row("Tree ID  (auto-filled):")
+        var_foc,  ent_foc  = _row("Focus prefix  (auto-filled):")
+
+        preview_frame = tk.Frame(win, bg="#0d1525", relief="flat",
+                                  highlightthickness=1, highlightbackground=BORDER_G)
+        preview_frame.pack(fill="x", padx=24, pady=8)
+        preview_lbl = tk.Label(preview_frame, text="", bg="#0d1525", fg="#6ee7b7",
+                               font=("Courier",9), justify="left", anchor="w",
+                               padx=10, pady=8)
+        preview_lbl.pack(fill="x")
+
+        def _update(*_):
+            tag  = var_tag.get().strip().upper()
+            name = var_name.get().strip().lower().replace(" ","_")
+            if tag:
+                tree_id = ("%s_focus" % name) if name else ("%s_focus" % tag.lower())
+                foc_pfx = tag + "_"
+                var_tree.set(tree_id)
+                var_foc.set(foc_pfx)
+                preview_lbl.config(text=(
+                    "focus_tree = {\n"
+                    "    id = %s\n"
+                    "    country = {\n"
+                    "        factor = 0\n"
+                    "        modifier = { add = 20  original_tag = %s }\n"
+                    "    }\n}" % (tree_id, tag)))
+            else:
+                preview_lbl.config(text="")
+
+        var_tag.trace_add("write", _update)
+        var_name.trace_add("write", _update)
+
+        def _create():
+            tag  = var_tag.get().strip().upper()
+            if not tag or len(tag) < 2:
+                messagebox.showwarning("Missing Tag",
+                    "Please enter a valid 2-3 letter country tag.", parent=win)
+                return
+            name = var_name.get().strip().lower().replace(" ","_")
+            tree_id = var_tree.get().strip() or ("%s_focus" % tag.lower())
+            foc_pfx = var_foc.get().strip()  or (tag + "_")
+
+            # Ask to save before clearing
+            if self.focuses:
+                ans = messagebox.askyesnocancel(
+                    "Save Current Tree?",
+                    "You have unsaved work on  '%s'\n\n"
+                    "Save it before starting a new tree?" % self._tree_id.get(),
+                    parent=win)
+                if ans is None:   # Cancel
+                    return
+                if ans:           # Yes — save first
+                    self._save()
+                # Clear canvas (Yes or No both clear)
+                self.cv.delete("all")
+                self.focuses.clear()
+                self.selected = None
+                self._lines.clear()
+                self._grid_item = None
+                self._grid_key  = None
+                self._grid_img  = None
+                self._hide_form()
+                self._redraw_now()
+
+            # Set tree ID
+            self._tree_id.set(tree_id)
+            self._update_title()
+
+            # Store setup on app for export
+            self._tree_country_tag  = tag
+            self._tree_country_name = name
+            self._tree_focus_prefix = foc_pfx
+
+            # Update Tree ID field hint
+            self._hint("New tree ready — right-click canvas to add your first focus  •  prefix: %s" % foc_pfx)
+
+            # Prefill new focus default name with prefix
+            self._default_focus_prefix = foc_pfx
+
+            win.destroy()
+            messagebox.showinfo("Tree Created",
+                "Tree ID: %s\nCountry: %s\nFocus prefix: %s\n\n"
+                "Right-click the canvas to place your first focus!" % (
+                    tree_id, tag, foc_pfx))
+
+        btn_row = tk.Frame(win, bg=BG_DARK)
+        btn_row.pack(pady=14)
+        tk.Button(btn_row, text="Cancel", command=win.destroy,
+                  bg=BG_CARD, fg=TEXT, relief="flat",
+                  font=("Helvetica",10), padx=16, pady=6,
+                  cursor="hand2").pack(side="left", padx=8)
+        tk.Button(btn_row, text="Create Tree", command=_create,
+                  bg="#fbbf24", fg="#0a0a0a", relief="flat",
+                  font=("Helvetica",10,"bold"), padx=16, pady=6,
+                  cursor="hand2").pack(side="left", padx=8)
+        ent_tag.focus_set()
+        win.bind("<Return>", lambda e: _create())
+
+    def _add_focus(self):
+        occ={(f.x,f.y) for f in self.focuses.values()}
+        gx,gy=0,0
+        while (gx,gy) in occ:
+            gx+=2           # HOI4 standard: focuses placed at even columns
+            if gx>14: gx=0; gy+=1
+        self._new_focus_at(gx,gy)
+    def _new_focus_at(self,wx,wy):
+        self._push_undo("add focus")
+        f=Focus(wx,wy)
+        pfx = self._default_focus_prefix
+        if pfx:
+            f.name = pfx + "focus_%d" % f.id
+        self.focuses[f.id]=f; self._redraw(); self._select(f)
+    def _apply(self):
+        if not self.selected: return
+        self._push_undo("edit focus")
+        f=self.selected; raw=self._fv_name.get().strip()
+        if not raw: messagebox.showerror("Error","Focus ID cannot be empty."); return
+        f.name=re.sub(r"[^A-Za-z0-9_]","_",raw); f.icon=self._fv_icon.get()
+        f.gfx=self._fv_gfx.get().strip() or "GFX_goal_generic_political_pressure"
+        try:
+            f.cost=int(self._fv_cost.get())
+            raw_ai = self._fv_ai_raw.get("1.0","end").strip()
+            f.ai_will_do_raw = raw_ai
+            import re as _re
+            m = _re.search(r"base\s*=\s*([\d.]+)", raw_ai)
+            f.ai_will_do = int(float(m.group(1))) if m else 1
+            nx=int(self._fv_x.get()); ny=int(self._fv_y.get())
+            # move on canvas if x/y changed
+            if not any(o.x==nx and o.y==ny and o.id!=f.id for o in self.focuses.values()):
+                f.x=nx; f.y=ny
+            else:
+                messagebox.showwarning("Position","Another focus already occupies that grid position.")
+        except ValueError: messagebox.showerror("Error","Cost, AI Will Do, X and Y must be integers."); return
+        f.desc=self._fv_desc.get("1.0","end").strip()
+        f.search_filters=self._fv_search.get().strip() or "FOCUS_FILTER_POLITICAL"
+        f.available_cond=self._fv_avail.get("1.0","end").strip()
+        f.bypass_cond   =self._fv_bypass.get("1.0","end").strip()
+        f.cancel_cond   =self._fv_cancel2.get("1.0","end").strip()
+        f.cancel_if_invalid=self._fv_cancel.get()
+        f.continue_if_invalid=self._fv_continue.get()
+        f.available_if_capitulated=self._fv_cap.get()
+        f._draw_key = None; self._redraw(); self._populate(f)
+        self._refresh_focus_list()
+    def _toggle_multisel(self):
+        self._multisel_mode = not self._multisel_mode
+        if self._multisel_mode:
+            self._msel_btn.config(bg="#1a2e4a", fg="#00e5ff",
+                                   text="☑ Multi-Select ON")
+            self._hint("Multi-select ON — Ctrl+click focuses to select  •  Del to delete selected")
+        else:
+            self._multi_sel.clear()
+            self._msel_btn.config(bg="#1a1a2e", fg=TEXT,
+                                   text="☐ Multi-Select")
+            self._hint("Right-click canvas to place a focus  •  Ctrl+drag to pan  •  Scroll to zoom")
+        self._redraw()
+
+    def _delete_selected(self):
+        """Delete all multi-selected focuses with confirmation."""
+        if not self._multi_sel:
+            messagebox.showinfo("No Selection",
+                "No focuses selected.\nCtrl+click focuses (or enable Multi-Select mode) to select them.",
+                parent=self)
+            return
+        n = len(self._multi_sel)
+        names = ", ".join(self.focuses[fid].name for fid in self._multi_sel
+                          if fid in self.focuses)
+        if not messagebox.askyesno("Delete Selected",
+            f"Delete {n} selected focus{'es' if n>1 else ''}?\n\n{names}\n\n"
+            "This will also remove all prerequisite links to/from these focuses.",
+            parent=self):
+            return
+        self._push_undo("delete selected")
+        for fid in list(self._multi_sel):
+            if fid not in self.focuses: continue
+            # Remove refs from other focuses
+            for o in self.focuses.values():
+                o.prereqs = [[p for p in g if p != fid] for g in o.prereqs]
+                o.prereqs = [g for g in o.prereqs if g]
+                o.mutex   = [m for m in o.mutex if m != fid]
+            # Delete canvas items
+            for item in self.focuses[fid]._items:
+                self.cv.delete(item)
+            del self.focuses[fid]
+        self._multi_sel.clear()
+        if self.selected and self.selected.id not in self.focuses:
+            self.selected = None; self._hide_form()
+        self._redraw()
+        self._hint(f"Deleted {n} focus{'es' if n>1 else ''}.")
+
+    def _key_delete(self):
+        """Handle Delete/Backspace key — delete multi-selection or single selected focus."""
+        if self._multi_sel:
+            self._delete_selected()
+        elif self.selected:
+            self._delete_focus()
+
+    def _delete_focus(self):
+        if not self.selected: return
+        self._push_undo("delete focus")
+        fid=self.selected.id
+        for o in self.focuses.values():
+            o.prereqs=[[p for p in g if p!=fid] for g in o.prereqs]; o.prereqs=[g for g in o.prereqs if g]
+            o.mutex=[m for m in o.mutex if m!=fid]
+        for i in self.selected._items: self.cv.delete(i)
+        del self.focuses[fid]; self.selected=None; self._hide_form(); self._redraw()
+    def _clear_all(self):
+        if not messagebox.askyesno("Clear All","Delete ALL focuses?"): return
+        self.cv.delete("all"); self.focuses.clear(); self.selected=None; self._lines.clear(); self._grid_item=None; self._grid_key=None; self._grid_img=None
+        self._hide_form(); self._draw_grid()
+
+    # ── CONNECT / MUTEX ─────────────────────────────────────────
+    def _toggle_connect(self):
+        if self.conn_src: self._end_connect(); return
+        if not self.selected: messagebox.showinfo("Connect","Select a focus first."); return
+        self.conn_src=self.selected
+        self._conn_btn.config(fg=RED,text="✖ Cancel Prereq")
+        self._hint(f"Click a focus to make it a PREREQUISITE of [{self.conn_src.name}]")
+        cx,cy=self.w2c(self.conn_src.x,self.conn_src.y)
+        self._temp_line=self.cv.create_line(cx,cy,cx,cy,fill=BLUE,width=2,dash=(6,4),tags="templine")
+        self._redraw()
+    def _end_connect(self):
+        if self.conn_src: self._push_undo("add prerequisite")
+        self.conn_src=None
+        if self._temp_line: self.cv.delete(self._temp_line); self._temp_line=None
+        self._conn_btn.config(fg=GOLD_LT,text="🔗 Prereq")
+        self._hint("Right-click canvas to place focus  •  Ctrl+drag to pan  •  Scroll to zoom"); self._redraw()
+    def _make_prereq(self,child,parent):
+        for g in child.prereqs:
+            if parent.id in g: return
+        child.prereqs.append([parent.id]); self._redraw()
+        if self.selected: self._refresh_prereqs()
+    def _rm_prereq(self,gi):
+        if not self.selected: return
+        self.selected.prereqs.pop(gi); self._refresh_prereqs(); self._draw_lines()
+
+    def _toggle_mutex(self):
+        # undo pushed inside when mutex is actually set
+        if self.mutex_mode: self._end_mutex(); return
+        if not self.selected: messagebox.showinfo("Mutex","Select a focus first."); return
+        self.mutex_mode=True; self.mutex_src=self.selected
+        self._mutex_btn.config(fg=RED,text="✖ Cancel Mutex")
+        self._hint(f"Click a focus to make it MUTUALLY EXCLUSIVE with [{self.mutex_src.name}]")
+        cx,cy=self.w2c(self.mutex_src.x,self.mutex_src.y)
+        self._temp_line=self.cv.create_line(cx,cy,cx,cy,fill=ORANGE,width=2,dash=(4,4),tags="templine")
+    def _end_mutex(self):
+        self.mutex_mode=False; self.mutex_src=None
+        if self._temp_line: self.cv.delete(self._temp_line); self._temp_line=None
+        self._mutex_btn.config(fg=ORANGE,text="✖ Mutex")
+        self._hint("Right-click canvas to place focus  •  Ctrl+drag to pan  •  Scroll to zoom"); self._redraw()
+    def _make_mutex(self,a,b):
+        if b.id not in a.mutex: a.mutex.append(b.id)
+        if a.id not in b.mutex: b.mutex.append(a.id)
+        self._redraw()
+        if self.selected: self._refresh_mutex()
+    def _rm_mutex(self,idx):
+        if not self.selected: return
+        mid=self.selected.mutex.pop(idx)
+        if mid in self.focuses:
+            other=self.focuses[mid]
+            if self.selected.id in other.mutex: other.mutex.remove(self.selected.id)
+        self._refresh_mutex(); self._draw_lines()
+
+    # ── EFFECT LIVE UPDATES ─────────────────────────────────────
+    def _add_effect(self):
+        self._push_undo("add effect")
+        if not self.selected: return
+        etype=self._eff_type.get(); defn=EFFECT_DEFS.get(etype,{})
+        defaults={fn:dv for fn,_,dv,_ in defn.get("fields",[])}
+        self.selected.effects.append({"type":etype,"fields":defaults}); self._refresh_effects()
+    def _rm_effect(self,idx):
+        if not self.selected: return
+        self.selected.effects.pop(idx); self._refresh_effects()
+    def _live_eff_field(self,idx,fname,var):
+        if self.selected and idx<len(self.selected.effects):
+            self.selected.effects[idx].setdefault("fields",{})[fname]=var.get()
+    def _live_eff_text(self,idx,fname,tw):
+        if self.selected and idx<len(self.selected.effects):
+            self.selected.effects[idx].setdefault("fields",{})[fname]=tw.get("1.0","end-1c")
+
+    # ── IMPORT .TXT ─────────────────────────────────────────────
+
+    def _import_drawio(self):
+        """Import a Draw.io .xml/.drawio file as a HOI4 focus tree skeleton.
+
+        Flow:
+          1. Pick file
+          2. Parse shapes (focuses) + arrows (prerequisites)
+          3. Show tree-setup dialog (tag, name, tree ID)  ← NEW
+          4. Apply tag prefix to every focus name
+          5. Preview dialog
+          6. Commit to canvas with proper HOI4 structure
+        """
+        import xml.etree.ElementTree as ET
+        import base64, zlib, urllib.parse, re as _re, os as _os
+
+        # ── Step 1: File picker ───────────────────────────────────────
+        path = filedialog.askopenfilename(
+            filetypes=[
+                ("Draw.io / XML", "*.xml *.drawio"),
+                ("All files",     "*.*"),
+            ],
+            title="Import Draw.io Diagram"
+        )
+        if not path: return
+
+        try:
+            with open(path, "r", encoding="utf-8", errors="replace") as fp:
+                raw_file = fp.read()
+        except Exception as e:
+            messagebox.showerror("Draw.io Import", f"Could not read file:\n{e}"); return
+
+        # ── Step 2: Parse XML ─────────────────────────────────────────
+        def decompress_drawio(b64str):
+            data = base64.b64decode(b64str)
+            return urllib.parse.unquote(zlib.decompress(data, -15).decode("utf-8"))
+
+        def get_graph_root(xml_str):
+            root = ET.fromstring(xml_str)
+            if root.tag == "mxGraphModel":
+                return root
+            for diag in root.iter("diagram"):
+                text = (diag.text or "").strip()
+                if not text:
+                    return diag
+                try:
+                    return ET.fromstring(decompress_drawio(text))
+                except Exception:
+                    pass
+                try:
+                    return ET.fromstring(text)
+                except Exception:
+                    pass
+            return root
+
+        try:
+            graph_root = get_graph_root(raw_file)
+        except ET.ParseError as e:
+            messagebox.showerror("Draw.io Import",
+                f"Could not parse XML:\n{e}\n\nExport as Editable Vector XML from Draw.io."); return
+
+        cells = graph_root.findall(".//mxCell")
+
+        def clean_label(raw):
+            s = _re.sub(r"<[^>]+>", "", raw or "")
+            for ent, ch in [("&amp;","&"),("&lt;","<"),("&gt;",">"),("&nbsp;"," "),("&#xa;","")]:
+                s = s.replace(ent, ch)
+            s = s.strip()
+            s = _re.sub(r"[\s\-]+", "_", s)
+            s = _re.sub(r"[^A-Za-z0-9_]", "", s)
+            return s
+
+        vertices = {}
+        for c in cells:
+            cid = c.get("id", "")
+            if c.get("vertex") != "1" or cid in ("0","1",""):
+                continue
+            geo = c.find("mxGeometry")
+            if geo is None: continue
+            label = clean_label(c.get("value", ""))
+            if not label: label = f"focus_{cid}"
+            try:
+                x = float(geo.get("x", 0) or 0)
+                y = float(geo.get("y", 0) or 0)
+                w = float(geo.get("width",  120) or 120)
+                h = float(geo.get("height",  60) or 60)
+            except: x=y=0; w=120; h=60
+            vertices[cid] = {"label": label, "x": x, "y": y, "w": w, "h": h}
+
+        # UserObject / object wrappers
+        for obj in graph_root.findall(".//UserObject") + graph_root.findall(".//object"):
+            inner = obj.find("mxCell")
+            if inner is None or inner.get("vertex") != "1": continue
+            cid = obj.get("id") or inner.get("id","")
+            if not cid or cid in ("0","1"): continue
+            geo = inner.find("mxGeometry")
+            if geo is None: continue
+            label = clean_label(obj.get("label") or obj.get("value") or obj.get("name") or "")
+            if not label: label = f"focus_{cid}"
+            try:
+                x=float(geo.get("x",0) or 0); y=float(geo.get("y",0) or 0)
+                w=float(geo.get("width",120) or 120); h=float(geo.get("height",60) or 60)
+            except: x=y=0; w=120; h=60
+            vertices[cid] = {"label": label, "x": x, "y": y, "w": w, "h": h}
+
+        if not vertices:
+            messagebox.showwarning("Draw.io Import",
+                "No shapes found in the diagram.\n\n"
+                "Make sure your shapes have labels and are saved as XML."); return
+
+        edges = []
+        for c in cells:
+            if c.get("edge") != "1": continue
+            src = c.get("source",""); tgt = c.get("target","")
+            if src in vertices and tgt in vertices:
+                edges.append((src, tgt))
+
+        # ── Step 3: Tree-setup dialog (tag, name, tree ID) ───────────
+        result = {}   # filled by dialog
+
+        setup = tk.Toplevel(self)
+        setup.title("Draw.io Import — Tree Setup")
+        setup.configure(bg=BG_DARK)
+        setup.geometry("480x420")
+        setup.resizable(False, False)
+        setup.grab_set()
+
+        # Header
+        hdr = tk.Frame(setup, bg="#1a0f2e", pady=10); hdr.pack(fill="x")
+        tk.Label(hdr, text="  📐  Draw.io Import — Focus Tree Setup",
+                 bg="#1a0f2e", fg="#a78bfa",
+                 font=("Helvetica",12,"bold")).pack(side="left", padx=10)
+        tk.Frame(setup, bg=BORDER_G, height=1).pack(fill="x")
+
+        tk.Label(setup,
+                 text=f"  Found {len(vertices)} focuses  •  {len(edges)} prerequisite arrows",
+                 bg=BG_DARK, fg="#58a6ff",
+                 font=("Helvetica",10,"bold"), pady=8, anchor="w").pack(fill="x", padx=16)
+        tk.Frame(setup, bg=BORDER_G, height=1).pack(fill="x", padx=16)
+
+        def _field(parent, label, placeholder=""):
+            row = tk.Frame(parent, bg=BG_DARK); row.pack(fill="x", padx=20, pady=7)
+            tk.Label(row, text=label, bg=BG_DARK, fg=TEXT_DIM,
+                     font=("Helvetica",9), width=26, anchor="w").pack(side="left")
+            var = tk.StringVar(value=placeholder)
+            e = tk.Entry(row, textvariable=var, bg=BG_CARD, fg=TEXT,
+                         insertbackground=BLUE, font=("Helvetica",11),
+                         relief="flat", highlightthickness=1,
+                         highlightbackground=BORDER_G)
+            e.pack(side="left", fill="x", expand=True, ipady=5)
+            return var, e
+
+        tk.Label(setup, text="", bg=BG_DARK).pack(pady=2)
+
+        var_tag,  ent_tag  = _field(setup, "Country Tag  (e.g. JAP):")
+        var_name, ent_name = _field(setup, "Country Name (e.g. Japan):")
+        var_tree, ent_tree = _field(setup, "Tree ID  (auto-filled):")
+        var_pfx,  ent_pfx  = _field(setup, "Focus prefix  (auto-filled):")
+
+        # Preview code box
+        prev_frame = tk.Frame(setup, bg=BG_DARK); prev_frame.pack(fill="x", padx=20, pady=4)
+        prev_txt = tk.Text(prev_frame, bg="#060a10", fg="#6ee7b7",
+                           font=("Courier", 8), height=5, relief="flat",
+                           highlightthickness=1, highlightbackground=BORDER_G,
+                           state="disabled")
+        prev_txt.pack(fill="x")
+
+        def _update(*_):
+            tag  = var_tag.get().strip().upper()
+            name = var_name.get().strip().lower().replace(" ","_")
+            if tag:
+                tid   = (f"{name}_focus" if name else f"{tag.lower()}_focus")
+                pfx   = tag + "_"
+                var_tree.set(tid); var_pfx.set(pfx)
+                code  = (
+                    f"focus_tree = {{\n"
+                    f"\tid = {tid}\n\n"
+                    f"\tcountry = {{\n"
+                    f"\t\tfactor = 0\n"
+                    f"\t\tmodifier = {{\n"
+                    f"\t\t\tadd = 20\n"
+                    f"\t\t\toriginal_tag = {tag}\n"
+                    f"\t\t}}\n"
+                    f"\t}}\n"
+                    f"\n\t# {len(vertices)} focuses imported from Draw.io\n}}"
+                )
+                prev_txt.config(state="normal")
+                prev_txt.delete("1.0","end")
+                prev_txt.insert("1.0", code)
+                prev_txt.config(state="disabled")
+            else:
+                prev_txt.config(state="normal")
+                prev_txt.delete("1.0","end")
+                prev_txt.config(state="disabled")
+
+        var_tag.trace_add("write", _update)
+        var_name.trace_add("write", _update)
+
+        confirmed = [False]
+
+        def _confirm():
+            tag = var_tag.get().strip().upper()
+            if not tag or len(tag) < 2:
+                messagebox.showwarning("Missing Tag",
+                    "Please enter a 2–3 letter country tag (e.g. JAP, GER, USA).",
+                    parent=setup); return
+            result["tag"]  = tag
+            result["name"] = var_name.get().strip().lower().replace(" ","_")
+            result["tree_id"] = var_tree.get().strip() or f"{tag.lower()}_focus"
+            result["prefix"]  = var_pfx.get().strip()  or f"{tag}_"
+            confirmed[0] = True
+            setup.destroy()
+
+        btn_row = tk.Frame(setup, bg=BG_DARK); btn_row.pack(pady=12)
+        tk.Button(btn_row, text="Cancel", command=setup.destroy,
+                  bg=BG_CARD, fg=TEXT, relief="flat",
+                  font=("Helvetica",10), padx=14, pady=6,
+                  cursor="hand2").pack(side="left", padx=6)
+        tk.Button(btn_row, text="Next  →", command=_confirm,
+                  bg="#a78bfa", fg="#0a0614", relief="flat",
+                  font=("Helvetica",10,"bold"), padx=14, pady=6,
+                  cursor="hand2").pack(side="left", padx=6)
+
+        ent_tag.focus_set()
+        setup.bind("<Return>", lambda e: _confirm())
+        setup.wait_window()
+        if not confirmed[0]: return
+
+        tag    = result["tag"]
+        prefix = result["prefix"]   # e.g. "JAP_"
+        tree_id= result["tree_id"]
+
+        # ── Step 4: Apply tag prefix to all focus labels ──────────────
+        # If label already starts with the prefix, don't double-add it
+        for v in vertices.values():
+            lbl = v["label"]
+            if not lbl.upper().startswith(prefix.upper()):
+                v["label"] = prefix + lbl
+
+        # ── Step 5: Map pixel coords → HOI4 grid (compact clustering) ──
+        #
+        # Strategy: cluster focuses into rows by proximity, then within each
+        # row assign columns by X order. This keeps the tree tight like the
+        # HOI4 in-game view instead of stretching the raw pixel distances.
+
+        def cluster_axis(values, tolerance_ratio=0.55):
+            """Group pixel coords into discrete slots using centroid clustering.
+            tolerance_ratio: fraction of median gap to use as merge threshold."""
+            vals = sorted(set(round(v) for v in values))
+            if not vals: return {}
+            # Find median gap between distinct positions
+            gaps = [b - a for a, b in zip(vals, vals[1:]) if b - a > 2]
+            median_gap = sorted(gaps)[len(gaps)//2] if gaps else 80
+            tol = max(10, median_gap * tolerance_ratio)
+            # Merge close values into clusters
+            clusters = []
+            for v in vals:
+                if clusters and v - clusters[-1][-1] <= tol:
+                    clusters[-1].append(v)
+                else:
+                    clusters.append([v])
+            # Map each raw value → cluster index
+            mapping = {}
+            for idx, cluster in enumerate(clusters):
+                for v in cluster:
+                    mapping[v] = idx
+            return mapping
+
+        all_px = [v["x"] for v in vertices.values()]
+        all_py = [v["y"] for v in vertices.values()]
+
+        x_cluster = cluster_axis(all_px, tolerance_ratio=0.60)
+        y_cluster = cluster_axis(all_py, tolerance_ratio=0.60)
+
+        def snap(val, mapping):
+            """Find nearest key in mapping dict."""
+            rounded = round(val)
+            if rounded in mapping: return mapping[rounded]
+            # nearest
+            return mapping[min(mapping.keys(), key=lambda k: abs(k - val))]
+
+        # Assign raw cluster indices
+        raw_grid = {}
+        for cid, v in vertices.items():
+            col = snap(v["x"], x_cluster)
+            row = snap(v["y"], y_cluster)
+            raw_grid[cid] = (col, row)
+
+        # HOI4 uses even columns (0,2,4,...) and integer rows (0,1,2,...)
+        # Remap col index → HOI4 x, row index → HOI4 y
+        # Option A collision resolution: nudge right first, then wrap to next row
+        used = {}          # (gx, gy) -> cid
+        grid_positions = {}
+        auto_shifted = []  # track which focuses were moved for the hint
+
+        # Find max column in use per row (to know how far right things go)
+        def _find_free(gx_start, gy, max_right_search=30):
+            """Try nudging right up to max_right_search slots, then drop to next row."""
+            gx = gx_start
+            for _ in range(max_right_search):
+                if (gx, gy) not in used:
+                    return gx, gy
+                gx += 2
+            # Column search exhausted — try next row at original column
+            gy_try = gy + 1
+            gx_try = gx_start
+            while (gx_try, gy_try) in used:
+                gx_try += 2
+            return gx_try, gy_try
+
+        for cid in sorted(raw_grid.keys(), key=lambda c: (raw_grid[c][1], raw_grid[c][0])):
+            col_idx, row_idx = raw_grid[cid]
+            gx_orig = col_idx * 2   # even columns
+            gy_orig = row_idx
+
+            if (gx_orig, gy_orig) not in used:
+                # No collision — place directly
+                gx, gy = gx_orig, gy_orig
+            else:
+                # Collision detected — find nearest free slot
+                gx, gy = _find_free(gx_orig, gy_orig)
+                auto_shifted.append((vertices[cid]["label"], gx_orig, gy_orig, gx, gy))
+
+            used[(gx, gy)] = cid
+            grid_positions[cid] = (gx, gy)
+
+        # Log shifts to hint bar after import completes
+        _auto_shift_log = auto_shifted
+
+        # ── Step 6: Preview dialog ────────────────────────────────────
+        prev_win = tk.Toplevel(self)
+        prev_win.title("Draw.io Import — Preview")
+        prev_win.configure(bg="#0d1117")
+        prev_win.geometry("680x560")
+        prev_win.grab_set()
+        prev_win.resizable(True, True)
+
+        phdr = tk.Frame(prev_win, bg="#161b22", pady=8); phdr.pack(fill="x")
+        tk.Label(phdr, text=f"  📐  Preview — {tag} Focus Tree  ({len(vertices)} focuses)",
+                 bg="#161b22", fg="#a78bfa",
+                 font=("Helvetica",12,"bold")).pack(side="left", padx=10)
+        tk.Frame(prev_win, bg="#30363d", height=1).pack(fill="x")
+
+        # Tab strip: Focuses | Code Preview
+        tab_bar = tk.Frame(prev_win, bg="#0d1117"); tab_bar.pack(fill="x")
+        pane_focuses = tk.Frame(prev_win, bg="#0d1117")
+        pane_code    = tk.Frame(prev_win, bg="#0d1117")
+
+        def _show_pane(which):
+            for p in (pane_focuses, pane_code): p.pack_forget()
+            which.pack(fill="both", expand=True)
+
+        for label, pane in [("Focuses & Links", pane_focuses), ("Code Preview", pane_code)]:
+            tk.Button(tab_bar, text=label, command=lambda p=pane: _show_pane(p),
+                      bg="#0d1117", fg=TEXT_DIM, relief="flat",
+                      font=("Helvetica",9,"bold"), padx=14, pady=6,
+                      cursor="hand2",
+                      activebackground=BG_PANEL, activeforeground=BLUE).pack(side="left")
+
+        # ── Focuses pane ──
+        lf = tk.Frame(pane_focuses, bg="#0d1117"); lf.pack(fill="both", expand=True, padx=10, pady=6)
+        lsb = tk.Scrollbar(lf); lsb.pack(side="right", fill="y")
+        lst = tk.Text(lf, bg="#0a0f18", fg="#c9d1d9", font=("Courier",9),
+                      relief="flat", yscrollcommand=lsb.set,
+                      wrap="none", state="normal", selectbackground="#1e3a6e")
+        lst.pack(fill="both", expand=True)
+        lsb.config(command=lst.yview)
+        lst.tag_configure("hdr",   foreground="#a78bfa", font=("Courier",9,"bold"))
+        lst.tag_configure("focus", foreground="#58a6ff")
+        lst.tag_configure("arrow", foreground="#22c55e")
+        lst.tag_configure("dim",   foreground="#374151")
+
+        lst.insert("end", f"FOCUSES  ({len(vertices)})\n", "hdr")
+        lst.insert("end", "─"*64+"\n", "dim")
+        for cid in sorted(vertices.keys(), key=lambda c: (grid_positions[c][1], grid_positions[c][0])):
+            v = vertices[cid]; gx,gy = grid_positions[cid]
+            lst.insert("end", f"  {v['label']:<36}", "focus")
+            lst.insert("end", f"  x={gx:2d}  y={gy:2d}\n", "dim")
+
+        if edges:
+            lst.insert("end", f"\nPREREQUISITES  ({len(edges)})\n", "hdr")
+            lst.insert("end", "─"*64+"\n", "dim")
+            for src,tgt in edges:
+                lst.insert("end", f"  {vertices[src]['label']}", "focus")
+                lst.insert("end",  "  ──►  ", "dim")
+                lst.insert("end", f"{vertices[tgt]['label']}\n", "arrow")
+        lst.config(state="disabled")
+
+        # ── Code preview pane ──
+        cf = tk.Frame(pane_code, bg="#0d1117"); cf.pack(fill="both", expand=True, padx=10, pady=6)
+        csb = tk.Scrollbar(cf); csb.pack(side="right", fill="y")
+        cxsb = tk.Scrollbar(cf, orient="horizontal"); cxsb.pack(side="bottom", fill="x")
+        ctxt = tk.Text(cf, bg="#0a0f18", fg="#c9d1d9", font=("Courier",9),
+                       relief="flat", yscrollcommand=csb.set,
+                       xscrollcommand=cxsb.set,
+                       wrap="none", state="normal", selectbackground="#1e3a6e")
+        ctxt.pack(fill="both", expand=True)
+        csb.config(command=ctxt.yview)
+        cxsb.config(command=ctxt.xview)
+        ctxt.tag_configure("kw",  foreground="#58a6ff", font=("Courier",9,"bold"))
+        ctxt.tag_configure("val", foreground="#fbbf24")
+        ctxt.tag_configure("cmt", foreground="#22c55e")
+        ctxt.tag_configure("brc", foreground="#6e7681")
+
+        # Build code preview
+        code_lines = []
+        code_lines.append(f"focus_tree = {{")
+        code_lines.append(f"\tid = {tree_id}")
+        code_lines.append("")
+        code_lines.append(f"\tcountry = {{")
+        code_lines.append(f"\t\tfactor = 0")
+        code_lines.append(f"\t\tmodifier = {{")
+        code_lines.append(f"\t\t\tadd = 20")
+        code_lines.append(f"\t\t\toriginal_tag = {tag}")
+        code_lines.append(f"\t\t}}")
+        code_lines.append(f"\t}}")
+        code_lines.append("")
+
+        # Sort focuses top-to-bottom, left-to-right (visual reading order)
+        sorted_cids = sorted(vertices.keys(),
+                             key=lambda c: (grid_positions[c][1], grid_positions[c][0]))
+
+        # Build prereq map: tgt_cid -> [src_cid, ...]
+        prereq_map = {}
+        for src_cid, tgt_cid in edges:
+            prereq_map.setdefault(tgt_cid, []).append(src_cid)
+
+        for cid in sorted_cids:
+            v = vertices[cid]; gx, gy = grid_positions[cid]
+            code_lines.append(f"\tfocus = {{")
+            code_lines.append(f"\t\tid = {v['label']}")
+            code_lines.append(f"\t\ticon = GFX_goal_generic_political_pressure")
+            code_lines.append("")
+            code_lines.append(f"\t\tx = {gx}")
+            code_lines.append(f"\t\ty = {gy}")
+            code_lines.append("")
+            code_lines.append(f"\t\tcost = 10")
+            code_lines.append("")
+            if cid in prereq_map:
+                for src_cid in prereq_map[cid]:
+                    code_lines.append(f"\t\tprerequisite = {{ focus = {vertices[src_cid]['label']} }}")
+                code_lines.append("")
+            # omit flags — HOI4 defaults apply when absent
+            code_lines.append("")
+            code_lines.append(f"\t\tcompletion_reward = {{")
+            code_lines.append(f"\t\t\t# TODO: add effects")
+            code_lines.append(f"\t\t}}")
+            code_lines.append(f"\t}}")
+            code_lines.append("")
+
+        code_lines.append("}")
+        code_str = "\n".join(code_lines)
+
+        import re as _re2
+        for line in code_lines:
+            stripped = line.lstrip("\t")
+            indent   = "\t" * (len(line) - len(stripped))
+            if stripped.startswith("#"):
+                ctxt.insert("end", indent); ctxt.insert("end", stripped+"\n","cmt")
+            elif "=" in stripped and not stripped.startswith("{") and not stripped.startswith("}"):
+                k, _, rest = stripped.partition("=")
+                ctxt.insert("end", indent)
+                ctxt.insert("end", k+"=", "kw")
+                if "{" in rest:
+                    ctxt.insert("end", rest+"\n", "brc")
+                else:
+                    ctxt.insert("end", rest+"\n", "val")
+            elif stripped in ("{", "}") or stripped.endswith("{") or stripped == "}":
+                ctxt.insert("end", indent); ctxt.insert("end", stripped+"\n","brc")
+            else:
+                ctxt.insert("end", line+"\n")
+        ctxt.config(state="disabled")
+
+        _show_pane(pane_focuses)
+
+        # Bottom bar
+        note = tk.Label(prev_win,
+                        text="  ℹ  Shapes → focuses with generic icon.  "
+                             "Click each focus in the sidebar to add effects & icons.",
+                        bg="#0d1117", fg="#6e7681",
+                        font=("Helvetica",8,"italic"), anchor="w", pady=4)
+        note.pack(fill="x", padx=10)
+
+        pbtn = tk.Frame(prev_win, bg="#0d1117", pady=8); pbtn.pack(fill="x", padx=10)
+        do_it = [False]
+
+        def _go():
+            do_it[0] = True
+            prev_win.destroy()
+
+        tk.Button(pbtn, text="✓  Import as Skeleton",
+                  command=_go, bg="#1a3a1a", fg="#4ade80",
+                  font=("Helvetica",10,"bold"), relief="flat",
+                  padx=16, pady=6, cursor="hand2").pack(side="left", padx=(0,8))
+        tk.Button(pbtn, text="← Back",
+                  command=prev_win.destroy, bg="#161b22", fg=TEXT_DIM,
+                  font=("Helvetica",10), relief="flat",
+                  padx=12, pady=6, cursor="hand2").pack(side="left", padx=(0,8))
+        tk.Button(pbtn, text="✕  Cancel",
+                  command=prev_win.destroy, bg="#2d1515", fg="#f87171",
+                  font=("Helvetica",10), relief="flat",
+                  padx=12, pady=6, cursor="hand2").pack(side="left")
+
+        prev_win.wait_window()
+        if not do_it[0]: return
+
+        # ── Step 7: Commit to canvas ──────────────────────────────────
+        self._push_undo("draw.io import")
+        self.cv.delete("all")
+        self.focuses.clear()
+        self.selected = None
+        self._lines.clear()
+        self._grid_item = None
+        self._grid_key  = None
+        self._grid_img  = None
+        self._hide_form()
+
+        # Apply tree metadata from dialog
+        self._tree_id.set(tree_id)
+        self._update_title()
+        self._tree_country_tag   = tag
+        self._tree_country_name  = result.get("name","")
+        self._tree_focus_prefix  = prefix
+        self._default_focus_prefix = prefix
+
+        # Create Focus objects sorted by visual order
+        cid_to_fid = {}
+        for cid in sorted_cids:
+            v   = vertices[cid]
+            gx, gy = grid_positions[cid]
+            f   = Focus(gx, gy)
+            f.name = v["label"]
+            f.gfx  = "GFX_goal_generic_political_pressure"
+            f.cost = 10
+            f.cancel_if_invalid       = True
+            f.continue_if_invalid     = False
+            f.available_if_capitulated = False
+            f.search_filters = "FOCUS_FILTER_POLITICAL"
+            self.focuses[f.id] = f
+            cid_to_fid[cid] = f.id
+
+        # Wire prerequisites
+        for src_cid, tgt_cid in edges:
+            if src_cid in cid_to_fid and tgt_cid in cid_to_fid:
+                self.focuses[cid_to_fid[tgt_cid]].prereqs.append([cid_to_fid[src_cid]])
+
+        self._redraw()
+        shift_note = (f"  •  ⚠ {len(_auto_shift_log)} auto-shifted to avoid overlap"
+                      if _auto_shift_log else "")
+        self._hint(
+            f"📐 Imported {len(self.focuses)} focuses from Draw.io  •  "
+            f"Tag: {tag}  •  Prefix: {prefix}{shift_note}  •  "
+            "Click any focus to add effects & icons"
+        )
+        if _auto_shift_log:
+            detail = "\n".join(
+                f"  • {lbl}  ({ox},{oy}) → ({nx},{ny})"
+                for lbl,ox,oy,nx,ny in _auto_shift_log[:12]
+            )
+            if len(_auto_shift_log) > 12:
+                detail += f"\n  … and {len(_auto_shift_log)-12} more"
+            messagebox.showinfo("Auto-Shift Notice",
+                f"{len(_auto_shift_log)} focus(es) were automatically moved to\n"
+                f"avoid overlapping another focus:\n\n{detail}\n\n"
+                "You can drag them to better positions on the canvas.",
+                parent=self)
+
+    def _import_txt(self):
+        # If mod is loaded, open directly in common/national_focus
+        init_dir = None
+        if MOD.loaded and MOD.root:
+            nf_dir = os.path.join(MOD.root, "common", "national_focus")
+            if os.path.isdir(nf_dir):
+                init_dir = nf_dir
+        path=filedialog.askopenfilename(
+            initialdir=init_dir,
+            filetypes=[("HOI4 Focus Tree","*.txt"),("All","*.*")],title="Import HOI4 Focus Tree .txt")
+        if not path: return
+        try:
+            with open(path,"r",encoding="utf-8",errors="replace") as fp: raw=fp.read()
+        except Exception as e:
+            messagebox.showerror("Import Error",f"Could not read file:\n{e}"); return
+
+        # strip comments
+        def strip_comments(s):
+            out=[]
+            for line in s.splitlines():
+                idx=line.find("#")
+                if idx>=0: line=line[:idx]
+                out.append(line)
+            return "\n".join(out)
+
+        txt=strip_comments(raw)
+
+        # simple recursive brace tokenizer
+        def tokenize(s):
+            tokens=[]; i=0
+            while i<len(s):
+                c=s[i]
+                if c in " \t\n\r": i+=1; continue
+                if c=="{": tokens.append("{"); i+=1; continue
+                if c=="}": tokens.append("}"); i+=1; continue
+                if c=="=": tokens.append("="); i+=1; continue
+                # quoted string
+                if c=='"':
+                    j=i+1
+                    while j<len(s) and s[j]!='"': j+=1
+                    tokens.append(s[i+1:j]); i=j+1; continue
+                # bare word/number
+                j=i
+                while j<len(s) and s[j] not in " \t\n\r{}=\"": j+=1
+                if j>i: tokens.append(s[i:j])
+                i=j
+            return tokens
+
+        def parse_block(tokens,pos):
+            """Parse a { ... } block into a dict/list structure."""
+            result={}; pos+=1  # skip {
+            while pos<len(tokens) and tokens[pos]!="}":
+                key=tokens[pos]; pos+=1
+                if pos>=len(tokens): break
+                if tokens[pos]=="=":
+                    pos+=1
+                    if pos>=len(tokens): break
+                    if tokens[pos]=="{":
+                        val,pos=parse_block(tokens,pos)
+                    else:
+                        val=tokens[pos]; pos+=1
+                    # allow repeated keys as list
+                    if key in result:
+                        existing=result[key]
+                        if not isinstance(existing,list): result[key]=[existing]
+                        result[key].append(val)
+                    else:
+                        result[key]=val
+                else:
+                    # bare value (e.g. inside prerequisite)
+                    if key not in ("","=","{","}"):
+                        result.setdefault("_values",[]).append(key)
+            return result, pos+1  # skip }
+
+        tokens=tokenize(txt)
+
+        # find top-level focus_tree block
+        focuses_data=[]
+        tree_name="imported_focus_tree"
+        i=0
+        while i<len(tokens):
+            if tokens[i]=="focus_tree" and i+1<len(tokens) and tokens[i+1]=="=":
+                block,i=parse_block(tokens,i+2)
+                tree_name=block.get("id","imported_focus_tree")
+                # collect focuses
+                raw_focuses=block.get("focus",[])
+                if isinstance(raw_focuses,dict): raw_focuses=[raw_focuses]
+                for rf in raw_focuses:
+                    if isinstance(rf,dict): focuses_data.append(rf)
+            else:
+                i+=1
+
+        if not focuses_data:
+            messagebox.showwarning("Import","No focus blocks found in file.\n"
+                "Make sure it contains a focus_tree = { ... } block."); return
+
+        # clear existing
+        # Clear canvas; _items refs are gone since we cv.delete('all')
+        self.cv.delete("all"); self.focuses.clear(); self.selected=None; self._lines.clear(); self._grid_item=None; self._grid_key=None; self._grid_img=None
+        self._hide_form()
+        self._tree_id.set(tree_name)
+        self._update_title()
+        # tag detection happens AFTER all focuses are loaded (see end of method)
+
+        # ── Pass 1: create Focus objects, store relative_position_id ──────────────
+        name_to_id={}
+        raw_pos={}   # fid_str -> (raw_x, raw_y, rel_id or None)
+        for rf in focuses_data:
+            fid_str=rf.get("id","")
+            if not fid_str: continue
+            try: gx=int(rf.get("x",0)); gy=int(rf.get("y",0))
+            except: gx=0; gy=0
+            rel_id = rf.get("relative_position_id", None)
+            if rel_id: f.relative_position_id = rel_id
+            raw_pos[fid_str] = (gx, gy, rel_id)
+            f=Focus(gx, gy)   # coords resolved below
+            f.name=fid_str
+            f.gfx=rf.get("icon","GFX_goal_generic_political_pressure")
+            try:
+                _c = float(rf.get("cost","10"))
+                f.cost = _c if _c != int(_c) else int(_c)
+            except: f.cost=10
+            aiblock=rf.get("ai_will_do",{})
+            if isinstance(aiblock,dict):
+                try: f.ai_will_do=int(float(aiblock.get("factor",aiblock.get("base",1))))
+                except: f.ai_will_do=1
+                f.ai_will_do_raw=_dict_to_raw(aiblock)  # preserve full block
+            else:
+                try: f.ai_will_do=int(float(aiblock))
+                except: f.ai_will_do=1
+                f.ai_will_do_raw=""
+            f.cancel_if_invalid      = rf.get("cancel_if_invalid","yes")=="yes"
+            f.continue_if_invalid    = rf.get("continue_if_invalid","no")=="yes"
+            f.available_if_capitulated=rf.get("available_if_capitulated","no")=="yes"
+            # search_filters — can be a dict with _values (bare words in { })
+            sf = rf.get("search_filters","")
+            if isinstance(sf,dict):
+                sf=" ".join(str(v) for v in sf.get("_values",[]) if not str(v).startswith("_"))
+            elif isinstance(sf,list): sf=" ".join(str(v) for v in sf)
+            f.search_filters = str(sf).strip("{}").strip() if sf else "FOCUS_FILTER_POLITICAL"
+            # condition blocks — store raw dict as indented lines
+            def _block_to_str(block):
+                if not block: return ""
+                if isinstance(block,str): return block.strip()
+                lines=[]
+                for k,v in block.items():
+                    if k.startswith("_"): continue
+                    lines.append(f"\t{k} = {v}" if not isinstance(v,dict) else f"\t{k} = {{ {' '.join(f'{a} = {b}' for a,b in v.items())} }}")
+                return "\n".join(lines)
+            f.available_cond = _block_to_str(rf.get("available",{}))
+            f.bypass_cond    = _block_to_str(rf.get("bypass",{}))
+            f.cancel_cond    = _block_to_str(rf.get("cancel",{}))
+            reward=rf.get("completion_reward",{})
+            if isinstance(reward,dict):
+                for ek,ev in reward.items():
+                    if ek.startswith("_"): continue
+                    vals=ev if isinstance(ev,list) else [ev]
+                    for val in vals:
+                        # Special: hidden_effect is a dict of sub-effects
+                        if ek in ("hidden_effect","effect_tooltip") and isinstance(val,dict):
+                            # Convert to raw text for the multiline editor
+                            raw_lines = []
+                            for hk,hv in val.items():
+                                if str(hk).startswith("_"): continue
+                                hvals = hv if isinstance(hv,list) else [hv]
+                                for hval in hvals:
+                                    if isinstance(hval,dict):
+                                        inner=" ".join(f"{a} = {b}" for a,b in hval.items() if not str(a).startswith("_"))
+                                        raw_lines.append(f"\t{hk} = {{ {inner} }}")
+                                    else:
+                                        raw_lines.append(f"\t{hk} = {hval}")
+                            f.effects.append({"type":ek,"fields":{"raw":"\n".join(raw_lines)}})
+                        else:
+                            # Unknown effect key -> preserve verbatim so it round-trips
+                            if ek not in EFFECT_DEFS:
+                                if isinstance(val, dict):
+                                    raw_txt = _dict_to_raw(val, "\t")
+                                    raw_str = ("%s = {\n%s\n}" % (ek, raw_txt)) if raw_txt else ("%s = yes" % ek)
+                                else:
+                                    raw_str = "%s = %s" % (ek, str(val).strip())
+                                f.effects.append({"type":"_raw_block","fields":{"raw":raw_str}})
+                            else:
+                                fields = _normalize_effect_fields(ek, val)
+                                actual_type = ek
+                                if ek == "custom_effect_tooltip" and fields.get("_block_form"):
+                                    actual_type = "custom_effect_tooltip_block"
+                                f.effects.append({"type":actual_type,"fields":fields})
+            self.focuses[f.id]=f
+            name_to_id[fid_str]=f.id
+
+        # ── Resolve relative_position_id chains → absolute grid coords ───────────
+        # HOI4: focus with relative_position_id="X", x=dx, y=dy means:
+        #   absolute = (resolve(X).x + dx,  resolve(X).y + dy)
+        # Chains can nest multiple levels deep: A → B → C (absolute)
+        def resolve_abs(name, visited=None):
+            if visited is None: visited = set()
+            if name not in raw_pos: return (0, 0)
+            if name in visited: return raw_pos[name][:2]   # circular ref guard
+            visited.add(name)
+            rx, ry, rel = raw_pos[name]
+            if rel is None or rel not in raw_pos:
+                return (rx, ry)
+            bx, by = resolve_abs(rel, visited)
+            return (bx + rx, by + ry)
+
+        for fid_str, fid in name_to_id.items():
+            ax, ay = resolve_abs(fid_str)
+            self.focuses[fid].x = ax
+            self.focuses[fid].y = ay
+
+        # second pass: link prerequisites and mutex
+        name_list=list(name_to_id.keys())
+        for rf in focuses_data:
+            fid_str=rf.get("id","")
+            if fid_str not in name_to_id: continue
+            fid=name_to_id[fid_str]
+            f=self.focuses[fid]
+            # prerequisites
+            prereqs=rf.get("prerequisite",[])
+            if isinstance(prereqs,dict): prereqs=[prereqs]
+            for pblock in prereqs:
+                if not isinstance(pblock,dict): continue
+                group_fids=[]
+                pf=pblock.get("focus",[])
+                if isinstance(pf,str): pf=[pf]
+                for pname in pf:
+                    if pname in name_to_id: group_fids.append(name_to_id[pname])
+                if group_fids: f.prereqs.append(group_fids)
+            # mutually exclusive
+            mutex=rf.get("mutually_exclusive",[])
+            if isinstance(mutex,dict): mutex=[mutex]
+            for mblock in mutex:
+                if not isinstance(mblock,dict): continue
+                mf=mblock.get("focus","")
+                if isinstance(mf,str) and mf in name_to_id:
+                    mid=name_to_id[mf]
+                    if mid not in f.mutex: f.mutex.append(mid)
+
+        self._detect_and_apply_tag()  # scan focus IDs now that all focuses are loaded
+        self._redraw()
+        messagebox.showinfo("Import Complete",
+            f"Imported {len(self.focuses)} focuses from:\n{os.path.basename(path)}\n\n"
+            f"Tree ID: {tree_name}\n\n"
+            "Note: available/bypass conditions and complex effects\n"
+            "may need manual review.")
+
+    # ── SAVE / LOAD ─────────────────────────────────────────────
+    def _save(self):
+        path=filedialog.asksaveasfilename(defaultextension=".json",
+            filetypes=[("JSON Project","*.json"),("All","*.*")],title="Save Project")
+        if not path: return
+        data={"tree_name":self._tree_id.get(),"focuses":[f.to_dict() for f in self.focuses.values()]}
+        with open(path,"w",encoding="utf-8") as fp: json.dump(data,fp,indent=2)
+        messagebox.showinfo("Saved",f"Project saved:\n{path}")
+    def _detect_and_apply_tag(self):
+        """Scan all loaded focus IDs, detect common country tag prefix, apply to new focuses."""
+        if not self.focuses: return
+        names = [f.name for f in self.focuses.values() if f.name and "_" in f.name]
+        if not names: return
+        from collections import Counter
+        # Extract first segment before first underscore (e.g. "JAP" from "JAP_militarism")
+        segs = [n.split("_")[0].upper() for n in names]
+        # Filter: must be 2-5 chars (typical HOI4 tags are 3 chars like JAP, GER, USA)
+        segs = [s for s in segs if 2 <= len(s) <= 5 and s.isalpha()]
+        if not segs: return
+        most_common, count = Counter(segs).most_common(1)[0]
+        # Apply if appears in at least 2 focuses OR >30% of all (handles small trees too)
+        threshold = count >= 2 and (count / len(names) >= 0.30)
+        if threshold and len(most_common) >= 2:
+            self._default_focus_prefix = most_common + "_"
+            self._hint(f"🏷 Tag detected: {most_common}  —  new focuses will auto-prefix '{most_common}_'")
+        else:
+            self._default_focus_prefix = ""
+
+    def _load(self):
+        path=filedialog.askopenfilename(filetypes=[("JSON Project","*.json"),("All","*.*")],title="Load Project")
+        if not path: return
+        with open(path,"r",encoding="utf-8") as fp: data=json.load(fp)
+        self.cv.delete("all"); self.focuses.clear(); self.selected=None; self._lines.clear(); self._grid_item=None; self._grid_key=None; self._grid_img=None
+        self._tree_id.set(data.get("tree_name","TAG_focus_tree"))
+        self._update_title()
+        for fd in data.get("focuses",[]):
+            f=Focus.from_dict(fd); f._draw_key=None; self.focuses[f.id]=f
+        self._detect_and_apply_tag()
+        self._hide_form(); self._redraw()
+
+    # ── EXPORT ──────────────────────────────────────────────────
+    def _render_effect(self, eff):
+        """Render a single effect as HOI4 code (3-tab indent, inside completion_reward)."""
+        t = eff.get("type", "")
+        f = eff.get("fields", {})
+        I = "\t\t\t"
+
+        def block(name, pairs):
+            inner = "\n".join(f"{I}\t{k} = {v}" for k,v in pairs)
+            return f"{I}{name} = {{\n{inner}\n{I}}}"
+
+        def g(key, default=""):
+            return f.get(key, default)
+
+        # ── Dispatch table: type → renderer ───────────────────────
+        _DISPATCH = {
+            "add_tech_bonus": lambda: block("add_tech_bonus", [
+                ("name", g("name","bonus")), ("bonus", g("bonus","0.5")),
+                ("uses", g("uses","1")), ("category", g("category","infantry_weapons"))]),
+            "add_popularity": lambda: block("add_popularity", [
+                ("ideology", g("ideology","democratic")), ("popularity", g("popularity","0.05"))]),
+            "set_politics": lambda: block("set_politics", [
+                ("ruling_party", g("ruling_party","democratic")),
+                ("elections_allowed", g("elections_allowed","no"))]),
+            "add_timed_idea": lambda: block("add_timed_idea", [
+                ("idea", g("idea","")), ("days", g("days","180"))]),
+            "swap_ideas": lambda: block("swap_ideas", [
+                ("remove_idea", g("remove_idea","old_spirit")), ("add_idea", g("add_idea","new_spirit"))]),
+            "declare_war_on": lambda: block("declare_war_on", [
+                ("target", g("target","TAG")), ("type", g("type","annex_everything"))]),
+            "create_wargoal": lambda: block("create_wargoal", [
+                ("type", g("type","annex_everything")), ("target", g("target","TAG"))]),
+            "annex_country": lambda: block("annex_country", [
+                ("target", g("target","TAG")), ("transfer_troops", g("transfer_troops","no"))]),
+            "add_opinion_modifier": lambda: block("add_opinion_modifier", [
+                ("target", g("target","TAG")), ("modifier", g("modifier","my_opinion_mod"))]),
+            "diplomatic_relation": lambda: block("diplomatic_relation", [
+                ("country", g("country","TAG")), ("relation", g("relation","guarantee")),
+                ("active", g("active","yes"))]),
+            "add_ai_strategy": lambda: block("add_ai_strategy", [
+                ("type", g("type","alliance")), ("id", g("id","TAG")), ("value", g("value","100"))]),
+            "start_civil_war": lambda: block("start_civil_war", [
+                ("ideology", g("ideology","communism")), ("size", g("size","0.5"))]),
+            "load_focus_tree": lambda: block("load_focus_tree", [
+                ("tree", g("tree","TAG_focus_tree")), ("keep_completed", g("keep_completed","yes"))]),
+            "add_building_construction": lambda: block("add_building_construction", [
+                ("type", g("type","industrial_complex")), ("level", g("level","1")),
+                ("instant_build", g("instant_build","no"))]),
+            "log": lambda: f'{I}log = "{g("text")}"',
+            "set_variable": lambda: f'{I}set_variable = {{ {g("var_name","my_var")} = {g("value","0")} }}',
+            "force_update_dynamic_modifier": lambda: f"{I}force_update_dynamic_modifier = yes",
+            "unlock_decision_category_tooltip": lambda: f'{I}unlock_decision_category_tooltip = {g("category","TAG_decisions")}',
+            "unlock_decision_tooltip": lambda: f'{I}unlock_decision_tooltip = {g("decision","TAG_decision")}',
+            "ingame_update_setup": lambda: f"{I}ingame_update_setup = yes",
+            # MD scripted effects
+            "md_modify_treasury": lambda: (
+                f"{I}set_temp_variable = {{ treasury_change = {g('amount','-10.00')} }}\n"
+                f"{I}modify_treasury_effect = yes"),
+            "md_modify_debt": lambda: (
+                f"{I}set_temp_variable = {{ debt_change = {g('amount','0.1')} }}\n"
+                f"{I}modify_debt_effect = yes"),
+            "md_flat_productivity": lambda: (
+                f"{I}set_temp_variable = {{ temp_productivity_change = {g('amount','0.025')} }}\n"
+                f"{I}flat_productivity_change_effect = yes"),
+            "md_economic_cycle": lambda: f"{I}{g('cycle','stable_growth')} = yes",
+            "md_gov_spending":   lambda: f"{I}{g('action','increase_social_spending')} = yes",
+            "md_build_random":   lambda: f"{I}{g('effect','one_random_industrial_complex')} = yes",
+            "md_enrichment_facility": lambda: (
+                f"{I}set_temp_variable = {{ temp_change = {g('count','1')} }}\n"
+                f"{I}build_enrichment_facilities_effect = yes"),
+            "md_battery_park": lambda: (
+                f"{I}set_temp_variable = {{ temp_change = {g('count','1')} }}\n"
+                f"{I}build_battery_park_effect = yes"),
+            "md_coalition_add": lambda: (
+                f"{I}set_temp_variable = {{ add_col_one = {g('party_index','5')} }}\n"
+                f"{I}add_coalition_members_effect = yes"),
+            "md_coalition_remove": lambda: (
+                f"{I}set_temp_variable = {{ remove_col_one = {g('party_index','5')} }}\n"
+                f"{I}remove_coalition_members_effect = yes"),
+            "md_domestic_influence": lambda: (
+                f"{I}set_temp_variable = {{ percent_change = {g('percent','10')} }}\n"
+                f"{I}change_domestic_influence_percentage = yes"),
+            "md_eurosceptic_all": lambda: (
+                f"{I}set_temp_variable = {{ modify_eurosceptic = {g('amount','-0.05')} }}\n"
+                f"{I}EU_eurosceptic_change = yes"),
+        }
+
+        if t in _DISPATCH:
+            return _DISPATCH[t]()
+
+        # ── Multi-case handlers ────────────────────────────────────
+        if t == "add_equipment_to_stockpile":
+            pairs = [("type", g("type","infantry_equipment_1")), ("amount", g("amount","500"))]
+            if g("producer","").strip(): pairs.append(("producer", g("producer")))
+            return block("add_equipment_to_stockpile", pairs)
+
+        if t in ("country_event", "news_event"):
+            pairs = [("id", g("id","my_event.1"))]
+            d = g("days","0").strip()
+            if d and d != "0": pairs.append(("days", d))
+            return block(t, pairs)
+
+        if t in ("hidden_effect", "effect_tooltip"):
+            raw = g("raw","").strip()
+            if not raw and "_list" in f:
+                raw = "\n".join(
+                    f"{I}\t{ik} = {iv}"
+                    for item in f["_list"] if isinstance(item, dict)
+                    for ik, iv in item.items() if not str(ik).startswith("_")
+                )
+            inner = "\n".join(f"{I}\t{ln}" for ln in raw.splitlines())
+            return f"{I}{t} = {{\n{inner}\n{I}}}"
+
+        if t == "_raw_block":
+            raw = g("raw","").strip()
+            return "\n".join(f"{I}{ln}" for ln in raw.splitlines()) if raw else ""
+
+        if t == "add_to_variable":
+            vn  = f.get("variable", g("var_name","AM_my_stat_var"))
+            val = f.get("amount",   g("value","0.05"))
+            tt  = g("tooltip","").strip()
+            base = f"{I}add_to_variable = {{ {vn} = {val}"
+            return base + (f" tooltip = {tt} }}" if tt else " }")
+
+        if t == "add_dynamic_modifier":
+            out = [f"{I}add_dynamic_modifier = {{", f"{I}\tmodifier = {g('modifier','TAG_modifier')}"]
+            sc = g("scope","").strip(); dy = g("days","").strip()
+            if sc: out.append(f"{I}\tscope = {sc}")
+            if dy: out.append(f"{I}\tdays = {dy}")
+            out.append(f"{I}}}"); return "\n".join(out)
+
+        if t == "remove_dynamic_modifier":
+            return f"{I}remove_dynamic_modifier = {{\n{I}\tmodifier = {g('modifier','TAG_modifier')}\n{I}}}"
+
+        if t in ("custom_effect_tooltip", "custom_effect_tooltip_block"):
+            if f.get("_block_form") or "localization_key" in f or "MODIFIER" in f or t.endswith("_block"):
+                return (f"{I}custom_effect_tooltip = {{\n"
+                        f"{I}\tlocalization_key = {g('localization_key','modifies_dynamic_modifier_tt')}\n"
+                        f"{I}\tMODIFIER = {g('MODIFIER','TAG_modifier')}\n{I}}}")
+            return f"{I}custom_effect_tooltip = {g('tooltip','my_tooltip_key')}"
+
+        if t in ("md_small_expenditure","md_medium_expenditure","md_large_expenditure"):
+            return f"{I}{t.replace('md_','')} = yes"
+
+        if t == "md_build_state":
+            return f"{I}{g('state_id','117')} = {{\n{I}\t{g('effect','one_state_industrial_complex')} = yes\n{I}}}"
+
+        if t == "md_party_popularity":
+            return (f"{I}set_temp_variable = {{ party_index = {g('party_index','2')} }}\n"
+                    f"{I}set_temp_variable = {{ party_popularity_increase = {g('amount','0.10')} }}\n"
+                    f"{I}add_relative_party_popularity = yes")
+
+        if t == "md_ruling_party":
+            return (f"{I}set_temp_variable = {{ rul_party_temp = {g('rul_party_temp','2')} }}\n"
+                    f"{I}change_ruling_party_effect = yes\n"
+                    f"{I}set_politics = {{\n{I}\truling_party = {g('ruling_party','western')}\n"
+                    f"{I}\telections_allowed = {g('elections_allowed','no')}\n{I}}}")
+
+        if t == "md_ban_party":
+            return (f"{I}set_temp_variable = {{ party_index = {g('party_index','1')} }}\n"
+                    f"{I}ban_party_scripted_call = yes")
+
+        if t == "md_unban_party":
+            return (f"{I}set_temp_variable = {{ party_index = {g('party_index','1')} }}\n"
+                    f"{I}unban_party_scripted_call = yes")
+
+        if t == "md_faction_opinion":
+            return (f"{I}set_temp_variable = {{ temp_opinion = {g('opinion','5')} }}\n"
+                    f"{I}{g('faction','change_the_military_opinion')} = yes")
+
+        if t == "md_influence_country":
+            return (f"{I}set_temp_variable = {{ percent_change = {g('percent','5')} }}\n"
+                    f"{I}set_temp_variable = {{ tag_index = ROOT }}\n"
+                    f"{I}set_temp_variable = {{ influence_target = {g('target','GER')} }}\n"
+                    f"{I}change_influence_percentage = yes")
+
+        if t == "md_eurosceptic_single":
+            return (f"{I}set_temp_variable = {{ modify_eurosceptic = {g('amount','0.05')} }}\n"
+                    f"{I}set_temp_variable = {{ modify_eurosceptic_target = {g('target','GER')} }}\n"
+                    f"{I}eurosceptic_change = yes")
+
+        if t == "md_cartel":
+            return (f"{I}set_temp_variable = {{ cart_strength_change = {g('strength','2')} }}\n"
+                    f"{I}set_temp_variable = {{ cart_influence_change = {g('influence','2')} }}\n"
+                    f"{I}modify_cartel_variables_effect = yes")
+
+        if t.startswith("md_modifier_"):
+            return f"{I}# MD MODIFIER (place inside idea modifier block):\n{I}# {g('modifier','')} = {g('value','0.05')}"
+
+        # ── Scope / if / else blocks ───────────────────────────────
+        _SCOPE_TYPES = {
+            "if","else_if","else","every_country","every_state","every_ally",
+            "every_enemy_country","every_faction_member","every_subject_country",
+            "every_neighbor_country","every_allied_country","every_other_country",
+            "every_occupied_country","every_possible_country","every_controlled_state",
+            "every_owned_state","every_core_state","every_neighbor_state",
+            "every_army_leader","every_navy_leader","every_unit_leader",
+            "every_character","every_operative","every_country_division",
+            "every_state_division","every_active_scientist","every_scientist",
+            "every_military_industrial_organization","every_purchase_contract",
+            "every_country_with_original_tag","every_collection_element",
+            "random_country","random_state","random_ally","random_neighbor_country",
+            "random_owned_state","random_controlled_state","random_core_state",
+            "capital_scope","overlord","faction_leader",
+        }
+        if t in _SCOPE_TYPES:
+            import re as _re
+            out = [f"{I}{t} = {{"]
+            limit_raw = str(g("limit","")).strip()
+            if limit_raw:
+                out.append(f"{I}\tlimit = {{")
+                inner = limit_raw.strip("{}").replace("'",'"')
+                for ln in inner.splitlines():
+                    ln = ln.strip().strip(",").strip()
+                    if ln: out.append(f"{I}\t\t{ln}")
+                out.append(f"{I}\t}}")
+            effect_raw = str(g("effect","")).strip()
+            if effect_raw:
+                inner = effect_raw.strip("{}[]").replace("'",'"')
+                for ln in inner.splitlines():
+                    ln = ln.strip().strip(",")
+                    if ln: out.append(f"{I}\t{ln}")
+            for k,v in f.items():
+                if k in ("limit","effect","_list") or str(k).startswith("_"): continue
+                vs = str(v).strip()
+                if not vs: continue
+                if vs.startswith("{") and vs.endswith("}"):
+                    inner2 = vs[1:-1].replace("'",'"').strip()
+                    pairs = _re.findall(r'"(\w+)"\s*[=:]\s*"([^"]*)"', inner2)
+                    if pairs:
+                        out.append(f"{I}\t{k} = {{")
+                        for pk,pv in pairs: out.append(f"{I}\t\t{pk} = {pv}")
+                        out.append(f"{I}\t}}")
+                    else:
+                        out.append(f"{I}\t{k} = {vs}")
+                else:
+                    out.append(f"{I}\t{k} = {vs}")
+            out.append(f"{I}}}")
+            return "\n".join(out)
+
+        # ── Generic fallback ───────────────────────────────────────
+        defn = EFFECT_DEFS.get(t, {})
+        fl = defn.get("fields", [])
+        fname = fl[0][0] if fl else None
+        if fname:
+            val = g(fname,"").strip()
+            if val: return f"{I}{t} = {val}"
+        raw_val = str(g("raw","")).strip()
+        if raw_val: return f"{I}{t} = {raw_val}"
+        fields_clean = {k:v for k,v in f.items()
+                        if not str(k).startswith("_") and k != "raw"}
+        if not fields_clean: return f"{I}{t} = yes"
+        if len(fields_clean) == 1:
+            k0,v0 = list(fields_clean.items())[0]
+            if k0 in ("amount","value","flag","tooltip","category","decision"):
+                return f"{I}{t} = {v0}"
+            return f"{I}{t} = {{ {k0} = {v0} }}"
+        inner_lines = "\n".join(f"{I}\t{k} = {v}" for k,v in fields_clean.items())
+        return f"{I}{t} = {{\n{inner_lines}\n{I}}}"
+
+
+    def _apply_md_visibility(self):
+        """Show/hide MD effect categories based on whether MD is detected."""
+        global EFFECT_CATS
+        md_cats = {"MD Economy","MD Buildings","MD Politics",
+                   "MD Factions","MD Influence","MD Modifiers"}
+        base_cats = [c for c in EFFECT_CATS if c not in md_cats]
+        if MOD.is_md:
+            EFFECT_CATS = base_cats + sorted(md_cats)
+        else:
+            EFFECT_CATS = base_cats
+        if hasattr(self, "_eff_cat"):
+            if self._eff_cat.get() not in EFFECT_CATS:
+                self._eff_cat.set(EFFECT_CATS[0])
+            self._rebuild_eff_dd()
+
+    def _open_settings(self):
+        """Settings panel — GFX paths, MD detection, extra dirs."""
+        win = tk.Toplevel(self)
+        win.title("Settings"); win.configure(bg=BG_DARK)
+        win.geometry("600x580"); win.resizable(True, True); win.grab_set()
+
+        tk.Label(win, text="SETTINGS", bg=BG_DARK, fg=TEXT,
+                 font=("Helvetica",11,"bold"), pady=10).pack(fill="x", padx=14)
+        tk.Frame(win, bg=BORDER_G, height=1).pack(fill="x")
+
+        sc = tk.Canvas(win, bg=BG_PANEL, highlightthickness=0)
+        sb = tk.Scrollbar(win, orient="vertical", command=sc.yview)
+        frm = tk.Frame(sc, bg=BG_PANEL)
+        sc.create_window((0,0), window=frm, anchor="nw")
+        sc.configure(yscrollcommand=sb.set)
+        frm.bind("<Configure>", lambda e: sc.configure(scrollregion=sc.bbox("all")))
+        sc.bind("<Configure>", lambda e: sc.itemconfig(sc.find_withtag("all")[0],
+                 width=e.width) if sc.find_withtag("all") else None)
+        sb.pack(side="right", fill="y"); sc.pack(fill="both", expand=True)
+
+        def _sec(text):
+            tk.Frame(frm, bg=BORDER_G, height=1).pack(fill="x", padx=8, pady=(10,2))
+            tk.Label(frm, text=text, bg=BG_PANEL, fg=TEXT,
+                     font=("Helvetica",9,"bold"), anchor="w", padx=10, pady=3).pack(fill="x")
+
+        def _lbl(text, fg=TEXT_DIM):
+            tk.Label(frm, text=text, bg=BG_PANEL, fg=fg,
+                     font=("Helvetica",8), anchor="w", padx=14).pack(fill="x")
+
+        def _path_row(label, attr):
+            row = tk.Frame(frm, bg=BG_PANEL); row.pack(fill="x", padx=10, pady=3)
+            tk.Label(row, text=label, bg=BG_PANEL, fg=TEXT_DIM,
+                     font=("Helvetica",9), width=18, anchor="w").pack(side="left")
+            var = tk.StringVar(value=getattr(MOD, attr, ""))
+            e = tk.Entry(row, textvariable=var, bg=BG_CARD, fg=TEXT,
+                         insertbackground=BLUE, font=("Courier",9), relief="flat",
+                         highlightthickness=1, highlightbackground=BORDER_G)
+            e.pack(side="left", fill="x", expand=True, ipady=3)
+            def _on_change(*a, _attr=attr, _var=var):
+                setattr(MOD, _attr, _var.get())
+                MOD.save_config()
+            var.trace_add("write", _on_change)
+            def _browse(v=var):
+                # Start inside mod root if loaded, else home
+                start = os.path.join(MOD.root, v.get()) if MOD.root and os.path.isdir(
+                    os.path.join(MOD.root, v.get())) else (
+                    MOD.root if MOD.root and os.path.isdir(MOD.root)
+                    else os.path.expanduser("~"))
+                d = filedialog.askdirectory(title="Select folder", initialdir=start)
+                if not d: return
+                # Store relative to mod root if possible, otherwise absolute
+                if MOD.root and d.startswith(MOD.root):
+                    d = os.path.relpath(d, MOD.root)
+                v.set(d)
+            tk.Button(row, text="Browse", command=_browse,
+                      bg=BG_CARD, fg=TEXT_DIM, relief="flat",
+                      font=("Helvetica",8), padx=8, pady=2,
+                      cursor="hand2",
+                      highlightthickness=1,
+                      highlightbackground=BORDER_G).pack(side="left", padx=(4,0))
+
+        # ── MOD DETECTION STATUS ──────────────────────────────────────
+        _sec("MOD DETECTION")
+        md_color = "#a78bfa" if MOD.is_md else TEXT_DIM
+        _lbl("  Loaded mod:   " + (MOD.mod_name or "None"), fg=md_color)
+        _lbl("  MD detected:  " + ("YES  ⚡ MD categories and effects are visible" if MOD.is_md
+             else "NO   — MD categories hidden"), fg=md_color)
+        _lbl("  Detection checks: folder name, descriptor.mod content.")
+        _lbl("  You can also override manually:")
+
+        ovr_row = tk.Frame(frm, bg=BG_PANEL); ovr_row.pack(fill="x", padx=10, pady=6)
+
+        def _force(is_md):
+            MOD.is_md = is_md
+            self._apply_md_visibility()
+            lbl_status.config(
+                text="  Overridden:  MD = %s" % ("ON" if is_md else "OFF"),
+                fg="#a78bfa" if is_md else "#4ade80")
+
+        tk.Button(ovr_row, text="Force MD ON",
+                  command=lambda: _force(True),
+                  bg="#2d1a4a", fg="#a78bfa", relief="flat",
+                  font=("Helvetica",9,"bold"), padx=12, pady=4,
+                  cursor="hand2").pack(side="left", padx=4)
+        tk.Button(ovr_row, text="Force MD OFF  (Vanilla)",
+                  command=lambda: _force(False),
+                  bg="#1a2c1a", fg="#4ade80", relief="flat",
+                  font=("Helvetica",9,"bold"), padx=12, pady=4,
+                  cursor="hand2").pack(side="left", padx=4)
+        lbl_status = tk.Label(frm, text="", bg=BG_PANEL, fg=TEXT_DIM,
+                              font=("Helvetica",8), anchor="w", padx=14)
+        lbl_status.pack(fill="x")
+
+        # ── MOD PATH ─────────────────────────────────────────────
+        _sec("MOD LOAD PATH")
+        _lbl("  Where the Mod button opens by default.")
+        _lbl("  Leave blank to use the HOI4 mod folder automatically.")
+
+        _default_hoi4 = os.path.join(
+            os.path.expanduser("~"), "Documents", "Paradox Interactive",
+            "Hearts of Iron IV", "mod")
+        if not hasattr(MOD, "custom_mod_path"):
+            MOD.custom_mod_path = ""
+
+        mp_row = tk.Frame(frm, bg=BG_PANEL); mp_row.pack(fill="x", padx=10, pady=3)
+        tk.Label(mp_row, text="Mod folder:", bg=BG_PANEL, fg=TEXT_DIM,
+                 font=("Helvetica",9), width=14, anchor="w").pack(side="left")
+        mp_var = tk.StringVar(value=MOD.custom_mod_path or _default_hoi4)
+        mp_ent = tk.Entry(mp_row, textvariable=mp_var, bg=BG_CARD, fg=TEXT,
+                          insertbackground=BLUE, font=("Courier",9), relief="flat",
+                          highlightthickness=1, highlightbackground=BORDER_G)
+        mp_ent.pack(side="left", fill="x", expand=True, ipady=3)
+        def _on_mp_change(*a):
+            MOD.custom_mod_path = mp_var.get()
+            MOD.save_config()
+        mp_var.trace_add("write", _on_mp_change)
+
+        def _browse_mod_path():
+            d = filedialog.askdirectory(title="Select default mod folder",
+                                        initialdir=mp_var.get() if os.path.isdir(mp_var.get())
+                                        else os.path.expanduser("~"))
+            if d: mp_var.set(d)
+
+        def _reset_mod_path():
+            mp_var.set(_default_hoi4)
+
+        mp_btn_row = tk.Frame(frm, bg=BG_PANEL); mp_btn_row.pack(fill="x", padx=10, pady=(0,4))
+        tk.Button(mp_btn_row, text="Browse", command=_browse_mod_path,
+                  bg=BG_CARD, fg=TEXT, relief="flat",
+                  font=("Helvetica",9), padx=10, pady=3,
+                  cursor="hand2").pack(side="left", padx=(0,4))
+        tk.Button(mp_btn_row, text="Reset to HOI4 Default",
+                  command=_reset_mod_path,
+                  bg=BG_CARD, fg=TEXT_DIM, relief="flat",
+                  font=("Helvetica",9), padx=10, pady=3,
+                  cursor="hand2").pack(side="left")
+        _lbl("  Current HOI4 default:  " + _default_hoi4)
+
+        # ── GFX PATHS ─────────────────────────────────────────────────
+        _sec("GFX PATHS  (relative to mod root)")
+        _lbl("  Focus icon GFX  (gfx/interface/goals/):")
+        _path_row("Goals path:", "path_goals")
+        _lbl("  Idea / National Spirit GFX  (gfx/interface/ideas/):")
+        _path_row("Ideas GFX path:", "path_ideas_gfx")
+        _lbl("  Changes take effect when you reload the mod.")
+
+        # Preset buttons
+        pre_row = tk.Frame(frm, bg=BG_PANEL); pre_row.pack(fill="x", padx=10, pady=4)
+        tk.Label(pre_row, text="Presets:", bg=BG_PANEL, fg=TEXT_DIM,
+                 font=("Helvetica",8)).pack(side="left", padx=(0,8))
+
+        presets = [
+            ("Vanilla HOI4",
+             os.path.join("gfx","interface","goals"),
+             os.path.join("gfx","interface","ideas")),
+            ("Millennium Dawn",
+             os.path.join("gfx","interface","goals"),
+             os.path.join("Millennium_Dawn","gfx","interface","ideas")),
+        ]
+        for pname, pg, pi in presets:
+            def _apply(g=pg, i=pi):
+                MOD.path_goals = g; MOD.path_ideas_gfx = i
+                MOD.save_config()
+                messagebox.showinfo("Preset Applied",
+                    "Paths updated.\nReload mod to apply.", parent=win)
+            tk.Button(pre_row, text=pname, command=_apply,
+                      bg=BG_CARD, fg=TEXT_DIM, relief="flat",
+                      font=("Helvetica",8), padx=8, pady=3,
+                      cursor="hand2").pack(side="left", padx=2)
+
+        # ── EVENT PICTURE GFX ────────────────────────────────────────
+        _sec("EVENT PICTURE GFX PATH  (relative to mod root)")
+        _lbl("  Folder containing .dds event pictures (vanilla: gfx/event_pictures/):")
+        _path_row("Event pictures:", "path_event_pictures")
+        _lbl("  Changes take effect immediately in the Event Maker GFX picker.")
+
+        # ── EVENT DIMENSION PROFILES ──────────────────────────────────
+        _sec("EVENT PICTURE DIMENSION PROFILES")
+        _lbl("  Define expected pixel dimensions for each profile.")
+        _lbl("  Vanilla: country_event=210×176 px,  news_event=397×165 px")
+        _lbl("  Add mod profiles below so the Event Maker can validate your custom GFX.")
+
+        # Active profile selector
+        prof_sel_row = tk.Frame(frm, bg=BG_PANEL)
+        prof_sel_row.pack(fill="x", padx=10, pady=4)
+        tk.Label(prof_sel_row, text="Active profile:", bg=BG_PANEL, fg=TEXT_DIM,
+                 font=("Helvetica",9), width=16, anchor="w").pack(side="left")
+        _prof_var = tk.StringVar(value=MOD.event_dim_active_profile)
+        _prof_cb  = ttk.Combobox(prof_sel_row, textvariable=_prof_var,
+                                  state="readonly", width=22, font=("Helvetica",9))
+        _prof_cb.pack(side="left", padx=4)
+
+        def _refresh_prof_list():
+            names = sorted(MOD.event_dim_profiles.keys())
+            _prof_cb["values"] = names
+            if _prof_var.get() not in names and names:
+                _prof_var.set(names[0])
+
+        def _on_prof_select(evt=None):
+            MOD.event_dim_active_profile = _prof_var.get()
+            MOD.save_config()
+            _refresh_prof_list()
+            _refresh_profiles_box()
+
+        _prof_cb.bind("<<ComboboxSelected>>", _on_prof_select)
+        _refresh_prof_list()
+
+        # Profiles list
+        profiles_box = tk.Frame(frm, bg=BG_PANEL)
+        profiles_box.pack(fill="x", padx=10, pady=2)
+
+        def _refresh_profiles_box():
+            for w in profiles_box.winfo_children(): w.destroy()
+            for pname, dims in sorted(MOD.event_dim_profiles.items()):
+                cw, ch = dims.get("country",(210,176))
+                nw, nh = dims.get("news",(397,165))
+                is_active = (pname == MOD.event_dim_active_profile)
+                row = tk.Frame(profiles_box, bg=BG_CARD,
+                               highlightthickness=1,
+                               highlightbackground="#4ade80" if is_active else BORDER_G)
+                row.pack(fill="x", pady=2)
+                badge = "  ✓ ACTIVE  " if is_active else "           "
+                tk.Label(row, text=badge, bg=BG_CARD,
+                         fg="#4ade80" if is_active else TEXT_DIM,
+                         font=("Helvetica",8,"bold"), width=10).pack(side="left")
+                tk.Label(row, text=f"{pname}", bg=BG_CARD, fg=TEXT,
+                         font=("Helvetica",9,"bold"), width=18, anchor="w").pack(side="left")
+                tk.Label(row, text=f"country={cw}×{ch}  news={nw}×{nh}",
+                         bg=BG_CARD, fg=TEXT_DIM, font=("Courier",8)).pack(side="left", padx=8)
+                if pname != "vanilla":
+                    tk.Button(row, text="✕",
+                              command=lambda p=pname: _delete_profile(p),
+                              bg=BG_CARD, fg=RED, relief="flat",
+                              font=("Helvetica",9), cursor="hand2",
+                              padx=4).pack(side="right")
+
+        def _delete_profile(pname):
+            if pname == "vanilla":
+                return
+            MOD.event_dim_profiles.pop(pname, None)
+            if MOD.event_dim_active_profile == pname:
+                MOD.event_dim_active_profile = "vanilla"
+                _prof_var.set("vanilla")
+            MOD.save_config()
+            _refresh_prof_list()
+            _refresh_profiles_box()
+
+        _refresh_profiles_box()
+
+        # Add new profile
+        _lbl("  Add custom profile:")
+        new_prof_row = tk.Frame(frm, bg=BG_PANEL)
+        new_prof_row.pack(fill="x", padx=10, pady=4)
+
+        np_name = tk.StringVar(value="My Mod")
+        np_cw   = tk.StringVar(value="420")
+        np_ch   = tk.StringVar(value="176")
+        np_nw   = tk.StringVar(value="794")
+        np_nh   = tk.StringVar(value="330")
+
+        def _lbl_s(parent, text, w=None):
+            kw = {"bg":BG_PANEL,"fg":TEXT_DIM,"font":("Helvetica",8)}
+            if w: kw["width"]=w
+            tk.Label(parent, text=text, **kw).pack(side="left", padx=2)
+        def _ent_s(parent, var, width=6):
+            tk.Entry(parent, textvariable=var, bg=BG_CARD, fg=TEXT,
+                     insertbackground=TEXT, relief="flat",
+                     highlightthickness=1, highlightbackground=BORDER_G,
+                     font=("Helvetica",9), width=width).pack(side="left", padx=2)
+
+        _lbl_s(new_prof_row, "Name:"); _ent_s(new_prof_row, np_name, 14)
+        _lbl_s(new_prof_row, "  country:"); _ent_s(new_prof_row, np_cw, 5)
+        _lbl_s(new_prof_row, "×"); _ent_s(new_prof_row, np_ch, 5)
+        _lbl_s(new_prof_row, "  news:"); _ent_s(new_prof_row, np_nw, 5)
+        _lbl_s(new_prof_row, "×"); _ent_s(new_prof_row, np_nh, 5)
+
+        def _add_profile():
+            name = np_name.get().strip()
+            if not name:
+                messagebox.showerror("Error","Profile name cannot be empty.", parent=win); return
+            try:
+                cw,ch = int(np_cw.get()), int(np_ch.get())
+                nw,nh = int(np_nw.get()), int(np_nh.get())
+            except ValueError:
+                messagebox.showerror("Error","Dimensions must be integers.", parent=win); return
+            MOD.event_dim_profiles[name] = {"country":(cw,ch), "news":(nw,nh)}
+            MOD.event_dim_active_profile = name
+            _prof_var.set(name)
+            MOD.save_config()
+            _refresh_prof_list()
+            _refresh_profiles_box()
+
+        tk.Button(frm, text="+ Add Profile", command=_add_profile,
+                  bg=BG_CARD, fg="#4ade80", relief="flat",
+                  font=("Helvetica",9,"bold"), padx=12, pady=4,
+                  cursor="hand2").pack(anchor="w", padx=10, pady=(0,6))
+
+        # ── EXTRA GFX DIRS ────────────────────────────────────────────
+        _sec("EXTRA GFX DIRECTORIES  (absolute paths)")
+        _lbl("  Scanned in addition to the paths above.")
+        _lbl("  Useful for pointing at vanilla HOI4 gfx from within a mod.")
+
+        extra_box = tk.Frame(frm, bg=BG_PANEL)
+        extra_box.pack(fill="x", padx=10, pady=4)
+
+        def _refresh_extra():
+            for w in extra_box.winfo_children(): w.destroy()
+            if not MOD.custom_gfx_dirs:
+                tk.Label(extra_box, text="  None added.",
+                         bg=BG_PANEL, fg=TEXT_DIM,
+                         font=("Helvetica",9,"italic")).pack(anchor="w")
+                return
+            for i, d in enumerate(list(MOD.custom_gfx_dirs)):
+                row = tk.Frame(extra_box, bg=BG_CARD,
+                               highlightthickness=1, highlightbackground=BORDER_G)
+                row.pack(fill="x", pady=1)
+                tk.Label(row, text=d, bg=BG_CARD, fg=TEXT,
+                         font=("Courier",8), anchor="w", padx=6).pack(
+                         side="left", fill="x", expand=True)
+                tk.Button(row, text="X",
+                          command=lambda idx=i: [MOD.custom_gfx_dirs.pop(idx),
+                                                  MOD.save_config(),
+                                                  _refresh_extra()],
+                          bg=BG_CARD, fg=RED, relief="flat",
+                          font=("Georgia",9), cursor="hand2",
+                          padx=4).pack(side="right")
+
+        _refresh_extra()
+
+        def _add_dir():
+            d = filedialog.askdirectory(title="Select extra GFX folder")
+            if d and d not in MOD.custom_gfx_dirs:
+                MOD.custom_gfx_dirs.append(d)
+                MOD.save_config()
+                _refresh_extra()
+
+        tk.Button(frm, text="+ Add Extra GFX Folder", command=_add_dir,
+                  bg=BG_CARD, fg=TEXT, relief="flat",
+                  font=("Helvetica",9,"bold"), padx=12, pady=4,
+                  cursor="hand2").pack(anchor="w", padx=10, pady=4)
+
+        # ── LOGS ──────────────────────────────────────────────────────
+        _sec("SESSION LOG")
+        _lbl("  All errors and warnings captured during this session.")
+
+        log_box_frame = tk.Frame(frm, bg="#0a0f18",
+                                 highlightthickness=1,
+                                 highlightbackground=BORDER_G)
+        log_box_frame.pack(fill="x", padx=10, pady=4)
+
+        log_sb  = tk.Scrollbar(log_box_frame, orient="vertical")
+        log_txt = tk.Text(log_box_frame, bg="#0a0f18", fg="#c9d1d9",
+                          font=("Courier",8), relief="flat", wrap="none",
+                          height=10, state="disabled",
+                          yscrollcommand=log_sb.set,
+                          selectbackground="#1e3a6e")
+        log_sb.config(command=log_txt.yview)
+        log_sb.pack(side="right", fill="y")
+        log_txt.pack(fill="x", expand=True)
+
+        log_txt.tag_configure("ts",    foreground="#374151")
+        log_txt.tag_configure("err",   foreground="#f87171")
+        log_txt.tag_configure("ok",    foreground="#4ade80")
+        log_txt.tag_configure("sep",   foreground="#21262d")
+        log_txt.tag_configure("tb",    foreground="#c9d1d9")
+
+        def _refresh_log():
+            log_txt.config(state="normal")
+            log_txt.delete("1.0", "end")
+            entries = self._error_entries
+            if not entries:
+                log_txt.insert("end", "  ✓  No errors recorded — running clean.\n", "ok")
+            else:
+                for ts, msg in entries:
+                    log_txt.insert("end", "[%s]  " % ts, "ts")
+                    lines = msg.splitlines()
+                    log_txt.insert("end", lines[0] + "\n", "err")
+                    for line in lines[1:]:
+                        log_txt.insert("end", line + "\n", "tb")
+                    log_txt.insert("end", "─" * 72 + "\n", "sep")
+            log_txt.config(state="disabled")
+            log_txt.see("end")
+
+        _refresh_log()
+
+        log_btn_row = tk.Frame(frm, bg=BG_PANEL)
+        log_btn_row.pack(fill="x", padx=10, pady=(0,6))
+
+        tk.Button(log_btn_row, text="⟳  Refresh",
+                  command=_refresh_log,
+                  bg=BG_CARD, fg=TEXT, relief="flat",
+                  font=("Helvetica",9), padx=10, pady=3,
+                  cursor="hand2").pack(side="left", padx=(0,4))
+        tk.Button(log_btn_row, text="⊞  Open Full Log Window",
+                  command=self._show_error_log,
+                  bg=BG_CARD, fg=TEXT, relief="flat",
+                  font=("Helvetica",9), padx=10, pady=3,
+                  cursor="hand2").pack(side="left", padx=(0,4))
+
+        def _clear_log():
+            self._error_entries.clear()
+            if hasattr(self, "_errlog_btn"):
+                self._errlog_btn.config(text="⚠ Log", fg="#6e7681", bg="#161b22")
+            _refresh_log()
+
+        tk.Button(log_btn_row, text="🗑  Clear",
+                  command=_clear_log,
+                  bg="#450a0a", fg="#f87171", relief="flat",
+                  font=("Helvetica",9), padx=10, pady=3,
+                  cursor="hand2").pack(side="left")
+
+
+        # ── COUNTRY TAG NAMES ─────────────────────────────────────────
+        _sec("COUNTRY TAG NAMES  (for Decision Maker preview)")
+        _lbl("  Map TAG codes to display names shown in the preview.")
+        _lbl("  e.g.  SOV → Soviet Union,  ERI → Eritrea,  GER → Germany")
+
+        tag_table = tk.Frame(frm, bg=BG_PANEL)
+        tag_table.pack(fill="x", padx=10, pady=4)
+
+        # Built-in vanilla HOI4 tag names as quick-fill
+        _VANILLA_TAGS = {
+            "GER":"Germany","SOV":"Soviet Union","ENG":"United Kingdom",
+            "FRA":"France","USA":"United States","ITA":"Italy",
+            "JAP":"Japan","CHI":"China","SPR":"Republican Spain",
+            "NAT":"Nationalist Spain","POL":"Poland","HUN":"Hungary",
+            "ROM":"Romania","BUL":"Bulgaria","YUG":"Yugoslavia",
+            "GRE":"Greece","TUR":"Turkey","IRQ":"Iraq","IRN":"Iran",
+            "SAU":"Saudi Arabia","EGY":"Egypt","ETH":"Ethiopia",
+            "SOM":"Somalia","ERI":"Eritrea","SYR":"Syria",
+            "HEZ":"Hezbollastan","PER":"Persia","CAN":"Canada",
+            "AST":"Australia","NZL":"New Zealand","SAF":"South Africa",
+            "MEX":"Mexico","BRA":"Brazil","ARG":"Argentina",
+            "SWE":"Sweden","NOR":"Norway","DEN":"Denmark",
+            "FIN":"Finland","POR":"Portugal","BEL":"Belgium",
+            "HOL":"Netherlands","SWI":"Switzerland","CZE":"Czechoslovakia",
+            "AUS":"Austria","YEM":"Yemen","AFG":"Afghanistan",
+        }
+
+        def _refresh_tag_table():
+            for w in tag_table.winfo_children(): w.destroy()
+            tags = dict(MOD.country_tag_names)
+            if not tags:
+                tk.Label(tag_table, text="  No tag mappings defined. Add below or load vanilla defaults.",
+                         bg=BG_PANEL, fg=TEXT_DIM, font=("Helvetica",8,"italic")).pack(anchor="w")
+            else:
+                hdr = tk.Frame(tag_table, bg=BG_DARK)
+                hdr.pack(fill="x", pady=(0,2))
+                for txt, w in [("TAG", 6),("→", 3),("Display Name", 22),("", 4)]:
+                    tk.Label(hdr, text=txt, bg=BG_DARK, fg=TEXT_DIM,
+                             font=("Courier",8,"bold"), width=w, anchor="w").pack(side="left", padx=2)
+                for tag in sorted(tags.keys()):
+                    name = tags[tag]
+                    row = tk.Frame(tag_table, bg=BG_CARD,
+                                   highlightthickness=1, highlightbackground=BORDER_G)
+                    row.pack(fill="x", pady=1)
+                    # Editable tag
+                    tv = tk.StringVar(value=tag)
+                    nv = tk.StringVar(value=name)
+                    te = tk.Entry(row, textvariable=tv, bg=BG_CARD, fg=GOLD,
+                                  insertbackground=GOLD, font=("Courier",9,"bold"),
+                                  relief="flat", width=6,
+                                  highlightthickness=0)
+                    te.pack(side="left", padx=(4,2), ipady=2)
+                    tk.Label(row, text="→", bg=BG_CARD, fg=TEXT_DIM,
+                             font=("Helvetica",9)).pack(side="left")
+                    ne = tk.Entry(row, textvariable=nv, bg=BG_CARD, fg=TEXT,
+                                  insertbackground=TEXT, font=("Helvetica",9),
+                                  relief="flat", width=24,
+                                  highlightthickness=0)
+                    ne.pack(side="left", padx=(2,4), fill="x", expand=True, ipady=2)
+                    def _save_row(old_tag=tag, tv=tv, nv=nv):
+                        new_tag  = tv.get().strip().upper()
+                        new_name = nv.get().strip()
+                        if not new_tag: return
+                        # Remove old key, add updated
+                        MOD.country_tag_names.pop(old_tag, None)
+                        if new_name:
+                            MOD.country_tag_names[new_tag] = new_name
+                        MOD.save_config()
+                    te.bind("<FocusOut>", lambda e, f=_save_row: f())
+                    ne.bind("<FocusOut>", lambda e, f=_save_row: f())
+                    te.bind("<Return>",   lambda e, f=_save_row: f())
+                    ne.bind("<Return>",   lambda e, f=_save_row: f())
+                    tk.Button(row, text="✕",
+                              command=lambda t=tag: [MOD.country_tag_names.pop(t, None),
+                                                      MOD.save_config(),
+                                                      _refresh_tag_table()],
+                              bg=BG_CARD, fg=RED, relief="flat",
+                              font=("Helvetica",9), cursor="hand2",
+                              padx=4).pack(side="right")
+
+        _refresh_tag_table()
+
+        # Add new tag row
+        add_tag_row = tk.Frame(frm, bg=BG_PANEL)
+        add_tag_row.pack(fill="x", padx=10, pady=4)
+        new_tag_v  = tk.StringVar()
+        new_name_v = tk.StringVar()
+        tk.Label(add_tag_row, text="TAG:", bg=BG_PANEL, fg=TEXT_DIM,
+                 font=("Helvetica",9)).pack(side="left")
+        tk.Entry(add_tag_row, textvariable=new_tag_v, bg=BG_CARD, fg=GOLD,
+                 insertbackground=GOLD, font=("Courier",9,"bold"),
+                 relief="flat", width=7,
+                 highlightthickness=1, highlightbackground=BORDER_G).pack(
+                 side="left", padx=(2,8), ipady=3)
+        tk.Label(add_tag_row, text="Name:", bg=BG_PANEL, fg=TEXT_DIM,
+                 font=("Helvetica",9)).pack(side="left")
+        tk.Entry(add_tag_row, textvariable=new_name_v, bg=BG_CARD, fg=TEXT,
+                 insertbackground=TEXT, font=("Helvetica",9),
+                 relief="flat", width=22,
+                 highlightthickness=1, highlightbackground=BORDER_G).pack(
+                 side="left", padx=(2,8), ipady=3)
+        def _add_tag_entry():
+            t = new_tag_v.get().strip().upper()
+            n = new_name_v.get().strip()
+            if not t or not n:
+                messagebox.showwarning("Missing data", "Both TAG and Name are required.", parent=win)
+                return
+            MOD.country_tag_names[t] = n
+            MOD.save_config()
+            new_tag_v.set(""); new_name_v.set("")
+            _refresh_tag_table()
+        tk.Button(add_tag_row, text="+ Add", command=_add_tag_entry,
+                  bg=BG_CARD, fg=GREEN, relief="flat",
+                  font=("Helvetica",9,"bold"), padx=10, pady=3,
+                  cursor="hand2").pack(side="left", padx=(0,6))
+
+        # Quick-fill vanilla button
+        def _fill_vanilla():
+            count = 0
+            for t, n in _VANILLA_TAGS.items():
+                if t not in MOD.country_tag_names:
+                    MOD.country_tag_names[t] = n
+                    count += 1
+            MOD.save_config()
+            _refresh_tag_table()
+            messagebox.showinfo("Vanilla Tags", f"Added {count} vanilla TAG mappings.", parent=win)
+        tk.Button(frm, text="⚡ Load Vanilla HOI4 Tags", command=_fill_vanilla,
+                  bg="#1a2c1a", fg="#4ade80", relief="flat",
+                  font=("Helvetica",9,"bold"), padx=12, pady=4,
+                  cursor="hand2").pack(anchor="w", padx=10, pady=(0,4))
+        tk.Button(frm, text="🗑 Clear All Tags",
+                  command=lambda: [MOD.country_tag_names.clear(),
+                                    MOD.save_config(),
+                                    _refresh_tag_table()],
+                  bg="#2d0a0a", fg=RED, relief="flat",
+                  font=("Helvetica",9), padx=12, pady=4,
+                  cursor="hand2").pack(anchor="w", padx=10, pady=(0,8))
+
+        # ── LOC TOKEN STYLE ────────────────────────────────────────────
+        _sec("LOCALISATION TOKEN STYLE  (Decision Maker preview)")
+        _lbl("  Tells the preview how to parse scripted loc tokens in decision names.")
+        _lbl("  Colon-style  [SOV:NameWithFlag]  — used by most vanilla decisions.")
+        _lbl("  Dot-style    [SOV.GetName]        — used by some mods.")
+
+        tok_row = tk.Frame(frm, bg=BG_PANEL)
+        tok_row.pack(fill="x", padx=10, pady=6)
+        _tok_var = tk.StringVar(value=getattr(MOD, "loc_token_style", "colon"))
+
+        def _on_tok_change(*_):
+            MOD.loc_token_style = _tok_var.get()
+            MOD.save_config()
+
+        for val, label, hint in [
+            ("colon", "Colon-style   [TAG:NameWithFlag]",
+             "Standard HOI4 vanilla format"),
+            ("dot",   "Dot-style     [TAG.GetName]",
+             "Some modded/scripted loc format"),
+            ("both",  "Both styles",
+             "Try colon first, fall back to dot"),
+        ]:
+            rb_row = tk.Frame(tok_row, bg=BG_PANEL)
+            rb_row.pack(anchor="w", pady=1)
+            tk.Radiobutton(rb_row, variable=_tok_var, value=val,
+                           text=label,
+                           bg=BG_PANEL, fg=TEXT,
+                           selectcolor=BG_CARD, activebackground=BG_PANEL,
+                           font=("Courier",9), cursor="hand2",
+                           command=_on_tok_change).pack(side="left")
+            tk.Label(rb_row, text=f"  — {hint}", bg=BG_PANEL,
+                     fg=TEXT_DIM, font=("Helvetica",8)).pack(side="left")
+
+        # Live preview
+        tok_prev = tk.Frame(frm, bg=BG_CARD,
+                            highlightthickness=1, highlightbackground=BORDER_G)
+        tok_prev.pack(fill="x", padx=10, pady=(0,8))
+        tk.Label(tok_prev, text="  Preview token parsing:", bg=BG_CARD,
+                 fg=TEXT_DIM, font=("Helvetica",8)).pack(anchor="w", padx=6, pady=(4,0))
+        tok_prev_lbl = tk.Label(tok_prev,
+            text="", bg=BG_CARD, fg="#7ec8e3",
+            font=("Courier",9), anchor="w", padx=12, pady=4)
+        tok_prev_lbl.pack(fill="x")
+        def _update_tok_preview(*_):
+            style = _tok_var.get()
+            ex = {
+                "colon": "🏳 Soviet Union  ←  [SOV:NameWithFlag] resolved via tag name map",
+                "dot":   "🏳 SOV  ←  [SOV.GetName] (dot-style)",
+                "both":  "🏳 Soviet Union  ←  tries [TAG:X] first, then [TAG.X]",
+            }
+            tok_prev_lbl.config(text="  " + ex.get(style, ""))
+        _tok_var.trace_add("write", _update_tok_preview)
+        _update_tok_preview()
+
+        # ── BOTTOM BAR ────────────────────────────────────────────────
+        tk.Frame(frm, bg=BORDER_G, height=1).pack(fill="x", padx=8, pady=(12,2))
+        tk.Label(frm, text="  Settings saved to:  " + CONFIG_PATH,
+                 bg=BG_PANEL, fg=TEXT_DIM,
+                 font=("Helvetica",7,"italic"), anchor="w",
+                 padx=10, pady=4).pack(fill="x")
+        tk.Frame(win, bg=BORDER_G, height=1).pack(fill="x")
+        bot_bar = tk.Frame(win, bg=BG_DARK); bot_bar.pack(fill="x")
+        tk.Button(bot_bar, text="Save & Close",
+                  command=lambda: [MOD.save_config(), win.destroy()],
+                  bg="#14532d", fg="#4ade80", relief="flat",
+                  font=("Helvetica",10,"bold"), padx=16, pady=6,
+                  cursor="hand2").pack(side="right", padx=12, pady=6)
+        tk.Button(bot_bar, text="Close", command=win.destroy,
+                  bg=BG_CARD, fg=TEXT_DIM, relief="flat",
+                  font=("Helvetica",10), padx=16, pady=6,
+                  cursor="hand2").pack(side="right", padx=4, pady=6)
+
+    def _national_spirit_wizard(self):
+        """Open the National Spirit/Ideas builder wizard."""
+        open_national_spirit_wizard(self)
+
+    def _dyn_mod_wizard(self):
+        """Open the Dynamic Modifier wizard."""
+        open_dyn_mod_wizard(self)
+
+    def _decision_wizard(self):
+        """Open the Decision Maker wizard."""
+        open_decision_wizard(self)
+
+    def _event_wizard(self):
+        """Open the Event Maker wizard."""
+        open_event_wizard(self)
+
+    def _update_statusbar(self):
+        """Refresh all status bar labels."""
+        if not hasattr(self, "_sb_focus_lbl"): return
+        tid = self._tree_id.get() or "no tree"
+        fc  = len(self.focuses)
+        sel = getattr(self.selected, "name", "—") if self.selected else "—"
+        zoom = int(getattr(self, "zoom", 1.0) * 100)
+        # mod name from _mod_lbl text (set by _on_mod_loaded)
+        try:
+            mod_txt = self._sb_mod_lbl2.cget("text") if hasattr(self,"_sb_mod_lbl2") else "Mod: none"
+            # keep whatever was already set unless we can get it from mod_lbl
+            if hasattr(self, "_mod_lbl"):
+                raw = self._mod_lbl.cget("text")
+                mod_txt = f"Mod: {raw}" if raw and raw != "No mod loaded" else "Mod: none"
+        except: mod_txt = "Mod: none"
+        self._sb_tree_val.config(text=tid)
+        self._sb_focus_lbl.config(text=f"Focuses: {fc}")
+        self._sb_sel_lbl.config(text=f"Selected: {sel}")
+        self._sb_zoom_lbl.config(text=f"Zoom: {zoom}%")
+        self._sb_mod_lbl2.config(text=mod_txt)
+
+    # ─────────────────── FOCUS LIST PANEL ────────────────────────
+    def _refresh_focus_list(self):
+        """Rebuild the left-panel focus list widgets.
+        Called on: add/delete focus, rename, search change, mod load.
+        For selection-only changes, _update_focus_list_selection() is cheaper.
+        """
+        if not hasattr(self, "_lp_inner"): return
+        for w in self._lp_inner.winfo_children():
+            w.destroy()
+        self._lp_row_widgets = {}  # fid -> (row, bar, dot, lbl)
+        query = ""
+        if hasattr(self, "_lp_search_var"):
+            q = self._lp_search_var.get().strip()
+            if q and q != "Search\u2026": query = q.lower()
+        for f in self.focuses.values():
+            if query and query not in f.name.lower(): continue
+            has_fx = bool(f.effects)
+            broken = any(pid not in self.focuses
+                         for grp in f.prereqs for pid in grp)
+            dot_col = "#ef4444" if broken else ("#22c55e" if has_fx else "#fbbf24")
+            is_sel  = bool(self.selected and self.selected.id == f.id)
+            row_bg  = "#1e2d4a" if is_sel else BG_PANEL
+            row_fg  = "#93c5fd" if is_sel else TEXT_DIM
+            row = tk.Frame(self._lp_inner, bg=row_bg, cursor="hand2")
+            row.pack(fill="x")
+            bar = tk.Frame(row, bg=BLUE if is_sel else row_bg, width=3)
+            bar.pack(side="left", fill="y")
+            dot = tk.Label(row, text="\u25cf", bg=row_bg, fg=dot_col,
+                           font=("Helvetica",7), padx=2)
+            dot.pack(side="left")
+            lbl = tk.Label(row, text=f.name, bg=row_bg, fg=row_fg,
+                           font=("Courier",9), anchor="w", padx=2, pady=4)
+            lbl.pack(side="left", fill="x", expand=True)
+            self._lp_row_widgets[f.id] = (row, bar, dot, lbl)
+            def _click(e, fid=f.id):
+                if fid in self.focuses:
+                    self._select(self.focuses[fid])
+                    self._redraw()
+            for w in (row, dot, lbl, bar):
+                w.bind("<Button-1>", _click)
+                w.bind("<Enter>",  lambda e, r=row, s=is_sel: r.config(
+                    bg="#253550" if not s else "#1e2d4a"))
+                w.bind("<Leave>",  lambda e, r=row, s=is_sel, c=row_bg: r.config(bg=c))
+
+    def _update_focus_list_selection(self):
+        """Fast highlight update — only recolours rows, no widget rebuild."""
+        if not hasattr(self, "_lp_row_widgets"): 
+            self._refresh_focus_list(); return
+        sel_id = self.selected.id if self.selected else None
+        for fid, (row, bar, dot, lbl) in self._lp_row_widgets.items():
+            try:
+                is_sel = (fid == sel_id)
+                bg = "#1e2d4a" if is_sel else BG_PANEL
+                fg = "#93c5fd" if is_sel else TEXT_DIM
+                bar_bg = BLUE if is_sel else bg
+                row.config(bg=bg); bar.config(bg=bar_bg)
+                dot.config(bg=bg); lbl.config(bg=bg, fg=fg)
+            except tk.TclError:
+                pass  # widget destroyed mid-update
+
+    def _toggle_focus_list(self):
+        """Show/hide the left focus list panel."""
+        if not hasattr(self, "_left_panel"): return
+        if self._left_panel_visible:
+            self._left_panel.pack_forget()
+            self._left_panel_visible = False
+            if hasattr(self, "_lp_collapse_btn"):
+                self._lp_collapse_btn.config(text="▶")
+        else:
+            self._left_panel.pack(side="left", fill="y", before=self.cv)
+            self._left_panel_visible = True
+            if hasattr(self, "_lp_collapse_btn"):
+                self._lp_collapse_btn.config(text="◀")
+
+    # ─────────────────── CANVAS CONTROLS ─────────────────────────
+    def _toggle_grid(self):
+        """Toggle canvas grid visibility."""
+        self._grid_on = not getattr(self, "_grid_on", True)
+        # Hide or restore the grid item immediately
+        if hasattr(self, "_grid_item") and self._grid_item:
+            state = "normal" if self._grid_on else "hidden"
+            self.cv.itemconfig(self._grid_item, state=state)
+        self._redraw()
+
+    def _toggle_minimap(self):
+        """Placeholder — minimap toggle."""
+        pass
+
+    def _fit_all(self):
+        """Fit all focuses into view by resetting pan/zoom."""
+        if not self.focuses: return
+        xs = [f.x for f in self.focuses.values()]
+        ys = [f.y for f in self.focuses.values()]
+        if not xs: return
+        cw = self.cv.winfo_width()  or 800
+        ch = self.cv.winfo_height() or 600
+        span_x = (max(xs) - min(xs) + 2) * XGRID
+        span_y = (max(ys) - min(ys) + 2) * YGRID
+        new_zoom = min(cw / max(span_x, 1), ch / max(span_y, 1), 2.0)
+        new_zoom = max(new_zoom, 0.3)
+        self.zoom = new_zoom
+        cx = (min(xs) + max(xs)) / 2
+        cy = (min(ys) + max(ys)) / 2
+        self.offset[0] = cw / 2 - cx * XGRID * self.zoom
+        self.offset[1] = ch / 2 - cy * YGRID * self.zoom
+        self._redraw_now()
+
+    # ─────────────────── DUPLICATE FOCUS ─────────────────────────
+    def _duplicate_focus(self):
+        """Duplicate the currently selected focus."""
+        if not self.selected:
+            messagebox.showinfo("Duplicate", "Select a focus first.")
+            return
+        import copy, re as _re
+        f = self.selected
+        nf = copy.deepcopy(f)
+        nf.id = id(nf)
+        # Generate new unique name
+        base = _re.sub(r"_copy\d*$", "", f.name) + "_copy"
+        n = 1
+        candidate = base
+        while candidate in {foc.name for foc in self.focuses.values()}:
+            candidate = f"{base}{n}"; n += 1
+        nf.name = candidate
+        nf.x = f.x + 1
+        nf.y = f.y
+        # Clear prereqs/mutex since IDs won't match
+        nf.prereqs = []
+        nf.mutex   = []
+        # Clear draw cache so new focus renders immediately
+        nf._draw_key = None
+        nf._items = []
+        self.focuses[nf.id] = nf
+        self._push_undo("duplicate")
+        self._redraw_now()  # force immediate, bypass throttle
+        self._select(nf)
+        self._refresh_focus_list()
+
+    # ─────────────────── BULK RENAME ─────────────────────────────
+    def _bulk_rename_dialog(self):
+        """Dialog to bulk rename all focus IDs by replacing a prefix."""
+        if not self.focuses:
+            messagebox.showinfo("Bulk Rename", "No focuses to rename."); return
+
+        win = tk.Toplevel(self)
+        win.title("Bulk Rename Prefix")
+        win.configure(bg=BG_DARK)
+        win.geometry("480x380")
+        win.resizable(False, False)
+        win.grab_set()
+
+        tk.Label(win, text="BULK RENAME PREFIX", bg=BG_DARK, fg=TEXT,
+                 font=("Helvetica",11,"bold"), pady=12).pack(fill="x", padx=16)
+        tk.Frame(win, bg=BORDER_G, height=1).pack(fill="x")
+
+        tk.Label(win, text=f"Replaces prefix across all {len(self.focuses)} focus IDs,\n"
+                           "prerequisite references, and mutex links.",
+                 bg=BG_DARK, fg=TEXT_DIM, font=("Helvetica",9),
+                 justify="left", anchor="w", pady=6).pack(fill="x", padx=16)
+
+        def _row(label, default):
+            f = tk.Frame(win, bg=BG_DARK); f.pack(fill="x", padx=16, pady=3)
+            tk.Label(f, text=label, bg=BG_DARK, fg=TEXT_DIM,
+                     font=("Helvetica",9), width=8, anchor="w").pack(side="left")
+            v = tk.StringVar(value=default)
+            tk.Entry(f, textvariable=v, bg=BG_CARD, fg=TEXT,
+                     insertbackground=BLUE, font=("Courier",10),
+                     relief="flat", highlightthickness=1,
+                     highlightbackground=BORDER_G).pack(side="left", fill="x",
+                                                        expand=True, ipady=4)
+            return v
+
+        # Auto-detect current prefix (longest common prefix up to first _)
+        names = [f.name for f in self.focuses.values()]
+        import os
+        auto_from = ""
+        if names:
+            parts = names[0].split("_")
+            if parts: auto_from = parts[0] + "_"
+
+        v_from = _row("From:", auto_from)
+        v_to   = _row("To:",   "")
+
+        # Preview
+        tk.Frame(win, bg=BORDER_G, height=1).pack(fill="x", padx=16, pady=6)
+        tk.Label(win, text="Preview (first 5):", bg=BG_DARK, fg=TEXT_DIM,
+                 font=("Helvetica",8,"bold"), anchor="w").pack(fill="x", padx=16)
+        prev_txt = tk.Text(win, bg="#050810", fg="#4ade80",
+                           font=("Courier",9), relief="flat", height=5,
+                           highlightthickness=1, highlightbackground=BORDER_G,
+                           state="disabled")
+        prev_txt.pack(fill="x", padx=16, pady=4)
+
+        def _update_preview(*_):
+            fr = v_from.get(); to = v_to.get()
+            lines = []
+            for f in list(self.focuses.values())[:5]:
+                new = f.name.replace(fr, to, 1) if fr and f.name.startswith(fr) else f.name
+                lines.append(f"  {f.name}  →  {new}")
+            prev_txt.config(state="normal")
+            prev_txt.delete("1.0","end")
+            prev_txt.insert("1.0", "\n".join(lines))
+            prev_txt.config(state="disabled")
+
+        v_from.trace_add("write", _update_preview)
+        v_to.trace_add("write",   _update_preview)
+        _update_preview()
+
+        def _apply():
+            fr = v_from.get(); to = v_to.get()
+            if not fr:
+                messagebox.showwarning("Rename", "From prefix cannot be empty."); return
+            self._push_undo("bulk_rename")
+            # Build mapping old_name → new_name
+            mapping = {}
+            for f in self.focuses.values():
+                if f.name.startswith(fr):
+                    mapping[f.name] = to + f.name[len(fr):]
+            # Apply to names
+            for f in self.focuses.values():
+                if f.name in mapping:
+                    f.name = mapping[f.name]
+            # prereqs and mutex store integer fids — no remapping needed
+            # (names changed above; fid links are stable)
+            n = len(mapping)
+            win.destroy()
+            self._redraw()
+            self._refresh_focus_list()
+            messagebox.showinfo("Renamed", f"Renamed {n} focus IDs.")
+
+        bf = tk.Frame(win, bg=BG_DARK); bf.pack(fill="x", padx=16, pady=8)
+        tk.Button(bf, text="Cancel", command=win.destroy,
+                  bg=BG_CARD, fg=TEXT, relief="flat", padx=12, pady=5,
+                  cursor="hand2", font=("Helvetica",9,"bold")).pack(side="right", padx=4)
+        tk.Button(bf, text=f"Apply to All {len(self.focuses)}  →",
+                  command=_apply,
+                  bg="#14532d", fg="#4ade80", relief="flat", padx=14, pady=5,
+                  cursor="hand2", font=("Helvetica",10,"bold")).pack(side="right")
+
+    # ─────────────────── SELECT ALL ──────────────────────────────
+    def _select_all_focuses(self):
+        """Select all focuses — enables multi-select with everything selected."""
+        if not self.focuses:
+            messagebox.showinfo("Select All", "No focuses to select."); return
+        if not self._multisel_mode:
+            self._toggle_multisel()
+        self._multi_sel = set(self.focuses.keys())
+        self._redraw()
+
+    # ─────────────────── VALIDATE TREE ───────────────────────────
+    def _validate_tree(self):
+        """Check tree for common errors and report them."""
+        issues = []
+        for f in self.focuses.values():
+            # Broken prereqs (prereqs store Focus IDs = ints)
+            for grp in f.prereqs:
+                for pid in grp:
+                    if pid not in self.focuses:
+                        issues.append(f"[{f.name}]  broken prereq → id:{pid}")
+            # Broken mutex (mutex stores Focus IDs = ints)
+            for mid in f.mutex:
+                if mid not in self.focuses:
+                    issues.append(f"[{f.name}]  broken mutex → id:{mid}")
+            # No effects
+            if not f.effects:
+                issues.append(f"[{f.name}]  no effects in completion_reward")
+            # Missing GFX
+            gfx = getattr(f, "gfx", "")
+            if not gfx or gfx == "GFX_goal_generic_political_pressure":
+                issues.append(f"[{f.name}]  using default/missing icon GFX")
+
+        win = tk.Toplevel(self)
+        win.title("Tree Validation")
+        win.configure(bg=BG_DARK)
+        win.geometry("640x440")
+        win.resizable(True, True)
+
+        hdr = tk.Frame(win, bg="#080c12"); hdr.pack(fill="x")
+        if issues:
+            tk.Label(hdr, text=f"  ⚠  {len(issues)} issues found",
+                     bg="#080c12", fg="#fbbf24",
+                     font=("Helvetica",11,"bold"), pady=8).pack(side="left", padx=8)
+        else:
+            tk.Label(hdr, text="  ✓  Tree looks clean!",
+                     bg="#080c12", fg="#22c55e",
+                     font=("Helvetica",11,"bold"), pady=8).pack(side="left", padx=8)
+        tk.Button(hdr, text="✕", command=win.destroy,
+                  bg="#080c12", fg=TEXT_DIM, relief="flat",
+                  cursor="hand2", padx=10).pack(side="right")
+        tk.Frame(win, bg=BORDER_G, height=1).pack(fill="x")
+
+        frm = tk.Frame(win, bg=BG_DARK); frm.pack(fill="both", expand=True)
+        sb = tk.Scrollbar(frm); sb.pack(side="right", fill="y")
+        txt = tk.Text(frm, bg="#050810", fg=TEXT,
+                      font=("Courier",10), relief="flat",
+                      yscrollcommand=sb.set, wrap="word",
+                      highlightthickness=0)
+        sb.config(command=txt.yview)
+        txt.pack(fill="both", expand=True, padx=8, pady=8)
+        if issues:
+            for issue in issues:
+                if "broken" in issue:
+                    txt.insert("end", "  🔴  " + issue + "\n")
+                elif "no effects" in issue:
+                    txt.insert("end", "  🟡  " + issue + "\n")
+                else:
+                    txt.insert("end", "  🔵  " + issue + "\n")
+        else:
+            txt.insert("end", "\n  All prerequisite chains are valid.\n"
+                               "  All mutex references resolve.\n"
+                               "  All focuses have completion_reward effects.\n")
+        txt.config(state="disabled")
+
+    def _export(self):
+        if not self.focuses:
+            messagebox.showwarning("Export","No focuses to export."); return
+        tid = re.sub(r"[^A-Za-z0-9_]","_",self._tree_id.get().strip()) or "TAG_focus_tree"
+
+        out = []
+        country_tag = getattr(self, "_tree_country_tag", "TAG")
+        out.append("focus_tree = {")
+        out.append(f"\tid = {tid}")
+        out.append("")
+        out.append("\tcountry = {")
+        out.append("\t\tfactor = 0")
+        out.append("\t\tmodifier = {")
+        out.append("\t\t\tadd = 20")
+        out.append("\t\t\toriginal_tag = %s" % country_tag)
+        out.append("\t\t}")
+        out.append("\t}")
+
+        for f in self.focuses.values():
+            gx = f.x
+            gy = f.y
+            out.append("")
+            out.append("\tfocus = {")
+            out.append(f"\t\tid = {f.name}")
+            out.append(f"\t\ticon = {getattr(f,'gfx','GFX_goal_generic_political_pressure')}")
+            out.append("")
+            rel_id = getattr(f, "relative_position_id", None)
+            if rel_id and any(foc.name == rel_id for foc in self.focuses.values()):
+                parent = next((foc for foc in self.focuses.values()
+                               if foc.name == rel_id), None)
+                if parent:
+                    out.append(f"\t\tx = {gx - parent.x}")
+                    out.append(f"\t\ty = {gy - parent.y}")
+                    out.append(f"\t\trelative_position_id = {rel_id}")
+                else:
+                    out.append(f"\t\tx = {gx}")
+                    out.append(f"\t\ty = {gy}")
+            else:
+                out.append(f"\t\tx = {gx}")
+                out.append(f"\t\ty = {gy}")
+            out.append("")
+            out.append(f"\t\tcost = {f.cost}")
+            out.append("")
+
+            # prerequisites
+            if f.prereqs:
+                for grp in f.prereqs:
+                    valid = [p for p in grp if p in self.focuses]
+                    if not valid: continue
+                    inner = " ".join(f"focus = {self.focuses[p].name}" for p in valid)
+                    out.append(f"\t\tprerequisite = {{ {inner} }}")
+
+            # mutually exclusive
+            if f.mutex:
+                for mid in f.mutex:
+                    if mid in self.focuses:
+                        out.append(f"\t\tmutually_exclusive = {{ focus = {self.focuses[mid].name} }}")
+
+            sf = getattr(f, "search_filters", "").strip()
+            if sf and sf != "FOCUS_FILTER_POLITICAL":
+                out.append(f"\t\tsearch_filters = {{ {sf} }}")
+            out.append("")
+
+            # available block — only emit if has content
+            avail = getattr(f,"available_cond","").strip()
+            if avail:
+                out.append("\t\tavailable = {")
+                for ln in avail.splitlines(): out.append(f"\t\t\t{ln.strip()}")
+                out.append("\t\t}")
+
+            # bypass block — only emit if has content
+            bypass = getattr(f,"bypass_cond","").strip()
+            if bypass:
+                out.append("\t\tbypass = {")
+                for ln in bypass.splitlines(): out.append(f"\t\t\t{ln.strip()}")
+                out.append("\t\t}")
+
+            # cancel block — only emit if has content
+            cancelc = getattr(f,"cancel_cond","").strip()
+            if cancelc:
+                out.append("\t\tcancel = {")
+                for ln in cancelc.splitlines(): out.append(f"\t\t\t{ln.strip()}")
+                out.append("\t\t}")
+
+            out.append("")
+            # Only emit when non-default (cancel_if_invalid=yes, continue=no, avail_cap=no)
+            if not f.cancel_if_invalid:
+                out.append("\t\tcancel_if_invalid = no")
+            if f.continue_if_invalid:
+                out.append("\t\tcontinue_if_invalid = yes")
+            if f.available_if_capitulated:
+                out.append("\t\tavailable_if_capitulated = yes")
+            out.append("")
+            out.append("\t\tcompletion_reward = {")
+            if f.effects:
+                for eff in f.effects:
+                    out.append(self._render_effect(eff))
+            else:
+                out.append("\t\t\t# add effects here")
+            out.append("\t\t}")
+            out.append("")
+            out.append("\t\tai_will_do = {")
+            raw_ai = getattr(f,"ai_will_do_raw","").strip()
+            if raw_ai:
+                for ln in raw_ai.splitlines():
+                    out.append(f"\t\t\t{ln.strip()}")
+            else:
+                out.append(f"\t\t\tbase = {f.ai_will_do}")
+            out.append("\t\t}")
+            out.append("\t}")
+
+        out.append("}")
+
+        path = filedialog.asksaveasfilename(defaultextension=".txt",
+            filetypes=[("HOI4 Focus Tree","*.txt"),("All","*.*")],
+            initialfile=f"{tid}.txt", title="Export HOI4 .txt")
+        if not path: return
+
+        loc_path = os.path.join(os.path.dirname(path), f"{tid}_l_english.yml")
+        with open(path,"w",encoding="utf-8") as fp:
+            fp.write("\n".join(out))
+
+        loc = ["l_english:"]
+        for f in self.focuses.values():
+            title = f.name.replace("_"," ").title()
+            desc  = f.desc if f.desc else f"Complete the {title} national focus."
+            loc.append(f' {f.name}: "{title}"')
+            loc.append(f' {f.name}_desc: "{desc}"')
+        with open(loc_path,"w",encoding="utf-8-sig") as fp:
+            fp.write("\n".join(loc))
+
+        messagebox.showinfo("Exported",
+            f"✅  Export complete!\n\nFocus tree: {path}\nLocalisation: {loc_path}\n\n"
+            f"Mod install paths:\n  .txt  →  common/national_focus/\n  .yml  →  localisation/english/")
+
+# ─────────────────────────── ENTRY POINT ────────────────────────
+if __name__=="__main__":
+    def _launch():
+        app = App()
+        app.update_idletasks()
+        W, H = 1440, 880
+        sw = app.winfo_screenwidth(); sh = app.winfo_screenheight()
+        app.geometry(f"{W}x{H}+{(sw-W)//2}+{(sh-H)//2}")
+        app.mainloop()
+    show_splash(_launch)
