@@ -1,4 +1,150 @@
-# Changelog
+# HOI4 Content Maker — Changelog
+
+---
+
+## Session 1 — Output Correctness Fixes (Focus Tree)
+
+### Focus Tree Maker (`_export` and `_build_focus_code`)
+
+**[BUG FIX] `tag =` → `original_tag =` in focus_tree country block**
+- File line ~17655
+- The country selector block was emitting `tag = TAG`, which checks the current tag (can change
+  during civil wars or puppeting). Changed to `original_tag = TAG`, which checks the permanent tag.
+- Without this fix the focus tree could load for the wrong nation in certain scenarios.
+
+**[BUG FIX] `search_filters = { FOCUS_FILTER_POLITICAL }` was silently dropped on export**
+- Lines ~17718–17720 (`_export`) and ~14447 (`_build_focus_code` preview)
+- The condition `if sf and sf != "FOCUS_FILTER_POLITICAL"` skipped writing the filter whenever
+  it was set to the default political value. All political focuses were exported with no
+  `search_filters` block, breaking the in-game focus search UI.
+- Fixed by removing the exclusion: `if sf:` now always writes the filter when set.
+
+**[BUG FIX] Focus log used wrong scope and missing "executed"**
+- Line ~17765 (`_export`) and ~15661 (import scaffold code path)
+- Was: `log = "[GetDateText]: [Root.GetName]: focus TAG_focus_name"`
+- Fixed to: `log = "[GetDateText]: [This.GetName]: focus TAG_focus_name executed"`
+- `[Root.GetName]` is incorrect in focus tree scope. `[This.GetName]` refers to the country
+  completing the focus. "executed" matches the convention used in all existing MD focus files.
+
+---
+
+## Session 1 — Output Correctness Fixes (Decision Maker)
+
+**[BUG FIX] `complete_effect` log — lowercase "decision" and extra " complete" suffix**
+- Lines ~7034 and ~7043
+- Was: `log = "[GetDateText]: [Root.GetName]: decision TAG_my_dec complete"`
+- Fixed to: `log = "[GetDateText]: [Root.GetName]: Decision TAG_my_dec"`
+- Matches the CLAUDE.md standard (capital D, no trailing word).
+
+**[BUG FIX] `remove_effect` log — said "decision … removed" instead of the effect identifier**
+- Line ~7053
+- Was: `log = "[GetDateText]: [Root.GetName]: decision TAG_my_dec removed"`
+- Fixed to: `log = "[GetDateText]: [Root.GetName]: remove_effect TAG_my_dec"`
+- Matches actual MD decision files (e.g. `remove_effect COM_disband_the_presidential_guard_decision`).
+
+---
+
+## Session 1 — Output Correctness Fixes (Event Maker)
+
+**[BUG FIX] Event wizard always emitted an empty `immediate` block**
+- Lines ~9632–9636
+- Even for `is_triggered_only = yes` events with no immediate effects, the wizard wrote:
+  `immediate = { log = "..." }`. This adds unnecessary log I/O overhead on every trigger
+  and is non-standard in MD.
+- Fixed: removed the unconditional `else` branch. `immediate` is now only written when
+  the user has provided content.
+
+**[BUG FIX] Event option log was injected even when the option had no effects**
+- Line ~9644
+- CLAUDE.md rule: "Log only if there are actual effects in the option."
+- Was injecting a log line unconditionally into every option.
+- Fixed: log injection now only runs when `opt_effects` is non-empty.
+
+---
+
+## Session 2 — Full Diagnostic Pass
+
+### Effect System — `_normalize_effect_fields`
+
+**[BUG FIX] `set_variable` import stored field under wrong key `"var_name"`**
+- Lines ~10808–10815
+- When importing a file containing `set_variable = { TAG_my_var = 0.05 }`, the parsed dict
+  was stored as `{"var_name": "TAG_my_var", "value": "0.05"}`.
+- `_render_effect` reads `g("var", ...)` (matching EFFECT_DEFS field name `"var"`), so the
+  variable name was always discarded on re-export and replaced with the fallback `my_var`.
+- Fixed: normalized dict now uses `{"var": ..., "value": ...}`.
+
+**[BUG FIX] `add_to_variable` import stored fields under wrong keys `"variable"` / `"amount"`**
+- Lines ~10788–10794
+- Same class of bug. Imported `add_to_variable` effects always re-exported with the placeholder
+  variable name `AM_my_stat_var` and default amount `0.05` regardless of actual content.
+- `_render_effect` reads `g("var", ...)` and `g("value", ...)`.
+- Fixed: normalized dict now uses `{"var": ..., "value": ..., "tooltip": ...}`.
+
+---
+
+### MD Additional Income Wizard
+
+**[BUG FIX] `localization_key` value in scripted_localisation block was double-quoted**
+- Line ~16575
+- Was generating: `localization_key = "my_tooltip_key"`
+- HOI4 scripted localisation expects bare (unquoted) keys for `localization_key`.
+- Fixed: now generates `localization_key = my_tooltip_key`.
+
+**[REMOVED] Dead empty fallback `text` block in scripted_loc output**
+- The block `text = { trigger = { NOT = { has_idea = X } } localization_key = "" }` was
+  being appended after the main text block. An empty `localization_key` is invalid in HOI4.
+- Removed entirely. The `defined_text` block now only contains the active case.
+
+**[BUG FIX] Spirit snippet used `name = "Literal String"` instead of a loc key**
+- Line ~8685
+- Was: `name = "Free Trade Bonus"` (inline literal, bypasses the localisation system)
+- Fixed to: `name = {idea_id}` (bare localisation key reference, per CLAUDE.md convention)
+
+**[BUG FIX] Spirit snippet missing `allowed_civil_war = { always = yes }`**
+- CLAUDE.md requires this for all national ideas/spirits so the spirit persists through civil wars.
+- Added as the second field in the generated spirit block (after `name`).
+
+---
+
+### Event Maker
+
+**[BUG FIX] No `WM_DELETE_WINDOW` handler — all events lost silently on window close**
+- The Event Maker had no close protocol and no autosave, unlike all other wizards.
+- Added `_ev_save_state()` and `_ev_load_state()` backed by a temp JSON file
+  (`hoi4_cm_event_autosave.json` in the system temp directory).
+- `WM_DELETE_WINDOW` now calls `_ev_save_state()` before destroying the window.
+- On next open, the autosave is restored automatically instead of starting blank.
+
+---
+
+### National Spirit Wizard
+
+**[BUG FIX] `_save_raw` loc regex only matched obsolete `key:0 "value"` format**
+- Line ~3616
+- Was: `r'^\s*(\S+?):0\s+"(.*)"'` — required a `:0` version suffix that the wizard's own
+  output no longer emits (current format is `key: "value"`).
+- When the user edited the raw preview and saved back, loc key changes were never
+  round-tripped to the form fields.
+- Fixed to: `r'^\s+(\S+?)(?::\d+)?\s+"(.*)"'` — matches both `key: "value"` and `key:0 "value"`.
+
+**[DEAD CODE] Duplicate `_edit_btn.config(...)` call on consecutive lines**
+- Lines ~3601–3602
+- `_edit_btn.config(text="✎ Edit", fg=TEXT_DIM, bg=BG_CARD)` appeared twice in a row with
+  no code between them. The second call had no effect.
+- Removed the duplicate.
+
+---
+
+### Dynamic Modifier Generator
+
+**[BUG FIX] `read_existing()` used `encoding="utf-8"` instead of `"utf-8-sig"`**
+- Line ~8192 inside `_save_file()`
+- HOI4 `.txt` files are written with BOM (`utf-8-sig`). Reading with plain `utf-8` causes the
+  BOM byte sequence (`\ufeff`) to appear in the parsed string, corrupting regex matches on the
+  first line of the file (block-replacement search would fail to match a block whose ID had a
+  BOM prefix).
+- Fixed: default encoding changed to `"utf-8-sig"`.
 
 All notable changes to HOI4 Content Maker are documented here.
 
