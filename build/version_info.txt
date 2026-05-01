@@ -1,0 +1,37 @@
+# UTF-8
+#
+# Windows version info — embedded into the .exe
+# Shows in: Right-click .exe → Properties → Details
+#
+VSVersionInfo(
+  ffi=FixedFileInfo(
+    filevers=(2, 0, 0, 0),
+    prodvers=(2, 0, 0, 0),
+    mask=0x3f,
+    flags=0x0,
+    OS=0x40004,
+    fileType=0x1,
+    subtype=0x0,
+    date=(0, 0)
+  ),
+  kids=[
+    StringFileInfo(
+      [
+        StringTable(
+          u'040904B0',
+          [
+            StringStruct(u'CompanyName',      u'Blazer'),
+            StringStruct(u'FileDescription',  u'HOI4 Content Maker — Mod Tooling for Hearts of Iron IV'),
+            StringStruct(u'FileVersion',      u'2.0.0.0'),
+            StringStruct(u'InternalName',     u'HOI4ContentMaker'),
+            StringStruct(u'LegalCopyright',   u'Copyright (c) 2025 Blazer. All Rights Reserved.'),
+            StringStruct(u'OriginalFilename', u'HOI4ContentMaker.exe'),
+            StringStruct(u'ProductName',      u'HOI4 Content Maker'),
+            StringStruct(u'ProductVersion',   u'2.0.0.0'),
+          ]
+        )
+      ]
+    ),
+    VarFileInfo([VarStruct(u'Translation', [0x0409, 1200])])
+  ]
+)
