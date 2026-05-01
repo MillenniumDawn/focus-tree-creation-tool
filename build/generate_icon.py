@@ -1,100 +1,89 @@
 """
 generate_icon.py — Creates icon.ico for the HOI4 Content Maker .exe
 
-Generates a multi-resolution .ico file with a HOI4-styled icon.
+Generates a multi-resolution .ico file with a watermelon icon.
 Run automatically by build.bat, or manually:  python generate_icon.py
 """
 
 try:
-    from PIL import Image, ImageDraw, ImageFont
+    from PIL import Image, ImageDraw
 except ImportError:
     print("[generate_icon] Pillow not installed — run: pip install Pillow")
     raise SystemExit(1)
 
+import math
 import os
 
-# ── Colour palette (HOI4 dark theme) ──────────────────────────────────────────
-BG        = (13,  17,  28)    # very dark navy
-GOLD      = (212, 175,  55)   # HOI4 gold
-GOLD_DIM  = (160, 130,  40)
-RED       = (180,  40,  40)
-WHITE     = (220, 220, 220)
+# ── Colour palette (watermelon) ───────────────────────────────────────────────
+GREEN_DARK   = (28,  88,  28)   # outer rind
+GREEN_LIGHT  = (80, 160,  50)   # rind stripes
+WHITE_RIND   = (220, 242, 205)  # inner white rind
+FLESH        = (210,  38,  38)  # red flesh
+SEED         = (22,   14,   6)  # seeds
+
 
 def make_frame(size):
-    """Draw one frame of the icon at the given pixel size."""
+    """Draw one watermelon cross-section frame at the given pixel size."""
     img  = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
 
-    pad  = max(1, size // 16)
-    r    = size - 1
+    pad = max(1, size // 14)
+    r   = size - 1
+    cx  = cy = size // 2
 
-    # Background — rounded dark square
-    corner = max(2, size // 8)
-    draw.rounded_rectangle([0, 0, r, r], radius=corner, fill=BG)
+    # ── 1. Outer dark-green circle (rind) ─────────────────────────────────────
+    draw.ellipse([pad, pad, r - pad, r - pad], fill=GREEN_DARK)
 
-    # Gold border
-    bw = max(1, size // 20)
-    draw.rounded_rectangle([bw, bw, r-bw, r-bw], radius=corner,
-                            outline=GOLD, width=bw)
+    # ── 2. Light-green stripes on the rind (skip for tiny sizes) ──────────────
+    rind_w = max(2, size // 7)
+    if size >= 24:
+        num_stripes = 3 if size >= 48 else 2
+        stripe_w    = max(1, rind_w // (num_stripes * 2 + 1))
+        for i in range(num_stripes):
+            offset = pad + stripe_w * (2 * i + 1)
+            draw.ellipse([offset, offset, r - offset, r - offset],
+                         outline=GREEN_LIGHT, width=max(1, stripe_w))
 
-    # Inner design: a simplified gear / cog shape for sizes >= 32
-    cx, cy = size // 2, size // 2
+    # ── 3. White inner-rind ring ───────────────────────────────────────────────
+    wi = pad + rind_w
+    draw.ellipse([wi, wi, r - wi, r - wi], fill=WHITE_RIND)
+
+    # ── 4. Red flesh ───────────────────────────────────────────────────────────
+    white_w = max(1, size // 20)
+    fi = wi + white_w
+    draw.ellipse([fi, fi, r - fi, r - fi], fill=FLESH)
+
+    # ── 5. Seeds (only for sizes >= 32) ───────────────────────────────────────
     if size >= 32:
-        # Outer circle (gold ring)
-        margin = size // 5
-        draw.ellipse([margin, margin, r-margin, r-margin],
-                     outline=GOLD, width=max(1, size//16))
-        # Inner circle (filled dark)
-        inner_m = size // 3
-        draw.ellipse([inner_m, inner_m, r-inner_m, r-inner_m], fill=BG)
+        flesh_r = cx - fi          # radius of the flesh circle
+        seed_r  = flesh_r * 0.55   # orbit radius for seeds
+        sw      = max(1, size // 22)   # seed half-width
+        sh      = max(2, size // 14)   # seed half-height
 
-        # Letter "H" in centre (HOI4 reference)
-        font_size = max(8, size // 3)
-        try:
-            # Try to load a system font
-            for fname in ("arialbd.ttf", "Arial Bold.ttf", "DejaVuSans-Bold.ttf",
-                          "LiberationSans-Bold.ttf", "FreeSansBold.ttf"):
-                try:
-                    font = ImageFont.truetype(fname, font_size)
-                    break
-                except Exception:
-                    font = None
-        except Exception:
-            font = None
+        # 5 seeds at evenly-spaced angles; fewer at smaller sizes
+        angles = [-90, -18, 54, 126, 198]
+        if size < 64:
+            angles = angles[:3]
 
-        if font is None:
-            font = ImageFont.load_default()
-
-        text = "H"
-        try:
-            bbox = draw.textbbox((0, 0), text, font=font)
-            tw = bbox[2] - bbox[0]
-            th = bbox[3] - bbox[1]
-        except Exception:
-            tw = th = font_size
-
-        tx = cx - tw // 2
-        ty = cy - th // 2 - max(1, size // 20)
-        draw.text((tx, ty), text, fill=GOLD, font=font)
-
-    else:
-        # For tiny sizes (16px) just fill with gold "H" on dark bg
-        draw.rectangle([pad*2, pad*2, r-pad*2, r-pad*2], fill=GOLD_DIM)
-        draw.rectangle([pad*3, pad*3, r-pad*3, r-pad*3], fill=BG)
+        for deg in angles:
+            rad = math.radians(deg)
+            sx  = int(cx + math.cos(rad) * seed_r)
+            sy  = int(cy + math.sin(rad) * seed_r)
+            draw.ellipse([sx - sw, sy - sh // 2,
+                          sx + sw, sy + sh // 2], fill=SEED)
 
     return img
 
 
 def main():
-    sizes   = [256, 128, 64, 48, 32, 16]
-    frames  = [make_frame(s) for s in sizes]
-    out     = "icon.ico"
+    sizes  = [256, 128, 64, 48, 32, 16]
+    frames = [make_frame(s) for s in sizes]
+    out    = "icon.ico"
 
-    # PIL needs the largest frame as the primary image
     frames[0].save(
         out,
-        format  = "ICO",
-        sizes   = [(s, s) for s in sizes],
+        format        = "ICO",
+        sizes         = [(s, s) for s in sizes],
         append_images = frames[1:],
     )
 

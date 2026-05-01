@@ -678,9 +678,10 @@ EFFECT_DEFS = {
     "fields":[("division_template","entry","Template Name","Template name."),
               ("disband","dropdown:yes,no","no","Return equipment to stockpile?")]},
   "create_unit":              {"label":"Create Unit",                  "cat":"Military",
-    "fields":[("division","entry","TAG_infantry_division","Division template name."),
-              ("owner","entry","TAG","Owner country tag."),
-              ("state","entry","1","State ID to spawn in.")]},
+    "fields":[("division_name","entry","1st Infantry Division","Display name of the division."),
+              ("division_template","entry","Infantry Division","Division template name (must exist)."),
+              ("start_experience_factor","entry","0.2","Starting experience (0.0–1.0)."),
+              ("owner","entry","ROOT","Owner country tag (ROOT, TAG, etc.).")]},
   "load_oob":                 {"label":"Load OOB File",                "cat":"Military",
     "fields":[("file","entry","TAG_1936","OOB file name in /history/units/.")]},
   "set_oob":                  {"label":"Set OOB (game start)",         "cat":"Military",
@@ -3821,6 +3822,8 @@ def open_national_spirit_wizard(app):
         if namekey != sid:
             out.append("\t\t\tname = %s" % namekey)
         out.append("\t\t\tpicture = %s" % pic)
+        if slot == "country":
+            out.append("\t\t\tallowed_civil_war = { always = yes }")
         if cost:
             out.append("\t\t\tcost = %s" % cost)
         if removal:
@@ -4161,13 +4164,13 @@ def open_national_spirit_wizard(app):
                     else:
                         new_existing = existing.rstrip() + "\n\n" + ideas_block + "\n"
 
-                    with open(ideas_path, "w", encoding="utf-8-sig") as f:
+                    with open(ideas_path, "w", encoding="utf-8") as f:
                         f.write(new_existing)
                     rel = os.path.relpath(ideas_path, mod_root)
                     saved.append(rel + "  (spirit appended into existing file)")
             else:
                 # New file — write as-is
-                with open(ideas_path, "w", encoding="utf-8-sig") as f:
+                with open(ideas_path, "w", encoding="utf-8") as f:
                     f.write(ideas_block)
                 rel = os.path.relpath(ideas_path, mod_root)
                 saved.append(rel + "  (new file created)")
@@ -4337,6 +4340,10 @@ def open_national_spirit_wizard(app):
         info_lbl.pack(padx=10, anchor="w", pady=(2,0))
 
         def _block_to_text(blk, depth=0):
+            """Recursively convert a parsed HOI4 block dict to script text.
+            Handles nested dicts, repeated keys (lists), and bools → yes/no."""
+            if isinstance(blk, bool):
+                return "yes" if blk else "no"
             if not isinstance(blk, dict):
                 return str(blk)
             lines = []
@@ -4344,13 +4351,21 @@ def open_national_spirit_wizard(app):
             for k, v in blk.items():
                 if k == "_values":
                     for val in (v if isinstance(v, list) else [v]):
-                        lines.append(f"{ind}{val}")
+                        if isinstance(val, bool):
+                            lines.append(f"{ind}{'yes' if val else 'no'}")
+                        else:
+                            lines.append(f"{ind}{val}")
+                    continue
+                if isinstance(v, bool):
+                    lines.append(f"{ind}{k} = {'yes' if v else 'no'}")
                 elif isinstance(v, list):
                     for item in v:
                         if isinstance(item, dict):
                             lines.append(f"{ind}{k} = {{")
                             lines.append(_block_to_text(item, depth + 1))
                             lines.append(f"{ind}}}")
+                        elif isinstance(item, bool):
+                            lines.append(f"{ind}{k} = {'yes' if item else 'no'}")
                         else:
                             lines.append(f"{ind}{k} = {item}")
                 elif isinstance(v, dict):
@@ -5155,11 +5170,25 @@ def open_decision_wizard(app):
         return False
 
     def _on_dec_win_close():
-        try: _collect()
+        # _collect and other helpers may not yet be defined in the closure if the
+        # window construction failed early — use a defensive lookup so we never
+        # raise NameError during window teardown.
+        try:
+            _c_fn = _collect  # noqa: F821 - late-bound closure
+        except NameError:
+            _c_fn = None
+        try:
+            if _c_fn: _c_fn()
         except Exception: pass
-        try: _autosave()
+        try:
+            _as_fn = _autosave  # noqa: F821 - late-bound closure
+        except NameError:
+            _as_fn = None
+        try:
+            if _as_fn: _as_fn()
         except Exception: pass
-        win.destroy()
+        try: win.destroy()
+        except Exception: pass
     win.protocol("WM_DELETE_WINDOW", _on_dec_win_close)
 
     # ── colour aliases matching mockup exactly ───────────────────────────────
@@ -5822,7 +5851,7 @@ def open_decision_wizard(app):
         else: msg += "?"
         if not messagebox.askyesno("Delete Category", msg, parent=win): return
         _collect(); _snapshot()
-        global dm_cats, dm_decs
+        # dm_cats / dm_decs are closure-scoped lists — mutate in place
         dm_decs[:] = [d for d in dm_decs if d["cat_uid"] != uid]
         dm_cats[:] = [c for c in dm_cats if c["uid"] != uid]
         if dm_cats: sel["uid"]=dm_cats[0]["uid"]; sel["type"]="cat"
@@ -7532,6 +7561,13 @@ def open_decision_wizard(app):
         if _s(dec["allowed"]):
             lines.append(f"{T2}allowed = {{\n{_indent(_s(dec['allowed']),3)}\n{T2}}}")
 
+        # ── icon (always second, after allowed) ───────────────────────────────
+        if _s(dec["icon"]):
+            _icon_val = _s(dec["icon"])
+            if _icon_val and not _icon_val.startswith("GFX_"):
+                _icon_val = f"GFX_decision_{_icon_val}"
+            lines.append(f"{T2}icon = {_icon_val}")
+
         # ── targeting ────────────────────────────────────────────────────────
         tgt_var = _evars.get("targeted")
         targeted = tgt_var.get() if isinstance(tgt_var, tk.StringVar) else dec.get("targeted","none")
@@ -7584,10 +7620,6 @@ def open_decision_wizard(app):
         # For non-targeted decisions that still use highlight_states + on_map_mode
         if targeted == "none" and _s(dec.get("on_map_mode","")):
             lines.append(f"{T2}on_map_mode = {_s(dec['on_map_mode'])}")
-
-        # ── icon ─────────────────────────────────────────────────────────────
-        if _s(dec["icon"]):
-            lines.append(f"{T2}icon = {_s(dec['icon'])}")
 
         # ── mission fields ───────────────────────────────────────────────────
         if dec.get("is_mission"):
@@ -7646,9 +7678,9 @@ def open_decision_wizard(app):
             if "log = " not in ce:
                 dec_id = _s(dec["dec_id"])
                 log_line = f'\t\t\tlog = "[GetDateText]: [Root.GetName]: Decision {dec_id}"'
-                ce = log_line + "\n" + ("\t\t\t" + ce.strip() if ce.strip() else "")
+                ce = log_line + ("\n" + _indent(ce.strip(), 3) if ce.strip() else "")
             else:
-                ce = "\t\t\t" + ce.strip()
+                ce = _indent(ce.strip(), 3)
             lines.append(f"{T2}complete_effect = {{\n{ce}\n{T2}}}")
         elif _s(dec.get("dec_id","")):
             # Always emit complete_effect with log even if empty, for standardizer compliance
@@ -7664,10 +7696,10 @@ def open_decision_wizard(app):
             re_txt = _s(dec["remove_effect"])
             if "log = " not in re_txt:
                 dec_id = _s(dec["dec_id"])
-                log_line = f'\t\t\tlog = "[GetDateText]: [Root.GetName]: remove_effect {dec_id}"'
-                re_txt = log_line + "\n\t\t\t" + re_txt.strip()
+                log_line = f'\t\t\tlog = "[GetDateText]: [Root.GetName]: Decision {dec_id}"'
+                re_txt = log_line + ("\n" + _indent(re_txt.strip(), 3) if re_txt.strip() else "")
             else:
-                re_txt = "\t\t\t" + re_txt.strip()
+                re_txt = _indent(re_txt.strip(), 3)
             lines.append(f"{T2}remove_effect = {{\n{re_txt}\n{T2}}}")
 
         if _s(dec.get("cancel_trigger","")):
@@ -7855,6 +7887,17 @@ def open_decision_wizard(app):
             parent=win, title="Import decisions .txt (+ optionally loc .yml)",
             filetypes=[("HOI4 files","*.txt *.yml"),("TXT","*.txt"),("YML","*.yml"),("All","*.*")])
         if not paths: return
+
+        # Auto-set edit target to the first imported .txt so Save overwrites in place
+        _first_txt = next((p for p in paths if p.lower().endswith(".txt")), None)
+        if _first_txt:
+            MOD.edit_decisions_file = _first_txt
+            # Try to auto-detect matching categories file in common/decisions/categories/
+            _base = _os.path.basename(_first_txt)
+            _folder = _os.path.dirname(_first_txt)
+            _cat_path = _os.path.join(_folder, "categories", _base)
+            if _os.path.isfile(_cat_path):
+                MOD.edit_decisions_cat_file = _cat_path
 
         # ── helper: extract a named block from text, return (inner_text, full_text) ──
         def _extract_block(text, start_pos=0):
@@ -8145,9 +8188,9 @@ def open_decision_wizard(app):
             defaultextension=".txt",filetypes=[("HOI4 decisions","*.txt"),("All","*.*")])
         if not path: return
         try:
-            with open(path,"w",encoding="utf-8-sig") as f: f.write(_gen_decisions_file())
+            with open(path,"w",encoding="utf-8") as f: f.write(_gen_decisions_file())
             cat_path=path.replace(".txt","_categories.txt")
-            with open(cat_path,"w",encoding="utf-8-sig") as f: f.write(_gen_categories_file())
+            with open(cat_path,"w",encoding="utf-8") as f: f.write(_gen_categories_file())
             _dm_status.config(text=f"  ✓  Exported")
         except Exception as e: messagebox.showerror("Export Error",str(e),parent=win)
 
@@ -8165,17 +8208,31 @@ def open_decision_wizard(app):
             if not mod_root: return
         ns=dm_cats[0]["cat_id"].split("_")[0] if dm_cats else "TAG"
         saved=[]; errs=[]
-        dec_path=os.path.join(mod_root,"common","decisions",f"{ns}_decisions.txt")
+        # Prefer the imported/user-set edit target so we overwrite the source file in place
+        if MOD.edit_decisions_file and os.path.isfile(MOD.edit_decisions_file):
+            dec_path = MOD.edit_decisions_file
+        else:
+            dec_path=os.path.join(mod_root,"common","decisions",f"{ns}_decisions.txt")
         os.makedirs(os.path.dirname(dec_path),exist_ok=True)
         try:
-            with open(dec_path,"w",encoding="utf-8-sig") as f: f.write(_gen_decisions_file())
-            saved.append(os.path.relpath(dec_path,mod_root))
+            with open(dec_path,"w",encoding="utf-8") as f: f.write(_gen_decisions_file())
+            try:
+                saved.append(os.path.relpath(dec_path,mod_root))
+            except ValueError:
+                saved.append(dec_path)
         except Exception as e: errs.append(str(e))
-        cat_path=os.path.join(mod_root,"common","decisions","categories",f"{ns}_categories.txt")
+        # Categories file — use the matching edit target if set, else default
+        if MOD.edit_decisions_cat_file and os.path.isfile(MOD.edit_decisions_cat_file):
+            cat_path = MOD.edit_decisions_cat_file
+        else:
+            cat_path=os.path.join(mod_root,"common","decisions","categories",f"{ns}_categories.txt")
         os.makedirs(os.path.dirname(cat_path),exist_ok=True)
         try:
-            with open(cat_path,"w",encoding="utf-8-sig") as f: f.write(_gen_categories_file())
-            saved.append(os.path.relpath(cat_path,mod_root))
+            with open(cat_path,"w",encoding="utf-8") as f: f.write(_gen_categories_file())
+            try:
+                saved.append(os.path.relpath(cat_path,mod_root))
+            except ValueError:
+                saved.append(cat_path)
         except Exception as e: errs.append(str(e))
         yml_path = (MOD.edit_loc_file if MOD.edit_loc_file and os.path.isfile(MOD.edit_loc_file)
                    else os.path.join(mod_root,"localisation","english",f"{ns}_decisions_l_english.yml"))
@@ -8691,12 +8748,12 @@ def open_dyn_mod_wizard(app):
                 except ValueError:
                     warnings.append(f"Variable modifier {key} = {val} — check Variable Modifiers field")
 
-        # Localisation
+        # Localisation — accept both `key: "value"` and legacy `key:0 "value"`
         loc_idx = next((i for i,l in enumerate(txt.splitlines())
                         if "# LOCALISATION" in l), None)
         if loc_idx:
             for ln in txt.splitlines()[loc_idx:]:
-                m = re.match(r'^\s*(\S+?):0\s+"(.*)"', ln)
+                m = re.match(r'^\s+(\S+?)(?::\d+)?\s*[=:]?\s*"(.*)"', ln)
                 if m:
                     key, val = m.group(1), m.group(2)
                     if key.endswith("_desc"):
@@ -8889,7 +8946,7 @@ def open_dyn_mod_wizard(app):
             except Exception:
                 return None
 
-        def write(rel, content, encoding="utf-8-sig"):
+        def write(rel, content, encoding="utf-8"):
             p = full(rel)
             os.makedirs(os.path.dirname(p), exist_ok=True)
             try:
@@ -8972,13 +9029,14 @@ def open_dyn_mod_wizard(app):
         existing_keys = set()
 
         # Collect all keys already in any loc file
+        # Accept both modern `key: "value"` and legacy `key:0 "value"` forms
         if os.path.isdir(loc_dir):
             for fname in os.listdir(loc_dir):
                 if fname.endswith(".yml"):
                     content = read_existing(
                         os.path.join("localisation","english",fname), "utf-8-sig")
                     if content:
-                        for m in _re.finditer(r'^\s*(\S+?):0?\s', content, _re.MULTILINE):
+                        for m in _re.finditer(r'^\s+(\S+?)(?::\d+)?\s*[=:]?\s*"', content, _re.MULTILINE):
                             existing_keys.add(m.group(1))
 
         # Build only the missing entries
@@ -9170,22 +9228,41 @@ def open_dyn_mod_wizard(app):
         for mid, fp in mods:
             lb.insert("end", f"  {mid:<50}  {os.path.basename(fp)}")
 
-        def _block_to_enable_text(blk):
+        def _block_to_enable_text(blk, depth=0):
+            """Recursively convert a parsed HOI4 block dict back to script text.
+            Handles nested dicts, repeated keys (lists), bools → yes/no."""
             if not isinstance(blk, dict):
-                return ""
+                # scalar fallback (list of scalars is handled in caller)
+                if isinstance(blk, bool): return "yes" if blk else "no"
+                return str(blk)
+            ind = "\t" * depth
             lines = []
             for k, v in blk.items():
                 if k == "_values":
                     for val in (v if isinstance(v, list) else [v]):
-                        lines.append(str(val))
+                        if isinstance(val, bool):
+                            lines.append(f"{ind}{'yes' if val else 'no'}")
+                        else:
+                            lines.append(f"{ind}{val}")
+                    continue
+                if isinstance(v, bool):
+                    lines.append(f"{ind}{k} = {'yes' if v else 'no'}")
+                elif isinstance(v, list):
+                    for item in v:
+                        if isinstance(item, dict):
+                            lines.append(f"{ind}{k} = {{")
+                            lines.append(_block_to_enable_text(item, depth + 1))
+                            lines.append(f"{ind}}}")
+                        elif isinstance(item, bool):
+                            lines.append(f"{ind}{k} = {'yes' if item else 'no'}")
+                        else:
+                            lines.append(f"{ind}{k} = {item}")
                 elif isinstance(v, dict):
-                    lines.append(f"{k} = {{")
-                    for ik, iv in v.items():
-                        if ik != "_values":
-                            lines.append(f"\t{ik} = {iv}")
-                    lines.append("}")
+                    lines.append(f"{ind}{k} = {{")
+                    lines.append(_block_to_enable_text(v, depth + 1))
+                    lines.append(f"{ind}}}")
                 else:
-                    lines.append(f"{k} = {v}")
+                    lines.append(f"{ind}{k} = {v}")
             return "\n".join(lines)
 
         def _load_selected():
@@ -10576,7 +10653,7 @@ def open_event_wizard(app):
             out.append(ind(ev.immediate)); out.append("\t}")
         out.append("")
         for opt in ev.options:
-            out.append(f"\toption = {{ #{opt.get('text','')}")
+            out.append(f"\toption = {{")
             out.append(f"\t\tname = {opt.get('name','opt')}")
             opt_effects = opt.get("effects","").strip()
             opt_name = opt.get("name","opt")
@@ -10584,9 +10661,9 @@ def open_event_wizard(app):
             # Format matches real MD event files: [This.GetName] and "<option_name> executed"
             if opt_effects and "log = " not in opt_effects:
                 out.append(f'\t\tlog = "[GetDateText]: [This.GetName]: {opt_name} executed"')
-            out.append(f"\t\tai_chance = {{ base = {opt.get('ai_chance','1')} }}")
             if opt_effects:
                 out.append(ind(opt_effects))
+            out.append(f"\t\tai_chance = {{ base = {opt.get('ai_chance','1')} }}")
             out.append("\t}")
         out.append("}")
         return "\n".join(out)
@@ -10632,7 +10709,7 @@ def open_event_wizard(app):
             filetypes=[("HOI4 Events","*.txt"),("All","*.*")],
             title="Export Events .txt")
         if not path: return
-        with open(path,"w",encoding="utf-8-sig") as f: f.write(_generate_all_txt())
+        with open(path,"w",encoding="utf-8") as f: f.write(_generate_all_txt())
         status_lbl.config(text=f"  ✓  Exported {len(events)} events")
 
     def _copy_yml():
@@ -10717,22 +10794,38 @@ def open_event_wizard(app):
 
             existing_yml_keys = set()
             yml_exists = os.path.isfile(loc_file)
+            # Regex accepts both the modern `key: "value"` form and the legacy `key:0 "value"` form
+            _YML_KEY = re.compile(r'^\s+(\S+?)(?::\d+)?\s*[=:]?\s*"')
             if yml_exists:
                 with open(loc_file, "r", encoding="utf-8-sig", errors="replace") as f:
                     for line in f:
-                        m = re.match(r'\s+(\S+?):\d+', line)
+                        m = _YML_KEY.match(line)
                         if m: existing_yml_keys.add(m.group(1))
 
-            to_add = [ln for ln in yml_new_lines
-                      if not re.match(r'\s+(\S+?):\d+', ln) or
-                         re.match(r'\s+(\S+?):\d+', ln).group(1) not in existing_yml_keys]
+            to_add = []
+            for ln in yml_new_lines:
+                m = _YML_KEY.match(ln)
+                # If the line doesn't look like a loc key, keep it as-is (header/comment).
+                if not m:
+                    to_add.append(ln)
+                elif m.group(1) not in existing_yml_keys:
+                    to_add.append(ln)
 
             if to_add:
                 if not yml_exists:
                     with open(loc_file, "w", encoding="utf-8-sig") as f:
                         f.write("l_english:\n")
+                # Only add the section header if it's not already there
+                needs_hdr = True
+                try:
+                    with open(loc_file, "r", encoding="utf-8-sig", errors="replace") as _rf:
+                        if f"##########Events - {ns}##########" in _rf.read():
+                            needs_hdr = False
+                except Exception:
+                    pass
                 with open(loc_file, "a", encoding="utf-8-sig") as f:
-                    f.write(f"\n ##########Events - {ns}##########\n")
+                    if needs_hdr:
+                        f.write(f"\n ##########Events - {ns}##########\n")
                     f.write("\n".join(to_add) + "\n")
                 rel = os.path.relpath(loc_file, mod_root)
                 saved.append(f"{rel}  (+{len(to_add)} keys)")
@@ -11795,16 +11888,22 @@ def open_event_wizard(app):
 
 
 def _dict_to_raw(d, indent="	"):
-    """Recursively convert a parsed dict back to HOI4 script lines."""
+    """Recursively convert a parsed dict back to HOI4 script lines.
+    Handles nested dicts, repeated keys (lists), and bools (True→yes, False→no)."""
+    if isinstance(d, bool): return "yes" if d else "no"
     if not isinstance(d, dict): return str(d)
     lines = []
     for k, v in d.items():
         if str(k).startswith("_"): continue
-        if isinstance(v, list):
+        if isinstance(v, bool):
+            lines.append(f"{indent}{k} = {'yes' if v else 'no'}")
+        elif isinstance(v, list):
             for item in v:
                 if isinstance(item, dict):
                     inner = _dict_to_raw(item, indent+"	")
                     lines.append(f"{indent}{k} = {{\n{inner}\n{indent}}}")
+                elif isinstance(item, bool):
+                    lines.append(f"{indent}{k} = {'yes' if item else 'no'}")
                 else:
                     lines.append(f"{indent}{k} = {item}")
         elif isinstance(v, dict):
@@ -11941,6 +12040,8 @@ class ModContext:
         self.edit_events_file = ""   # abs path to events .txt to append new events to
         self.edit_events_ns   = ""   # namespace detected from that events file
         self.edit_focus_file       = ""   # abs path to national_focus .txt to overwrite on export
+        self.edit_decisions_file   = ""   # abs path to decisions .txt to overwrite on export
+        self.edit_decisions_cat_file = ""  # abs path to decisions/categories .txt to overwrite on export
         self.edit_loc_file         = ""   # abs path to localisation .yml to append new loc entries to
         self.edit_scripted_loc_file = ""   # abs path to scripted_localisation .txt to append to
         # MD Additional Income system file paths (auto-discovered on mod load)
@@ -12499,6 +12600,10 @@ class Focus:
         self.available_cond = ""   # raw HOI4 block content (inside available = { })
         self.bypass_cond    = ""   # raw HOI4 block content (inside bypass = { })
         self.cancel_cond    = ""   # raw HOI4 block content (inside cancel = { })
+        self.will_lead_to_war_with = ""  # raw block content or target tag
+        self.complete_tooltip = ""        # raw block content for complete_tooltip
+        self.select_effect  = ""          # raw block content (inside select_effect = { })
+        self.bypass_effect  = ""          # raw block content (inside bypass_effect = { })
         self.offsets = []          # [{"x": int, "y": int, "trigger": str}, ...] — conditional position offsets
         self.tree_idx = 0           # 0 = main tree; >0 = index into _extra_trees (1-based)
         self._items   = []
@@ -12519,6 +12624,8 @@ class Focus:
             ("ai_will_do",1),("gfx","GFX_goal_generic_political_pressure"),
             ("search_filters","FOCUS_FILTER_POLITICAL"),
             ("available_cond",""),("bypass_cond",""),("cancel_cond",""),
+            ("will_lead_to_war_with",""),("complete_tooltip",""),
+            ("select_effect",""),("bypass_effect",""),
             ("offsets",[]),("ai_will_do_raw",""),("tree_idx",0)]:
             if not hasattr(f,attr): setattr(f,attr,default)
         if f.id >= Focus._next: Focus._next = f.id+1
@@ -13653,7 +13760,8 @@ class App(tk.Tk):
                                    highlightthickness=1, highlightbackground=BORDER_G,
                                    wrap="none", undo=True)
         self._fv_ai_raw.pack(fill="x")
-        self._fv_ai_raw.insert("1.0", "    factor = 1")
+        # MD convention: use `base` at top level of ai_will_do
+        self._fv_ai_raw.insert("1.0", "    base = 1")
         self._fv_ai = None
 
         self._fv_desc = self._sb_text("Description (localisation):")
@@ -15627,9 +15735,12 @@ class App(tk.Tk):
             f.cost=int(self._fv_cost.get())
             raw_ai = self._fv_ai_raw.get("1.0","end").strip()
             f.ai_will_do_raw = raw_ai
-            # Extract base value for display
+            # Extract top-level numeric value — accept either `base` or `factor`
+            # (MD uses `base` at the ai_will_do top level, `factor` in modifier sub-blocks).
             import re as _re
-            m = _re.search(r"base\s*=\s*([\d.]+)", raw_ai)
+            m = _re.search(r"^\s*base\s*=\s*([\d.]+)", raw_ai, _re.MULTILINE)
+            if not m:
+                m = _re.search(r"^\s*factor\s*=\s*([\d.]+)", raw_ai, _re.MULTILINE)
             f.ai_will_do = int(float(m.group(1))) if m else 1
             nx=int(self._fv_x.get()); ny=int(self._fv_y.get())
             if not any(o.x==nx and o.y==ny and o.id!=f.id for o in self.focuses.values()): f.x=nx; f.y=ny
@@ -15674,7 +15785,8 @@ class App(tk.Tk):
         if raw:
             self._fv_ai_raw.insert("1.0", raw)
         else:
-            self._fv_ai_raw.insert("1.0", "    factor = %s" % f.ai_will_do)
+            # MD convention: ai_will_do uses `base = X` at top level
+            self._fv_ai_raw.insert("1.0", "    base = %s" % f.ai_will_do)
         self._fv_desc.delete("1.0","end"); self._fv_desc.insert("1.0",f.desc)
         self._fv_search.set(getattr(f,"search_filters","FOCUS_FILTER_POLITICAL"))
         for tv,attr in [(self._fv_avail,"available_cond"),(self._fv_bypass,"bypass_cond"),(self._fv_cancel2,"cancel_cond")]:
@@ -15749,7 +15861,11 @@ class App(tk.Tk):
             # ── Block fields ───────────────────────────────────────────
             for key, attr in [("available", "available_cond"),
                                ("bypass",   "bypass_cond"),
-                               ("cancel",   "cancel_cond")]:
+                               ("cancel",   "cancel_cond"),
+                               ("will_lead_to_war_with", "will_lead_to_war_with"),
+                               ("complete_tooltip",      "complete_tooltip"),
+                               ("select_effect",         "select_effect"),
+                               ("bypass_effect",         "bypass_effect")]:
                 raw = _extract_raw_block(new_code, key)
                 if raw is not None and raw != "": setattr(f, attr, raw)
 
@@ -15855,6 +15971,34 @@ class App(tk.Tk):
             out.append(f"{I}available = {{")
             for ln in avail.splitlines(): out.append(f"{I}\t{ln.strip()}")
             out.append(f"{I}}}")
+        bypass = getattr(f,"bypass_cond","").strip()
+        if bypass:
+            out.append(f"{I}bypass = {{")
+            for ln in bypass.splitlines(): out.append(f"{I}\t{ln.strip()}")
+            out.append(f"{I}}}")
+        cancelc = getattr(f,"cancel_cond","").strip()
+        if cancelc:
+            out.append(f"{I}cancel = {{")
+            for ln in cancelc.splitlines(): out.append(f"{I}\t{ln.strip()}")
+            out.append(f"{I}}}")
+        wltww = getattr(f,"will_lead_to_war_with","").strip()
+        if wltww:
+            out.append(f"{I}will_lead_to_war_with = {{")
+            for ln in wltww.splitlines():
+                if ln.strip(): out.append(f"{I}\t{ln.strip()}")
+            out.append(f"{I}}}")
+        ctip = getattr(f,"complete_tooltip","").strip()
+        if ctip:
+            out.append(f"{I}complete_tooltip = {{")
+            for ln in ctip.splitlines():
+                if ln.strip(): out.append(f"{I}\t{ln.strip()}")
+            out.append(f"{I}}}")
+        sel_eff = getattr(f,"select_effect","").strip()
+        if sel_eff:
+            out.append(f"{I}select_effect = {{")
+            for ln in sel_eff.splitlines():
+                if ln.strip(): out.append(f"{I}\t{ln.strip()}")
+            out.append(f"{I}}}")
         if not f.cancel_if_invalid:
             out.append(f"{I}cancel_if_invalid = no")
         if f.continue_if_invalid:
@@ -15868,9 +16012,16 @@ class App(tk.Tk):
         else:
             out.append(f"{I}\t# add effects here")
         out.append(f"{I}}}")
+        bp_eff = getattr(f,"bypass_effect","").strip()
+        if bp_eff:
+            out.append(f"{I}bypass_effect = {{")
+            for ln in bp_eff.splitlines():
+                if ln.strip(): out.append(f"{I}\t{ln.strip()}")
+            out.append(f"{I}}}")
         raw_ai = getattr(f,"ai_will_do_raw","").strip()
+        # MD convention: ai_will_do uses `base` at top level, `factor` only in modifier sub-blocks
         out += ["", f"{I}ai_will_do = {{",
-                f"{I}\t{raw_ai}" if raw_ai else f"{I}\tfactor = {f.ai_will_do}",
+                f"{I}\t{raw_ai}" if raw_ai else f"{I}\tbase = {f.ai_will_do}",
                 f"{I}}}", "}"]
         return "\n".join(out)
     def _refresh_prereqs(self):
@@ -16032,47 +16183,10 @@ class App(tk.Tk):
             messagebox.showinfo("View Code", "No focus selected.\nClick a focus on the canvas first.")
             return
 
-        # ── Build the focus block text ──────────────────────────────────
-        out = []
-        out.append("focus = {")
-        out.append(f"    id = {f.name}")
-        out.append(f"    icon = {getattr(f, 'gfx', 'GFX_goal_generic_political_pressure')}")
-        out.append("")
-        out.append(f"    x = {f.x}")
-        out.append(f"    y = {f.y}")
-        out.append("")
-        out.append(f"    cost = {f.cost}")
-        out.append("")
-        if f.prereqs:
-            for grp in f.prereqs:
-                valid = [p for p in grp if p in self.focuses]
-                if not valid: continue
-                inner = " ".join(f"focus = {self.focuses[p].name}" for p in valid)
-                out.append(f"    prerequisite = {{ {inner} }}")
-        else:
-            out.append("    # no prerequisites")
-        if f.mutex:
-            for mid in f.mutex:
-                if mid in self.focuses:
-                    out.append(f"    mutually_exclusive = {{ focus = {self.focuses[mid].name} }}")
-        out.append("")
-        # Only emit flags that differ from HOI4 defaults
-        if not f.cancel_if_invalid:
-            out.append("    cancel_if_invalid = no")
-        if f.continue_if_invalid:
-            out.append("    continue_if_invalid = yes")
-        if f.available_if_capitulated:
-            out.append("    available_if_capitulated = yes")
-        out.append("")
-        out.append("    completion_reward = {")
-        if f.effects:
-            for eff in f.effects:
-                out.append("    " + self._render_effect(eff))
-        else:
-            out.append("        # add effects here")
-        out.append("    }")
-        out.append("}")
-        code = "\n".join(out)
+        # Use the canonical full builder so condition blocks and the new
+        # preserved fields (will_lead_to_war_with, complete_tooltip, etc.)
+        # all show up in the popup.
+        code = self._build_focus_code(f)
 
         # ── Popup window ────────────────────────────────────────────────
         win = tk.Toplevel(self)
@@ -16361,7 +16475,10 @@ class App(tk.Tk):
             raw_ai = self._fv_ai_raw.get("1.0","end").strip()
             f.ai_will_do_raw = raw_ai
             import re as _re
-            m = _re.search(r"base\s*=\s*([\d.]+)", raw_ai)
+            # Accept either `base` or `factor` at top level (MD convention uses `base`).
+            m = _re.search(r"^\s*base\s*=\s*([\d.]+)", raw_ai, _re.MULTILINE)
+            if not m:
+                m = _re.search(r"^\s*factor\s*=\s*([\d.]+)", raw_ai, _re.MULTILINE)
             f.ai_will_do = int(float(m.group(1))) if m else 1
             nx=int(self._fv_x.get()); ny=int(self._fv_y.get())
             # move on canvas if x/y changed
@@ -17288,6 +17405,30 @@ class App(tk.Tk):
         except Exception as e:
             messagebox.showerror("Import Error",f"Could not read file:\n{e}"); return
 
+        # Auto-set the edit target so Export writes back to this file in place
+        MOD.edit_focus_file = path
+        # If mod is loaded, also try to auto-detect the matching localisation file
+        if MOD.loaded and MOD.root:
+            try:
+                import re as _re_tag
+                _tag_m = _re_tag.search(r'\b([A-Z]{2,4})_[A-Za-z]', raw)
+                if _tag_m:
+                    _ctag = _tag_m.group(1)
+                    _loc_candidates = [
+                        f"MD_focus_{_ctag}_l_english.yml",
+                        f"{_ctag}_focus_l_english.yml",
+                        f"{_ctag}_focuses_l_english.yml",
+                    ]
+                    _loc_dir = os.path.join(MOD.root, "localisation", "english")
+                    if os.path.isdir(_loc_dir):
+                        for _cand in _loc_candidates:
+                            _cand_path = os.path.join(_loc_dir, _cand)
+                            if os.path.isfile(_cand_path):
+                                MOD.edit_loc_file = _cand_path
+                                break
+            except Exception:
+                pass
+
         # strip BOM defensively (in case encoding didn't catch it)
         if raw.startswith("\ufeff"): raw = raw[1:]
 
@@ -17357,8 +17498,10 @@ class App(tk.Tk):
             _rr = extract_raw_block_from_text(_fblock, 'completion_reward')
             if _rr:
                 _raw_rewards[_fid] = _rr
-            # also capture raw available/bypass/cancel
-            for _condkey in ('available', 'bypass', 'cancel'):
+            # also capture raw available/bypass/cancel and the new preserved fields
+            for _condkey in ('available', 'bypass', 'cancel',
+                             'will_lead_to_war_with', 'complete_tooltip',
+                             'select_effect', 'bypass_effect'):
                 _cv = extract_raw_block_from_text(_fblock, _condkey)
                 if _cv:
                     _raw_rewards[(_fid, _condkey)] = _cv
@@ -17555,19 +17698,27 @@ class App(tk.Tk):
             f.search_filters = str(sf).strip("{}").strip() if sf else "FOCUS_FILTER_POLITICAL"
             # condition blocks — store raw dict as indented lines
             def _block_to_str(block, depth=1):
-                """Recursively convert a parsed HOI4 block dict to script text."""
+                """Recursively convert a parsed HOI4 block dict to script text.
+                Handles nested dicts, repeated keys (lists), and bools → yes/no."""
                 if not block: return ""
+                if isinstance(block, bool): return "yes" if block else "no"
                 if isinstance(block, str): return block.strip()
+                if not isinstance(block, dict):
+                    return str(block)
                 T = "\t" * depth
                 lines = []
                 for k, v in block.items():
                     if str(k).startswith("_"): continue
-                    if isinstance(v, list):
+                    if isinstance(v, bool):
+                        lines.append(f"{T}{k} = {'yes' if v else 'no'}")
+                    elif isinstance(v, list):
                         # list means the key appears multiple times, e.g. has_idea repeated
                         for item in v:
                             if isinstance(item, dict):
                                 inner = _block_to_str(item, depth + 1)
                                 lines.append(f"{T}{k} = {{\n{inner}\n{T}}}")
+                            elif isinstance(item, bool):
+                                lines.append(f"{T}{k} = {'yes' if item else 'no'}")
                             else:
                                 lines.append(f"{T}{k} = {item}")
                     elif isinstance(v, dict):
@@ -17583,6 +17734,15 @@ class App(tk.Tk):
                                 _block_to_str(rf.get("bypass",{})))
             f.cancel_cond    = _raw_rewards.get((fid_str,'cancel'),
                                 _block_to_str(rf.get("cancel",{})))
+            # preserve extra fields introduced later (war with, tooltips, select/bypass effects)
+            f.will_lead_to_war_with = _raw_rewards.get((fid_str,'will_lead_to_war_with'),
+                                _block_to_str(rf.get("will_lead_to_war_with",{})))
+            f.complete_tooltip      = _raw_rewards.get((fid_str,'complete_tooltip'),
+                                _block_to_str(rf.get("complete_tooltip",{})))
+            f.select_effect         = _raw_rewards.get((fid_str,'select_effect'),
+                                _block_to_str(rf.get("select_effect",{})))
+            f.bypass_effect         = _raw_rewards.get((fid_str,'bypass_effect'),
+                                _block_to_str(rf.get("bypass_effect",{})))
             f.offsets        = _raw_rewards.get((fid_str, '_offsets'), [])
             # ── completion_reward: always preserve as single raw block ──────
             raw_rw = _raw_rewards.get(fid_str, "")
@@ -17818,7 +17978,9 @@ class App(tk.Tk):
             _fid = _id_m.group(1)
             _rr = _extract_raw_block(_fblock, 'completion_reward')
             if _rr: _raw_rewards[_fid] = _rr
-            for _ck in ('available', 'bypass', 'cancel'):
+            for _ck in ('available', 'bypass', 'cancel',
+                        'will_lead_to_war_with', 'complete_tooltip',
+                        'select_effect', 'bypass_effect'):
                 _cv = _extract_raw_block(_fblock, _ck)
                 if _cv: _raw_rewards[(_fid, _ck)] = _cv
             # Extract all offset = { x = N y = M trigger = { ... } } blocks as structured data
@@ -17965,17 +18127,25 @@ class App(tk.Tk):
         self._refresh_tree_meta_panel()
 
         def _blk_to_str(block, depth=1):
+            """Recursively convert a parsed HOI4 block dict to script text.
+            Handles nested dicts, repeated keys (lists), and bools → yes/no."""
             if not block: return ""
+            if isinstance(block, bool): return "yes" if block else "no"
             if isinstance(block, str): return block.strip()
+            if not isinstance(block, dict): return str(block)
             T = "\t" * depth
             lines = []
             for k, v in block.items():
                 if str(k).startswith("_"): continue
-                if isinstance(v, list):
+                if isinstance(v, bool):
+                    lines.append(f"{T}{k} = {'yes' if v else 'no'}")
+                elif isinstance(v, list):
                     for item in v:
                         if isinstance(item, dict):
                             inner = _blk_to_str(item, depth + 1)
                             lines.append(f"{T}{k} = {{\n{inner}\n{T}}}")
+                        elif isinstance(item, bool):
+                            lines.append(f"{T}{k} = {'yes' if item else 'no'}")
                         else:
                             lines.append(f"{T}{k} = {item}")
                 elif isinstance(v, dict):
@@ -18028,6 +18198,14 @@ class App(tk.Tk):
             f.available_cond = _raw_rewards.get((fid_str, 'available'), _blk_to_str(rf.get("available", {})))
             f.bypass_cond    = _raw_rewards.get((fid_str, 'bypass'),    _blk_to_str(rf.get("bypass", {})))
             f.cancel_cond    = _raw_rewards.get((fid_str, 'cancel'),    _blk_to_str(rf.get("cancel", {})))
+            f.will_lead_to_war_with = _raw_rewards.get((fid_str, 'will_lead_to_war_with'),
+                                            _blk_to_str(rf.get("will_lead_to_war_with", {})))
+            f.complete_tooltip      = _raw_rewards.get((fid_str, 'complete_tooltip'),
+                                            _blk_to_str(rf.get("complete_tooltip", {})))
+            f.select_effect         = _raw_rewards.get((fid_str, 'select_effect'),
+                                            _blk_to_str(rf.get("select_effect", {})))
+            f.bypass_effect         = _raw_rewards.get((fid_str, 'bypass_effect'),
+                                            _blk_to_str(rf.get("bypass_effect", {})))
             f._joint_extra   = _raw_rewards.get((fid_str, '_joint_extra'), "")
             f.offsets        = _raw_rewards.get((fid_str, '_offsets'), [])
             raw_rw = _raw_rewards.get(fid_str, "")
@@ -18245,6 +18423,29 @@ class App(tk.Tk):
                         stripped = ln[min_ind:] if len(ln) >= min_ind else ln.lstrip("\t")
                         out.append(f"{T2}{stripped}")
                     out.append(f"{T}}}")
+            # will_lead_to_war_with / complete_tooltip / select_effect — preserve from import
+            wltww = getattr(f, "will_lead_to_war_with", "").strip()
+            if wltww:
+                if wltww.startswith("{") and wltww.endswith("}"):
+                    inner = wltww[1:-1].strip()
+                else:
+                    inner = wltww
+                out.append(f"{T}will_lead_to_war_with = {{")
+                for ln in inner.splitlines():
+                    if ln.strip(): out.append(f"{T2}{ln.strip()}")
+                out.append(f"{T}}}")
+            ctip = getattr(f, "complete_tooltip", "").strip()
+            if ctip:
+                out.append(f"{T}complete_tooltip = {{")
+                for ln in ctip.splitlines():
+                    if ln.strip(): out.append(f"{T2}{ln.strip()}")
+                out.append(f"{T}}}")
+            sel_eff = getattr(f, "select_effect", "").strip()
+            if sel_eff:
+                out.append(f"{T}select_effect = {{")
+                for ln in sel_eff.splitlines():
+                    if ln.strip(): out.append(f"{T2}{ln.strip()}")
+                out.append(f"{T}}}")
             out.append("")
             out.append(f"{T}completion_reward = {{")
             if f.effects:
@@ -18261,6 +18462,13 @@ class App(tk.Tk):
                 out.append(f"{T2}log = \"[GetDateText]: [This.GetName]: focus {f.name} executed\"")
                 out.append(f"{T2}# TODO: add effects")
             out.append(f"{T}}}")
+            # bypass_effect — raw block (preserved from import)
+            bp_eff = getattr(f, "bypass_effect", "").strip()
+            if bp_eff:
+                out.append(f"{T}bypass_effect = {{")
+                for ln in bp_eff.splitlines():
+                    if ln.strip(): out.append(f"{T2}{ln.strip()}")
+                out.append(f"{T}}}")
             out.append("")
             out.append(f"{T}ai_will_do = {{")
             raw_ai = getattr(f, "ai_will_do_raw", "").strip()
@@ -18330,7 +18538,7 @@ class App(tk.Tk):
                 initialfile=os.path.basename(info["file_path"]),
                 title=f"Save {info['type'].capitalize()} Tree .txt")
         if not path: return
-        with open(path, "w", encoding="utf-8-sig") as fp:
+        with open(path, "w", encoding="utf-8") as fp:
             fp.write("\n".join(out))
         info["file_path"] = path
         messagebox.showinfo("Saved",
@@ -18576,7 +18784,9 @@ class App(tk.Tk):
             _fid = _id_m.group(1)
             _rr = _extract_raw_block(_fblock, 'completion_reward')
             if _rr: _raw_rewards[_fid] = _rr
-            for _ck in ('available', 'bypass', 'cancel'):
+            for _ck in ('available', 'bypass', 'cancel',
+                        'will_lead_to_war_with', 'complete_tooltip',
+                        'select_effect', 'bypass_effect'):
                 _cv = _extract_raw_block(_fblock, _ck)
                 if _cv: _raw_rewards[(_fid, _ck)] = _cv
             # Extract all offset = { x = N y = M trigger = { ... } } blocks as structured data
@@ -18704,15 +18914,23 @@ class App(tk.Tk):
         self._refresh_tree_meta_panel()
 
         def _blk_to_str(block, depth=1):
+            """Recursively convert a parsed HOI4 block dict to script text.
+            Handles nested dicts, repeated keys (lists), and bools → yes/no."""
             if not block: return ""
+            if isinstance(block, bool): return "yes" if block else "no"
             if isinstance(block, str): return block.strip()
+            if not isinstance(block, dict): return str(block)
             T = "\t" * depth; lines = []
             for k, v in block.items():
                 if str(k).startswith("_"): continue
-                if isinstance(v, list):
+                if isinstance(v, bool):
+                    lines.append(f"{T}{k} = {'yes' if v else 'no'}")
+                elif isinstance(v, list):
                     for item in v:
                         if isinstance(item, dict):
                             lines.append(f"{T}{k} = {{\n{_blk_to_str(item, depth+1)}\n{T}}}")
+                        elif isinstance(item, bool):
+                            lines.append(f"{T}{k} = {'yes' if item else 'no'}")
                         else:
                             lines.append(f"{T}{k} = {item}")
                 elif isinstance(v, dict):
@@ -18757,6 +18975,14 @@ class App(tk.Tk):
             f.available_cond = _raw_rewards.get((fid_str, 'available'), _blk_to_str(rf.get("available", {})))
             f.bypass_cond    = _raw_rewards.get((fid_str, 'bypass'),    _blk_to_str(rf.get("bypass", {})))
             f.cancel_cond    = _raw_rewards.get((fid_str, 'cancel'),    _blk_to_str(rf.get("cancel", {})))
+            f.will_lead_to_war_with = _raw_rewards.get((fid_str, 'will_lead_to_war_with'),
+                                            _blk_to_str(rf.get("will_lead_to_war_with", {})))
+            f.complete_tooltip      = _raw_rewards.get((fid_str, 'complete_tooltip'),
+                                            _blk_to_str(rf.get("complete_tooltip", {})))
+            f.select_effect         = _raw_rewards.get((fid_str, 'select_effect'),
+                                            _blk_to_str(rf.get("select_effect", {})))
+            f.bypass_effect         = _raw_rewards.get((fid_str, 'bypass_effect'),
+                                            _blk_to_str(rf.get("bypass_effect", {})))
             f._joint_extra   = _raw_rewards.get((fid_str, '_joint_extra'), "")
             f.offsets        = _raw_rewards.get((fid_str, '_offsets'), [])
             raw_rw = _raw_rewards.get(fid_str, "")
@@ -18906,7 +19132,7 @@ class App(tk.Tk):
                 ("name", g("name","bonus")), ("bonus", g("bonus","0.5")),
                 ("uses", g("uses","1")), ("category", g("category","infantry_weapons"))]),
             "add_popularity": lambda: block("add_popularity", [
-                ("ideology", g("ideology","democratic")), ("popularity", g("popularity","0.05"))]),
+                ("ideology", g("ideology","democratic")), ("popularity", g("popularity","0.05"))]) + f"\n{I}recalculate_party = yes",
             "set_politics": lambda: block("set_politics", [
                 ("ruling_party", g("ruling_party","democratic")),
                 ("elections_allowed", g("elections_allowed","no"))]),
@@ -18934,6 +19160,27 @@ class App(tk.Tk):
             "add_building_construction": lambda: block("add_building_construction", [
                 ("type", g("type","industrial_complex")), ("level", g("level","1")),
                 ("instant_build", g("instant_build","no"))]),
+            "create_unit": lambda: (
+                f"{I}create_unit = {{\n"
+                f"{I}\tdivision = \"name = \\\"{g('division_name','1st Infantry Division')}\\\" "
+                f"division_template = \\\"{g('division_template','Infantry Division')}\\\" "
+                f"start_experience_factor = {g('start_experience_factor','0.2')}\"\n"
+                f"{I}\towner = {g('owner','ROOT')}\n"
+                f"{I}}}"),
+            "set_technology": lambda: f'{I}set_technology = {{ {g("tech_id","infantry_weapons1")} = {"1" if g("researched","yes") == "yes" else "0"} }}',
+            "modify_timed_idea": lambda: block("modify_timed_idea", [
+                ("idea", g("idea","my_spirit")), ("days", g("days","30"))]),
+            "build_railway": lambda: block("build_railway", [
+                ("level", g("level","1")), ("path", g("path","{ 1 2 3 }"))]),
+            "division_template": lambda: (
+                f"{I}division_template = {{\n"
+                f'{I}\tname = "{g("name","Infantry Division")}"\n'
+                f"{I}\tregiments = {{\n"
+                + "\n".join(f"{I}\t\t{ln.strip()}" for ln in g("regiments","infantry = { x = 0 y = 0 }").strip().splitlines() if ln.strip())
+                + f"\n{I}\t}}\n"
+                f"{I}}}"),
+            "load_oob": lambda: f'{I}load_oob = "{g("file","TAG_1936")}"',
+            "set_oob": lambda: f'{I}set_oob = "{g("file","TAG_1936")}"',
             "log": lambda: f'{I}log = "{g("text")}"',
             "set_variable": lambda: f'{I}set_variable = {{ {g("var","my_var")} = {g("value","0")} }}',
             "force_update_dynamic_modifier": lambda: f"{I}force_update_dynamic_modifier = yes",
@@ -19249,10 +19496,61 @@ class App(tk.Tk):
             "every_state_division","every_active_scientist","every_scientist",
             "every_military_industrial_organization","every_purchase_contract",
             "every_country_with_original_tag","every_collection_element",
+            "every_hostile_country","global_every_army_leader",
             "random_country","random_state","random_ally","random_neighbor_country",
             "random_owned_state","random_controlled_state","random_core_state",
-            "capital_scope","overlord","faction_leader",
+            "random_owned_controlled_state","random_neighbor_state",
+            "random_allied_country","random_other_country","random_enemy_country",
+            "random_occupied_country","random_subject_country",
+            "random_army_leader","random_navy_leader","random_unit_leader",
+            "random_character","random_operative","random_active_scientist",
+            "random_scientist","random_military_industrial_organization",
+            "random_purchase_contract","random_country_division",
+            "random_state_division","random_country_with_original_tag",
+            "random_scope_in_array","random_hostile_country",
+            "random_list","random",
+            "capital_scope","overlord","faction_leader","party_leader",
+            "while_loop_effect","for_loop_effect","for_each_loop","for_each_scope_loop",
         }
+        # ── Helper: coerce a Python value to a HOI4 scalar (no True/False/list/dict leaks)
+        def _hoi4_val(v):
+            if isinstance(v, bool):
+                return "yes" if v else "no"
+            return str(v)
+
+        # ── Helper: recursively render a dict/list value into HOI4 script lines
+        def _hoi4_render_value(k, v, indent):
+            """Render a single key->value pair at the given tab indent. Returns list of lines.
+            Handles: scalars, bools → yes/no, lists → repeated keys, dicts → nested block."""
+            T = indent
+            if isinstance(v, bool):
+                return [f"{T}{k} = {'yes' if v else 'no'}"]
+            if isinstance(v, (int, float)):
+                return [f"{T}{k} = {v}"]
+            if isinstance(v, str):
+                return [f"{T}{k} = {v}"]
+            if isinstance(v, list):
+                out_lines = []
+                for item in v:
+                    if isinstance(item, dict):
+                        out_lines.append(f"{T}{k} = {{")
+                        for ik, iv in item.items():
+                            if str(ik).startswith("_"): continue
+                            out_lines.extend(_hoi4_render_value(ik, iv, T + "\t"))
+                        out_lines.append(f"{T}}}")
+                    else:
+                        out_lines.append(f"{T}{k} = {_hoi4_val(item)}")
+                return out_lines
+            if isinstance(v, dict):
+                out_lines = [f"{T}{k} = {{"]
+                for ik, iv in v.items():
+                    if str(ik).startswith("_"): continue
+                    out_lines.extend(_hoi4_render_value(ik, iv, T + "\t"))
+                out_lines.append(f"{T}}}")
+                return out_lines
+            # fallback — coerce anything else to string (should not happen)
+            return [f"{T}{k} = {v}"]
+
         if t in _SCOPE_TYPES:
             import re as _re
             out = [f"{I}{t} = {{"]
@@ -19272,6 +19570,10 @@ class App(tk.Tk):
                     if ln: out.append(f"{I}\t{ln}")
             for k,v in f.items():
                 if k in ("limit","effect","_list") or str(k).startswith("_"): continue
+                # Use the recursive renderer so lists/dicts/bools don't leak Python syntax
+                if isinstance(v, (list, dict, bool)):
+                    out.extend(_hoi4_render_value(k, v, f"{I}\t"))
+                    continue
                 vs = str(v).strip()
                 if not vs: continue
                 if vs.startswith("{") and vs.endswith("}"):
@@ -19292,8 +19594,12 @@ class App(tk.Tk):
         defn = EFFECT_DEFS.get(t, {})
         fl = defn.get("fields", [])
         fname = fl[0][0] if fl else None
-        if fname:
-            val = g(fname,"").strip()
+        if fname and len(fl) == 1:
+            val = g(fname,"")
+            if isinstance(val, (list, dict, bool)):
+                rendered = _hoi4_render_value(fname, val, I)
+                return "\n".join(rendered)
+            val = str(val).strip()
             if val: return f"{I}{t} = {val}"
         raw_val = str(g("raw","")).strip()
         if raw_val: return f"{I}{t} = {raw_val}"
@@ -19302,11 +19608,20 @@ class App(tk.Tk):
         if not fields_clean: return f"{I}{t} = yes"
         if len(fields_clean) == 1:
             k0,v0 = list(fields_clean.items())[0]
+            if isinstance(v0, (list, dict, bool)):
+                rendered = _hoi4_render_value(k0, v0, I)
+                return "\n".join(rendered)
             if k0 in ("amount","value","flag","tooltip","category","decision"):
                 return f"{I}{t} = {v0}"
             return f"{I}{t} = {{ {k0} = {v0} }}"
-        inner_lines = "\n".join(f"{I}\t{k} = {v}" for k,v in fields_clean.items())
-        return f"{I}{t} = {{\n{inner_lines}\n{I}}}"
+        # Multi-field block — render each field recursively to handle nested structures
+        inner_blocks = []
+        for k,v in fields_clean.items():
+            if isinstance(v, (list, dict, bool)):
+                inner_blocks.extend(_hoi4_render_value(k, v, I + "\t"))
+            else:
+                inner_blocks.append(f"{I}\t{k} = {_hoi4_val(v)}")
+        return f"{I}{t} = {{\n" + "\n".join(inner_blocks) + f"\n{I}}}"
 
 
     def _apply_md_additional_income(self, idea_id, variable_name, amount, tooltip_key, formula_type="fixed"):
@@ -19376,7 +19691,7 @@ class App(tk.Tk):
                             i += 1
                         # Insert before the closing brace (no extra tab before closing brace)
                         sys_text = sys_text[:i] + inject_block + "\n" + sys_text[i:]
-                        with open(money_sys, "w", encoding="utf-8-sig") as fp:
+                        with open(money_sys, "w", encoding="utf-8") as fp:
                             fp.write(sys_text)
                         rel = os.path.relpath(money_sys, MOD.root)
                         saved.append(f"✅ {rel}  — injected '{idea_id}' into calculate_additional_income_rate")
@@ -19413,7 +19728,7 @@ class App(tk.Tk):
                     f"\t}}\n"
                     f"}}\n"
                 )
-                with open(sloc, "a", encoding="utf-8-sig") as fp:
+                with open(sloc, "a", encoding="utf-8") as fp:
                     fp.write(defined_text)
                 rel = os.path.relpath(sloc, MOD.root)
                 saved.append(f"✅ {rel}  — appended '{summary_name}'")
@@ -20606,6 +20921,12 @@ class App(tk.Tk):
         txt.config(state="disabled")
 
     def _export(self):
+        # Flush any unsaved edits from the form back to the current focus before export
+        try:
+            if self.selected:
+                self._autosave()
+        except Exception:
+            pass
         # Only export main-tree focuses (tree_idx == 0)
         main_focuses = {fid: f for fid, f in self.focuses.items()
                         if getattr(f, "tree_idx", 0) == 0}
@@ -20627,8 +20948,8 @@ class App(tk.Tk):
         out.append("\tcountry = {")
         out.append("\t\tfactor = 0")
         out.append("\t\tmodifier = {")
-        out.append("\t\t\tadd = 20")
-        out.append(f"\t\t\toriginal_tag = {country_tag}")
+        out.append("\t\t\tadd = 100")
+        out.append(f"\t\t\ttag = {country_tag}")
         out.append("\t\t}")
         out.append("\t}")
         out.append("")
@@ -20676,7 +20997,10 @@ class App(tk.Tk):
             # select_effect, completion_reward, bypass_effect, ai_will_do
 
             out.append(f"\t\tid = {f.name}")
-            out.append(f"\t\ticon = {getattr(f,'gfx','GFX_goal_generic_political_pressure')}")
+            _focus_gfx = getattr(f, 'gfx', 'generic_political_pressure')
+            if _focus_gfx.startswith('GFX_goal_'):
+                _focus_gfx = _focus_gfx[len('GFX_goal_'):]
+            out.append(f"\t\ticon = {_focus_gfx}")
 
             rel_id = getattr(f, "relative_position_id", None)
             if rel_id and any(foc.name == rel_id for foc in self.focuses.values()):
@@ -20762,15 +21086,56 @@ class App(tk.Tk):
                     out.append(f"\t\t\t{stripped}")
                 out.append("\t\t}")
 
+            # will_lead_to_war_with (raw block — can contain multiple tags)
+            wltww = getattr(f,"will_lead_to_war_with","").strip()
+            if wltww:
+                if wltww.startswith("{") and wltww.endswith("}"):
+                    inner = wltww[1:-1].strip()
+                else:
+                    inner = wltww
+                out.append("\t\twill_lead_to_war_with = {")
+                for ln in inner.splitlines():
+                    if ln.strip():
+                        out.append(f"\t\t\t{ln.strip()}")
+                out.append("\t\t}")
+
+            # complete_tooltip (raw block of effects)
+            ctip = getattr(f,"complete_tooltip","").strip()
+            if ctip:
+                out.append("\t\tcomplete_tooltip = {")
+                for ln in ctip.splitlines():
+                    if ln.strip():
+                        out.append(f"\t\t\t{ln.strip()}")
+                out.append("\t\t}")
+
+            # select_effect (raw block — runs when focus is selected)
+            sel_eff = getattr(f,"select_effect","").strip()
+            if sel_eff:
+                out.append("\t\tselect_effect = {")
+                for ln in sel_eff.splitlines():
+                    if ln.strip():
+                        out.append(f"\t\t\t{ln.strip()}")
+                out.append("\t\t}")
+
             out.append("")
             out.append("\t\tcompletion_reward = {")
+            out.append(f"\t\t\tlog = \"[GetDateText]: [Root.GetName]: Focus {f.name}\"")
             if f.effects:
                 for eff in f.effects:
                     out.append(self._render_effect(eff))
             else:
-                out.append(f"\t\t\tlog = \"[GetDateText]: [This.GetName]: focus {f.name} executed\"")
                 out.append("\t\t\t# TODO: add effects")
             out.append("\t\t}")
+
+            # bypass_effect (raw block — runs when focus is bypassed)
+            bp_eff = getattr(f,"bypass_effect","").strip()
+            if bp_eff:
+                out.append("\t\tbypass_effect = {")
+                for ln in bp_eff.splitlines():
+                    if ln.strip():
+                        out.append(f"\t\t\t{ln.strip()}")
+                out.append("\t\t}")
+
             out.append("")
             out.append("\t\tai_will_do = {")
             raw_ai = getattr(f,"ai_will_do_raw","").strip()
@@ -20778,7 +21143,8 @@ class App(tk.Tk):
                 for ln in raw_ai.splitlines():
                     out.append(f"\t\t\t{ln.strip()}")
             else:
-                out.append(f"\t\t\tfactor = {f.ai_will_do}")
+                # MD convention: ai_will_do uses `base = X` at top level, `factor = X` only in modifier sub-blocks
+                out.append(f"\t\t\tbase = {f.ai_will_do}")
             out.append("\t\t}")
             out.append("\t}")
             out.append("")
@@ -20797,7 +21163,7 @@ class App(tk.Tk):
                 initialfile=default_filename, title="Export HOI4 .txt")
         if not path: return
 
-        with open(path,"w",encoding="utf-8-sig") as fp:
+        with open(path,"w",encoding="utf-8") as fp:
             fp.write("\n".join(out))
 
         # ── Localisation: smart merge into edit_loc_file or correct mod subfolder ─
@@ -20856,8 +21222,18 @@ class App(tk.Tk):
             if not os.path.isfile(loc_path):
                 with open(loc_path,"w",encoding="utf-8-sig") as fp:
                     fp.write("l_english:\n")
+            # Only write a section header if one doesn't already exist
+            needs_header = True
+            try:
+                with open(loc_path,"r",encoding="utf-8-sig",errors="replace") as _fp:
+                    _existing = _fp.read()
+                if f"##########Focuses - {country_tag}##########" in _existing:
+                    needs_header = False
+            except Exception:
+                pass
             with open(loc_path,"a",encoding="utf-8-sig") as fp:
-                fp.write(f"\n ##########Focuses - {country_tag}##########\n")
+                if needs_header:
+                    fp.write(f"\n ##########Focuses - {country_tag}##########\n")
                 for k,v in to_add.items():
                     fp.write(f' {k}: "{v}"\n')
             loc_saved = f"\nLocalisation: {os.path.basename(loc_path)}  (+{len(to_add)} new keys)"

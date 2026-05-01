@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c \"import ast; ast.parse\\(open\\('hoi4_content_maker.py','r',encoding='utf-8'\\).read\\(\\)\\); print\\('OK'\\)\")",
+      "Bash(xargs head:*)",
+      "Bash(xxd \"C:/Users/ASUS/OneDrive/Documents/Paradox Interactive/Hearts of Iron IV/mod/Millennium_Dawn/common/ideas/MD_generic.txt\")",
+      "Bash(python -c ':*)"
+    ]
+  }
+}

@@ -1,17 +1,14 @@
 @echo off
 :: ============================================================
 ::  HOI4 Content Maker — Build Script
-::  Double-click this file to compile the .exe
-::
-::  Requirements (install once):
-::    C:\Users\ASUS\AppData\Local\Python\pythoncore-3.14-64\python.exe -m pip install pyinstaller
-::    pip install Pillow          (optional, for icon generation)
-::    pip install pyinstaller[encryption]  (optional, for bytecode encryption)
-::
-::  Output: dist\HOI4ContentMaker.exe
+::  Double-click this to compile HOI4ContentMaker.exe
 :: ============================================================
 
 title HOI4 Content Maker - Build
+
+set PYTHON=C:\Users\ASUS\AppData\Local\Python\pythoncore-3.14-64\python.exe
+set SCRIPT_DIR=%~dp0
+set ROOT_DIR=%SCRIPT_DIR%..
 
 echo.
 echo  =====================================================
@@ -19,20 +16,21 @@ echo   HOI4 Content Maker ^|^| Build System v2.0
 echo  =====================================================
 echo.
 
-:: ── Check Python is available ────────────────────────────────
-C:\Users\ASUS\AppData\Local\Python\pythoncore-3.14-64\python.exe --version >nul 2>&1
+:: ── Check Python ─────────────────────────────────────────────
+echo  Checking Python...
+%PYTHON% --version
 if errorlevel 1 (
-    echo  [ERROR] Python not found in PATH.
-    echo  Install Python 3.9+ from https://python.org
+    echo  [ERROR] Python not found at: %PYTHON%
     pause
     exit /b 1
 )
 
-:: ── Check PyInstaller is installed ───────────────────────────
-C:\Users\ASUS\AppData\Local\Python\pythoncore-3.14-64\python.exe -c "import PyInstaller" >nul 2>&1
+:: ── Check PyInstaller ─────────────────────────────────────────
+echo  Checking PyInstaller...
+%PYTHON% -c "import PyInstaller; print('PyInstaller OK')" 2>nul
 if errorlevel 1 (
-    echo  [INFO] PyInstaller not found. Installing...
-    C:\Users\ASUS\AppData\Local\Python\pythoncore-3.14-64\python.exe -m pip install pyinstaller
+    echo  [INFO] Installing PyInstaller...
+    %PYTHON% -m pip install pyinstaller
     if errorlevel 1 (
         echo  [ERROR] Failed to install PyInstaller.
         pause
@@ -40,70 +38,46 @@ if errorlevel 1 (
     )
 )
 
-:: ── Check Pillow (for icon generation) ───────────────────────
-C:\Users\ASUS\AppData\Local\Python\pythoncore-3.14-64\python.exe -c "from PIL import Image" >nul 2>&1
+:: ── Check Pillow ──────────────────────────────────────────────
+%PYTHON% -c "from PIL import Image" >nul 2>&1
 if errorlevel 1 (
-    echo  [INFO] Pillow not found. Installing for icon generation...
-    C:\Users\ASUS\AppData\Local\Python\pythoncore-3.14-64\python.exe -m pip install Pillow
+    echo  [INFO] Installing Pillow...
+    %PYTHON% -m pip install Pillow
 )
 
-:: ── Generate icon.ico if it doesn't exist ────────────────────
-if not exist icon.ico (
+:: ── Generate icon ─────────────────────────────────────────────
+if not exist "%SCRIPT_DIR%icon.ico" (
     echo  [INFO] Generating icon.ico...
-    C:\Users\ASUS\AppData\Local\Python\pythoncore-3.14-64\python.exe generate_icon.py
-    if errorlevel 1 (
-        echo  [WARN] Icon generation failed. Building without custom icon.
-        :: Patch spec to remove icon reference
-        C:\Users\ASUS\AppData\Local\Python\pythoncore-3.14-64\python.exe -c "
-import re, sys
-with open('hoi4_content_maker.spec','r') as f: s=f.read()
-s = s.replace(\"icon='icon.ico',\", \"icon=None,\")
-s = s.replace(\"version='version_info.txt',\", \"\")
-with open('hoi4_content_maker.spec','w') as f: f.write(s)
-print('Spec patched - continuing without icon')
-"
-    )
+    %PYTHON% "%SCRIPT_DIR%generate_icon.py"
 )
 
-:: ── Clean previous build ─────────────────────────────────────
+:: ── Clean ─────────────────────────────────────────────────────
 echo.
 echo  [STEP 1/3] Cleaning previous build...
-if exist build   rmdir /s /q build
+if exist "%SCRIPT_DIR%build_tmp" rmdir /s /q "%SCRIPT_DIR%build_tmp"
+if exist "%ROOT_DIR%\HOI4ContentMaker.exe" del "%ROOT_DIR%\HOI4ContentMaker.exe"
 echo  Done.
 
-:: ── Run PyInstaller ──────────────────────────────────────────
+:: ── Compile ───────────────────────────────────────────────────
 echo.
-echo  [STEP 2/3] Compiling...
-echo  (This may take 1-3 minutes on first run)
+echo  [STEP 2/3] Compiling... (1-3 minutes)
 echo.
 
-C:\Users\ASUS\AppData\Local\Python\pythoncore-3.14-64\python.exe -m PyInstaller hoi4_content_maker.spec --clean --noconfirm
+%PYTHON% -m PyInstaller "%SCRIPT_DIR%hoi4_content_maker.spec" --clean --noconfirm --distpath "%ROOT_DIR%" --workpath "%SCRIPT_DIR%build_tmp"
 
 if errorlevel 1 (
     echo.
     echo  =====================================================
-    echo   [ERROR] Build FAILED. See output above.
+    echo   [ERROR] Build FAILED - see output above
     echo  =====================================================
     pause
     exit /b 1
 )
 
-:: ── Post-build ───────────────────────────────────────────────
+:: ── Cleanup ───────────────────────────────────────────────────
 echo.
-echo  [STEP 3/3] Finalising...
-
-:: Copy the .exe to root folder for convenience
-echo  Output written to parent folder.
-
-:: Clean up PyInstaller temp folders (keep dist/)
-if exist build_tmp rmdir /s /q build_tmp
-if exist "hoi4_content_maker.spec.bak" del "hoi4_content_maker.spec.bak"
-
-:: Report file size
-for %%A in ("HOI4ContentMaker.exe") do (
-    set size=%%~zA
-)
-C:\Users\ASUS\AppData\Local\Python\pythoncore-3.14-64\python.exe -c "s=%size%; print(f'  File size: {s/1024/1024:.1f} MB')" 2>nul
+echo  [STEP 3/3] Cleaning up...
+if exist "%SCRIPT_DIR%build_tmp" rmdir /s /q "%SCRIPT_DIR%build_tmp"
 
 echo.
 echo  =====================================================
@@ -111,7 +85,7 @@ echo   Build SUCCESSFUL
 echo   Output: HOI4ContentMaker.exe
 echo  =====================================================
 echo.
-echo  You can now distribute HOI4ContentMaker.exe
-echo  No Python installation needed on the target machine.
+echo  Find HOI4ContentMaker.exe in the HOI4ContentMaker folder.
+echo  No Python needed to run it - share it with anyone!
 echo.
 pause

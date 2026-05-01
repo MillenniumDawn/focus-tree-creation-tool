@@ -17,16 +17,22 @@
 
 ---
 
-### Focus Tree — Shared/Joint Extra Trees Not Auto-Fitting Viewport After Load
+### Focus Tree — Auto-Fit Viewport Missing After Import and Extra Tree Load
 
-**[BUG FIX] Loading a shared or joint tree via `+ Shared` / `+ Joint` buttons left the viewport unchanged, making the new focuses appear off-screen**
-- `_load_extra_tree` (line ~17896) and `_load_extra_tree_from_path` (line ~18571)
-- Both functions called `_redraw()` (throttled, preserves current zoom/pan) but not `_fit_all()`.
-  The "Load All" batch dialog already called `_fit_all()` after loading; individual load buttons did not.
-  If the loaded tree's focuses were at grid coordinates outside the current viewport (e.g. a shared
-  tree at grid x=27 while the main tree was at x=0–15), the tree appeared to be missing or at the
-  wrong position when it was simply off-screen.
-- Fixed: added `self._fit_all()` call immediately after `self._redraw()` in both functions.
+**[BUG FIX] Loading any tree (main import or `+ Shared` / `+ Joint`) left the viewport unchanged, making focuses appear off-screen or "in the wrong position"**
+- `_import_txt` (line ~17472), `_load_extra_tree` (line ~17896), `_load_extra_tree_from_path` (line ~18571)
+- All three functions called `_redraw()` (throttled, preserves current zoom/pan) but not `_fit_all()`.
+  The "Load All" batch dialog already called `_fit_all()` after loading; all other load paths did not.
+  Example: NKO main tree spans x=-1 to x=50 (absolute coordinates). Its shared tree
+  `korea_unified.txt` has `KOR_korea_reunified` at x=27, y=15 — correct and within NKO's range,
+  but outside a default or zoomed-in viewport. Without `_fit_all()`, the canvas never re-panned
+  to show the loaded focuses. Focuses appeared "in a corner" or "at the wrong position" because the
+  viewport hadn't updated, even though the properties panel correctly showed X: 27 Y: 15.
+  Root cause confirmed: no coordinate calculation bug exists. `_parse_blk` correctly reads the
+  focus-level `x = 27`, `y = 15` even when a nested `offset = { x = 15 ... }` sub-block is present
+  (nested keys never contaminate the outer scope). `_resolve_abs` chains relative positions correctly
+  within-file.
+- Fixed: added `self._fit_all()` call immediately after `self._redraw()` in all three functions.
 
 ---
 

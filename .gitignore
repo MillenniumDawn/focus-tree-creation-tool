@@ -1,1 +1,35 @@
-README.md
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+
+# Virtual environments
+venv/
+env/
+.venv/
+
+# App config & autosave (user-specific, should not be committed)
+.hoi4_focus_maker.json
+hoi4_cm_decision_autosave.json
+hoi4_cm_spirit_autosave.json
+hoi4_cm_dynmod_autosave.json
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Distribution
+dist/
+build/
+*.spec
+*.egg-info/
