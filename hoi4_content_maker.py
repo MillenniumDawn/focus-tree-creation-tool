@@ -12604,6 +12604,8 @@ class Focus:
         self.complete_tooltip = ""        # raw block content for complete_tooltip
         self.select_effect  = ""          # raw block content (inside select_effect = { })
         self.bypass_effect  = ""          # raw block content (inside bypass_effect = { })
+        self.allow_branch   = ""          # raw block content (inside allow_branch = { })
+        self.text           = ""          # custom localisation key override
         self.offsets = []          # [{"x": int, "y": int, "trigger": str}, ...] — conditional position offsets
         self.tree_idx = 0           # 0 = main tree; >0 = index into _extra_trees (1-based)
         self._items   = []
@@ -12626,6 +12628,7 @@ class Focus:
             ("available_cond",""),("bypass_cond",""),("cancel_cond",""),
             ("will_lead_to_war_with",""),("complete_tooltip",""),
             ("select_effect",""),("bypass_effect",""),
+            ("allow_branch",""),("text",""),
             ("offsets",[]),("ai_will_do_raw",""),("tree_idx",0)]:
             if not hasattr(f,attr): setattr(f,attr,default)
         if f.id >= Focus._next: Focus._next = f.id+1
@@ -17443,6 +17446,9 @@ class App(tk.Tk):
 
         txt=strip_comments(raw)
 
+        # Reset per-import metadata so values don't carry over from a prior load
+        self._tree_country_raw = ""
+
         # ── Extract shared_focus and joint_focus lines BEFORE tokenising ──────
         import re as _re2
         self._shared_focuses = _re2.findall(r'\bshared_focus\s*=\s*(\S+)', txt)
@@ -17501,7 +17507,7 @@ class App(tk.Tk):
             # also capture raw available/bypass/cancel and the new preserved fields
             for _condkey in ('available', 'bypass', 'cancel',
                              'will_lead_to_war_with', 'complete_tooltip',
-                             'select_effect', 'bypass_effect'):
+                             'select_effect', 'bypass_effect', 'allow_branch'):
                 _cv = extract_raw_block_from_text(_fblock, _condkey)
                 if _cv:
                     _raw_rewards[(_fid, _condkey)] = _cv
@@ -17612,6 +17618,8 @@ class App(tk.Tk):
                         ).upper().strip()
                         if _imported_tag and len(_imported_tag) >= 2:
                             self._tree_country_tag = _imported_tag
+                # Preserve the full country block verbatim so we can write it back unchanged
+                self._tree_country_raw = extract_raw_block_from_text(txt, "country")
                 # collect focuses
                 raw_focuses=block.get("focus",[])
                 if isinstance(raw_focuses,dict): raw_focuses=[raw_focuses]
@@ -17780,6 +17788,10 @@ class App(tk.Tk):
                                 _block_to_str(rf.get("select_effect",{})))
             f.bypass_effect         = _raw_rewards.get((fid_str,'bypass_effect'),
                                 _block_to_str(rf.get("bypass_effect",{})))
+            f.allow_branch          = _raw_rewards.get((fid_str,'allow_branch'),
+                                _block_to_str(rf.get("allow_branch",{})))
+            _text_val = rf.get("text","")
+            f.text = str(_text_val).strip() if _text_val and not isinstance(_text_val, dict) else ""
             f.offsets        = _raw_rewards.get((fid_str, '_offsets'), [])
             # ── completion_reward: always preserve as single raw block ──────
             raw_rw = _raw_rewards.get(fid_str, "")
@@ -20982,13 +20994,24 @@ class App(tk.Tk):
         out.append("focus_tree = {")
         out.append(f"\tid = {tid}")
         out.append("")
-        out.append("\tcountry = {")
-        out.append("\t\tfactor = 0")
-        out.append("\t\tmodifier = {")
-        out.append("\t\t\tadd = 100")
-        out.append(f"\t\t\ttag = {country_tag}")
-        out.append("\t\t}")
-        out.append("\t}")
+        # Prefer the verbatim country block captured from import; fall back to a
+        # default that follows MD convention (base/add/original_tag) if none was
+        # imported (e.g., tree created from scratch).
+        _country_raw = getattr(self, "_tree_country_raw", "").strip()
+        if _country_raw:
+            out.append("\tcountry = {")
+            for ln in _country_raw.splitlines():
+                if ln.strip():
+                    out.append(f"\t\t{ln}")
+            out.append("\t}")
+        else:
+            out.append("\tcountry = {")
+            out.append("\t\tbase = 0")
+            out.append("\t\tmodifier = {")
+            out.append("\t\t\tadd = 100")
+            out.append(f"\t\t\toriginal_tag = {country_tag}")
+            out.append("\t\t}")
+            out.append("\t}")
         out.append("")
 
         # Write shared_focus and joint_focus lines (preserved from import, never stripped)
@@ -21038,6 +21061,10 @@ class App(tk.Tk):
             if _focus_gfx.startswith('GFX_goal_'):
                 _focus_gfx = _focus_gfx[len('GFX_goal_'):]
             out.append(f"\t\ticon = {_focus_gfx}")
+            # Custom localisation key override (preserved from import)
+            _ftext = getattr(f, "text", "").strip()
+            if _ftext:
+                out.append(f"\t\ttext = {_ftext}")
 
             rel_id = getattr(f, "relative_position_id", None)
             if rel_id and any(foc.name == rel_id for foc in self.focuses.values()):
@@ -21085,6 +21112,18 @@ class App(tk.Tk):
             sf = getattr(f, "search_filters", "").strip()
             if sf:
                 out.append(f"\t\tsearch_filters = {{ {sf} }}")
+
+            # allow_branch (gates focus visibility — preserved from import)
+            allow_br = getattr(f, "allow_branch", "").strip()
+            if allow_br:
+                out.append("\t\tallow_branch = {")
+                lines = allow_br.splitlines()
+                non_empty = [l for l in lines if l.strip()]
+                min_ind = min((len(l) - len(l.lstrip("\t"))) for l in non_empty) if non_empty else 0
+                for ln in lines:
+                    stripped = ln[min_ind:] if len(ln) >= min_ind else ln.lstrip("\t")
+                    out.append(f"\t\t\t{stripped}")
+                out.append("\t\t}")
 
             # available
             avail = getattr(f,"available_cond","").strip()
@@ -21154,9 +21193,24 @@ class App(tk.Tk):
                         out.append(f"\t\t\t{ln.strip()}")
                 out.append("\t\t}")
 
+            # boolean flags — only emit when they differ from defaults
+            if not f.cancel_if_invalid:
+                out.append("\t\tcancel_if_invalid = no")
+            if f.continue_if_invalid:
+                out.append("\t\tcontinue_if_invalid = yes")
+            if f.available_if_capitulated:
+                out.append("\t\tavailable_if_capitulated = yes")
+
+            # completion_reward — preserve imported raw block verbatim;
+            # only inject the hardcoded log line for newly created focuses
+            # (whose raw block is empty) to avoid duplicating it on every save.
+            _has_raw_reward = bool(f.effects and
+                                   any(e.get("type") == "_raw_block"
+                                       for e in f.effects))
             out.append("")
             out.append("\t\tcompletion_reward = {")
-            out.append(f"\t\t\tlog = \"[GetDateText]: [Root.GetName]: Focus {f.name}\"")
+            if not _has_raw_reward:
+                out.append(f"\t\t\tlog = \"[GetDateText]: [Root.GetName]: Focus {f.name}\"")
             if f.effects:
                 for eff in f.effects:
                     out.append(self._render_effect(eff))
