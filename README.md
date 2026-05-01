@@ -268,7 +268,7 @@ See [CHANGELOG.md](CHANGELOG.md) for the full version history.
 
 Copyright © 2025 Blazer. All Rights Reserved.
 
-This software is **not open-source**.
+This software is **open-source**.
 
 For licensing enquiries: **ThatGuyBlazer@gmail.com**
 
