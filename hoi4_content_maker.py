@@ -17559,6 +17559,13 @@ class App(tk.Tk):
                         val,pos=parse_block(tokens,pos)
                     else:
                         val=tokens[pos]; pos+=1
+                        # Recover from malformed `key = value = { ... }` syntax
+                        # that HOI4 tolerates. Skip the orphan block so its
+                        # closing brace doesn't get attributed to the parent.
+                        if (pos+1 < len(tokens) and
+                                tokens[pos]=="=" and tokens[pos+1]=="{"):
+                            pos+=1
+                            _,pos=parse_block(tokens,pos)
                     # allow repeated keys as list
                     if key in result:
                         existing=result[key]
@@ -17629,6 +17636,36 @@ class App(tk.Tk):
                     i += 1
             if focuses_data and not tree_name or tree_name == "imported_focus_tree":
                 # Try to infer tree name from file name
+                tree_name = os.path.splitext(os.path.basename(path))[0]
+                self._tree_id.set(tree_name)
+
+        # ── Robust per-focus fallback ─────────────────────────────────────────
+        # HOI4's own parser tolerates structural quirks (an unbalanced brace,
+        # malformed `key=val={...}` patterns, etc.) that our structured parser
+        # can choke on. Walk the raw text, brace-match each `focus = { ... }`
+        # block, and parse each one independently. If this finds more focuses
+        # than the structured pass, prefer it.
+        import re as _re_robust
+        _per_block_focuses = []
+        for _bm in _re_robust.finditer(r'\b(?:focus|shared_focus)\s*=\s*\{', txt):
+            _bs = _bm.end() - 1   # position of '{'
+            _bd = 0; _bi = _bs
+            while _bi < len(txt):
+                if txt[_bi] == '{': _bd += 1
+                elif txt[_bi] == '}':
+                    _bd -= 1
+                    if _bd == 0: break
+                _bi += 1
+            if _bi >= len(txt): continue
+            _btxt = txt[_bs:_bi+1]
+            _btoks = tokenize(_btxt)
+            if not _btoks or _btoks[0] != "{": continue
+            _bdict, _ = parse_block(_btoks, 0)
+            if isinstance(_bdict, dict) and "id" in _bdict:
+                _per_block_focuses.append(_bdict)
+        if len(_per_block_focuses) > len(focuses_data):
+            focuses_data = _per_block_focuses
+            if tree_name == "imported_focus_tree":
                 tree_name = os.path.splitext(os.path.basename(path))[0]
                 self._tree_id.set(tree_name)
 
