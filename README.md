@@ -268,7 +268,7 @@ See [CHANGELOG.md](CHANGELOG.md) for the full version history.
 
 Copyright © 2025 Blazer. All Rights Reserved.
 
-This software is **not open-source**. See the licence header in `hoi4_content_maker.py` for full terms.
+This software is **open-source**. See the licence header in `hoi4_content_maker.py` for full terms.
 
 For licensing enquiries: **ThatGuyBlazer@gmail.com**
 
