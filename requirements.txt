@@ -1,0 +1,2 @@
+# Runtime (optional — app runs without these but with degraded functionality)
+Pillow>=9.0

@@ -1,9 +1,9 @@
 # Build Instructions
 
-How to compile `hoi4_content_maker.py` into a standalone Windows `.exe` that:
+How to compile `hoi4_content_maker.py` into a standalone executable that:
 - Requires **no Python installation** on the user's machine
-- Shows **no CMD window** when launched
-- Has your **name and version** in the Windows file properties
+- Works on **Windows, macOS, and Linux**
+- Shows **no CMD/terminal window** when launched
 - Has **bytecode protection** so the source code is not trivially readable
 
 ---
@@ -12,46 +12,63 @@ How to compile `hoi4_content_maker.py` into a standalone Windows `.exe` that:
 
 Open a terminal and run:
 
-```bat
-pip install pyinstaller
-pip install Pillow
+```bash
+pip install -r requirements-build.txt
 ```
 
-That's it. You only need to do this once.
+This installs PyInstaller and Pillow. You only need to do this once.
+
+On **Linux**, you also need tkinter (not bundled with pip):
+```bash
+sudo apt-get install python3-tk    # Debian/Ubuntu
+sudo dnf install python3-tkinter   # Fedora
+```
 
 ---
 
 ## Building
 
-### Standard build (recommended for most releases)
+### Cross-platform build (recommended)
+
+From the project root:
+
+```bash
+python build/build.py              # standard build
+python build/build.py --encrypted  # AES-encrypted bytecode
+```
+
+This auto-detects your platform and produces the correct output:
+
+| Platform | Output |
+|----------|--------|
+| Windows | `HOI4ContentMaker.exe` |
+| macOS | `HOI4ContentMaker-mac` |
+| Linux | `HOI4ContentMaker-linux` |
+
+### Windows-only build (legacy)
+
+If you prefer the old Windows `.bat` scripts:
 
 ```
-Double-click:  build.bat
+Double-click:  build/build.bat
 ```
 
 Or from the terminal:
 ```bat
-build.bat
+build\build.bat
 ```
-
-Output: **`HOI4ContentMaker.exe`** in the same folder.
-
----
 
 ### Encrypted build (stronger protection)
 
-This build AES-encrypts the bytecode inside the `.exe`. Anyone who extracts the bundle gets encrypted `.pyc` files — not readable Python.
+This build AES-encrypts the bytecode inside the executable. Anyone who extracts the bundle gets encrypted `.pyc` files — not readable Python.
 
-```
-Double-click:  build_encrypted.bat
-```
-
-Extra requirement (installed automatically by the script):
-```bat
-pip install "pyinstaller[encryption]"
+```bash
+python build/build.py --encrypted
 ```
 
-> **Note:** The encryption key is hardcoded in `build_encrypted.bat`. Change the line `key = 'HOI4CM_BLAZER_2025'` to your own secret string before building. Keep this string private — don't commit it to GitHub.
+Or on Windows (legacy): `build\build_encrypted.bat`
+
+> **Note:** The encryption key is hardcoded. Change the key string before building. Keep it private — don't commit it to GitHub.
 
 ---
 
@@ -59,12 +76,15 @@ pip install "pyinstaller[encryption]"
 
 | File | Purpose |
 |---|---|
-| `build.bat` | Standard one-click build script |
-| `build_encrypted.bat` | Encrypted bytecode build |
-| `hoi4_content_maker.spec` | PyInstaller spec — controls exactly how the `.exe` is built |
-| `version_info.txt` | Windows file properties (name, version, copyright shown in right-click → Properties) |
-| `generate_icon.py` | Generates `icon.ico` automatically if it doesn't exist |
-| `icon.ico` | App icon (auto-generated, or replace with your own) |
+| `build/build.py` | Cross-platform build script (Windows, macOS, Linux) |
+| `build/build.bat` | Windows-only one-click build script (legacy) |
+| `build/build_encrypted.bat` | Windows-only encrypted bytecode build (legacy) |
+| `build/hoi4_content_maker.spec` | PyInstaller spec for Windows `.bat` builds |
+| `build/version_info.txt` | Windows file properties (right-click → Properties) |
+| `build/generate_icon.py` | Generates `icon.ico` and `icon.png` automatically |
+| `requirements.txt` | Optional runtime dependencies (Pillow) |
+| `requirements-build.txt` | Build dependencies (PyInstaller, Pillow) |
+| `.github/workflows/release.yml` | CI workflow — auto-builds and publishes releases |
 
 ---
 
@@ -78,12 +98,13 @@ Replace `icon.ico` with any `.ico` file before running the build. A 256×256 ico
 
 ```
 your-folder/
-├── HOI4ContentMaker.exe    ← distribute this file
-├── dist/                   ← PyInstaller output (same .exe, safe to delete)
-└── build/                  ← temp files (deleted automatically)
+├── HOI4ContentMaker.exe       ← Windows (distribute this)
+├── HOI4ContentMaker-mac       ← macOS (distribute this)
+├── HOI4ContentMaker-linux     ← Linux (distribute this)
+└── build/                     ← build scripts (not output)
 ```
 
-Only **`HOI4ContentMaker.exe`** needs to be distributed. The `dist/` folder is cleaned up automatically.
+Only the executable for your platform needs to be distributed. Temp files are cleaned up automatically by `build.py`.
 
 ---
 
@@ -105,6 +126,52 @@ PyInstaller + encryption is **not perfect protection** — a determined reverse-
 - Hides your internal logic, algorithms, and any API keys
 
 For a modding tool like this, the encrypted build is more than sufficient to deter casual copying.
+
+---
+
+## Cross-Platform Build (Windows / macOS / Linux)
+
+A Python build script replaces the Windows-only `.bat` files. It works on all platforms:
+
+```bash
+python build/build.py              # standard build
+python build/build.py --encrypted  # AES-encrypted bytecode
+```
+
+### One-time setup
+
+```bash
+pip install -r requirements-build.txt
+```
+
+On **Linux**, you also need tkinter:
+```bash
+sudo apt-get install python3-tk    # Debian/Ubuntu
+sudo dnf install python3-tkinter   # Fedora
+```
+
+### Output per platform
+
+| Platform | Output file | Size |
+|----------|------------|------|
+| Windows | `HOI4ContentMaker.exe` | ~18 MB |
+| macOS | `HOI4ContentMaker-mac` | ~18 MB |
+| Linux | `HOI4ContentMaker-linux` | ~18 MB |
+
+### Automated releases (CI)
+
+Every push to `main` that changes `hoi4_content_maker.py` triggers a GitHub Actions workflow that:
+1. Extracts the version from the source header (e.g., `Version 2.0`)
+2. Creates a git tag like `v2.0.1`, `v2.0.2`, etc.
+3. Builds executables on Windows, macOS, and Linux
+4. Publishes all three binaries as a GitHub Release
+
+You can also trigger a release manually from the Actions tab (`workflow_dispatch`).
+
+### macOS notes
+
+- PyInstaller builds will trigger Gatekeeper warnings without code signing
+- Users can bypass with: right-click > Open, or `xattr -cr HOI4ContentMaker-mac`
 
 ---
 

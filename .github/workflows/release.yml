@@ -1,0 +1,87 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            artifact_name: HOI4ContentMaker.exe
+            display_name: Windows
+          - os: macos-latest
+            artifact_name: HOI4ContentMaker-mac
+            display_name: macOS
+          - os: ubuntu-latest
+            artifact_name: HOI4ContentMaker-linux
+            display_name: Linux
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install tkinter (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y python3-tk
+
+      - name: Install build dependencies
+        run: pip install -r requirements-build.txt
+
+      - name: Build executable
+        run: python build/build.py
+
+      - name: Make executable (Linux/macOS)
+        if: runner.os != 'Windows'
+        run: chmod +x "${{ matrix.artifact_name }}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: ${{ matrix.artifact_name }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: HOI4 Content Maker ${{ github.ref_name }}
+          body: |
+            ## HOI4 Content Maker ${{ github.ref_name }}
+
+            ### Downloads
+            | Platform | File |
+            |----------|------|
+            | Windows | `HOI4ContentMaker.exe` |
+            | macOS | `HOI4ContentMaker-mac` |
+            | Linux | `HOI4ContentMaker-linux` |
+
+            ### Running
+            - **Windows**: Double-click `HOI4ContentMaker.exe`
+            - **macOS**: `chmod +x HOI4ContentMaker-mac && ./HOI4ContentMaker-mac`
+            - **Linux**: `chmod +x HOI4ContentMaker-linux && ./HOI4ContentMaker-linux`
+
+            No Python installation required.
+          files: |
+            artifacts/HOI4ContentMaker.exe/HOI4ContentMaker.exe
+            artifacts/HOI4ContentMaker-mac/HOI4ContentMaker-mac
+            artifacts/HOI4ContentMaker-linux/HOI4ContentMaker-linux
+          draft: false
+          prerelease: false

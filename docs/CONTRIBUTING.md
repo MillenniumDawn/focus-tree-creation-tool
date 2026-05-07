@@ -44,7 +44,7 @@ If you have been granted permission to submit code:
 
 - **Python 3.9+ compatible** — no walrus operator (`:=`) or match/case statements; the app targets 3.9–3.14.
 - **Single file** — all application code lives in `hoi4_content_maker.py`. Do not split into modules.
-- **tkinter only** — no additional GUI frameworks. Third-party packages are limited to optional image support (`Pillow`, `pillow-dds`).
+- **tkinter only** — no additional GUI frameworks. Third-party packages are limited to optional image support (`Pillow`, `pillow-dds`). Runtime dependencies are listed in `requirements.txt`; build dependencies in `requirements-build.txt`.
 - **Defensive field access** — always use the `_s()` helper (or `.get("key", "")`) when reading cat/dec fields in generator functions. Fields can be `bool`, `None`, or `str` depending on how they were set.
 - **No forward references** — Python 3.14 is strict about closures. Always define functions before referencing them, or wrap deferred calls in `try/except`.
 - **Autosave after changes** — any function that modifies `dm_cats` or `dm_decs` should call `_autosave()` and `_snapshot()` at appropriate points.
