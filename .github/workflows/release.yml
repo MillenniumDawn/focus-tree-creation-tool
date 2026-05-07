@@ -2,53 +2,13 @@ name: Release
 
 on:
   push:
-    branches: [main]
-    paths: [hoi4_content_maker.py]
-  workflow_dispatch:
+    tags: ['v*']
 
 permissions:
   contents: write
 
 jobs:
-  version:
-    runs-on: ubuntu-latest
-    outputs:
-      tag: ${{ steps.tag.outputs.tag }}
-      version: ${{ steps.tag.outputs.version }}
-      should_release: ${{ steps.tag.outputs.should_release }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Determine version and tag
-        id: tag
-        run: |
-          # Extract version from hoi4_content_maker.py header (e.g. "Version 2.0")
-          VERSION=$(grep -oP 'Version \K[\d.]+' hoi4_content_maker.py | head -1)
-          if [ -z "$VERSION" ]; then
-            echo "::error::Could not extract version from hoi4_content_maker.py"
-            exit 1
-          fi
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-
-          # Find the highest existing build number for this version
-          LATEST=$(git tag -l "v${VERSION}.*" --sort=-v:refname | head -1)
-          if [ -z "$LATEST" ]; then
-            BUILD=1
-          else
-            BUILD=$(echo "$LATEST" | grep -oP '\.\K\d+$')
-            BUILD=$((BUILD + 1))
-          fi
-
-          TAG="v${VERSION}.${BUILD}"
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "should_release=true" >> "$GITHUB_OUTPUT"
-          echo "Release tag: $TAG"
-
   build:
-    needs: version
-    if: needs.version.outputs.should_release == 'true'
     strategy:
       matrix:
         include:
@@ -90,30 +50,21 @@ jobs:
           path: ${{ matrix.artifact_name }}
 
   release:
-    needs: [version, build]
+    needs: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
 
-      - name: Create tag
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag "${{ needs.version.outputs.tag }}"
-          git push origin "${{ needs.version.outputs.tag }}"
-
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ needs.version.outputs.tag }}
-          name: HOI4 Content Maker ${{ needs.version.outputs.tag }}
+          tag_name: ${{ github.ref_name }}
+          name: HOI4 Content Maker ${{ github.ref_name }}
           body: |
-            ## HOI4 Content Maker ${{ needs.version.outputs.tag }}
+            ## HOI4 Content Maker ${{ github.ref_name }}
 
             ### Downloads
             | Platform | File |
