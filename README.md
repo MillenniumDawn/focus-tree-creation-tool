@@ -36,15 +36,50 @@ HOI4 Content Maker is a standalone Python/Tkinter desktop application that lets 
 | Requirement | Notes |
 |---|---|
 | **Python 3.9 or newer** | Tested on Python 3.9 – 3.14. |
-| **tkinter** | Included with most Python installations. On Linux: `sudo apt install python3-tk` |
-| **Pillow** *(optional)* | Enables GFX icon previews (`.png`, `.tga`). Install with `pip install Pillow`. Without it the app still runs, but icons show as placeholders. |
-| **pillow-dds** *(optional)* | Adds `.dds` texture support for icon previews. Install with `pip install pillow-dds`. |
+| **tkinter** | Included with most Python installations. See platform-specific notes below. |
+| **Pillow** *(optional)* | Enables GFX icon previews (`.png`, `.tga`). Without it the app still runs, but icons show as placeholders. |
+| **pillow-dds** *(optional)* | Adds `.dds` texture support for icon previews. |
 
-No other third-party packages are required.
+### Platform-specific requirements
+
+| Platform | tkinter | Notes |
+|----------|---------|-------|
+| **Windows** | Included with Python installer | Make sure "tcl/tk and IDLE" is checked during install |
+| **macOS** | Included with python.org installer | Homebrew Python sometimes omits tkinter — use the official installer |
+| **Linux** | Separate package | `sudo apt install python3-tk` (Debian/Ubuntu) or `sudo dnf install python3-tkinter` (Fedora) |
+
+### Installing optional dependencies
+
+All optional runtime dependencies are listed in `requirements.txt`:
+
+```bash
+pip install -r requirements.txt
+```
+
+Or install individually:
+
+```bash
+pip install Pillow          # image previews
+pip install pillow-dds      # .dds texture support
+```
 
 ---
 
 ## Installation
+
+### Option 1: Pre-built executable (no Python needed)
+
+Download the latest release for your platform from the [Releases](../../releases) page:
+
+| Platform | File |
+|----------|------|
+| Windows | `HOI4ContentMaker.exe` |
+| macOS | `HOI4ContentMaker-mac` |
+| Linux | `HOI4ContentMaker-linux` |
+
+Just download and run — no Python installation required.
+
+### Option 2: Run from source
 
 ```bash
 # 1. Clone the repository
@@ -52,8 +87,7 @@ git clone https://github.com/YOUR_USERNAME/hoi4-content-maker.git
 cd hoi4-content-maker
 
 # 2. (Optional) Install image support
-pip install Pillow
-pip install pillow-dds   # for .dds previews
+pip install -r requirements.txt
 
 # 3. Run
 python hoi4_content_maker.py
@@ -176,13 +210,25 @@ Settings are saved automatically to `~/.hoi4_focus_maker.json`.
 ## File Structure
 
 ```
-hoi4_content_maker.py   ← entire application (single file)
+hoi4_content_maker.py       ← entire application (single file)
+requirements.txt            ← optional runtime dependencies (Pillow)
+requirements-build.txt      ← build dependencies (PyInstaller, Pillow)
 README.md
 CHANGELOG.md
+BUILD_INSTRUCTIONS.md       ← how to compile executables
+build/
+  build.py                  ← cross-platform build script
+  build.bat                 ← Windows-only build script (legacy)
+  build_encrypted.bat       ← Windows-only encrypted build (legacy)
+  hoi4_content_maker.spec   ← PyInstaller spec (Windows)
+  generate_icon.py          ← generates app icons (.ico, .png)
+  version_info.txt          ← Windows file properties metadata
+.github/workflows/
+  release.yml               ← CI: auto-build + publish releases
 docs/
-  FOCUS_TREE.md         ← Focus Tree Editor deep-dive
-  DECISION_MAKER.md     ← Decision Maker deep-dive
-  CONTRIBUTING.md       ← contribution guidelines
+  FOCUS_TREE.md             ← Focus Tree Editor deep-dive
+  DECISION_MAKER.md         ← Decision Maker deep-dive
+  CONTRIBUTING.md           ← contribution guidelines
 ```
 
 ---

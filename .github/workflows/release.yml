@@ -1,0 +1,136 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+    paths: [hoi4_content_maker.py]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+      version: ${{ steps.tag.outputs.version }}
+      should_release: ${{ steps.tag.outputs.should_release }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine version and tag
+        id: tag
+        run: |
+          # Extract version from hoi4_content_maker.py header (e.g. "Version 2.0")
+          VERSION=$(grep -oP 'Version \K[\d.]+' hoi4_content_maker.py | head -1)
+          if [ -z "$VERSION" ]; then
+            echo "::error::Could not extract version from hoi4_content_maker.py"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+          # Find the highest existing build number for this version
+          LATEST=$(git tag -l "v${VERSION}.*" --sort=-v:refname | head -1)
+          if [ -z "$LATEST" ]; then
+            BUILD=1
+          else
+            BUILD=$(echo "$LATEST" | grep -oP '\.\K\d+$')
+            BUILD=$((BUILD + 1))
+          fi
+
+          TAG="v${VERSION}.${BUILD}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "should_release=true" >> "$GITHUB_OUTPUT"
+          echo "Release tag: $TAG"
+
+  build:
+    needs: version
+    if: needs.version.outputs.should_release == 'true'
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            artifact_name: HOI4ContentMaker.exe
+            display_name: Windows
+          - os: macos-latest
+            artifact_name: HOI4ContentMaker-mac
+            display_name: macOS
+          - os: ubuntu-latest
+            artifact_name: HOI4ContentMaker-linux
+            display_name: Linux
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install tkinter (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y python3-tk
+
+      - name: Install build dependencies
+        run: pip install -r requirements-build.txt
+
+      - name: Build executable
+        run: python build/build.py
+
+      - name: Make executable (Linux/macOS)
+        if: runner.os != 'Windows'
+        run: chmod +x "${{ matrix.artifact_name }}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: ${{ matrix.artifact_name }}
+
+  release:
+    needs: [version, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "${{ needs.version.outputs.tag }}"
+          git push origin "${{ needs.version.outputs.tag }}"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.version.outputs.tag }}
+          name: HOI4 Content Maker ${{ needs.version.outputs.tag }}
+          body: |
+            ## HOI4 Content Maker ${{ needs.version.outputs.tag }}
+
+            ### Downloads
+            | Platform | File |
+            |----------|------|
+            | Windows | `HOI4ContentMaker.exe` |
+            | macOS | `HOI4ContentMaker-mac` |
+            | Linux | `HOI4ContentMaker-linux` |
+
+            ### Running
+            - **Windows**: Double-click `HOI4ContentMaker.exe`
+            - **macOS**: `chmod +x HOI4ContentMaker-mac && ./HOI4ContentMaker-mac`
+            - **Linux**: `chmod +x HOI4ContentMaker-linux && ./HOI4ContentMaker-linux`
+
+            No Python installation required.
+          files: |
+            artifacts/HOI4ContentMaker.exe/HOI4ContentMaker.exe
+            artifacts/HOI4ContentMaker-mac/HOI4ContentMaker-mac
+            artifacts/HOI4ContentMaker-linux/HOI4ContentMaker-linux
+          draft: false
+          prerelease: false

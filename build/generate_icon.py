@@ -76,19 +76,30 @@ def make_frame(size):
 
 
 def main():
+    import sys as _sys
+
+    all_formats = "--all-formats" in _sys.argv
+
     sizes  = [256, 128, 64, 48, 32, 16]
     frames = [make_frame(s) for s in sizes]
-    out    = "icon.ico"
 
+    # Always generate .ico (Windows)
+    ico_out = "icon.ico"
     frames[0].save(
-        out,
+        ico_out,
         format        = "ICO",
         sizes         = [(s, s) for s in sizes],
         append_images = frames[1:],
     )
+    kb = os.path.getsize(ico_out) / 1024
+    print(f"[generate_icon] Created {ico_out}  ({kb:.1f} KB)  —  sizes: {sizes}")
 
-    kb = os.path.getsize(out) / 1024
-    print(f"[generate_icon] Created {out}  ({kb:.1f} KB)  —  sizes: {sizes}")
+    # Generate .png for Linux and macOS (also used as macOS icon source)
+    if all_formats or _sys.platform != "win32":
+        png_out = "icon.png"
+        make_frame(512).save(png_out, format="PNG")
+        kb = os.path.getsize(png_out) / 1024
+        print(f"[generate_icon] Created {png_out}  ({kb:.1f} KB)  —  512x512")
 
 
 if __name__ == "__main__":

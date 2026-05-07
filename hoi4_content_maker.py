@@ -81,9 +81,27 @@ def _cfg_save(data):
         existing.update(data)
         with open(CONFIG_PATH, "w", encoding="utf-8") as f:
             json.dump(existing, f, indent=2)
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[config] save failed: {e}", file=sys.stderr)
 
+
+def _read_file(path):
+    for enc in ("utf-8-sig", "utf-8", "latin-1"):
+        try:
+            with open(path, encoding=enc, errors="replace") as f:
+                return f.read()
+        except Exception:
+            pass
+    return ""
+
+
+def _default_hoi4_mod_dir():
+    base = os.path.join("Paradox Interactive", "Hearts of Iron IV", "mod")
+    if sys.platform == "darwin":
+        return os.path.join(os.path.expanduser("~"), "Library", "Application Support", base)
+    elif sys.platform.startswith("linux"):
+        return os.path.join(os.path.expanduser("~"), ".local", "share", base)
+    return os.path.join(os.path.expanduser("~"), "Documents", base)
 
 
 def _append_scripted_loc(sloc_path, blocks, saved, errs, mod_root=None):
@@ -4252,14 +4270,7 @@ def open_national_spirit_wizard(app):
         spirits = []  # list of (spirit_id, slot, file_path)
         for fp in sorted(_glob.glob(os.path.join(ideas_dir, "*.txt"))):
             try:
-                src = ""
-                for enc in ("utf-8-sig", "utf-8", "latin-1"):
-                    try:
-                        with open(fp, encoding=enc, errors="replace") as f:
-                            src = f.read()
-                        break
-                    except Exception:
-                        pass
+                src = _read_file(fp)
                 if not src:
                     continue
                 tokens = ModContext._tokenize(src)
@@ -4387,14 +4398,7 @@ def open_national_spirit_wizard(app):
                 return
             spirit_id, slot_key, fp = _filtered[sel[0]]
             try:
-                src = ""
-                for enc in ("utf-8-sig", "utf-8", "latin-1"):
-                    try:
-                        with open(fp, encoding=enc, errors="replace") as f:
-                            src = f.read()
-                        break
-                    except Exception:
-                        pass
+                src = _read_file(fp)
                 tokens = ModContext._tokenize(src)
                 tokens = ["{"] + tokens + ["}"]
                 parsed, _ = ModContext._parse_block(tokens, 0)
@@ -4451,14 +4455,7 @@ def open_national_spirit_wizard(app):
                     if not lf.endswith(".yml"):
                         continue
                     try:
-                        for enc in ("utf-8-sig", "utf-8", "latin-1"):
-                            try:
-                                with open(os.path.join(loc_dir, lf),
-                                          encoding=enc, errors="replace") as f:
-                                    loc_src = f.read()
-                                break
-                            except Exception:
-                                pass
+                        loc_src = _read_file(os.path.join(loc_dir, lf))
                         for m in _re.finditer(
                                 r'^\s+(\S+?)(?::\d+)?\s+"(.*)"', loc_src, _re.MULTILINE):
                             k, v = m.group(1), m.group(2)
@@ -9179,14 +9176,7 @@ def open_dyn_mod_wizard(app):
         mods = []  # list of (modifier_id, file_path)
         for fp in sorted(_glob.glob(os.path.join(dm_dir, "*.txt"))):
             try:
-                src = ""
-                for enc in ("utf-8-sig", "utf-8", "latin-1"):
-                    try:
-                        with open(fp, encoding=enc, errors="replace") as f:
-                            src = f.read()
-                        break
-                    except Exception:
-                        pass
+                src = _read_file(fp)
                 if not src:
                     continue
                 tokens = ModContext._tokenize(src)
@@ -9271,14 +9261,7 @@ def open_dyn_mod_wizard(app):
                 return
             modifier_id, fp = mods[sel[0]]
             try:
-                src = ""
-                for enc in ("utf-8-sig", "utf-8", "latin-1"):
-                    try:
-                        with open(fp, encoding=enc, errors="replace") as f:
-                            src = f.read()
-                        break
-                    except Exception:
-                        pass
+                src = _read_file(fp)
                 tokens = ModContext._tokenize(src)
                 tokens = ["{"] + tokens + ["}"]
                 parsed, _ = ModContext._parse_block(tokens, 0)
@@ -9333,14 +9316,7 @@ def open_dyn_mod_wizard(app):
                     if not lf.endswith(".yml"):
                         continue
                     try:
-                        for enc in ("utf-8-sig", "utf-8", "latin-1"):
-                            try:
-                                with open(os.path.join(loc_dir, lf),
-                                          encoding=enc, errors="replace") as f:
-                                    loc_src = f.read()
-                                break
-                            except Exception:
-                                pass
+                        loc_src = _read_file(os.path.join(loc_dir, lf))
                         for m in _re2.finditer(
                                 r'^\s+(\S+?)(?::\d+)?\s+"(.*)"', loc_src, _re2.MULTILINE):
                             k2, v2 = m.group(1), m.group(2)
@@ -12133,12 +12109,7 @@ class ModContext:
         return result, pos+1
 
     def _read(self, path):
-        for enc in ("utf-8-sig","utf-8","latin-1"):
-            try:
-                with open(path, encoding=enc, errors="replace") as f:
-                    return f.read()
-            except: pass
-        return ""
+        return _read_file(path)
 
     def _parse_file(self, path):
         """Parse a HOI4 script file into a dict tree."""
@@ -12149,7 +12120,7 @@ class ModContext:
             tokens = ["{"] + tokens + ["}"]
             result, _ = self._parse_block(tokens, 0)
             return result
-        except: return {}
+        except Exception: return {}
 
     # ── Scanners ─────────────────────────────────────────────────────
     def _scan_gfx(self):
@@ -12984,12 +12955,12 @@ class App(tk.Tk):
             b = self._open_menu_btn[0]
             if w:
                 try: w.destroy()
-                except: pass
+                except Exception: pass
             self._open_menu_win[0] = None
             self._open_menu_btn[0] = None
             if b:
                 try: b.config(bg="#080b10", fg=TEXT_DIM)
-                except: pass
+                except Exception: pass
 
         def _menu_btn(parent, label, items):
             btn = tk.Button(parent, text=label,
@@ -13267,9 +13238,9 @@ class App(tk.Tk):
         tk.Frame(row2, bg=BORDER_G, width=1, height=20).pack(side="right", padx=5)
         def _cfp_commit(*_):
             try: self._cfp_x = int(self._cfp_x_var.get())
-            except: pass
+            except Exception: pass
             try: self._cfp_y = int(self._cfp_y_var.get())
-            except: pass
+            except Exception: pass
         _cfp_y_ent = tk.Entry(row2, textvariable=self._cfp_y_var, width=6,
                                bg=BG_CARD, fg=TEXT, insertbackground=BLUE,
                                font=("Courier",9), relief="flat",
@@ -13878,9 +13849,9 @@ class App(tk.Tk):
         offs = []
         for x_var, y_var, trig_text in self._offset_entries:
             try: ox = int(x_var.get())
-            except: ox = 0
+            except Exception: ox = 0
             try: oy = int(y_var.get())
-            except: oy = 0
+            except Exception: oy = 0
             otrig = trig_text.get("1.0", "end").strip()
             offs.append({"x": ox, "y": oy, "trigger": otrig})
         self.selected.offsets = offs
@@ -14089,7 +14060,7 @@ class App(tk.Tk):
         # Walk up to find the canvas
         while w and not isinstance(w, tk.Canvas):
             try: w = w.master
-            except: break
+            except Exception: break
         if w and isinstance(w, tk.Canvas):
             w.yview_scroll(delta, "units")
 
@@ -14401,7 +14372,7 @@ class App(tk.Tk):
         # Keep above grid image, below focuses
         if self._grid_item:
             try: self.cv.tag_raise("coord_lbl", "grid")
-            except: pass
+            except Exception: pass
 
     def _draw_lines(self):
         """Draw edges: solid blue elbow+arrowhead for prereqs; dashed orange for mutex."""
@@ -14683,9 +14654,7 @@ class App(tk.Tk):
             _fd.askdirectory = orig
 
     def _load_mod(self):
-        _hoi4_mod_dir = os.path.join(
-            os.path.expanduser("~"), "Documents", "Paradox Interactive",
-            "Hearts of Iron IV", "mod")
+        _hoi4_mod_dir = _default_hoi4_mod_dir()
         _custom = getattr(MOD, "custom_mod_path", "")
         _init_dir = (_custom if _custom and os.path.isdir(_custom)
                      else _hoi4_mod_dir if os.path.isdir(_hoi4_mod_dir)
@@ -15847,7 +15816,7 @@ class App(tk.Tk):
             m = _re.search(r"\bcost\s*=\s*([\d.]+)", new_code)
             if m:
                 try: f.cost = int(float(m.group(1)))
-                except: pass
+                except Exception: pass
 
             m = _re.search(r"\brelative_position_id\s*=\s*(\S+)", new_code)
             if m: f.relative_position_id = m.group(1)
@@ -16670,7 +16639,7 @@ class App(tk.Tk):
             if not f: return
             if _tip_win[0]:
                 try: _tip_win[0].destroy()
-                except: pass
+                except Exception: pass
             t = tk.Toplevel(win); t.wm_overrideredirect(True)
             t.geometry(f"+{e.x_root+12}+{e.y_root-8}")
             tk.Label(t, text=f.name, bg="#1e3a5f", fg=TEXT,
@@ -16680,7 +16649,7 @@ class App(tk.Tk):
         def _hide_tip(e):
             if _tip_win[0]:
                 try: _tip_win[0].destroy()
-                except: pass
+                except Exception: pass
                 _tip_win[0] = None
         lb.bind("<Motion>", _show_tip)
         lb.bind("<Leave>",  _hide_tip)
@@ -16893,7 +16862,7 @@ class App(tk.Tk):
                 y = float(geo.get("y", 0) or 0)
                 w = float(geo.get("width",  120) or 120)
                 h = float(geo.get("height",  60) or 60)
-            except: x=y=0; w=120; h=60
+            except Exception: x=y=0; w=120; h=60
             vertices[cid] = {"label": label, "x": x, "y": y, "w": w, "h": h}
 
         # UserObject / object wrappers
@@ -16909,7 +16878,7 @@ class App(tk.Tk):
             try:
                 x=float(geo.get("x",0) or 0); y=float(geo.get("y",0) or 0)
                 w=float(geo.get("width",120) or 120); h=float(geo.get("height",60) or 60)
-            except: x=y=0; w=120; h=60
+            except Exception: x=y=0; w=120; h=60
             vertices[cid] = {"label": label, "x": x, "y": y, "w": w, "h": h}
 
         if not vertices:
@@ -17599,9 +17568,9 @@ class App(tk.Tk):
                 _cfp_blk = block.get("continuous_focus_position", {})
                 if isinstance(_cfp_blk, dict):
                     try: self._cfp_x = int(_cfp_blk.get("x", ""))
-                    except: self._cfp_x = None
+                    except Exception: self._cfp_x = None
                     try: self._cfp_y = int(_cfp_blk.get("y", ""))
-                    except: self._cfp_y = None
+                    except Exception: self._cfp_y = None
                 else:
                     self._cfp_x = self._cfp_y = None
                 # Update toolbar display
@@ -17708,7 +17677,7 @@ class App(tk.Tk):
             fid_str=rf.get("id","")
             if not fid_str: continue
             try: gx=int(rf.get("x",0)); gy=int(rf.get("y",0))
-            except: gx=0; gy=0
+            except Exception: gx=0; gy=0
             rel_id = rf.get("relative_position_id", None)
             raw_pos[fid_str] = (gx, gy, rel_id)
             f=Focus(gx, gy)   # coords resolved below
@@ -17722,15 +17691,15 @@ class App(tk.Tk):
             try:
                 _c = float(rf.get("cost","10"))
                 f.cost = _c if _c != int(_c) else int(_c)
-            except: f.cost=10
+            except Exception: f.cost=10
             aiblock=rf.get("ai_will_do",{})
             if isinstance(aiblock,dict):
                 try: f.ai_will_do=int(float(aiblock.get("factor",aiblock.get("base",1))))
-                except: f.ai_will_do=1
+                except Exception: f.ai_will_do=1
                 f.ai_will_do_raw=_dict_to_raw(aiblock)  # preserve full block
             else:
                 try: f.ai_will_do=int(float(aiblock))
-                except: f.ai_will_do=1
+                except Exception: f.ai_will_do=1
                 f.ai_will_do_raw=""
             f.cancel_if_invalid      = rf.get("cancel_if_invalid","yes")=="yes"
             f.continue_if_invalid    = rf.get("continue_if_invalid","no")=="yes"
@@ -18108,9 +18077,9 @@ class App(tk.Tk):
                 _cfp_blk = block.get("continuous_focus_position", {})
                 if isinstance(_cfp_blk, dict):
                     try: cfp_x = int(_cfp_blk.get("x", ""))
-                    except: cfp_x = None
+                    except Exception: cfp_x = None
                     try: cfp_y = int(_cfp_blk.get("y", ""))
-                    except: cfp_y = None
+                    except Exception: cfp_y = None
                 _country_blk = block.get("country", {})
                 if isinstance(_country_blk, dict):
                     _mod_blk = _country_blk.get("modifier", {})
@@ -18211,7 +18180,7 @@ class App(tk.Tk):
             fid_str = rf.get("id", "")
             if not fid_str: continue
             try: gx = int(rf.get("x", 0)); gy = int(rf.get("y", 0))
-            except: gx = 0; gy = 0
+            except Exception: gx = 0; gy = 0
             rel_id = rf.get("relative_position_id", None)
             raw_pos[fid_str] = (gx, gy, rel_id)
             f = Focus(gx, gy)
@@ -18226,15 +18195,15 @@ class App(tk.Tk):
             try:
                 _c = float(rf.get("cost", "10"))
                 f.cost = _c if _c != int(_c) else int(_c)
-            except: f.cost = 10
+            except Exception: f.cost = 10
             aiblock = rf.get("ai_will_do", {})
             if isinstance(aiblock, dict):
                 try: f.ai_will_do = int(float(aiblock.get("factor", aiblock.get("base", 1))))
-                except: f.ai_will_do = 1
+                except Exception: f.ai_will_do = 1
                 f.ai_will_do_raw = _dict_to_raw(aiblock)
             else:
                 try: f.ai_will_do = int(float(aiblock))
-                except: f.ai_will_do = 1
+                except Exception: f.ai_will_do = 1
                 f.ai_will_do_raw = ""
             f.cancel_if_invalid        = rf.get("cancel_if_invalid", "yes") == "yes"
             f.continue_if_invalid      = rf.get("continue_if_invalid", "no") == "yes"
@@ -18350,7 +18319,7 @@ class App(tk.Tk):
                 f = self.focuses[fid]
                 for item in f._items:
                     try: self.cv.delete(item)
-                    except: pass
+                    except Exception: pass
                 del self.focuses[fid]
         self._lines.clear()
         if self.selected and self.selected.id not in self.focuses:
@@ -18914,9 +18883,9 @@ class App(tk.Tk):
                 _cfp_blk = block.get("continuous_focus_position", {})
                 if isinstance(_cfp_blk, dict):
                     try: cfp_x = int(_cfp_blk.get("x", ""))
-                    except: cfp_x = None
+                    except Exception: cfp_x = None
                     try: cfp_y = int(_cfp_blk.get("y", ""))
-                    except: cfp_y = None
+                    except Exception: cfp_y = None
                 _country_blk = block.get("country", {})
                 if isinstance(_country_blk, dict):
                     _mod_blk = _country_blk.get("modifier", {})
@@ -18993,7 +18962,7 @@ class App(tk.Tk):
             fid_str = rf.get("id", "")
             if not fid_str: continue
             try: gx = int(rf.get("x", 0)); gy = int(rf.get("y", 0))
-            except: gx = 0; gy = 0
+            except Exception: gx = 0; gy = 0
             rel_id = rf.get("relative_position_id", None)
             raw_pos[fid_str] = (gx, gy, rel_id)
             f = Focus(gx, gy)
@@ -19003,15 +18972,15 @@ class App(tk.Tk):
             f.gfx = rf.get("icon", "GFX_goal_generic_political_pressure")
             try:
                 _c = float(rf.get("cost", "10")); f.cost = _c if _c != int(_c) else int(_c)
-            except: f.cost = 10
+            except Exception: f.cost = 10
             aiblock = rf.get("ai_will_do", {})
             if isinstance(aiblock, dict):
                 try: f.ai_will_do = int(float(aiblock.get("factor", aiblock.get("base", 1))))
-                except: f.ai_will_do = 1
+                except Exception: f.ai_will_do = 1
                 f.ai_will_do_raw = _dict_to_raw(aiblock)
             else:
                 try: f.ai_will_do = int(float(aiblock))
-                except: f.ai_will_do = 1
+                except Exception: f.ai_will_do = 1
                 f.ai_will_do_raw = ""
             f.cancel_if_invalid        = rf.get("cancel_if_invalid", "yes") == "yes"
             f.continue_if_invalid      = rf.get("continue_if_invalid", "no") == "yes"
@@ -19947,9 +19916,7 @@ class App(tk.Tk):
         _lbl("  Where the Mod button opens by default.")
         _lbl("  Leave blank to use the HOI4 mod folder automatically.")
 
-        _default_hoi4 = os.path.join(
-            os.path.expanduser("~"), "Documents", "Paradox Interactive",
-            "Hearts of Iron IV", "mod")
+        _default_hoi4 = _default_hoi4_mod_dir()
         if not hasattr(MOD, "custom_mod_path"):
             MOD.custom_mod_path = ""
 
@@ -20505,7 +20472,7 @@ class App(tk.Tk):
             if hasattr(self, "_mod_lbl"):
                 raw = self._mod_lbl.cget("text")
                 mod_txt = f"Mod: {raw}" if raw and raw != "No mod loaded" else "Mod: none"
-        except: mod_txt = "Mod: none"
+        except Exception: mod_txt = "Mod: none"
         self._sb_tree_val.config(text=tid)
         self._sb_focus_lbl.config(text=f"Focuses: {fc}")
         self._sb_sel_lbl.config(text=f"Selected: {sel}")
@@ -20621,7 +20588,7 @@ class App(tk.Tk):
         else:
             if hasattr(self, "_mm_canvas"):
                 try: self._mm_canvas.place_forget()
-                except: pass
+                except Exception: pass
 
     def _draw_minimap(self):
         """Render all focuses as small colored dots plus the current viewport rectangle."""
@@ -20630,7 +20597,7 @@ class App(tk.Tk):
         try:
             mm = self._mm_canvas
             if not mm.winfo_exists(): return
-        except: return
+        except Exception: return
 
         mm.delete("mm_content")
         if not self.focuses: return
@@ -20724,7 +20691,7 @@ class App(tk.Tk):
             mm.create_rectangle(vx0, vy0, vx1, vy1,
                                  outline="#60a5fa", fill="#60a5fa18",
                                  width=1, tags="mm_content")
-        except: pass
+        except Exception: pass
 
         # Label
         mm.create_text(4, MM_H - 4, text="M — minimap",

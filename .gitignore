@@ -28,8 +28,13 @@ desktop.ini
 *.swo
 *~
 
-# Distribution
+# Distribution / build output
 dist/
-build/
+build_tmp/
 *.spec
 *.egg-info/
+HOI4ContentMaker-linux
+HOI4ContentMaker-mac
+HOI4ContentMaker.exe
+build/icon.ico
+build/icon.png
