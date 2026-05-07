@@ -1,15 +1,15 @@
 # =================================================================
 #  Content Maker for Hearts of Iron 4
 #  HOI4 Content Maker
-#  Version 2.0  |  Author: Blazer
+#  Version 2.0  |  Millennium Dawn Team
 # =================================================================
 #
 #  COPYRIGHT NOTICE
-#  Copyright (c) 2025 Blazer. All Rights Reserved.
+#  Copyright (c) 2025 Millennium Dawn Team. All Rights Reserved.
 #
 #  This software, including all source code, assets, and
 #  associated files, is the exclusive intellectual property
-#  of Blazer ("the Author").
+#  of the Millennium Dawn Team ("the Author").
 #
 #  PROPRIETARY LICENCE — ALL RIGHTS RESERVED
 #
@@ -37,16 +37,15 @@
 #
 #  CONTACT
 #  For licensing enquiries, permissions, or general contact:
-#    ThatGuyBlazer@gmail.com
+#    millenniumdawnteam@gmail.com
 #
 # =================================================================
 
 """
 Content Maker for Hearts of Iron 4
-HOI4 Content Maker  —  v2.0  |  by Blazer
+HOI4 Content Maker  —  v2.0  |  Millennium Dawn Team
 
-Copyright (c) 2025 Blazer. All Rights Reserved.
-Contact : ThatGuyBlazer@gmail.com
+Copyright (c) 2025 Millennium Dawn Team. All Rights Reserved.
 
 Wiki    : https://hoi4.paradoxwikis.com/National_focus_modding
 Requires: Python 3.9+  (tkinter built-in, no pip install needed)
@@ -59,8 +58,13 @@ Controls:
   Scroll wheel         = zoom in / out
   Ctrl + Z             = undo last action
 """
+from hoi4_logger import log, log_startup
+log_startup()
+
+log.info("Importing tkinter...")
 import tkinter as tk
 from tkinter import messagebox, filedialog, ttk
+log.info("tkinter imported OK")
 import json, os, re, threading, sys, subprocess, tempfile, copy
 
 # ── Persistent config ────────────────────────────────────────────────
@@ -151,18 +155,27 @@ def _append_scripted_loc(sloc_path, blocks, saved, errs, mod_root=None):
         errs.append("Scripted Loc: " + str(e))
 
 # ── Auto-install Pillow if missing ───────────────────────────────────
+log.info("Importing Pillow...")
 try:
     from PIL import Image as _PILImage, ImageTk as _PILImageTk
     _PIL_OK = True
+    log.info("Pillow imported OK")
 except ImportError:
     _PIL_OK = False
-    try:
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "Pillow"],
-                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        from PIL import Image as _PILImage, ImageTk as _PILImageTk
-        _PIL_OK = True
-    except Exception:
-        _PIL_OK = False
+    _frozen = getattr(sys, 'frozen', False)
+    if _frozen:
+        log.warning("Pillow not available in frozen binary — skipping auto-install")
+    else:
+        try:
+            log.info("Pillow missing, attempting pip install...")
+            subprocess.check_call([sys.executable, "-m", "pip", "install", "Pillow"],
+                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            from PIL import Image as _PILImage, ImageTk as _PILImageTk
+            _PIL_OK = True
+            log.info("Pillow installed and imported OK")
+        except Exception:
+            log.warning("Pillow auto-install failed")
+            _PIL_OK = False
 
 # Shared image cache registry — wizards register their caches here for invalidation on mod reload
 _app_img_caches = []
@@ -12611,7 +12624,9 @@ def show_splash(callback):
     """Cinematic launch splash — dark themed, animated title."""
     import math, time
 
+    log.info("Splash: creating Tk root...")
     root = tk.Tk()
+    log.info("Splash: Tk root created")
     root.overrideredirect(True)          # borderless
     root.attributes("-topmost", True)
     root.configure(bg="#000000")
@@ -12669,7 +12684,7 @@ def show_splash(callback):
                            anchor="center")
 
     # By line — starts invisible
-    byline = cv.create_text(W//2, 295, text="by  Blazer",
+    byline = cv.create_text(W//2, 295, text="Millennium Dawn Team",
                             fill="#000000", font=("Courier", 14),
                             anchor="center")
 
@@ -12762,7 +12777,9 @@ def show_splash(callback):
                 state["overlay"] = cv.create_rectangle(
                     0, 0, W, H, fill="#000000", outline="", stipple="gray50")
             if t >= 1.0:
+                log.info("Splash: animation done, destroying splash root...")
                 root.destroy()
+                log.info("Splash: root destroyed, calling app launcher...")
                 state["done"] = True
                 callback()
                 return
@@ -12852,7 +12869,9 @@ _app_ref = None   # module-level ref so ModContext.save_config can access the wi
 class App(tk.Tk):
     def __init__(self):
         global _app_ref
+        log.info("App.__init__: calling tk.Tk.__init__...")
         super().__init__()
+        log.info("App.__init__: tk.Tk initialized")
         _app_ref = self
         self.title("HOI4 Content Maker  —  no tree  [Wiki Accurate v2]")
         # Restore saved geometry if available, else use default
@@ -12870,7 +12889,16 @@ class App(tk.Tk):
         self._redraw_job=None
         self._grid_img=None; self._grid_item=None; self._grid_key=None
         self._sash_x=0
+        self.protocol("WM_DELETE_WINDOW", self._on_app_close)
         self._build_ui(); self._redraw()
+
+    def _on_app_close(self):
+        try:
+            MOD.save_config()
+        except Exception:
+            pass
+        self.destroy()
+        os._exit(0)
 
     # ── TOP BAR ─────────────────────────────────────────────────
     # ── Widget factories (use for all new UI code) ───────────────────
@@ -21310,10 +21338,15 @@ class App(tk.Tk):
 # ─────────────────────────── ENTRY POINT ────────────────────────
 if __name__=="__main__":
     def _launch():
+        log.info("_launch: creating App...")
         app = App()
+        log.info("_launch: App created, updating idle tasks...")
         app.update_idletasks()
         W, H = 1440, 880
         sw = app.winfo_screenwidth(); sh = app.winfo_screenheight()
         app.geometry(f"{W}x{H}+{(sw-W)//2}+{(sh-H)//2}")
+        log.info(f"_launch: geometry set to {W}x{H}, entering mainloop...")
         app.mainloop()
+        log.info("_launch: mainloop exited")
+    log.info("Entry point: calling show_splash...")
     show_splash(_launch)

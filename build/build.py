@@ -3,18 +3,15 @@
 Cross-platform build script for HOI4 Content Maker.
 
 Usage:
-    python build/build.py              # standard build
-    python build/build.py --encrypted  # AES-encrypted bytecode build
+    python build/build.py
 
 Works on Windows, macOS, and Linux.
-Replaces the Windows-only build.bat / build_encrypted.bat scripts.
 """
 
 import os
 import subprocess
 import sys
 import shutil
-import argparse
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR = os.path.dirname(SCRIPT_DIR)
@@ -57,11 +54,10 @@ def generate_icon():
         cwd=SCRIPT_DIR)
 
 
-def write_spec(encrypted=False):
+def write_spec():
     """Generate a platform-aware PyInstaller .spec file."""
     icon_line = ""
     version_line = ""
-    cipher_line = "block_cipher = None"
 
     if sys.platform == "win32":
         icon_line = "    icon=os.path.join(SCRIPT_DIR, 'icon.ico'),"
@@ -71,9 +67,6 @@ def write_spec(encrypted=False):
         if os.path.exists(png):
             icon_line = f"    icon=os.path.join(SCRIPT_DIR, 'icon.png'),"
     # Linux ELF executables don't support embedded icons — skip
-
-    if encrypted:
-        cipher_line = "block_cipher = 'HOI4CM_BLAZER_2025'"
 
     source_path = SOURCE.replace("\\", "/")
     root_path = ROOT_DIR.replace("\\", "/")
@@ -92,6 +85,7 @@ a = Analysis(
     binaries=[],
     datas=[],
     hiddenimports=[
+        'hoi4_logger',
         'tkinter', 'tkinter.ttk', 'tkinter.messagebox',
         'tkinter.filedialog', 'tkinter.font', 'tkinter.scrolledtext',
         'PIL', 'PIL.Image', 'PIL.ImageTk',
@@ -105,11 +99,11 @@ a = Analysis(
         'PyQt5', 'PyQt6', 'wx', 'unittest',
         'email', 'http', 'xmlrpc', 'lib2to3',
     ],
-    cipher={"block_cipher" if encrypted else "None"},
+    cipher=None,
     noarchive=False,
 )
 
-pyz = PYZ(a.pure, a.zipped_data, cipher={"block_cipher" if encrypted else "None"})
+pyz = PYZ(a.pure, a.zipped_data, cipher=None)
 
 exe = EXE(
     pyz,
@@ -123,7 +117,7 @@ exe = EXE(
     strip=False,
     upx=True,
     upx_exclude=[],
-    console=False,
+    console=True,
 {icon_line}
 {version_line}
 )
@@ -144,19 +138,12 @@ def get_output_name():
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Build HOI4 Content Maker")
-    parser.add_argument("--encrypted", action="store_true",
-                        help="Enable AES bytecode encryption")
-    args = parser.parse_args()
-
     output_name = get_output_name()
 
     print()
     print("=" * 55)
     print("  HOI4 Content Maker | Cross-Platform Build")
     print(f"  Platform: {sys.platform}  |  Python: {sys.version.split()[0]}")
-    if args.encrypted:
-        print("  Mode: ENCRYPTED (AES-128)")
     print("=" * 55)
     print()
 
@@ -169,8 +156,6 @@ def main():
     print("[STEP 1/4] Checking dependencies...")
     ensure_package("pyinstaller", "PyInstaller")
     ensure_package("Pillow", "PIL")
-    if args.encrypted:
-        ensure_package("tinyaes")
     print()
 
     # Generate icon
@@ -192,7 +177,7 @@ def main():
     print("[STEP 4/4] Compiling... (1-3 minutes)")
     print()
 
-    spec_path = write_spec(encrypted=args.encrypted)
+    spec_path = write_spec()
 
     try:
         run([
