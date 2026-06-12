@@ -62,6 +62,21 @@ If you have been granted permission to submit code:
 | `C_*` | Colour constants |
 | `MOD` | Global `ModContext` instance |
 
+### Tests and linting
+
+New code in the `src/hoi4cm` package and `tests/` is checked by Ruff and Black. Before
+submitting:
+
+```bash
+pip install ".[dev]"
+pytest
+ruff check .
+black --check .
+```
+
+CI (`.github/workflows/ci.yml`) runs these on every pull request. The legacy monolith is
+excluded from linting until it is refactored into the package.
+
 ---
 
 ## Licence Note

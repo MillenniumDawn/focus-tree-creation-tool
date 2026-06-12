@@ -1,4 +1,5 @@
 """Filesystem helpers: default mod directory and tolerant file reading."""
+
 import os
 import sys
 
@@ -6,7 +7,9 @@ import sys
 def default_hoi4_mod_dir():
     base = os.path.join("Paradox Interactive", "Hearts of Iron IV", "mod")
     if sys.platform == "darwin":
-        return os.path.join(os.path.expanduser("~"), "Library", "Application Support", base)
+        return os.path.join(
+            os.path.expanduser("~"), "Library", "Application Support", base
+        )
     elif sys.platform.startswith("linux"):
         return os.path.join(os.path.expanduser("~"), ".local", "share", base)
     return os.path.join(os.path.expanduser("~"), "Documents", base)

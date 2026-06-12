@@ -3,6 +3,7 @@
 Stored as a JSON dict at ``~/.hoi4_focus_maker.json``. The path is unchanged
 from the original monolith so existing user configs keep loading.
 """
+
 import json
 import os
 
@@ -16,7 +17,7 @@ CONFIG_PATH = os.path.join(os.path.expanduser("~"), ".hoi4_focus_maker.json")
 def cfg_load():
     """Load saved config dict, return {} on any error."""
     try:
-        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+        with open(CONFIG_PATH, encoding="utf-8") as f:
             return json.load(f)
     except Exception:
         return {}

@@ -100,15 +100,20 @@ python hoi4_content_maker.py
 Running from a clone also picks up the `src/hoi4cm` package automatically — the entry
 point adds `src/` to the import path at startup, so no install step is needed.
 
-### Running the tests
+### Running tests and linters
 
 ```bash
 pip install ".[dev]"
-pytest
+pytest                 # tests
+ruff check .           # lint
+black --check .        # formatting
 ```
 
 `pyproject.toml` puts `src/` on the path for pytest, so the suite runs from a clean
-checkout with no install. Tests live under `tests/`.
+checkout with no install. Tests live under `tests/`. Ruff and Black are scoped to the
+`src/hoi4cm` package and `tests/` (the legacy monolith is excluded for now).
+
+CI runs the same checks on every pull request (`.github/workflows/ci.yml`).
 
 ---
 

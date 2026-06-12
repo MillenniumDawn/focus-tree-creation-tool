@@ -8,6 +8,7 @@ errors that the in-app error log reads from.
 Handlers are attached directly to the ``HOI4CM`` logger with ``propagate=False``
 (no ``logging.basicConfig``), so each line logs exactly once.
 """
+
 import logging
 import os
 import sys
@@ -78,6 +79,7 @@ _error_callback = None
 
 def _timestamp():
     import datetime
+
     return datetime.datetime.now().strftime("%H:%M:%S")
 
 
@@ -113,7 +115,7 @@ _excepthook_installed = False
 
 
 def install_excepthook():
-    """Capture uncaught exceptions into the error buffer, then chain to the prior hook."""
+    """Capture uncaught exceptions into the buffer, then chain to the prior hook."""
     global _excepthook_installed
     if _excepthook_installed:
         return

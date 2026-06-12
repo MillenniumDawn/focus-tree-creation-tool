@@ -1,4 +1,5 @@
 """Base module: logging + foundational utilities for the HOI4 Content Maker."""
+
 from .config import CONFIG_PATH, cfg_load, cfg_save
 from .logger import (
     add_error,

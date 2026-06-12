@@ -11,9 +11,9 @@ requires-python = ">=3.9"
 dependencies = []
 
 [project.optional-dependencies]
-image = ["Pillow>=9.0"]                       # GFX icon previews (.png/.tga)
-dev = ["pytest>=7.0"]                         # tests
-build = ["pyinstaller>=6.0", "Pillow>=9.0"]   # compile standalone executables
+image = ["Pillow>=9.0"]                              # GFX icon previews (.png/.tga)
+dev = ["pytest>=7.0", "ruff>=0.6", "black>=24.0"]    # tests + linting
+build = ["pyinstaller>=6.0", "Pillow>=9.0"]          # compile standalone executables
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/hoi4cm"]
@@ -21,3 +21,18 @@ packages = ["src/hoi4cm"]
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
+
+# Linting/formatting is scoped to the modular package + tests. The legacy
+# monolith (hoi4_content_maker.py) and build scripts are excluded until they
+# are refactored into the package.
+[tool.black]
+line-length = 88
+target-version = ["py39"]
+extend-exclude = "hoi4_content_maker\\.py|^/build/"
+
+[tool.ruff]
+line-length = 88
+extend-exclude = ["hoi4_content_maker.py", "build"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]

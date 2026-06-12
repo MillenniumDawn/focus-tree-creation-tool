@@ -1,4 +1,5 @@
 """Tests for hoi4cm.core.log — the base logging module."""
+
 import logging
 import re
 import sys
@@ -38,6 +39,7 @@ def log_state():
 
 # ── configuration ────────────────────────────────────────────────────
 
+
 def test_logger_configured_without_double_handlers():
     assert logmod.log.name == "HOI4CM"
     assert logmod.log.level == logging.DEBUG
@@ -69,6 +71,7 @@ def test_log_startup_emits_four_info_records(log_state):
 
 
 # ── error buffer ─────────────────────────────────────────────────────
+
 
 def test_add_error_appends_timestamped_entry(log_state):
     count = logmod.add_error("  boom  ")
@@ -108,9 +111,13 @@ def test_buffer_identity_is_stable_across_clear(log_state):
 
 # ── excepthook ───────────────────────────────────────────────────────
 
+
 def test_install_excepthook_records_and_chains(log_state):
     chained = []
-    sentinel = lambda *a: chained.append(a)
+
+    def sentinel(*a):
+        chained.append(a)
+
     sys.excepthook = sentinel
 
     logmod.install_excepthook()
