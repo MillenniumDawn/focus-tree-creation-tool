@@ -76,9 +76,6 @@ from tkinter import messagebox, filedialog, ttk
 log.info("tkinter imported OK")
 import json, os, re, threading, sys, subprocess, tempfile, copy
 
-# ── Persistent config / paths / file IO (moved to hoi4cm.core) ───────
-# CONFIG_PATH, cfg_load, cfg_save, read_file, default_hoi4_mod_dir are imported
-# from hoi4cm.core above. Aliased here to keep the existing call sites unchanged.
 _cfg_load = cfg_load
 _cfg_save = cfg_save
 _read_file = read_file

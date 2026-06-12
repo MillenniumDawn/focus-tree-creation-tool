@@ -9,6 +9,7 @@ Handlers are attached directly to the ``HOI4CM`` logger with ``propagate=False``
 (no ``logging.basicConfig``), so each line logs exactly once.
 """
 
+import datetime
 import logging
 import os
 import sys
@@ -23,14 +24,10 @@ _LOG_FILE = os.path.join(_LOG_DIR, "app.log")
 
 log = logging.getLogger(_LOG_NAME)
 
-_configured = False
-
 
 def _configure():
     """Attach handlers to the HOI4CM logger once. Safe to call repeatedly."""
-    global _configured
-    if _configured or log.handlers:
-        _configured = True
+    if log.handlers:
         return
 
     log.setLevel(logging.DEBUG)
@@ -50,8 +47,6 @@ def _configure():
         log.addHandler(fileh)
     except Exception as e:
         log.warning("File logging disabled: %s", e)
-
-    _configured = True
 
 
 _configure()
@@ -78,8 +73,6 @@ _error_callback = None
 
 
 def _timestamp():
-    import datetime
-
     return datetime.datetime.now().strftime("%H:%M:%S")
 
 
