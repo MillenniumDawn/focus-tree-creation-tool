@@ -4,14 +4,16 @@ __pycache__/
 *.pyo
 *.pyd
 .Python
+.pytest_cache/
 
 # Virtual environments
 venv/
 env/
 .venv/
 
-# App config & autosave (user-specific, should not be committed)
+# App config, logs & autosave (user-specific, should not be committed)
 .hoi4_focus_maker.json
+.hoi4cm/
 hoi4_cm_decision_autosave.json
 hoi4_cm_spirit_autosave.json
 hoi4_cm_dynmod_autosave.json

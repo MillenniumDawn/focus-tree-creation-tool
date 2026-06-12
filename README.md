@@ -50,10 +50,10 @@ HOI4 Content Maker is a standalone Python/Tkinter desktop application that lets 
 
 ### Installing optional dependencies
 
-All optional runtime dependencies are listed in `requirements.txt`:
+Image preview support is declared as the `image` extra in `pyproject.toml`:
 
 ```bash
-pip install -r requirements.txt
+pip install ".[image]"
 ```
 
 Or install individually:
@@ -79,6 +79,10 @@ Download the latest release for your platform from the [Releases](../../releases
 
 Just download and run — no Python installation required.
 
+> Executables are not committed to the repository. Each tagged release is built by CI
+> (`.github/workflows/release.yml`) and the binaries are attached to the
+> [Releases](../../releases) page.
+
 ### Option 2: Run from source
 
 ```bash
@@ -87,13 +91,24 @@ git clone https://github.com/YOUR_USERNAME/hoi4-content-maker.git
 cd hoi4-content-maker
 
 # 2. (Optional) Install image support
-pip install -r requirements.txt
+pip install ".[image]"
 
 # 3. Run
 python hoi4_content_maker.py
 ```
 
-Or just download `hoi4_content_maker.py` directly and run it — it's a single self-contained file.
+Running from a clone also picks up the `src/hoi4cm` package automatically — the entry
+point adds `src/` to the import path at startup, so no install step is needed.
+
+### Running the tests
+
+```bash
+pip install ".[dev]"
+pytest
+```
+
+`pyproject.toml` puts `src/` on the path for pytest, so the suite runs from a clean
+checkout with no install. Tests live under `tests/`.
 
 ---
 
@@ -210,9 +225,16 @@ Settings are saved automatically to `~/.hoi4_focus_maker.json`.
 ## File Structure
 
 ```
-hoi4_content_maker.py       ← entire application (single file)
-requirements.txt            ← optional runtime dependencies (Pillow)
-requirements-build.txt      ← build dependencies (PyInstaller, Pillow)
+hoi4_content_maker.py       ← application entry point (the GUI)
+src/hoi4cm/                 ← modular package (logging + shared core)
+  core/
+    logger.py               ← logging setup, error buffer, excepthook
+    config.py               ← persistent user config load/save
+    paths.py                ← mod-dir defaults + tolerant file reading
+hoi4_logger.py              ← back-compat shim → hoi4cm.core.logger
+tests/                      ← pytest suite
+  test_logger.py            ← logging module tests
+pyproject.toml              ← dependencies (extras: image/dev/build), metadata, pytest config
 README.md
 CHANGELOG.md
 BUILD_INSTRUCTIONS.md       ← how to compile executables
@@ -224,12 +246,16 @@ build/
   generate_icon.py          ← generates app icons (.ico, .png)
   version_info.txt          ← Windows file properties metadata
 .github/workflows/
-  release.yml               ← CI: auto-build + publish releases
+  release.yml               ← CI: build + publish executables to Releases on tag push
 docs/
   FOCUS_TREE.md             ← Focus Tree Editor deep-dive
   DECISION_MAKER.md         ← Decision Maker deep-dive
   CONTRIBUTING.md           ← contribution guidelines
 ```
+
+> The app is being split out of a single file into the `hoi4cm` package one module at
+> a time. Logging and the shared core came first; `hoi4_content_maker.py` is still the
+> launch point.
 
 ---
 
