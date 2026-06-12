@@ -43,8 +43,8 @@ Open a GitHub Issue with the label **enhancement**. Please include:
 If you have been granted permission to submit code:
 
 - **Python 3.9+ compatible** — no walrus operator (`:=`) or match/case statements; the app targets 3.9–3.14.
-- **Single file** — all application code lives in `hoi4_content_maker.py`. Do not split into modules.
-- **tkinter only** — no additional GUI frameworks. Third-party packages are limited to optional image support (`Pillow`, `pillow-dds`). Runtime dependencies are listed in `requirements.txt`; build dependencies in `requirements-build.txt`.
+- **Modular package** — the GUI lives in `hoi4_content_maker.py`, but shared/foundational code is being moved into the `src/hoi4cm` package (e.g. `hoi4cm.core` for logging, config, and paths). Put reusable, non-GUI logic in the package rather than the monolith.
+- **tkinter only** — no additional GUI frameworks. Third-party packages are limited to optional image support (`Pillow`, `pillow-dds`). All dependencies live in `pyproject.toml` as extras (`image`, `dev`, `build`).
 - **Defensive field access** — always use the `_s()` helper (or `.get("key", "")`) when reading cat/dec fields in generator functions. Fields can be `bool`, `None`, or `str` depending on how they were set.
 - **No forward references** — Python 3.14 is strict about closures. Always define functions before referencing them, or wrap deferred calls in `try/except`.
 - **Autosave after changes** — any function that modifies `dm_cats` or `dm_decs` should call `_autosave()` and `_snapshot()` at appropriate points.
@@ -61,6 +61,21 @@ If you have been granted permission to submit code:
 | `_s(v)` | Safe string coercion for generator output |
 | `C_*` | Colour constants |
 | `MOD` | Global `ModContext` instance |
+
+### Tests and linting
+
+New code in the `src/hoi4cm` package and `tests/` is checked by Ruff and Black. Before
+submitting:
+
+```bash
+pip install ".[dev]"
+pytest
+ruff check .
+black --check .
+```
+
+CI (`.github/workflows/ci.yml`) runs these on every pull request. The legacy monolith is
+excluded from linting until it is refactored into the package.
 
 ---
 

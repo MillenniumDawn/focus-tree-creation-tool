@@ -70,6 +70,7 @@ def write_spec():
 
     source_path = SOURCE.replace("\\", "/")
     root_path = ROOT_DIR.replace("\\", "/")
+    src_path = os.path.join(ROOT_DIR, "src").replace("\\", "/")
     script_dir_str = SCRIPT_DIR.replace("\\", "/")
 
     spec_content = f"""# -*- mode: python ; coding: utf-8 -*-
@@ -81,11 +82,13 @@ block_cipher = None
 
 a = Analysis(
     [{source_path!r}],
-    pathex=[{root_path!r}],
+    pathex=[{root_path!r}, {src_path!r}],
     binaries=[],
     datas=[],
     hiddenimports=[
         'hoi4_logger',
+        'hoi4cm', 'hoi4cm.core', 'hoi4cm.core.logger',
+        'hoi4cm.core.config', 'hoi4cm.core.paths', 'logging.handlers',
         'tkinter', 'tkinter.ttk', 'tkinter.messagebox',
         'tkinter.filedialog', 'tkinter.font', 'tkinter.scrolledtext',
         'PIL', 'PIL.Image', 'PIL.ImageTk',

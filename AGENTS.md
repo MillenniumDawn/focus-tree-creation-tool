@@ -1,0 +1,50 @@
+# AGENTS.md
+
+Guidance for AI coding agents (opencode, Claude Code, etc.) working in this repo. `CLAUDE.md` is a symlink to this file.
+
+## What this is
+
+A standalone Python/Tkinter desktop app for authoring Hearts of Iron IV mod content (focus trees, decisions, events, ideas, dynamic modifiers). It parses existing Paradox script, edits it visually, and exports wiki-accurate `.txt`/`.yml` files. Stdlib + tkinter only at runtime; Pillow and PyInstaller are optional extras.
+
+## The one rule that shapes everything
+
+**New code goes in `src/hoi4cm/`. Do not grow the monolith.**
+
+`hoi4_content_maker.py` (~21k lines) is a legacy single file being migrated into the `hoi4cm` package one module at a time. When adding or refactoring, extract into a `src/hoi4cm/` module and pair it with a test — don't add features to the monolith. Edits to the monolith should be confined to bug fixes and the wiring needed to call into newly-extracted modules.
+
+## Commands
+
+```bash
+python hoi4_content_maker.py    # run the app (needs a display + tkinter)
+
+pip install ".[dev]"            # tests + linters
+pytest                          # full suite (src/ is on the path via pyproject)
+pytest tests/test_config.py::test_cfg_save_merges_existing_keys   # single test
+ruff check .                    # lint
+black --check .                 # formatting
+
+python build/build.py           # standalone exe (after pip install ".[build]")
+```
+
+CI runs ruff + black on 3.12 and pytest on 3.9 and 3.13.
+
+## Layout
+
+- **`hoi4_content_maker.py`** — the launch point and (still) most of the app: every `open_*_wizard(app)` function, the parser/`ModContext`, `Focus`, and `App(tk.Tk)`. Entry point at the bottom calls `show_splash(_launch)`.
+- **`src/hoi4cm/core/`** — the extracted package: `logger.py`, `config.py`, `paths.py`, re-exported flat from `hoi4cm.core`. This is where new modules land.
+- **`hoi4_logger.py`** — back-compat shim re-exporting from `hoi4cm.core.logger`. No logic here.
+
+The monolith inserts `src/` onto `sys.path` at startup, imports from `hoi4cm.core`, and aliases names to their old underscore forms (`_cfg_load`, `_read_file`, …). Keep that aliasing pattern when extracting more, so the rest of the monolith keeps working unchanged.
+
+## Conventions
+
+- **Lint scope:** ruff (`E,F,W,I,UP,B`) and black (line-length 88) cover `src/hoi4cm/` and `tests/` only — the monolith and `build/` are excluded. Packaged code must pass both; in the monolith, match the existing style by hand.
+- **Logging, not print.** `get_logger("name")` for a `HOI4CM.<name>` child. User-facing errors go through `add_error()` so they reach the in-app error log.
+- **Tolerant file reads.** Mod files have mixed encodings — read them via `read_file`, never bare `open(...).read()`.
+- **Preserve user data on round-trips.** Parse→export of an existing file must not drop fields. Test round-trips when touching the parser or exporters.
+- **Frozen paths.** `~/.hoi4_focus_maker.json` (config) and `~/.hoi4cm/` (logs) are unchanged from the monolith so existing users keep their settings. Don't rename them.
+- New modules ship with a test under `tests/` (see `test_logger.py`/`test_config.py` for the isolation-fixture style) — only packaged code is covered.
+
+## Releases
+
+Pushing to `main` with a changed `hoi4_content_maker.py` triggers `release.yml`: it reads the version from the source header (`Version 2.0`), tags, builds Win/macOS/Linux executables, and publishes a Release. Executables are never committed.

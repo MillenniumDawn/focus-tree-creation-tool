@@ -13,10 +13,10 @@ How to compile `hoi4_content_maker.py` into a standalone executable that:
 Open a terminal and run:
 
 ```bash
-pip install -r requirements-build.txt
+pip install ".[build]"
 ```
 
-This installs PyInstaller and Pillow. You only need to do this once.
+This installs PyInstaller and Pillow (declared in `pyproject.toml`). You only need to do this once.
 
 On **Linux**, you also need tkinter (not bundled with pip):
 ```bash
@@ -82,8 +82,7 @@ Or on Windows (legacy): `build\build_encrypted.bat`
 | `build/hoi4_content_maker.spec` | PyInstaller spec for Windows `.bat` builds |
 | `build/version_info.txt` | Windows file properties (right-click → Properties) |
 | `build/generate_icon.py` | Generates `icon.ico` and `icon.png` automatically |
-| `requirements.txt` | Optional runtime dependencies (Pillow) |
-| `requirements-build.txt` | Build dependencies (PyInstaller, Pillow) |
+| `pyproject.toml` | Dependencies + extras (`image`, `dev`, `build`) and package metadata |
 | `.github/workflows/release.yml` | CI workflow — auto-builds and publishes releases |
 
 ---
@@ -141,7 +140,7 @@ python build/build.py --encrypted  # AES-encrypted bytecode
 ### One-time setup
 
 ```bash
-pip install -r requirements-build.txt
+pip install ".[build]"
 ```
 
 On **Linux**, you also need tkinter:
