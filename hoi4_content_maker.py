@@ -58,7 +58,16 @@ Controls:
   Scroll wheel         = zoom in / out
   Ctrl + Z             = undo last action
 """
+import os as _os, sys as _sys
+_SRC = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "src")
+if _os.path.isdir(_SRC) and _SRC not in _sys.path:
+    _sys.path.insert(0, _SRC)
+
 from hoi4_logger import log, log_startup
+from hoi4cm.core import (
+    get_logger, cfg_load, cfg_save, CONFIG_PATH, read_file, default_hoi4_mod_dir,
+    add_error, get_error_entries, set_error_callback, install_excepthook,
+)
 log_startup()
 
 import os, sys
@@ -106,45 +115,10 @@ def _apply_tk_dpi_scaling(root):
     except Exception as e:
         log.warning(f"Tk DPI scaling setup skipped: {e}")
 
-# ── Persistent config ────────────────────────────────────────────────
-CONFIG_PATH = os.path.join(os.path.expanduser("~"), ".hoi4_focus_maker.json")
-
-def _cfg_load():
-    """Load saved config dict, return {} on any error."""
-    try:
-        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return {}
-
-def _cfg_save(data):
-    """Merge data into existing config and write to disk."""
-    try:
-        existing = _cfg_load()
-        existing.update(data)
-        with open(CONFIG_PATH, "w", encoding="utf-8") as f:
-            json.dump(existing, f, indent=2)
-    except Exception as e:
-        print(f"[config] save failed: {e}", file=sys.stderr)
-
-
-def _read_file(path):
-    for enc in ("utf-8-sig", "utf-8", "latin-1"):
-        try:
-            with open(path, encoding=enc, errors="replace") as f:
-                return f.read()
-        except Exception:
-            pass
-    return ""
-
-
-def _default_hoi4_mod_dir():
-    base = os.path.join("Paradox Interactive", "Hearts of Iron IV", "mod")
-    if sys.platform == "darwin":
-        return os.path.join(os.path.expanduser("~"), "Library", "Application Support", base)
-    elif sys.platform.startswith("linux"):
-        return os.path.join(os.path.expanduser("~"), ".local", "share", base)
-    return os.path.join(os.path.expanduser("~"), "Documents", base)
+_cfg_load = cfg_load
+_cfg_save = cfg_save
+_read_file = read_file
+_default_hoi4_mod_dir = default_hoi4_mod_dir
 
 
 def _append_scripted_loc(sloc_path, blocks, saved, errs, mod_root=None):
@@ -6703,14 +6677,12 @@ def open_decision_wizard(app):
                     img = _PILImageTk.PhotoImage(pil)
                     break
                 except Exception as _ico_err:
-                    import sys as _sys
-                    print(f"[ICO] PIL failed {cpath}: {_ico_err}", file=_sys.stderr)
+                    get_logger("ico").warning(f"PIL failed {cpath}: {_ico_err}")
                     continue
         else:
-            import sys as _sys
-            print(f"[ICO] no path for {gfx_key!r}  "
-                  f"(decision_sprites={len(MOD.decision_sprites)}, root={bool(MOD.root)})",
-                  file=_sys.stderr)
+            get_logger("ico").warning(
+                f"no path for {gfx_key!r}  "
+                f"(decision_sprites={len(MOD.decision_sprites)}, root={bool(MOD.root)})")
         _dec_prev_img_cache[cache_key] = img
         return img
 
@@ -13462,29 +13434,22 @@ class App(tk.Tk):
 
 
     def _init_error_log(self):
-        """Set up in-app error log — captures all Python exceptions."""
-        import sys as _sys, traceback as _tb
+        """Set up in-app error log — captures all Python exceptions.
 
-        self._error_entries = []
-
-        _orig_except = _sys.excepthook
-        app_ref = self
-
-        def _custom_excepthook(exc_type, exc_val, exc_tb):
-            msg = "".join(_tb.format_exception(exc_type, exc_val, exc_tb))
-            app_ref._log_error(msg)
-            _orig_except(exc_type, exc_val, exc_tb)
-
-        _sys.excepthook = _custom_excepthook
+        The error buffer and excepthook live in hoi4cm.core.log; this just
+        aliases the shared buffer and registers the badge-flash callback.
+        """
+        self._error_entries = get_error_entries()
+        set_error_callback(self._on_error_logged)
+        install_excepthook()
 
     def _log_error(self, msg):
-        """Record an error and update the log badge if window is open."""
-        import datetime
-        ts = datetime.datetime.now().strftime("%H:%M:%S")
-        self._error_entries.append((ts, msg.strip()))
-        # Flash the error log button if it exists
+        """Record an error (core appends + fires the badge callback)."""
+        add_error(msg)
+
+    def _on_error_logged(self, count):
+        """Flash the error log button when a new error is recorded."""
         if hasattr(self, "_errlog_btn"):
-            count = len(self._error_entries)
             self._errlog_btn.config(
                 text=f"⚠ Errors ({count})",
                 fg="#f87171", bg="#450a0a")

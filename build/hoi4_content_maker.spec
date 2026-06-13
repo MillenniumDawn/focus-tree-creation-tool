@@ -5,10 +5,13 @@ block_cipher = None
 
 a = Analysis(
     ['..\\hoi4_content_maker.py'],
-    pathex=['..'],
+    pathex=['..', '..\\src'],
     binaries=[],
     datas=[],
     hiddenimports=[
+        'hoi4_logger',
+        'hoi4cm', 'hoi4cm.core', 'hoi4cm.core.logger',
+        'hoi4cm.core.config', 'hoi4cm.core.paths', 'logging.handlers',
         'tkinter', 'tkinter.ttk', 'tkinter.messagebox',
         'tkinter.filedialog', 'tkinter.font', 'tkinter.scrolledtext',
         'PIL', 'PIL.Image', 'PIL.ImageTk',
