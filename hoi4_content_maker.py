@@ -70,11 +70,50 @@ from hoi4cm.core import (
 )
 log_startup()
 
+import os, sys
+
+def _enable_windows_dpi_awareness():
+    """Prevent Windows from bitmap-scaling the Tk UI on high-DPI displays."""
+    if sys.platform != "win32" or os.environ.get("HOI4CM_DISABLE_DPI_AWARENESS"):
+        return
+    try:
+        import ctypes
+        try:
+            result = ctypes.windll.shcore.SetProcessDpiAwareness(2)  # per-monitor DPI aware
+            if result == 0:
+                log.info("Windows DPI awareness enabled: per-monitor")
+                return
+            if result & 0xFFFFFFFF == 0x80070005:  # E_ACCESSDENIED: already set
+                log.info("Windows DPI awareness already set")
+                return
+        except Exception:
+            pass
+        try:
+            if ctypes.windll.user32.SetProcessDPIAware():
+                log.info("Windows DPI awareness enabled: system")
+        except Exception:
+            pass
+    except Exception as e:
+        log.warning(f"Windows DPI awareness setup skipped: {e}")
+
+_enable_windows_dpi_awareness()
 log.info("Importing tkinter...")
 import tkinter as tk
 from tkinter import messagebox, filedialog, ttk
 log.info("tkinter imported OK")
-import json, os, re, threading, sys, subprocess, tempfile, copy
+import json, re, threading, subprocess, tempfile, copy
+
+def _apply_tk_dpi_scaling(root):
+    """Align Tk point-size scaling with the current monitor DPI."""
+    if sys.platform != "win32":
+        return
+    try:
+        dpi = root.winfo_fpixels("1i")
+        if dpi > 0:
+            root.tk.call("tk", "scaling", dpi / 72.0)
+            log.info(f"Tk scaling set from monitor DPI: {dpi:.1f}")
+    except Exception as e:
+        log.warning(f"Tk DPI scaling setup skipped: {e}")
 
 _cfg_load = cfg_load
 _cfg_save = cfg_save
@@ -12598,6 +12637,7 @@ def show_splash(callback):
 
     log.info("Splash: creating Tk root...")
     root = tk.Tk()
+    _apply_tk_dpi_scaling(root)
     log.info("Splash: Tk root created")
     root.overrideredirect(True)          # borderless
     root.attributes("-topmost", True)
@@ -12843,6 +12883,7 @@ class App(tk.Tk):
         global _app_ref
         log.info("App.__init__: calling tk.Tk.__init__...")
         super().__init__()
+        _apply_tk_dpi_scaling(self)
         log.info("App.__init__: tk.Tk initialized")
         _app_ref = self
         self.title("HOI4 Content Maker  —  no tree  [Wiki Accurate v2]")
