@@ -70,9 +70,7 @@ from hoi4cm.core import (
     Focus,
     EFFECT_DEFS, EFFECT_CATS, effects_in_cat,
     MODIFIER_DEFS, MODIFIER_CATS, modifiers_in_cat,
-    MD_BUILDING_COSTS, MD_RESOURCE_COST_PER_UNIT,
-    md_building_cost_hint, md_resource_cost_hint,
-    dict_to_raw, normalize_effect_fields, append_scripted_loc,
+    dict_to_raw, append_scripted_loc,
     show_splash,
 )
 log_startup()
@@ -203,63 +201,6 @@ BOX   = 52     # focus card rendered size
 
 # ── Icon list ─────────────────────────────────────────────────────
 ICONS = ["⚔","🛡","🏭","🌾","💰","🔬","⚙","🗺","✊","🏛","★","⚡","🐉","🎖","📜","🔔","🌊","🔥","❄","☠"]
-
-
-
-# ── MD Building & Resource Cost Reference ────────────────────────
-# Costs in Billions ($). Building slot minimum: $1.00/slot (already factored in below for slotted buildings).
-# Resources: 8 resources = 1 Civilian Factory equivalent = $0.938B per resource unit.
-MD_BUILDING_COSTS = {
-    # State Buildings (consume a building slot — slot cost included)
-    "industrial_complex":   {"label": "Civilian Industry",                    "cost": 7.50,  "slot": True,  "scope": "state"},
-    "arms_factory":         {"label": "Military Industry",                    "cost": 7.50,  "slot": True,  "scope": "state"},
-    "dockyard":             {"label": "Dockyard",                             "cost": 7.50,  "slot": True,  "scope": "state"},
-    "offices":              {"label": "Offices",                              "cost": 12.00, "slot": True,  "scope": "state"},
-    "synthetic_refinery":   {"label": "Renewable Energy Infrastructure",      "cost": 8.50,  "slot": True,  "scope": "state"},
-    "infrastructure":       {"label": "Infrastructure",                       "cost": 3.50,  "slot": False, "scope": "state"},
-    "air_base":             {"label": "Air Base",                             "cost": 2.50,  "slot": False, "scope": "state"},
-    "anti_air_building":    {"label": "Sam Site",                             "cost": 3.25,  "slot": False, "scope": "state"},
-    "fuel_silo":            {"label": "Fuel Silo",                            "cost": 3.00,  "slot": False, "scope": "state"},
-    "radar_station":        {"label": "Radar Station",                        "cost": 1.75,  "slot": False, "scope": "state"},
-    "internet_station":     {"label": "Network Infrastructure",               "cost": 3.00,  "slot": False, "scope": "state"},
-    "rocket_site":          {"label": "Missile Launch Site",                  "cost": 3.00,  "slot": False, "scope": "state"},
-    "nuclear_reactor":      {"label": "Nuclear Reactor",                      "cost": 9.00,  "slot": False, "scope": "state"},
-    "stronghold_network":   {"label": "State-Wide Defensive Network",         "cost": 8.00,  "slot": False, "scope": "state"},
-    "fossil_powerplant":    {"label": "Fossil Fuel Powerplant",               "cost": 2.25,  "slot": False, "scope": "state"},
-    # Commercialized Agriculture District
-    "agriculture_district": {"label": "Commercialized Agriculture District",  "cost": 3.75,  "slot": True,  "scope": "state"},
-    # Provincial Buildings (per level)
-    "naval_facility":       {"label": "Naval Engineering Facility",           "cost": 15.00, "slot": False, "scope": "province"},
-    "land_facility":        {"label": "Land Warfare Facility",                "cost": 15.00, "slot": False, "scope": "province"},
-    "air_facility":         {"label": "Aerodynamics & Avionics Facility",     "cost": 15.00, "slot": False, "scope": "province"},
-    "nuclear_facility":     {"label": "Civilian R&D Facility",                "cost": 15.00, "slot": False, "scope": "province"},
-    "naval_base":           {"label": "Naval Base",                           "cost": 0.50,  "slot": False, "scope": "province", "note": "per level"},
-    "bunker":               {"label": "Land Fort",                            "cost": 0.50,  "slot": False, "scope": "province", "note": "per level"},
-    "coastal_bunker":       {"label": "Coastal Bunker",                       "cost": 0.50,  "slot": False, "scope": "province", "note": "per level"},
-    "supply_node":          {"label": "Supply Hub",                           "cost": 2.50,  "slot": False, "scope": "province"},
-    "rail_way":             {"label": "Railways",                             "cost": 0.01,  "slot": False, "scope": "province", "note": "per province"},
-}
-
-# Resource cost: 8 resources = 1 CivFac = ~$7.50B  →  1 resource unit = $0.938B
-MD_RESOURCE_COST_PER_UNIT = 0.938  # billion per 1 resource added via add_resource
-
-def md_building_cost_hint(building_type, levels=1):
-    """Return a cost hint string for a given building type and level count."""
-    info = MD_BUILDING_COSTS.get(building_type)
-    if not info: return ""
-    total = info["cost"] * levels
-    note  = f"  ({info['note']})" if info.get("note") else ""
-    slot  = "  [uses building slot]" if info.get("slot") else ""
-    return f"≈ ${total:.2f}B{note}{slot}  →  set treasury_change = -{total:.2f}"
-
-def md_resource_cost_hint(amount):
-    """Return a cost hint for adding N units of a resource."""
-    try:
-        cost = round(float(amount) * MD_RESOURCE_COST_PER_UNIT, 3)
-        return f"≈ ${cost:.3f}B per resource unit  →  set treasury_change = -{cost:.3f}"
-    except (TypeError, ValueError):
-        return ""
-
 
 
 
