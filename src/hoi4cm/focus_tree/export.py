@@ -11,6 +11,21 @@ import re
 GFX_DEFAULT = "GFX_goal_generic_political_pressure"
 
 
+def _emit_block(out, key, text, indent):
+    """Append ``{indent}key = { ... }``, one stripped non-blank line per row.
+
+    No-op when ``text`` is blank. Inner lines are indented one tab past ``indent``.
+    """
+    text = text.strip()
+    if not text:
+        return
+    out.append(f"{indent}{key} = {{")
+    for ln in text.splitlines():
+        if ln.strip():
+            out.append(f"{indent}\t{ln.strip()}")
+    out.append(f"{indent}}}")
+
+
 def export_focus_tree(focuses_in_tree, info, *, focus_lookup, effect_renderer):
     """Return the full script text for one extra (shared/joint) tree.
 
@@ -109,30 +124,11 @@ def export_focus_tree(focuses_in_tree, info, *, focus_lookup, effect_renderer):
                 out.append(f"{t1}}}")
         # will_lead_to_war_with / complete_tooltip / select_effect — preserve.
         wltww = getattr(f, "will_lead_to_war_with", "").strip()
-        if wltww:
-            if wltww.startswith("{") and wltww.endswith("}"):
-                inner = wltww[1:-1].strip()
-            else:
-                inner = wltww
-            out.append(f"{t1}will_lead_to_war_with = {{")
-            for ln in inner.splitlines():
-                if ln.strip():
-                    out.append(f"{t2}{ln.strip()}")
-            out.append(f"{t1}}}")
-        ctip = getattr(f, "complete_tooltip", "").strip()
-        if ctip:
-            out.append(f"{t1}complete_tooltip = {{")
-            for ln in ctip.splitlines():
-                if ln.strip():
-                    out.append(f"{t2}{ln.strip()}")
-            out.append(f"{t1}}}")
-        sel_eff = getattr(f, "select_effect", "").strip()
-        if sel_eff:
-            out.append(f"{t1}select_effect = {{")
-            for ln in sel_eff.splitlines():
-                if ln.strip():
-                    out.append(f"{t2}{ln.strip()}")
-            out.append(f"{t1}}}")
+        if wltww.startswith("{") and wltww.endswith("}"):
+            wltww = wltww[1:-1].strip()
+        _emit_block(out, "will_lead_to_war_with", wltww, t1)
+        _emit_block(out, "complete_tooltip", getattr(f, "complete_tooltip", ""), t1)
+        _emit_block(out, "select_effect", getattr(f, "select_effect", ""), t1)
         out.append("")
         out.append(f"{t1}completion_reward = {{")
         if f.effects:
@@ -152,13 +148,7 @@ def export_focus_tree(focuses_in_tree, info, *, focus_lookup, effect_renderer):
             )
             out.append(f"{t2}# TODO: add effects")
         out.append(f"{t1}}}")
-        bp_eff = getattr(f, "bypass_effect", "").strip()
-        if bp_eff:
-            out.append(f"{t1}bypass_effect = {{")
-            for ln in bp_eff.splitlines():
-                if ln.strip():
-                    out.append(f"{t2}{ln.strip()}")
-            out.append(f"{t1}}}")
+        _emit_block(out, "bypass_effect", getattr(f, "bypass_effect", ""), t1)
         out.append("")
         out.append(f"{t1}ai_will_do = {{")
         raw_ai = getattr(f, "ai_will_do_raw", "").strip()

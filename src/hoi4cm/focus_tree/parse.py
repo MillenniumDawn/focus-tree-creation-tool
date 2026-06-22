@@ -55,31 +55,39 @@ def strip_comments(s):
     )
 
 
+def match_brace(s, open_idx):
+    """Return the index of the ``}`` matching the ``{`` at ``open_idx``.
+
+    Returns ``len(s)`` when the brace is unbalanced (no matching close).
+    """
+    depth = 0
+    i = open_idx
+    while i < len(s):
+        if s[i] == "{":
+            depth += 1
+        elif s[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return i
+        i += 1
+    return i
+
+
 def extract_raw_block(source, key):
     """Return the dedented inner text of ``key = { ... }`` in ``source``."""
     m = re.search(key + r"\s*=\s*\{", source)
     if not m:
         return ""
     start = m.end() - 1
-    depth = 0
-    i = start
-    while i < len(source):
-        if source[i] == "{":
-            depth += 1
-        elif source[i] == "}":
-            depth -= 1
-            if depth == 0:
-                inner = source[start + 1 : i]
-                lines = inner.split("\n")
-                non_empty = [ln for ln in lines if ln.strip()]
-                if non_empty:
-                    min_indent = min(len(ln) - len(ln.lstrip("\t")) for ln in non_empty)
-                    lines = [
-                        ln[min_indent:] if len(ln) >= min_indent else ln for ln in lines
-                    ]
-                return "\n".join(lines).strip("\n")
-        i += 1
-    return ""
+    end = match_brace(source, start)
+    if end >= len(source):
+        return ""
+    lines = source[start + 1 : end].split("\n")
+    non_empty = [ln for ln in lines if ln.strip()]
+    if non_empty:
+        min_indent = min(len(ln) - len(ln.lstrip("\t")) for ln in non_empty)
+        lines = [ln[min_indent:] if len(ln) >= min_indent else ln for ln in lines]
+    return "\n".join(lines).strip("\n")
 
 
 def tokenize(s):
@@ -196,17 +204,7 @@ def _extract_raw_rewards(txt):
     raw_rewards = {}
     for fm in re.finditer(r"\b(?:shared_focus|joint_focus|focus)\s*=\s*\{", txt):
         fs = fm.end() - 1
-        depth = 0
-        fi = fs
-        while fi < len(txt):
-            if txt[fi] == "{":
-                depth += 1
-            elif txt[fi] == "}":
-                depth -= 1
-                if depth == 0:
-                    break
-            fi += 1
-        fblock = txt[fs + 1 : fi]
+        fblock = txt[fs + 1 : match_brace(txt, fs)]
         id_m = re.search(r"\bid\s*=\s*(\S+)", fblock)
         if not id_m:
             continue
@@ -222,17 +220,7 @@ def _extract_raw_rewards(txt):
         offsets = []
         for om in re.finditer(r"\boffset\s*=\s*\{", fblock):
             os_ = om.end() - 1
-            od = 0
-            oi = os_
-            while oi < len(fblock):
-                if fblock[oi] == "{":
-                    od += 1
-                elif fblock[oi] == "}":
-                    od -= 1
-                    if od == 0:
-                        break
-                oi += 1
-            oinner = fblock[os_ + 1 : oi]
+            oinner = fblock[os_ + 1 : match_brace(fblock, os_)]
             oxm = re.search(r"\bx\s*=\s*(-?\d+)", oinner)
             oym = re.search(r"\by\s*=\s*(-?\d+)", oinner)
             ox = int(oxm.group(1)) if oxm else 0
