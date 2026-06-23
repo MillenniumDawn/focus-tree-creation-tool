@@ -12,6 +12,13 @@ from hoi4cm.data import (
     md_resource_cost_hint,
     modifiers_in_cat,
 )
+from hoi4cm.focus_tree import (
+    EmptyFocusTreeError,
+    ParsedFocusTree,
+    build_focuses,
+    export_focus_tree,
+    parse_focus_tree,
+)
 from hoi4cm.models import Focus
 from hoi4cm.script import (
     append_scripted_loc,
@@ -48,6 +55,11 @@ __all__ = [
     "default_hoi4_mod_dir",
     "read_file",
     "Focus",
+    "parse_focus_tree",
+    "ParsedFocusTree",
+    "EmptyFocusTreeError",
+    "build_focuses",
+    "export_focus_tree",
     "dict_to_raw",
     "normalize_effect_fields",
     "append_scripted_loc",

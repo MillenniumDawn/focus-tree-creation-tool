@@ -68,6 +68,7 @@ from hoi4cm.core import (
     get_logger, cfg_load, cfg_save, CONFIG_PATH, read_file, default_hoi4_mod_dir,
     add_error, get_error_entries, set_error_callback, install_excepthook,
     Focus,
+    parse_focus_tree, EmptyFocusTreeError, build_focuses, export_focus_tree,
     EFFECT_DEFS, EFFECT_CATS, effects_in_cat,
     MODIFIER_DEFS, MODIFIER_CATS, modifiers_in_cat,
     dict_to_raw, append_scripted_loc,
@@ -14733,6 +14734,46 @@ class App(tk.Tk):
                           col, f"Continuous\nFocus Position\n[{badge}]")
 
 
+    def _install_extra_tree(self, raw, path, tree_type):
+        """Parse raw focus-tree text, register the tree, and build its focuses.
+
+        Shared core behind both the shared/joint loaders. Returns
+        (focus_count, tree_id). Raises EmptyFocusTreeError when the file holds
+        no focus data."""
+        parsed = parse_focus_tree(raw, path)
+        tree_idx = len(self._extra_trees) + 1
+        tree_info = {
+            "type": tree_type,
+            "file_path": path,
+            "tree_id": parsed.tree_id,
+            "cfp_x": parsed.cfp_x,
+            "cfp_y": parsed.cfp_y,
+            "shared_focuses": parsed.shared_refs,
+            "joint_focuses":  parsed.joint_refs,
+            "country_tag": parsed.country_tag,
+            "had_wrapper": parsed.had_wrapper,
+            "focus_ids": set(),
+        }
+        self._extra_trees.append(tree_info)
+        if tree_type == "shared" and parsed.tree_id not in self._shared_focuses:
+            self._shared_focuses.append(parsed.tree_id)
+        elif tree_type == "joint" and parsed.tree_id not in self._joint_focuses:
+            self._joint_focuses.append(parsed.tree_id)
+        self._refresh_tree_meta_panel()
+        # Snapshot existing focuses BEFORE inserting the new ones so cross-tree
+        # position/prereq resolution sees only already-loaded trees.
+        new_focuses = build_focuses(
+            parsed, tree_idx,
+            country_tag=getattr(self, "_tree_country_tag", ""),
+            existing_focuses=list(self.focuses.values()))
+        for f in new_focuses:
+            self.focuses[f.id] = f
+            tree_info["focus_ids"].add(f.id)
+        self._refresh_loaded_trees_panel()
+        self._redraw()
+        self._fit_all()
+        return len(new_focuses), parsed.tree_id
+
     def _load_extra_tree(self, tree_type):
         """Load a shared or joint focus tree file onto the canvas alongside the main tree."""
         init_dir = None
@@ -14751,371 +14792,18 @@ class App(tk.Tk):
                 messagebox.showwarning("Already Loaded",
                     f"This file is already loaded:\n{os.path.basename(path)}")
                 return
-
         try:
             with open(path, "r", encoding="utf-8-sig", errors="replace") as fp:
                 raw = fp.read()
         except Exception as e:
             messagebox.showerror("Load Error", f"Could not read file:\n{e}"); return
-
-        if raw.startswith("\ufeff"): raw = raw[1:]
-
-        def _strip_comments(s):
-            out = []
-            for line in s.splitlines():
-                idx = line.find("#")
-                if idx >= 0: line = line[:idx]
-                out.append(line)
-            return "\n".join(out)
-
-        txt = _strip_comments(raw)
-        import re as _re2
-        sf_refs = _re2.findall(r'\bshared_focus\s*=\s*(\S+)', txt)
-        jf_refs = _re2.findall(r'\bjoint_focus\s*=\s*(\S+)', txt)
-
-        def _extract_raw_block(source, key):
-            import re
-            m = re.search(key + r"\s*=\s*\{", source)
-            if not m: return ""
-            start = m.end() - 1; depth = 0; i = start
-            while i < len(source):
-                if source[i] == '{': depth += 1
-                elif source[i] == '}':
-                    depth -= 1
-                    if depth == 0:
-                        inner = source[start + 1:i]
-                        lines = inner.split('\n')
-                        non_empty = [l for l in lines if l.strip()]
-                        if non_empty:
-                            min_indent = min(len(l) - len(l.lstrip('\t')) for l in non_empty)
-                            lines = [l[min_indent:] if len(l) >= min_indent else l for l in lines]
-                        return '\n'.join(lines).strip('\n')
-                i += 1
-            return ""
-
-        import re as _re
-        _raw_rewards = {}
-        # Match shared_focus, joint_focus, and plain focus blocks
-        for _fm in _re.finditer(r'\b(?:shared_focus|joint_focus|focus)\s*=\s*\{', txt):
-            _fs = _fm.end() - 1; _d = 0; _fi = _fs
-            while _fi < len(txt):
-                if txt[_fi] == '{': _d += 1
-                elif txt[_fi] == '}':
-                    _d -= 1
-                    if _d == 0: break
-                _fi += 1
-            _fblock = txt[_fs + 1:_fi]
-            _id_m = _re.search(r'\bid\s*=\s*(\S+)', _fblock)
-            if not _id_m: continue
-            _fid = _id_m.group(1)
-            _rr = _extract_raw_block(_fblock, 'completion_reward')
-            if _rr: _raw_rewards[_fid] = _rr
-            for _ck in ('available', 'bypass', 'cancel',
-                        'will_lead_to_war_with', 'complete_tooltip',
-                        'select_effect', 'bypass_effect'):
-                _cv = _extract_raw_block(_fblock, _ck)
-                if _cv: _raw_rewards[(_fid, _ck)] = _cv
-            # Extract all offset = { x = N y = M trigger = { ... } } blocks as structured data
-            _offsets = []
-            for _om in _re.finditer(r'\boffset\s*=\s*\{', _fblock):
-                _os = _om.end() - 1; _od = 0; _oi = _os
-                while _oi < len(_fblock):
-                    if _fblock[_oi] == '{': _od += 1
-                    elif _fblock[_oi] == '}':
-                        _od -= 1
-                        if _od == 0: break
-                    _oi += 1
-                _oinner = _fblock[_os + 1:_oi]
-                _oxm = _re.search(r'\bx\s*=\s*(-?\d+)', _oinner)
-                _oym = _re.search(r'\by\s*=\s*(-?\d+)', _oinner)
-                _ox = int(_oxm.group(1)) if _oxm else 0
-                _oy = int(_oym.group(1)) if _oym else 0
-                _otrig = _extract_raw_block(_oinner, 'trigger')
-                _offsets.append({"x": _ox, "y": _oy, "trigger": _otrig})
-            if _offsets: _raw_rewards[(_fid, '_offsets')] = _offsets
-            # Preserve joint_trigger as extra raw text (offset now stored separately)
-            _jt = _extract_raw_block(_fblock, 'joint_trigger')
-            if _jt: _raw_rewards[(_fid, '_joint_extra')] = f"joint_trigger = {{\n{_jt}\n}}"
-
-        def _tokenize(s):
-            tokens = []; i = 0
-            while i < len(s):
-                c = s[i]
-                if c in " \t\n\r": i += 1; continue
-                if c == "{": tokens.append("{"); i += 1; continue
-                if c == "}": tokens.append("}"); i += 1; continue
-                if c == "=": tokens.append("="); i += 1; continue
-                if c == '"':
-                    j = i + 1
-                    while j < len(s) and s[j] != '"': j += 1
-                    tokens.append(s[i + 1:j]); i = j + 1; continue
-                j = i
-                while j < len(s) and s[j] not in " \t\n\r{}=\"": j += 1
-                if j > i: tokens.append(s[i:j])
-                i = j
-            return tokens
-
-        def _parse_blk(tokens, pos):
-            result = {}; pos += 1
-            while pos < len(tokens) and tokens[pos] != "}":
-                key = tokens[pos]; pos += 1
-                if pos >= len(tokens): break
-                if tokens[pos] == "=":
-                    pos += 1
-                    if pos >= len(tokens): break
-                    if tokens[pos] == "{":
-                        val, pos = _parse_blk(tokens, pos)
-                    else:
-                        val = tokens[pos]; pos += 1
-                    if key in result:
-                        existing = result[key]
-                        if not isinstance(existing, list): result[key] = [existing]
-                        result[key].append(val)
-                    else:
-                        result[key] = val
-                else:
-                    if key not in ("", "=", "{", "}"):
-                        result.setdefault("_values", []).append(key)
-            return result, pos + 1
-
-        tokens = _tokenize(txt)
-        focuses_data = []
-        tree_name = "imported_tree"
-        cfp_x = cfp_y = None
-        country_tag = "TAG"
-        i = 0
-        while i < len(tokens):
-            if tokens[i] == "focus_tree" and i + 1 < len(tokens) and tokens[i + 1] == "=":
-                block, i = _parse_blk(tokens, i + 2)
-                tree_name = block.get("id", "imported_tree")
-                _cfp_blk = block.get("continuous_focus_position", {})
-                if isinstance(_cfp_blk, dict):
-                    try: cfp_x = int(_cfp_blk.get("x", ""))
-                    except Exception: cfp_x = None
-                    try: cfp_y = int(_cfp_blk.get("y", ""))
-                    except Exception: cfp_y = None
-                _country_blk = block.get("country", {})
-                if isinstance(_country_blk, dict):
-                    _mod_blk = _country_blk.get("modifier", {})
-                    if isinstance(_mod_blk, dict):
-                        _tag = (_mod_blk.get("original_tag") or _mod_blk.get("tag") or "").upper().strip()
-                        if _tag: country_tag = _tag
-                raw_focuses = block.get("focus", [])
-                if isinstance(raw_focuses, dict): raw_focuses = [raw_focuses]
-                for rf in raw_focuses:
-                    if isinstance(rf, dict): focuses_data.append(rf)
-            else:
-                i += 1
-
-        had_wrapper = bool(focuses_data)  # True if file had a focus_tree = { } wrapper
-
-        # Fallback: handle files without a focus_tree = { } wrapper.
-        # Handles shared_focus and joint_focus top-level blocks.
-        if not focuses_data:
-            i = 0
-            while i < len(tokens):
-                if tokens[i] in ("focus", "shared_focus", "joint_focus") and \
-                        i + 1 < len(tokens) and tokens[i + 1] == "=" and \
-                        i + 2 < len(tokens) and tokens[i + 2] == "{":
-                    blk, i = _parse_blk(tokens, i + 2)
-                    if isinstance(blk, dict) and "id" in blk:
-                        focuses_data.append(blk)
-                else:
-                    i += 1
-            if focuses_data and tree_name == "imported_tree":
-                tree_name = os.path.splitext(os.path.basename(path))[0]
-
-        if not focuses_data:
-            import re as _re_diag
-            _found = [kw for kw in ("focus_tree", "focus", "shared_focus", "joint_focus")
-                      if _re_diag.search(rf'\b{kw}\s*=\s*\{{', txt)]
-            _detail = (f"Blocks found: {', '.join(_found)} — none had valid focus IDs."
-                       if _found else "No recognized block types found.")
-            messagebox.showwarning("Load Tree",
-                f"No focus data found in:\n{os.path.basename(path)}\n\n{_detail}")
-            return
-
-        # Assign tree_idx for this extra tree
-        tree_idx = len(self._extra_trees) + 1
-        tree_info = {
-            "type": tree_type,
-            "file_path": path,
-            "tree_id": tree_name,
-            "cfp_x": cfp_x,
-            "cfp_y": cfp_y,
-            "shared_focuses": sf_refs,
-            "joint_focuses":  jf_refs,
-            "country_tag": country_tag,
-            "had_wrapper": had_wrapper,
-            "focus_ids": set(),
-        }
-        self._extra_trees.append(tree_info)
-
-        # Auto-register tree_id in main tree's shared/joint reference list
-        if tree_type == "shared" and tree_name not in self._shared_focuses:
-            self._shared_focuses.append(tree_name)
-        elif tree_type == "joint" and tree_name not in self._joint_focuses:
-            self._joint_focuses.append(tree_name)
-        self._refresh_tree_meta_panel()
-
-        def _blk_to_str(block, depth=1):
-            """Recursively convert a parsed HOI4 block dict to script text.
-            Handles nested dicts, repeated keys (lists), and bools → yes/no."""
-            if not block: return ""
-            if isinstance(block, bool): return "yes" if block else "no"
-            if isinstance(block, str): return block.strip()
-            if not isinstance(block, dict): return str(block)
-            T = "\t" * depth
-            lines = []
-            for k, v in block.items():
-                if str(k).startswith("_"): continue
-                if isinstance(v, bool):
-                    lines.append(f"{T}{k} = {'yes' if v else 'no'}")
-                elif isinstance(v, list):
-                    for item in v:
-                        if isinstance(item, dict):
-                            inner = _blk_to_str(item, depth + 1)
-                            lines.append(f"{T}{k} = {{\n{inner}\n{T}}}")
-                        elif isinstance(item, bool):
-                            lines.append(f"{T}{k} = {'yes' if item else 'no'}")
-                        else:
-                            lines.append(f"{T}{k} = {item}")
-                elif isinstance(v, dict):
-                    inner = _blk_to_str(v, depth + 1)
-                    lines.append(f"{T}{k} = {{\n{inner}\n{T}}}")
-                else:
-                    lines.append(f"{T}{k} = {v}")
-            return "\n".join(lines)
-
-        # Pass 1: create Focus objects
-        name_to_id = {}
-        raw_pos = {}
-        for rf in focuses_data:
-            fid_str = rf.get("id", "")
-            if not fid_str: continue
-            try: gx = int(rf.get("x", 0)); gy = int(rf.get("y", 0))
-            except Exception: gx = 0; gy = 0
-            rel_id = rf.get("relative_position_id", None)
-            raw_pos[fid_str] = (gx, gy, rel_id)
-            f = Focus(gx, gy)
-            f._raw_gx = gx; f._raw_gy = gy  # original file coords, preserved for export
-            f.tree_idx = tree_idx
-            f.name = fid_str
-            if rel_id:
-                f.relative_position_id = rel_id
-                f._rel_dx = gx
-                f._rel_dy = gy
-            f.gfx = rf.get("icon", "GFX_goal_generic_political_pressure")
-            try:
-                _c = float(rf.get("cost", "10"))
-                f.cost = _c if _c != int(_c) else int(_c)
-            except Exception: f.cost = 10
-            aiblock = rf.get("ai_will_do", {})
-            if isinstance(aiblock, dict):
-                try: f.ai_will_do = int(float(aiblock.get("factor", aiblock.get("base", 1))))
-                except Exception: f.ai_will_do = 1
-                f.ai_will_do_raw = dict_to_raw(aiblock)
-            else:
-                try: f.ai_will_do = int(float(aiblock))
-                except Exception: f.ai_will_do = 1
-                f.ai_will_do_raw = ""
-            f.cancel_if_invalid        = rf.get("cancel_if_invalid", "yes") == "yes"
-            f.continue_if_invalid      = rf.get("continue_if_invalid", "no") == "yes"
-            f.available_if_capitulated = rf.get("available_if_capitulated", "no") == "yes"
-            sf = rf.get("search_filters", "")
-            if isinstance(sf, dict):
-                sf = " ".join(str(v) for v in sf.get("_values", []) if not str(v).startswith("_"))
-            elif isinstance(sf, list): sf = " ".join(str(v) for v in sf)
-            f.search_filters = str(sf).strip("{}").strip() if sf else "FOCUS_FILTER_POLITICAL"
-            f.available_cond = _raw_rewards.get((fid_str, 'available'), _blk_to_str(rf.get("available", {})))
-            f.bypass_cond    = _raw_rewards.get((fid_str, 'bypass'),    _blk_to_str(rf.get("bypass", {})))
-            f.cancel_cond    = _raw_rewards.get((fid_str, 'cancel'),    _blk_to_str(rf.get("cancel", {})))
-            f.will_lead_to_war_with = _raw_rewards.get((fid_str, 'will_lead_to_war_with'),
-                                            _blk_to_str(rf.get("will_lead_to_war_with", {})))
-            f.complete_tooltip      = _raw_rewards.get((fid_str, 'complete_tooltip'),
-                                            _blk_to_str(rf.get("complete_tooltip", {})))
-            f.select_effect         = _raw_rewards.get((fid_str, 'select_effect'),
-                                            _blk_to_str(rf.get("select_effect", {})))
-            f.bypass_effect         = _raw_rewards.get((fid_str, 'bypass_effect'),
-                                            _blk_to_str(rf.get("bypass_effect", {})))
-            f._joint_extra   = _raw_rewards.get((fid_str, '_joint_extra'), "")
-            f.offsets        = _raw_rewards.get((fid_str, '_offsets'), [])
-            raw_rw = _raw_rewards.get(fid_str, "")
-            if raw_rw:
-                f.effects = [{"type": "_raw_block", "fields": {"raw": raw_rw}}]
-            else:
-                f.effects = []
-            self.focuses[f.id] = f
-            name_to_id[fid_str] = f.id
-            tree_info["focus_ids"].add(f.id)
-
-        # Apply country-tag-matching offsets to raw_pos BEFORE resolution so that
-        # all relative-positioned children naturally inherit the shift.
-        _active_tag = getattr(self, '_tree_country_tag', '').upper().strip()
-        if _active_tag:
-            for _fid_s in list(raw_pos.keys()):
-                for _off in _raw_rewards.get((_fid_s, '_offsets'), []):
-                    _trig = _off.get('trigger', '')
-                    if _re.search(r'\boriginal_tag\s*=\s*' + _re.escape(_active_tag) + r'\b', _trig):
-                        _rx, _ry, _rel = raw_pos[_fid_s]
-                        raw_pos[_fid_s] = (_rx + _off['x'], _ry + _off['y'], _rel)
-                        break  # apply only the first matching offset per focus
-
-        # Resolve relative positions — looks within this tree first, then cross-tree
-        def _resolve_abs(name, visited=None):
-            if visited is None: visited = set()
-            if name not in raw_pos: return (0, 0)
-            if name in visited: return raw_pos[name][:2]
-            visited.add(name)
-            rx, ry, rel = raw_pos[name]
-            if rel is None: return (rx, ry)
-            if rel in raw_pos:
-                bx, by = _resolve_abs(rel, visited)
-                return (bx + rx, by + ry)
-            # Cross-tree: anchor is in a different loaded tree (e.g. main tree focus)
-            for _cf in self.focuses.values():
-                if _cf.name == rel:
-                    return (_cf.x + rx, _cf.y + ry)
-            return (rx, ry)
-
-        for fid_str, fid in name_to_id.items():
-            ax, ay = _resolve_abs(fid_str)
-            self.focuses[fid].x = ax
-            self.focuses[fid].y = ay
-
-        # Pass 2: link prerequisites and mutex (cross-tree lookups included)
-        all_name_to_id = {f.name: f.id for f in self.focuses.values()}
-        for rf in focuses_data:
-            fid_str = rf.get("id", "")
-            if fid_str not in name_to_id: continue
-            fid = name_to_id[fid_str]
-            f = self.focuses[fid]
-            prereqs = rf.get("prerequisite", [])
-            if isinstance(prereqs, dict): prereqs = [prereqs]
-            for pblock in prereqs:
-                if not isinstance(pblock, dict): continue
-                group_fids = []
-                pf = pblock.get("focus", [])
-                if isinstance(pf, str): pf = [pf]
-                for pname in pf:
-                    if pname in all_name_to_id:
-                        group_fids.append(all_name_to_id[pname])
-                if group_fids: f.prereqs.append(group_fids)
-            mutex = rf.get("mutually_exclusive", [])
-            if isinstance(mutex, dict): mutex = [mutex]
-            for mblock in mutex:
-                if not isinstance(mblock, dict): continue
-                mf = mblock.get("focus", "")
-                if isinstance(mf, str) and mf in all_name_to_id:
-                    mid = all_name_to_id[mf]
-                    if mid not in f.mutex: f.mutex.append(mid)
-
-        self._refresh_loaded_trees_panel()
-        self._redraw()
-        self._fit_all()
+        try:
+            count, tree_id = self._install_extra_tree(raw, path, tree_type)
+        except EmptyFocusTreeError as e:
+            messagebox.showwarning("Load Tree", str(e)); return
         messagebox.showinfo("Loaded",
-            f"Loaded {len(focuses_data)} focuses from {tree_type} tree:\n"
-            f"{os.path.basename(path)}\n\nTree ID: {tree_name}")
+            f"Loaded {count} focuses from {tree_type} tree:\n"
+            f"{os.path.basename(path)}\n\nTree ID: {tree_id}")
 
     def _unload_extra_tree(self, tree_idx):
         """Remove all focuses belonging to an extra tree from the canvas."""
@@ -15191,175 +14879,9 @@ class App(tk.Tk):
                            if getattr(f, "tree_idx", 0) == tree_idx]
         if not focuses_in_tree:
             messagebox.showwarning("Export", "No focuses in this tree."); return
-        tid = re.sub(r"[^A-Za-z0-9_]", "_", info["tree_id"].strip()) or "TAG_focus_tree"
-        country_tag = info.get("country_tag", "TAG")
-        cfp_x = info.get("cfp_x"); cfp_y = info.get("cfp_y")
-        is_joint = info.get("type") == "joint"
-
-        def _write_focus_body(f, out, indent, strip_effect_tab=False):
-            """Write the shared body of a focus/joint_focus block (fields after id/icon/x/y/cost).
-
-            strip_effect_tab: _render_effect outputs with 3-tab indent; set True for joint trees
-            where completion_reward is only 1 level deep (so effects need 2-tab indent).
-            """
-            T = indent; T2 = indent + "\t"
-            # Use original file coords (not offset-applied canvas coords) for export
-            gx = getattr(f, '_raw_gx', f.x); gy = getattr(f, '_raw_gy', f.y)
-            rel_id = getattr(f, "relative_position_id", None)
-            if rel_id and any(foc.name == rel_id for foc in self.focuses.values()):
-                dx = getattr(f, "_rel_dx", None); dy = getattr(f, "_rel_dy", None)
-                if dx is None or dy is None:
-                    parent = next((foc for foc in self.focuses.values() if foc.name == rel_id), None)
-                    dx = gx - parent.x if parent else gx
-                    dy = gy - parent.y if parent else gy
-                out.append(f"{T}x = {dx}"); out.append(f"{T}y = {dy}")
-                out.append(f"{T}relative_position_id = {rel_id}")
-            else:
-                out.append(f"{T}x = {gx}"); out.append(f"{T}y = {gy}")
-            for _off in getattr(f, "offsets", []):
-                out.append(f"{T}offset = {{")
-                out.append(f"{T}\tx = {_off['x']}")
-                out.append(f"{T}\ty = {_off['y']}")
-                if _off.get("trigger", "").strip():
-                    out.append(f"{T}\ttrigger = {{")
-                    for _ln in _off["trigger"].strip().splitlines():
-                        out.append(f"{T}\t\t{_ln.strip()}")
-                    out.append(f"{T}\t}}")
-                out.append(f"{T}}}")
-            out.append(f"{T}cost = {f.cost}")
-            # Joint-specific preserved fields (joint_trigger only now — offset stored in f.offsets)
-            jextra = getattr(f, "_joint_extra", "").strip()
-            if jextra:
-                for ln in jextra.splitlines():
-                    out.append(f"{T}{ln}")
-            if f.prereqs:
-                for grp in f.prereqs:
-                    valid = [p for p in grp if p in self.focuses]
-                    if not valid: continue
-                    inner = " ".join(f"focus = {self.focuses[p].name}" for p in valid)
-                    out.append(f"{T}prerequisite = {{ {inner} }}")
-            if f.mutex:
-                for mid in f.mutex:
-                    if mid in self.focuses:
-                        out.append(f"{T}mutually_exclusive = {{ focus = {self.focuses[mid].name} }}")
-            sf = getattr(f, "search_filters", "").strip()
-            if sf: out.append(f"{T}search_filters = {{ {sf} }}")
-            for cond_key, cond_attr in [("available", "available_cond"), ("bypass", "bypass_cond"), ("cancel", "cancel_cond")]:
-                cond = getattr(f, cond_attr, "").strip()
-                if cond:
-                    out.append(f"{T}{cond_key} = {{")
-                    lines = cond.splitlines()
-                    non_empty = [l for l in lines if l.strip()]
-                    min_ind = min((len(l) - len(l.lstrip("\t"))) for l in non_empty) if non_empty else 0
-                    for ln in lines:
-                        stripped = ln[min_ind:] if len(ln) >= min_ind else ln.lstrip("\t")
-                        out.append(f"{T2}{stripped}")
-                    out.append(f"{T}}}")
-            # will_lead_to_war_with / complete_tooltip / select_effect — preserve from import
-            wltww = getattr(f, "will_lead_to_war_with", "").strip()
-            if wltww:
-                if wltww.startswith("{") and wltww.endswith("}"):
-                    inner = wltww[1:-1].strip()
-                else:
-                    inner = wltww
-                out.append(f"{T}will_lead_to_war_with = {{")
-                for ln in inner.splitlines():
-                    if ln.strip(): out.append(f"{T2}{ln.strip()}")
-                out.append(f"{T}}}")
-            ctip = getattr(f, "complete_tooltip", "").strip()
-            if ctip:
-                out.append(f"{T}complete_tooltip = {{")
-                for ln in ctip.splitlines():
-                    if ln.strip(): out.append(f"{T2}{ln.strip()}")
-                out.append(f"{T}}}")
-            sel_eff = getattr(f, "select_effect", "").strip()
-            if sel_eff:
-                out.append(f"{T}select_effect = {{")
-                for ln in sel_eff.splitlines():
-                    if ln.strip(): out.append(f"{T2}{ln.strip()}")
-                out.append(f"{T}}}")
-            out.append("")
-            out.append(f"{T}completion_reward = {{")
-            if f.effects:
-                for eff in f.effects:
-                    eff_text = self._render_effect(eff)
-                    if strip_effect_tab:
-                        # _render_effect uses \t\t\t base indent; joint needs \t\t
-                        eff_text = "\n".join(
-                            ln[1:] if ln.startswith("\t") else ln
-                            for ln in eff_text.splitlines()
-                        )
-                    out.append(eff_text)
-            else:
-                out.append(f"{T2}log = \"[GetDateText]: [This.GetName]: focus {f.name} executed\"")
-                out.append(f"{T2}# TODO: add effects")
-            out.append(f"{T}}}")
-            # bypass_effect — raw block (preserved from import)
-            bp_eff = getattr(f, "bypass_effect", "").strip()
-            if bp_eff:
-                out.append(f"{T}bypass_effect = {{")
-                for ln in bp_eff.splitlines():
-                    if ln.strip(): out.append(f"{T2}{ln.strip()}")
-                out.append(f"{T}}}")
-            out.append("")
-            out.append(f"{T}ai_will_do = {{")
-            raw_ai = getattr(f, "ai_will_do_raw", "").strip()
-            if raw_ai:
-                for ln in raw_ai.splitlines():
-                    out.append(f"{T2}{ln.strip()}")
-            else:
-                out.append(f"{T2}base = {f.ai_will_do}")
-            out.append(f"{T}}}")
-
-        out = []
-        had_wrapper = info.get("had_wrapper", False)
-        if is_joint or not had_wrapper:
-            # Bare blocks without a focus_tree wrapper:
-            #   joint trees              → joint_focus = { ... }
-            #   shared trees (no wrapper) → shared_focus = { ... }
-            block_kw = "joint_focus" if is_joint else "shared_focus"
-            for f in focuses_in_tree:
-                out.append(f"{block_kw} = {{")
-                out.append(f"\tid = {f.name}")
-                out.append(f"\ticon = {getattr(f, 'gfx', 'GFX_goal_generic_political_pressure')}")
-                _write_focus_body(f, out, "\t", strip_effect_tab=True)
-                out.append("}")
-                out.append("")
-        else:
-            # Shared tree with focus_tree = { } wrapper → focus = { } blocks inside.
-            out.append("focus_tree = {")
-            out.append(f"\tid = {tid}")
-            out.append("")
-            out.append("\tcountry = {")
-            out.append("\t\tfactor = 0")
-            out.append("\t\tmodifier = {")
-            out.append("\t\t\tadd = 20")
-            out.append(f"\t\t\toriginal_tag = {country_tag}")
-            out.append("\t\t}")
-            out.append("\t}")
-            out.append("")
-            for sf in info.get("shared_focuses", []):
-                out.append(f"\tshared_focus = {sf}")
-            for jf in info.get("joint_focuses", []):
-                out.append(f"\tjoint_focus = {jf}")
-            if info.get("shared_focuses") or info.get("joint_focuses"):
-                out.append("")
-            if cfp_x is None or cfp_y is None:
-                if focuses_in_tree:
-                    cfp_x = min(f.x for f in focuses_in_tree) * 100
-                    cfp_y = max(f.y for f in focuses_in_tree) * 100
-                else:
-                    cfp_x = cfp_y = 0
-            out.append(f"\tcontinuous_focus_position = {{ x = {cfp_x} y = {cfp_y} }}")
-            out.append("")
-            for f in focuses_in_tree:
-                out.append("\tfocus = {")
-                out.append(f"\t\tid = {f.name}")
-                out.append(f"\t\ticon = {getattr(f, 'gfx', 'GFX_goal_generic_political_pressure')}")
-                _write_focus_body(f, out, "\t\t")
-                out.append("\t}")
-                out.append("")
-            out.append("}")
+        out_text = export_focus_tree(
+            focuses_in_tree, info,
+            focus_lookup=self.focuses, effect_renderer=self._render_effect)
         # Save to source file or ask
         if os.path.isfile(info["file_path"]):
             path = info["file_path"]
@@ -15371,7 +14893,7 @@ class App(tk.Tk):
                 title=f"Save {info['type'].capitalize()} Tree .txt")
         if not path: return
         with open(path, "w", encoding="utf-8") as fp:
-            fp.write("\n".join(out))
+            fp.write(out_text)
         info["file_path"] = path
         messagebox.showinfo("Saved",
             f"✅  {info['type'].capitalize()} tree saved:\n{os.path.basename(path)}")
@@ -15564,324 +15086,10 @@ class App(tk.Tk):
         for et in self._extra_trees:
             if os.path.normpath(et["file_path"]) == os.path.normpath(path):
                 return  # silently skip already-loaded files
-
         with open(path, "r", encoding="utf-8-sig", errors="replace") as fp:
             raw = fp.read()
-        if raw.startswith("\ufeff"): raw = raw[1:]
-
-        def _strip_comments(s):
-            return "\n".join(
-                (line[:line.find("#")] if "#" in line else line)
-                for line in s.splitlines()
-            )
-
-        txt = _strip_comments(raw)
-        import re as _re2
-        sf_refs = _re2.findall(r'\bshared_focus\s*=\s*(\S+)', txt)
-        jf_refs = _re2.findall(r'\bjoint_focus\s*=\s*(\S+)', txt)
-
-        def _extract_raw_block(source, key):
-            import re
-            m = re.search(key + r"\s*=\s*\{", source)
-            if not m: return ""
-            start = m.end() - 1; depth = 0; i = start
-            while i < len(source):
-                if source[i] == '{': depth += 1
-                elif source[i] == '}':
-                    depth -= 1
-                    if depth == 0:
-                        inner = source[start + 1:i]
-                        lines = inner.split('\n')
-                        non_empty = [l for l in lines if l.strip()]
-                        if non_empty:
-                            min_indent = min(len(l) - len(l.lstrip('\t')) for l in non_empty)
-                            lines = [l[min_indent:] if len(l) >= min_indent else l for l in lines]
-                        return '\n'.join(lines).strip('\n')
-                i += 1
-            return ""
-
-        import re as _re
-        _raw_rewards = {}
-        for _fm in _re.finditer(r'\b(?:shared_focus|joint_focus|focus)\s*=\s*\{', txt):
-            _fs = _fm.end() - 1; _d = 0; _fi = _fs
-            while _fi < len(txt):
-                if txt[_fi] == '{': _d += 1
-                elif txt[_fi] == '}':
-                    _d -= 1
-                    if _d == 0: break
-                _fi += 1
-            _fblock = txt[_fs + 1:_fi]
-            _id_m = _re.search(r'\bid\s*=\s*(\S+)', _fblock)
-            if not _id_m: continue
-            _fid = _id_m.group(1)
-            _rr = _extract_raw_block(_fblock, 'completion_reward')
-            if _rr: _raw_rewards[_fid] = _rr
-            for _ck in ('available', 'bypass', 'cancel',
-                        'will_lead_to_war_with', 'complete_tooltip',
-                        'select_effect', 'bypass_effect'):
-                _cv = _extract_raw_block(_fblock, _ck)
-                if _cv: _raw_rewards[(_fid, _ck)] = _cv
-            # Extract all offset = { x = N y = M trigger = { ... } } blocks as structured data
-            _offsets = []
-            for _om in _re.finditer(r'\boffset\s*=\s*\{', _fblock):
-                _os = _om.end() - 1; _od = 0; _oi = _os
-                while _oi < len(_fblock):
-                    if _fblock[_oi] == '{': _od += 1
-                    elif _fblock[_oi] == '}':
-                        _od -= 1
-                        if _od == 0: break
-                    _oi += 1
-                _oinner = _fblock[_os + 1:_oi]
-                _oxm = _re.search(r'\bx\s*=\s*(-?\d+)', _oinner)
-                _oym = _re.search(r'\by\s*=\s*(-?\d+)', _oinner)
-                _ox = int(_oxm.group(1)) if _oxm else 0
-                _oy = int(_oym.group(1)) if _oym else 0
-                _otrig = _extract_raw_block(_oinner, 'trigger')
-                _offsets.append({"x": _ox, "y": _oy, "trigger": _otrig})
-            if _offsets: _raw_rewards[(_fid, '_offsets')] = _offsets
-            # Preserve joint_trigger as extra raw text (offset now stored separately)
-            _jt = _extract_raw_block(_fblock, 'joint_trigger')
-            if _jt: _raw_rewards[(_fid, '_joint_extra')] = f"joint_trigger = {{\n{_jt}\n}}"
-
-        def _tokenize(s):
-            tokens = []; i = 0
-            while i < len(s):
-                c = s[i]
-                if c in " \t\n\r": i += 1; continue
-                if c == "{": tokens.append("{"); i += 1; continue
-                if c == "}": tokens.append("}"); i += 1; continue
-                if c == "=": tokens.append("="); i += 1; continue
-                if c == '"':
-                    j = i + 1
-                    while j < len(s) and s[j] != '"': j += 1
-                    tokens.append(s[i + 1:j]); i = j + 1; continue
-                j = i
-                while j < len(s) and s[j] not in " \t\n\r{}=\"": j += 1
-                if j > i: tokens.append(s[i:j])
-                i = j
-            return tokens
-
-        def _parse_blk(tokens, pos):
-            result = {}; pos += 1
-            while pos < len(tokens) and tokens[pos] != "}":
-                key = tokens[pos]; pos += 1
-                if pos >= len(tokens): break
-                if tokens[pos] == "=":
-                    pos += 1
-                    if pos >= len(tokens): break
-                    if tokens[pos] == "{":
-                        val, pos = _parse_blk(tokens, pos)
-                    else:
-                        val = tokens[pos]; pos += 1
-                    if key in result:
-                        existing = result[key]
-                        if not isinstance(existing, list): result[key] = [existing]
-                        result[key].append(val)
-                    else:
-                        result[key] = val
-                else:
-                    if key not in ("", "=", "{", "}"):
-                        result.setdefault("_values", []).append(key)
-            return result, pos + 1
-
-        tokens = _tokenize(txt)
-        focuses_data = []
-        tree_name = os.path.splitext(os.path.basename(path))[0]
-        cfp_x = cfp_y = None
-        country_tag = "TAG"
-        i = 0
-        while i < len(tokens):
-            if tokens[i] == "focus_tree" and i + 1 < len(tokens) and tokens[i + 1] == "=":
-                block, i = _parse_blk(tokens, i + 2)
-                tree_name = block.get("id", tree_name)
-                _cfp_blk = block.get("continuous_focus_position", {})
-                if isinstance(_cfp_blk, dict):
-                    try: cfp_x = int(_cfp_blk.get("x", ""))
-                    except Exception: cfp_x = None
-                    try: cfp_y = int(_cfp_blk.get("y", ""))
-                    except Exception: cfp_y = None
-                _country_blk = block.get("country", {})
-                if isinstance(_country_blk, dict):
-                    _mod_blk = _country_blk.get("modifier", {})
-                    if isinstance(_mod_blk, dict):
-                        _tag = (_mod_blk.get("original_tag") or _mod_blk.get("tag") or "").upper().strip()
-                        if _tag: country_tag = _tag
-                raw_focuses = block.get("focus", [])
-                if isinstance(raw_focuses, dict): raw_focuses = [raw_focuses]
-                for rf in raw_focuses:
-                    if isinstance(rf, dict): focuses_data.append(rf)
-            else:
-                i += 1
-
-        had_wrapper = bool(focuses_data)  # True if file had a focus_tree = { } wrapper
-
-        # Fallback: top-level focus/shared_focus/joint_focus blocks (no focus_tree wrapper)
-        if not focuses_data:
-            i = 0
-            while i < len(tokens):
-                if tokens[i] in ("focus", "shared_focus", "joint_focus") and \
-                        i + 1 < len(tokens) and tokens[i + 1] == "=" and \
-                        i + 2 < len(tokens) and tokens[i + 2] == "{":
-                    blk, i = _parse_blk(tokens, i + 2)
-                    if isinstance(blk, dict) and "id" in blk:
-                        focuses_data.append(blk)
-                else:
-                    i += 1
-
-        if not focuses_data:
-            raise ValueError(f"No focus data found in {os.path.basename(path)}")
-
-        tree_idx = len(self._extra_trees) + 1
-        tree_info = {
-            "type": tree_type, "file_path": path, "tree_id": tree_name,
-            "cfp_x": cfp_x, "cfp_y": cfp_y, "shared_focuses": sf_refs,
-            "joint_focuses": jf_refs, "country_tag": country_tag,
-            "had_wrapper": had_wrapper, "focus_ids": set(),
-        }
-        self._extra_trees.append(tree_info)
-        if tree_type == "shared" and tree_name not in self._shared_focuses:
-            self._shared_focuses.append(tree_name)
-        elif tree_type == "joint" and tree_name not in self._joint_focuses:
-            self._joint_focuses.append(tree_name)
-        self._refresh_tree_meta_panel()
-
-        def _blk_to_str(block, depth=1):
-            """Recursively convert a parsed HOI4 block dict to script text.
-            Handles nested dicts, repeated keys (lists), and bools → yes/no."""
-            if not block: return ""
-            if isinstance(block, bool): return "yes" if block else "no"
-            if isinstance(block, str): return block.strip()
-            if not isinstance(block, dict): return str(block)
-            T = "\t" * depth; lines = []
-            for k, v in block.items():
-                if str(k).startswith("_"): continue
-                if isinstance(v, bool):
-                    lines.append(f"{T}{k} = {'yes' if v else 'no'}")
-                elif isinstance(v, list):
-                    for item in v:
-                        if isinstance(item, dict):
-                            lines.append(f"{T}{k} = {{\n{_blk_to_str(item, depth+1)}\n{T}}}")
-                        elif isinstance(item, bool):
-                            lines.append(f"{T}{k} = {'yes' if item else 'no'}")
-                        else:
-                            lines.append(f"{T}{k} = {item}")
-                elif isinstance(v, dict):
-                    lines.append(f"{T}{k} = {{\n{_blk_to_str(v, depth+1)}\n{T}}}")
-                else:
-                    lines.append(f"{T}{k} = {v}")
-            return "\n".join(lines)
-
-        name_to_id = {}; raw_pos = {}
-        for rf in focuses_data:
-            fid_str = rf.get("id", "")
-            if not fid_str: continue
-            try: gx = int(rf.get("x", 0)); gy = int(rf.get("y", 0))
-            except Exception: gx = 0; gy = 0
-            rel_id = rf.get("relative_position_id", None)
-            raw_pos[fid_str] = (gx, gy, rel_id)
-            f = Focus(gx, gy)
-            f._raw_gx = gx; f._raw_gy = gy  # original file coords, preserved for export
-            f.tree_idx = tree_idx; f.name = fid_str
-            if rel_id: f.relative_position_id = rel_id; f._rel_dx = gx; f._rel_dy = gy
-            f.gfx = rf.get("icon", "GFX_goal_generic_political_pressure")
-            try:
-                _c = float(rf.get("cost", "10")); f.cost = _c if _c != int(_c) else int(_c)
-            except Exception: f.cost = 10
-            aiblock = rf.get("ai_will_do", {})
-            if isinstance(aiblock, dict):
-                try: f.ai_will_do = int(float(aiblock.get("factor", aiblock.get("base", 1))))
-                except Exception: f.ai_will_do = 1
-                f.ai_will_do_raw = dict_to_raw(aiblock)
-            else:
-                try: f.ai_will_do = int(float(aiblock))
-                except Exception: f.ai_will_do = 1
-                f.ai_will_do_raw = ""
-            f.cancel_if_invalid        = rf.get("cancel_if_invalid", "yes") == "yes"
-            f.continue_if_invalid      = rf.get("continue_if_invalid", "no") == "yes"
-            f.available_if_capitulated = rf.get("available_if_capitulated", "no") == "yes"
-            sf = rf.get("search_filters", "")
-            if isinstance(sf, dict):
-                sf = " ".join(str(v) for v in sf.get("_values", []) if not str(v).startswith("_"))
-            elif isinstance(sf, list): sf = " ".join(str(v) for v in sf)
-            f.search_filters = str(sf).strip("{}").strip() if sf else "FOCUS_FILTER_POLITICAL"
-            f.available_cond = _raw_rewards.get((fid_str, 'available'), _blk_to_str(rf.get("available", {})))
-            f.bypass_cond    = _raw_rewards.get((fid_str, 'bypass'),    _blk_to_str(rf.get("bypass", {})))
-            f.cancel_cond    = _raw_rewards.get((fid_str, 'cancel'),    _blk_to_str(rf.get("cancel", {})))
-            f.will_lead_to_war_with = _raw_rewards.get((fid_str, 'will_lead_to_war_with'),
-                                            _blk_to_str(rf.get("will_lead_to_war_with", {})))
-            f.complete_tooltip      = _raw_rewards.get((fid_str, 'complete_tooltip'),
-                                            _blk_to_str(rf.get("complete_tooltip", {})))
-            f.select_effect         = _raw_rewards.get((fid_str, 'select_effect'),
-                                            _blk_to_str(rf.get("select_effect", {})))
-            f.bypass_effect         = _raw_rewards.get((fid_str, 'bypass_effect'),
-                                            _blk_to_str(rf.get("bypass_effect", {})))
-            f._joint_extra   = _raw_rewards.get((fid_str, '_joint_extra'), "")
-            f.offsets        = _raw_rewards.get((fid_str, '_offsets'), [])
-            raw_rw = _raw_rewards.get(fid_str, "")
-            if raw_rw:
-                f.effects = [{"type": "_raw_block", "fields": {"raw": raw_rw}}]
-            else:
-                f.effects = []
-            self.focuses[f.id] = f; name_to_id[fid_str] = f.id
-            tree_info["focus_ids"].add(f.id)
-
-        # Apply country-tag-matching offsets to raw_pos BEFORE resolution so that
-        # all relative-positioned children naturally inherit the shift.
-        _active_tag = getattr(self, '_tree_country_tag', '').upper().strip()
-        if _active_tag:
-            for _fid_s in list(raw_pos.keys()):
-                for _off in _raw_rewards.get((_fid_s, '_offsets'), []):
-                    _trig = _off.get('trigger', '')
-                    if _re.search(r'\boriginal_tag\s*=\s*' + _re.escape(_active_tag) + r'\b', _trig):
-                        _rx, _ry, _rel = raw_pos[_fid_s]
-                        raw_pos[_fid_s] = (_rx + _off['x'], _ry + _off['y'], _rel)
-                        break  # apply only the first matching offset per focus
-
-        def _resolve_abs(name, visited=None):
-            if visited is None: visited = set()
-            if name not in raw_pos: return (0, 0)
-            if name in visited: return raw_pos[name][:2]
-            visited.add(name)
-            rx, ry, rel = raw_pos[name]
-            if rel is None: return (rx, ry)
-            if rel in raw_pos:
-                bx, by = _resolve_abs(rel, visited)
-                return (bx + rx, by + ry)
-            # Cross-tree: anchor is in a different loaded tree (e.g. main tree)
-            for _cf in self.focuses.values():
-                if _cf.name == rel:
-                    return (_cf.x + rx, _cf.y + ry)
-            return (rx, ry)
-
-        for fid_str, fid in name_to_id.items():
-            ax, ay = _resolve_abs(fid_str)
-            self.focuses[fid].x = ax; self.focuses[fid].y = ay
-
-        all_name_to_id = {f.name: f.id for f in self.focuses.values()}
-        for rf in focuses_data:
-            fid_str = rf.get("id", "")
-            if fid_str not in name_to_id: continue
-            fid = name_to_id[fid_str]; f = self.focuses[fid]
-            prereqs = rf.get("prerequisite", [])
-            if isinstance(prereqs, dict): prereqs = [prereqs]
-            for pblock in prereqs:
-                if not isinstance(pblock, dict): continue
-                pf = pblock.get("focus", [])
-                if isinstance(pf, str): pf = [pf]
-                group_fids = [all_name_to_id[pn] for pn in pf if pn in all_name_to_id]
-                if group_fids: f.prereqs.append(group_fids)
-            mutex = rf.get("mutually_exclusive", [])
-            if isinstance(mutex, dict): mutex = [mutex]
-            for mblock in mutex:
-                if not isinstance(mblock, dict): continue
-                mf = mblock.get("focus", "")
-                if isinstance(mf, str) and mf in all_name_to_id:
-                    mid = all_name_to_id[mf]
-                    if mid not in f.mutex: f.mutex.append(mid)
-
-        self._refresh_loaded_trees_panel()
-        self._redraw()
-        self._fit_all()
+        # EmptyFocusTreeError (rich diagnostic) propagates to the batch caller.
+        self._install_extra_tree(raw, path, tree_type)
 
     def _save_all_trees(self):
         """Export all loaded trees (main + extra) with one click."""
