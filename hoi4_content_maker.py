@@ -109,6 +109,54 @@ from tkinter import messagebox, filedialog, ttk
 log.info("tkinter imported OK")
 import json, re, threading, subprocess, tempfile, copy
 
+# -- UI i18n ---------------------------------------------------------
+# Keep source code readable by using stable keys plus English fallbacks:
+#   text=tr("common.cancel", "Cancel")
+# JSON files live in ./locales/<lang>.json and may be edited without touching code.
+I18N_LANGS = {
+    "en": "English",
+    "zh_CN": "简体中文",
+}
+I18N_LANG = None
+I18N_STRINGS = {}
+
+
+def _resource_path(*parts):
+    base = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(base, *parts)
+
+
+def _load_i18n(lang=None):
+    """Load UI translations from locales/<lang>.json with safe fallback."""
+    global I18N_LANG, I18N_STRINGS
+    cfg = _cfg_load()
+    chosen = lang or os.environ.get("HOI4CM_LANG") or cfg.get("language") or "en"
+    if chosen not in I18N_LANGS:
+        chosen = "en"
+    path = _resource_path("locales", f"{chosen}.json")
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            I18N_STRINGS = json.load(f)
+    except Exception:
+        I18N_STRINGS = {}
+    I18N_LANG = chosen
+
+
+def set_language(lang):
+    if lang not in I18N_LANGS:
+        lang = "en"
+    _cfg_save({"language": lang})
+    _load_i18n(lang)
+
+
+def tr(key, default=None, **kwargs):
+    text = I18N_STRINGS.get(key, default if default is not None else key)
+    try:
+        return text.format(**kwargs)
+    except Exception:
+        return text
+
+
 def _apply_tk_dpi_scaling(root):
     """Align Tk point-size scaling with the current monitor DPI."""
     if sys.platform != "win32":
@@ -121,10 +169,12 @@ def _apply_tk_dpi_scaling(root):
     except Exception as e:
         log.warning(f"Tk DPI scaling setup skipped: {e}")
 
+
 _cfg_load = cfg_load
 _cfg_save = cfg_save
 _read_file = read_file
 _default_hoi4_mod_dir = default_hoi4_mod_dir
+_load_i18n()
 
 
 # ── Auto-install Pillow if missing ───────────────────────────────────
@@ -216,7 +266,7 @@ from tkinter import messagebox, filedialog
 def open_national_spirit_wizard(app):
     """Visual National Spirit / Idea builder with searchable modifier cards."""
     win = tk.Toplevel(app)
-    win.title("National Spirit Builder")
+    win.title(tr("wizard.national_spirit.title", "National Spirit Builder"))
     win.configure(bg=BG_DARK)
     win.geometry("820x860")
     win.resizable(True, True)
@@ -244,7 +294,7 @@ def open_national_spirit_wizard(app):
     _spirit_svars = {}      # populated by _field() calls for autosave
 
     # ── Header ────────────────────────────────────────────────────────
-    tk.Label(win, text="NATIONAL SPIRIT BUILDER", bg=BG_DARK, fg=TEXT,
+    tk.Label(win, text=tr("wizard.national_spirit.header", "NATIONAL SPIRIT BUILDER"), bg=BG_DARK, fg=TEXT,
              font=("Helvetica",12,"bold"), pady=10).pack(fill="x", padx=14)
     tk.Frame(win, bg=BORDER_G, height=1).pack(fill="x")
 
@@ -280,19 +330,19 @@ def open_national_spirit_wizard(app):
     # Preview header with Edit toggle
     prev_hdr = tk.Frame(right_outer, bg=BG_DARK)
     prev_hdr.pack(fill="x", pady=(8,2))
-    tk.Label(prev_hdr, text="  OUTPUT PREVIEW", bg=BG_DARK, fg=TEXT_DIM,
+    tk.Label(prev_hdr, text=tr("common.output_preview", "  OUTPUT PREVIEW"), bg=BG_DARK, fg=TEXT_DIM,
              font=("Helvetica",9,"bold"), anchor="w").pack(side="left")
     _edit_mode    = [False]  # True while preview text box is editable
     _raw_override = [None]   # if not None, Copy/Save use this raw string instead of _build_output
 
-    _edit_btn = tk.Button(prev_hdr, text="✎ Edit",
+    _edit_btn = tk.Button(prev_hdr, text=tr("common.edit", "Edit"),
                           bg=BG_CARD, fg=TEXT_DIM, relief="flat",
                           font=("Helvetica",8,"bold"), padx=8, pady=1,
                           cursor="hand2",
                           highlightthickness=1, highlightbackground=BORDER_G)
     _edit_btn.pack(side="right", padx=4)
 
-    _save_raw_btn = tk.Button(prev_hdr, text="💾 Save Raw",
+    _save_raw_btn = tk.Button(prev_hdr, text=tr("common.save_raw", "Save Raw"),
                               bg=BG_CARD, fg=TEXT_DIM, relief="flat",
                               font=("Helvetica",8,"bold"), padx=8, pady=1,
                               cursor="hand2",
@@ -300,7 +350,7 @@ def open_national_spirit_wizard(app):
     _save_raw_btn.pack(side="right", padx=2)
 
 
-    _lock_lbl = tk.Label(prev_hdr, text="live", bg=BG_DARK, fg=TEXT_DIM,
+    _lock_lbl = tk.Label(prev_hdr, text=tr("common.live", "live"), bg=BG_DARK, fg=TEXT_DIM,
                          font=("Helvetica",7,"italic"))
     _lock_lbl.pack(side="right")
     preview_txt = tk.Text(right_outer, bg="#0d1117", fg="#a8d8a8",
@@ -364,19 +414,19 @@ def open_national_spirit_wizard(app):
         return t
 
     # ── IDENTITY ──────────────────────────────────────────────────────
-    _sec("▸  IDENTITY")
+    _sec(tr("spirit.section.identity", "IDENTITY"))
     v_id       = tk.StringVar(value="TAG_my_spirit")
     v_name_key = tk.StringVar(value="TAG_my_spirit")
     v_picture  = tk.StringVar(value="GFX_idea_TAG_my_spirit")
     v_slot     = tk.StringVar(value="country")
     v_cost     = tk.StringVar(value="0")
     v_removal  = tk.StringVar(value="-1")
-    _field("Idea ID:",      v_id)
-    _field("Name loc key:", v_name_key)
+    _field(tr("spirit.field.idea_id", "Idea ID:"),      v_id)
+    _field(tr("spirit.field.name_loc_key", "Name loc key:"), v_name_key)
     # Picture GFX row with ⊞ browse button
     _gfx_row = tk.Frame(lfrm, bg=BG_PANEL)
     _gfx_row.pack(fill="x", padx=10, pady=2)
-    tk.Label(_gfx_row, text="Picture GFX:", bg=BG_PANEL, fg=TEXT_DIM,
+    tk.Label(_gfx_row, text=tr("spirit.field.picture_gfx", "Picture GFX:"), bg=BG_PANEL, fg=TEXT_DIM,
              font=("Helvetica",9), width=14, anchor="w").pack(side="left")
     _gfx_ent = tk.Entry(_gfx_row, textvariable=v_picture,
                         bg=BG_CARD, fg=TEXT, insertbackground=BLUE,
@@ -398,7 +448,7 @@ def open_national_spirit_wizard(app):
 
         if not MOD.loaded or not ideas_root or not os.path.isdir(ideas_root):
             # Fallback: let user pick a folder manually
-            folder = filedialog.askdirectory(title="Select idea GFX folder")
+            folder = filedialog.askdirectory(title=tr("filedialog.select_idea_gfx_folder", "Select idea GFX folder"))
             if not folder: return
             ideas_root = folder
 
@@ -423,7 +473,7 @@ def open_national_spirit_wizard(app):
 
         # ── Browser window ────────────────────────────────────────
         bwin = tk.Toplevel(win)
-        bwin.title("GFX Browser  —  Ideas")
+        bwin.title(tr("gfx.browser.ideas_title", "GFX Browser  -  Ideas"))
         bwin.configure(bg=BG_DARK)
         bwin.geometry("900x580")
         bwin.resizable(True, True)
@@ -436,7 +486,7 @@ def open_national_spirit_wizard(app):
         lf = tk.Frame(panes, bg=BG_PANEL, width=200)
         lf.pack(side="left", fill="y", padx=(0,6))
         lf.pack_propagate(False)
-        tk.Label(lf, text="  FOLDERS", bg=BG_PANEL, fg=TEXT_DIM,
+        tk.Label(lf, text=tr("gfx.folders", "  FOLDERS"), bg=BG_PANEL, fg=TEXT_DIM,
                  font=("Helvetica",9,"bold"), anchor="w", pady=6).pack(fill="x")
         tk.Frame(lf, bg=BORDER_G, height=1).pack(fill="x")
         folder_lb = tk.Listbox(lf, bg=BG_CARD, fg=TEXT,
@@ -456,7 +506,7 @@ def open_national_spirit_wizard(app):
 
         top_r = tk.Frame(rf, bg=BG_DARK)
         top_r.pack(fill="x", pady=(0,6))
-        tk.Label(top_r, text="Filter:", bg=BG_DARK, fg=TEXT_DIM,
+        tk.Label(top_r, text=tr("common.filter", "Filter:"), bg=BG_DARK, fg=TEXT_DIM,
                  font=("Helvetica",9)).pack(side="left")
         search_var = tk.StringVar()
         tk.Entry(top_r, textvariable=search_var, bg=BG_CARD, fg=TEXT,
@@ -464,7 +514,7 @@ def open_national_spirit_wizard(app):
                  relief="flat", highlightthickness=1,
                  highlightbackground=BORDER_G).pack(
                      side="left", padx=6, fill="x", expand=True, ipady=3)
-        status_lbl = tk.Label(top_r, text="select a folder", bg=BG_DARK,
+        status_lbl = tk.Label(top_r, text=tr("gfx.select_folder_status", "select a folder"), bg=BG_DARK,
                               fg=TEXT_DIM, font=("Helvetica",9))
         status_lbl.pack(side="right", padx=6)
 
@@ -482,14 +532,14 @@ def open_national_spirit_wizard(app):
         selected_var = tk.StringVar(value="")
         tk.Label(bot, textvariable=selected_var, bg=BG_DARK,
                  fg=BLUE, font=("Helvetica",9)).pack(side="left", padx=4)
-        tk.Button(bot, text="Cancel", command=bwin.destroy,
+        tk.Button(bot, text=tr("common.cancel", "Cancel"), command=bwin.destroy,
                   bg=BG_CARD, fg=TEXT, relief="flat",
                   font=("Helvetica",9), padx=10, pady=4,
                   cursor="hand2").pack(side="right", padx=4)
         def _apply_idea():
             v_picture.set(selected_var.get())
             bwin.destroy()
-        _sel_btn_i = tk.Button(bot, text="Select ->", command=_apply_idea,
+        _sel_btn_i = tk.Button(bot, text=tr("common.select_arrow", "Select ->"), command=_apply_idea,
                                bg="#1a3322", fg="#4b7a5e", relief="flat",
                                font=("Helvetica",10,"bold"), padx=14, pady=5,
                                cursor="arrow", state="disabled")
@@ -628,7 +678,7 @@ def open_national_spirit_wizard(app):
             _st["pairs"] = pairs; _st["drawn"].clear()
             _st["canvas_ids"].clear(); _st["sel_idx"] = None
             if not pairs:
-                status_lbl.config(text="0 icons"); return
+                status_lbl.config(text=tr("gfx.icons_count", "{count} icons", count=0)); return
             status_lbl.config(text="%d icons" % len(pairs))
             rows = (len(pairs)+COLS-1)//COLS
             cv.configure(scrollregion=(0,0,
@@ -651,7 +701,7 @@ def open_national_spirit_wizard(app):
             return pairs
 
         def _load_folder(folder_path):
-            status_lbl.config(text="scanning...")
+            status_lbl.config(text=tr("gfx.scanning", "scanning..."))
             bwin.update_idletasks()
             _rebuild_grid(_collect_files(folder_path))
 
@@ -674,39 +724,39 @@ def open_national_spirit_wizard(app):
             _load_folder(folders[0][1])
 
 
-    _dropdown("Slot:", v_slot,
+    _dropdown(tr("spirit.field.slot", "Slot:"), v_slot,
               ["country","political_advisor","army_chief","navy_chief","air_chief",
                "high_command","theorist","industrial_concern","materiel_designer",
                "naval_manufacturer","aircraft_manufacturer","tank_manufacturer"])
-    _field("Cost (PP):",    v_cost,   width=6)
-    _field("Removal cost:", v_removal, width=6)
-    _lbl("  removal_cost = -1  means the spirit cannot be manually removed")
+    _field(tr("spirit.field.cost_pp", "Cost (PP):"),    v_cost,   width=6)
+    _field(tr("spirit.field.removal_cost", "Removal cost:"), v_removal, width=6)
+    _lbl(tr("spirit.hint.removal_cost", "  removal_cost = -1  means the spirit cannot be manually removed"))
 
     _sep()
     # ── TRIGGERS ──────────────────────────────────────────────────────
-    _sec("▸  TRIGGERS  (optional)")
-    t_allowed   = _trigger_field("allowed:",   height=2)
-    t_available = _trigger_field("available:", height=2)
-    t_cancel    = _trigger_field("cancel:",    height=2)
-    t_visible   = _trigger_field("visible:",   height=2)
+    _sec(tr("spirit.section.triggers", "TRIGGERS  (optional)"))
+    t_allowed   = _trigger_field(tr("spirit.field.allowed", "allowed:"),   height=2)
+    t_available = _trigger_field(tr("spirit.field.available", "available:"), height=2)
+    t_cancel    = _trigger_field(tr("spirit.field.cancel", "cancel:"),    height=2)
+    t_visible   = _trigger_field(tr("spirit.field.visible", "visible:"),   height=2)
     t_allowed.insert("1.0", "original_tag = TAG")
 
     _sep()
     # ── SCRIPTED EFFECTS ──────────────────────────────────────────────
-    _sec("▸  SCRIPTED EFFECTS  (optional)")
-    t_on_add    = _trigger_field("on_add:",    height=3)
-    t_on_remove = _trigger_field("on_remove:", height=2)
-    _lbl('  e.g.  set_rule = { can_access_market = no }')
+    _sec(tr("spirit.section.scripted_effects", "SCRIPTED EFFECTS  (optional)"))
+    t_on_add    = _trigger_field(tr("spirit.field.on_add", "on_add:"),    height=3)
+    t_on_remove = _trigger_field(tr("spirit.field.on_remove", "on_remove:"), height=2)
+    _lbl(tr("spirit.example.set_rule", "  e.g.  set_rule = { can_access_market = no }"))
 
     _sep()
     # ── RULE ──────────────────────────────────────────────────────────
-    _sec("▸  RULE  (optional)")
-    t_rule = _trigger_field("rule:", height=2)
-    _lbl("  e.g.  can_access_market = no")
+    _sec(tr("spirit.section.rule", "RULE  (optional)"))
+    t_rule = _trigger_field(tr("spirit.field.rule", "rule:"), height=2)
+    _lbl(tr("spirit.example.rule", "  e.g.  can_access_market = no"))
 
     _sep()
     # ── MODIFIER BUILDER ──────────────────────────────────────────────
-    _sec("▸  MODIFIERS")
+    _sec(tr("spirit.section.modifiers", "MODIFIERS"))
     mod_outer = tk.Frame(lfrm, bg=BG_PANEL)
     mod_outer.pack(fill="x", padx=8, pady=4)
 
@@ -734,7 +784,7 @@ def open_national_spirit_wizard(app):
     # Category + dropdown row
     cd_row = tk.Frame(mod_outer, bg=BG_PANEL)
     cd_row.pack(fill="x", pady=2)
-    tk.Label(cd_row, text="Category:", bg=BG_PANEL, fg=TEXT_DIM,
+    tk.Label(cd_row, text=tr("common.category", "Category:"), bg=BG_PANEL, fg=TEXT_DIM,
              font=("Helvetica",9)).pack(side="left")
     _mc = tk.StringVar(value=MODIFIER_CATS[0])
     cat_om = tk.OptionMenu(cd_row, _mc, *MODIFIER_CATS,
@@ -808,7 +858,7 @@ def open_national_spirit_wizard(app):
         # Rebuild modifier dropdown with all matches (ignoring category filter while searching)
         for w in dd_frame.winfo_children(): w.destroy()
         if not matches:
-            tk.Label(dd_frame, text="No modifiers found",
+            tk.Label(dd_frame, text=tr("modifier.none_found", "No modifiers found"),
                      bg=BG_PANEL, fg=TEXT_DIM,
                      font=("Helvetica",9)).pack(anchor="w")
             return
@@ -830,14 +880,14 @@ def open_national_spirit_wizard(app):
     _sv.trace_add("write", _filter_mod_dd)
 
     # + Add Modifier button
-    tk.Button(mod_outer, text="plus  Add Modifier",
+    tk.Button(mod_outer, text=tr("modifier.add", "+ Add Modifier"),
               command=lambda: _add_mod_card(),
               bg="#14532d", fg="#4ade80",
               font=("Helvetica",10,"bold"), relief="flat",
               pady=6, cursor="hand2").pack(fill="x", padx=2, pady=(4,2))
 
     tk.Frame(mod_outer, bg=BORDER_G, height=1).pack(fill="x", pady=4)
-    tk.Label(mod_outer, text="  ADDED MODIFIERS", bg=BG_PANEL, fg=TEXT_DIM,
+    tk.Label(mod_outer, text=tr("modifier.added", "  ADDED MODIFIERS"), bg=BG_PANEL, fg=TEXT_DIM,
              font=("Helvetica",8,"bold"), anchor="w").pack(fill="x")
 
     mod_box = tk.Frame(mod_outer, bg=BG_PANEL)
@@ -846,7 +896,7 @@ def open_national_spirit_wizard(app):
     def _refresh_mod_cards():
         for w in mod_box.winfo_children(): w.destroy()
         if not spirit_modifiers:
-            tk.Label(mod_box, text="None -- add modifiers above",
+            tk.Label(mod_box, text=tr("modifier.none_added", "None -- add modifiers above"),
                      bg=BG_PANEL, fg=TEXT_DIM,
                      font=("Helvetica",9,"italic")).pack(anchor="w", padx=6)
             return
@@ -881,7 +931,7 @@ def open_national_spirit_wizard(app):
 
         val_row = tk.Frame(card, bg=BG_CARD)
         val_row.pack(fill="x", padx=6, pady=3)
-        tk.Label(val_row, text="value:", bg=BG_CARD, fg=TEXT_DIM,
+        tk.Label(val_row, text=tr("common.value_label", "value:"), bg=BG_CARD, fg=TEXT_DIM,
                  font=("Helvetica",9), width=6,
                  anchor="w").pack(side="left")
         vvar = tk.StringVar(value=mod["value"])
@@ -923,28 +973,28 @@ def open_national_spirit_wizard(app):
 
     _sep()
     # ── EXTRA / CUSTOM MODIFIERS ──────────────────────────────────────
-    _sec("▸  EXTRA / CUSTOM MODIFIERS  (free text  key = value)")
+    _sec(tr("spirit.section.extra_modifiers", "EXTRA / CUSTOM MODIFIERS  (free text  key = value)"))
     t_extra = tk.Text(lfrm, bg=BG_CARD, fg=TEXT, insertbackground=BLUE,
                       font=("Courier",10), relief="flat",
                       highlightthickness=1, highlightbackground=BORDER_G,
                       height=4, wrap="none")
     t_extra.pack(fill="x", padx=10, pady=2)
     t_extra.bind("<KeyRelease>", lambda e: _refresh_preview())
-    _lbl("  e.g.  modifier_army_sub_unit_Militia_Bat_attack_factor = 0.15")
+    _lbl(tr("spirit.example.custom_modifier", "  e.g.  modifier_army_sub_unit_Militia_Bat_attack_factor = 0.15"))
 
     _sep()
     # ── LOCALISATION ──────────────────────────────────────────────────
-    _sec("▸  LOCALISATION")
+    _sec(tr("spirit.section.localisation", "LOCALISATION"))
     v_loc_name = tk.StringVar(value="My National Spirit")
     v_loc_desc = tk.StringVar(value="A spirit granting special bonuses.")
-    _field("Display name:", v_loc_name)
-    _field("Description:",  v_loc_desc)
+    _field(tr("common.display_name", "Display name:"), v_loc_name)
+    _field(tr("common.description", "Description:"),  v_loc_desc)
 
     _sep()
     # ── AI ────────────────────────────────────────────────────────────
-    _sec("▸  AI  (optional)")
+    _sec(tr("spirit.section.ai", "AI  (optional)"))
     v_ai = tk.StringVar(value="1")
-    _field("ai_will_do:", v_ai)
+    _field(tr("spirit.field.ai_will_do", "ai_will_do:"), v_ai)
 
     # ── Output builder ────────────────────────────────────────────────
     def _build_output():
@@ -1058,16 +1108,16 @@ def open_national_spirit_wizard(app):
             preview_txt.delete("1.0", "end")
             preview_txt.insert("1.0", _get_output_text())
             preview_txt.config(bg="#0d1a0d", highlightbackground="#4ade80")
-            _edit_btn.config(text="✖ Cancel Edit", fg="#ef4444", bg="#2a0a0a")
-            _lock_lbl.config(text="editing — click 💾 Save Raw to keep changes",
+            _edit_btn.config(text=tr("common.cancel_edit", "Cancel Edit"), fg="#ef4444", bg="#2a0a0a")
+            _lock_lbl.config(text=tr("common.editing_save_raw_hint", "editing - click Save Raw to keep changes"),
                              fg="#fbbf24")
         else:
             # Cancel edit — discard changes and go fully back to live-from-fields
             _raw_override[0] = None
-            _edit_btn.config(text="✎ Edit", fg=TEXT_DIM, bg=BG_CARD)
-            _save_raw_btn.config(text="💾 Save Raw", fg=TEXT_DIM, bg=BG_CARD)
+            _edit_btn.config(text=tr("common.edit", "Edit"), fg=TEXT_DIM, bg=BG_CARD)
+            _save_raw_btn.config(text=tr("common.save_raw", "Save Raw"), fg=TEXT_DIM, bg=BG_CARD)
             preview_txt.config(bg="#0d1117", highlightbackground=BORDER_G)
-            _lock_lbl.config(text="live", fg=TEXT_DIM)
+            _lock_lbl.config(text=tr("common.live", "live"), fg=TEXT_DIM)
             _refresh_preview()
 
     def _save_raw():
@@ -1081,7 +1131,7 @@ def open_national_spirit_wizard(app):
         _edit_mode[0] = False
         preview_txt.config(state="disabled", bg="#0d1117",
                            highlightbackground=ORANGE)
-        _edit_btn.config(text="✎ Edit", fg=TEXT_DIM, bg=BG_CARD)
+        _edit_btn.config(text=tr("common.edit", "Edit"), fg=TEXT_DIM, bg=BG_CARD)
 
         # ── Parse safe fields from the raw text ──────────────────────────
         changes = []
@@ -1213,7 +1263,7 @@ def open_national_spirit_wizard(app):
             v_slot.set(slot_val); changes.append(f"Slot → {slot_val!r}")
 
         # ── Build notification message ────────────────────────────────────
-        _lock_lbl.config(text="raw override active", fg=ORANGE)
+        _lock_lbl.config(text=tr("common.raw_override_active", "raw override active"), fg=ORANGE)
 
         parts = []
         if changes:
@@ -1440,20 +1490,20 @@ def open_national_spirit_wizard(app):
                 pass
 
         if not spirits:
-            messagebox.showinfo("No Spirits Found",
-                "No spirit/idea definitions found in common/ideas/.", parent=win)
+            messagebox.showinfo(tr("spirit.dialog.no_spirits_found.title", "No Spirits Found"),
+                tr("spirit.dialog.no_spirits_found.body", "No spirit/idea definitions found in common/ideas/."), parent=win)
             return
 
         dlg = tk.Toplevel(win)
-        dlg.title("Browse Existing Spirits")
+        dlg.title(tr("spirit.browse_existing.title", "Browse Existing Spirits"))
         dlg.configure(bg=BG_DARK)
         dlg.geometry("600x520")
         dlg.resizable(True, True)
         dlg.grab_set()
 
-        tk.Label(dlg, text="BROWSE EXISTING SPIRITS", bg=BG_DARK, fg=TEXT,
+        tk.Label(dlg, text=tr("spirit.browse_existing.header", "BROWSE EXISTING SPIRITS"), bg=BG_DARK, fg=TEXT,
                  font=("Helvetica",11,"bold"), pady=8).pack(fill="x", padx=12)
-        tk.Label(dlg, text="Select a spirit to load it into the editor.",
+        tk.Label(dlg, text=tr("spirit.browse_existing.hint", "Select a spirit to load it into the editor."),
                  bg=BG_DARK, fg=TEXT_DIM, font=("Helvetica",9)).pack(fill="x", padx=12)
         tk.Frame(dlg, bg=BORDER_G, height=1).pack(fill="x", pady=(4,0))
 
@@ -1628,11 +1678,11 @@ def open_national_spirit_wizard(app):
 
         bot_dlg = tk.Frame(dlg, bg=BG_DARK, pady=6)
         bot_dlg.pack(fill="x")
-        tk.Button(bot_dlg, text="Load Selected", command=_load_selected,
+        tk.Button(bot_dlg, text=tr("common.load_selected", "Load Selected"), command=_load_selected,
                   bg="#14532d", fg="#4ade80", relief="flat",
                   font=("Helvetica",10,"bold"), padx=16, pady=5,
                   cursor="hand2").pack(side="left", padx=10)
-        tk.Button(bot_dlg, text="Cancel", command=dlg.destroy,
+        tk.Button(bot_dlg, text=tr("common.cancel", "Cancel"), command=dlg.destroy,
                   bg=BG_CARD, fg=TEXT, relief="flat",
                   font=("Helvetica",10), padx=12, pady=5,
                   cursor="hand2").pack(side="right", padx=10)
@@ -1640,20 +1690,20 @@ def open_national_spirit_wizard(app):
     tk.Frame(win, bg=BORDER_G, height=1).pack(fill="x")
     bot = tk.Frame(win, bg=BG_DARK, pady=8)
     bot.pack(fill="x")
-    tk.Button(bot, text="Copy to Clipboard", command=_copy_output,
+    tk.Button(bot, text=tr("common.copy_to_clipboard", "Copy to Clipboard"), command=_copy_output,
               bg=BG_CARD, fg=TEXT, relief="flat",
               font=("Helvetica",10,"bold"), padx=16, pady=6,
               cursor="hand2").pack(side="left", padx=12)
-    tk.Button(bot, text="Save to Mod Folder", command=_save_to_mod,
+    tk.Button(bot, text=tr("common.save_to_mod_folder", "Save to Mod Folder"), command=_save_to_mod,
               bg="#1a3a1a", fg="#4ade80", relief="flat",
               font=("Helvetica",10,"bold"), padx=16, pady=6,
               cursor="hand2").pack(side="left", padx=4)
     if MOD.loaded:
-        tk.Button(bot, text="Browse Existing", command=_browse_existing_spirits,
+        tk.Button(bot, text=tr("common.browse_existing", "Browse Existing"), command=_browse_existing_spirits,
                   bg=BG_CARD, fg=BLUE, relief="flat",
                   font=("Helvetica",10,"bold"), padx=14, pady=6,
                   cursor="hand2").pack(side="left", padx=4)
-    tk.Button(bot, text="Close", command=win.destroy,
+    tk.Button(bot, text=tr("common.close", "Close"), command=win.destroy,
               bg=BG_CARD, fg=TEXT_DIM, relief="flat",
               font=("Helvetica",10), padx=16, pady=6,
               cursor="hand2").pack(side="right", padx=12)
@@ -1723,7 +1773,7 @@ def _open_universal_gfx_browser(win, on_select, title="GFX Browser",
 
     if not folder_groups:
         # No mod loaded — let user pick a folder manually
-        folder = filedialog.askdirectory(title="Select GFX folder", parent=win)
+        folder = filedialog.askdirectory(title=tr("filedialog.select_gfx_folder", "Select GFX folder"), parent=win)
         if not folder: return
         folder_groups = [("(selected)", folder, "GFX_")]
 
@@ -1744,19 +1794,19 @@ def _open_universal_gfx_browser(win, on_select, title="GFX Browser",
                           insertbackground=BLUE, font=("Helvetica",10),
                           relief="flat", highlightthickness=1, highlightbackground=BORDER_G)
     search_ent.pack(side="left", fill="x", expand=True, ipady=4)
-    status_lbl = tk.Label(top_bar, text="select a folder", bg=BG_DARK, fg=TEXT_DIM,
+    status_lbl = tk.Label(top_bar, text=tr("gfx.select_folder", "select a folder"), bg=BG_DARK, fg=TEXT_DIM,
                           font=("Helvetica",9))
     status_lbl.pack(side="right", padx=8)
     # add custom folder button
     def _add_custom():
-        d = filedialog.askdirectory(title="Add custom GFX folder", parent=bwin)
+        d = filedialog.askdirectory(title=tr("filedialog.add_custom_gfx_folder", "Add custom GFX folder"), parent=bwin)
         if d:
             if d not in [g[1] for g in folder_groups]:
                 folder_groups.append((os.path.basename(d)+" (custom)", d, "GFX_"))
                 folder_lb.insert("end", "  "+os.path.basename(d)+" (custom)")
             if d not in getattr(MOD,"custom_gfx_dirs",[]):
                 MOD.custom_gfx_dirs.append(d)
-    tk.Button(top_bar, text="+ Add Folder", command=_add_custom,
+    tk.Button(top_bar, text=tr("gfx.add_folder", "+ Add Folder"), command=_add_custom,
               bg=BG_CARD, fg=TEAL, relief="flat", font=("Helvetica",9),
               cursor="hand2", padx=8, pady=3).pack(side="right", padx=4)
 
@@ -1766,7 +1816,7 @@ def _open_universal_gfx_browser(win, on_select, title="GFX Browser",
     body_f = tk.Frame(bwin, bg=BG_DARK); body_f.pack(fill="both", expand=True, padx=6, pady=6)
     lf = tk.Frame(body_f, bg=BG_PANEL, width=210); lf.pack(side="left", fill="y", padx=(0,5))
     lf.pack_propagate(False)
-    tk.Label(lf, text="  FOLDERS", bg=BG_PANEL, fg=TEXT_DIM,
+    tk.Label(lf, text=tr("gfx.folders", "  FOLDERS"), bg=BG_PANEL, fg=TEXT_DIM,
              font=("Helvetica",9,"bold"), anchor="w", pady=5).pack(fill="x")
     tk.Frame(lf, bg=BORDER_G, height=1).pack(fill="x")
     folder_lb = tk.Listbox(lf, bg=BG_CARD, fg=TEXT, selectbackground=BLUE,
@@ -1791,10 +1841,10 @@ def _open_universal_gfx_browser(win, on_select, title="GFX Browser",
     sel_var = tk.StringVar(value="")
     tk.Label(bot_f, textvariable=sel_var, bg=BG_DARK, fg=BLUE,
              font=("Helvetica",9)).pack(side="left", padx=4)
-    tk.Button(bot_f, text="Cancel", command=bwin.destroy,
+    tk.Button(bot_f, text=tr("common.cancel", "Cancel"), command=bwin.destroy,
               bg=BG_CARD, fg=TEXT, relief="flat", font=("Helvetica",9),
               padx=10, pady=4, cursor="hand2").pack(side="right", padx=4)
-    sel_btn = tk.Button(bot_f, text="Select →", bg="#1a3322", fg="#4b7a5e",
+    sel_btn = tk.Button(bot_f, text=tr("common.select", "Select"), bg="#1a3322", fg="#4b7a5e",
                         relief="flat", font=("Helvetica",10,"bold"),
                         padx=14, pady=5, cursor="arrow", state="disabled")
     sel_btn.pack(side="right")
@@ -1907,7 +1957,7 @@ def _open_universal_gfx_browser(win, on_select, title="GFX Browser",
     def _rebuild_grid(pairs):
         cv.delete("all"); _st.update({"pairs":pairs,"drawn":set(),"canvas_ids":{},"sel_idx":None})
         sel_var.set(""); sel_path[0]=None
-        if not pairs: status_lbl.config(text="0 images"); return
+        if not pairs: status_lbl.config(text=tr("gfx.images_count", "{count} images", count=0)); return
         status_lbl.config(text=f"{len(pairs)} images")
         rows=(len(pairs)+COLS-1)//COLS
         cv.configure(scrollregion=(0,0,PAD_G+COLS*(TILE_W+PAD_G),PAD_G+rows*(TILE_H+PAD_G)))
@@ -1930,7 +1980,7 @@ def _open_universal_gfx_browser(win, on_select, title="GFX Browser",
     def _load_folder(idx):
         if idx<0 or idx>=len(folder_groups): return
         lbl2,fpath,pfx=folder_groups[idx]
-        status_lbl.config(text="scanning…"); bwin.update_idletasks()
+        status_lbl.config(text=tr("gfx.scanning", "scanning...")); bwin.update_idletasks()
         _rebuild_grid(_collect_images(fpath,pfx))
 
     def _on_folder_select(evt=None):
@@ -1972,16 +2022,16 @@ def _open_gfx_placement_editor(win, initial_items=None, on_confirm=None):
     PANEL_BORD = "#3a4a6a"
 
     pwin = tk.Toplevel(win)
-    pwin.title("GFX Placement Editor")
+    pwin.title(tr("gfx_placement.title", "GFX Placement Editor"))
     pwin.configure(bg=BG_DARK)
     pwin.geometry("900x620")
     pwin.resizable(True, True)
     pwin.grab_set()
 
-    tk.Label(pwin, text="GFX PLACEMENT EDITOR",
+    tk.Label(pwin, text=tr("gfx_placement.header", "GFX PLACEMENT EDITOR"),
              bg=BG_DARK, fg=TEXT, font=("Helvetica",10,"bold"), pady=6).pack(fill="x", padx=12)
     tk.Label(pwin,
-             text="Drag images to position them. The tool writes the GFX code matching your layout.",
+             text=tr("gfx_placement.description", "Drag images to position them. The tool writes the GFX code matching your layout."),
              bg=BG_DARK, fg=TEXT_DIM, font=("Helvetica",8,"italic")).pack(fill="x", padx=12)
     tk.Frame(pwin, bg=BORDER_G, height=1).pack(fill="x", pady=(4,0))
 
@@ -1989,7 +2039,7 @@ def _open_gfx_placement_editor(win, initial_items=None, on_confirm=None):
 
     # ── LEFT: placement canvas ───────────────────────────────────────────────
     left_f = tk.Frame(body, bg=BG_DARK); left_f.pack(side="left", fill="both", expand=True, padx=8, pady=8)
-    tk.Label(left_f, text="  Decision panel preview  (drag GFX items to position)",
+    tk.Label(left_f, text=tr("gfx_placement.preview_header", "  Decision panel preview  (drag GFX items to position)"),
              bg=BG_DARK, fg=TEAL, font=("Helvetica",8,"bold"), anchor="w").pack(fill="x")
     cv_place = tk.Canvas(left_f, bg=PANEL_BG, width=CANVAS_W, height=CANVAS_H,
                           highlightthickness=2, highlightbackground=PANEL_BORD,
@@ -2124,7 +2174,7 @@ def _open_gfx_placement_editor(win, initial_items=None, on_confirm=None):
     right_f = tk.Frame(body, bg=BG_PANEL, width=360); right_f.pack(side="left", fill="y", padx=(0,8), pady=8)
     right_f.pack_propagate(False)
 
-    tk.Label(right_f, text="  ADD GFX ITEMS", bg=BG_PANEL, fg=GOLD,
+    tk.Label(right_f, text=tr("gfx_placement.add_items", "  ADD GFX ITEMS"), bg=BG_PANEL, fg=GOLD,
              font=("Helvetica",9,"bold"), anchor="w", pady=4).pack(fill="x")
     tk.Frame(right_f, bg=BORDER_G, height=1).pack(fill="x")
 
@@ -2139,28 +2189,28 @@ def _open_gfx_placement_editor(win, initial_items=None, on_confirm=None):
             title=f"Pick GFX for {role}",
             gfx_hints=["decisions","ideas"] if role=="icon" else ["decisions","ideas","interface"])
 
-    tk.Button(btn_row, text="＋ Add Icon",
+    tk.Button(btn_row, text=tr("gfx_placement.add_icon", "+ Add Icon"),
               command=lambda: _browse_and_add("icon"),
               bg="#1a2842", fg=BLUE, relief="flat", font=("Helvetica",9),
               cursor="hand2", padx=10, pady=4).pack(side="left", padx=(0,4))
-    tk.Button(btn_row, text="＋ Add Picture",
+    tk.Button(btn_row, text=tr("gfx_placement.add_picture", "+ Add Picture"),
               command=lambda: _browse_and_add("picture"),
               bg="#32302a", fg=GOLD, relief="flat", font=("Helvetica",9),
               cursor="hand2", padx=10, pady=4).pack(side="left")
 
     # Grid + snap toggles
     opt_row = tk.Frame(right_f, bg=BG_PANEL); opt_row.pack(fill="x", padx=8)
-    tk.Checkbutton(opt_row, text="Grid", variable=grid_on, bg=BG_PANEL, fg=TEXT_DIM,
+    tk.Checkbutton(opt_row, text=tr("common.grid", "Grid"), variable=grid_on, bg=BG_PANEL, fg=TEXT_DIM,
                    activebackground=BG_PANEL, selectcolor=BG_CARD,
                    font=("Helvetica",9), cursor="hand2").pack(side="left")
-    tk.Checkbutton(opt_row, text="Snap to grid", variable=snap_on, bg=BG_PANEL, fg=TEXT_DIM,
+    tk.Checkbutton(opt_row, text=tr("common.snap_to_grid", "Snap to grid"), variable=snap_on, bg=BG_PANEL, fg=TEXT_DIM,
                    activebackground=BG_PANEL, selectcolor=BG_CARD,
                    font=("Helvetica",9), cursor="hand2").pack(side="left", padx=8)
 
     tk.Frame(right_f, bg=BORDER_G, height=1).pack(fill="x", padx=4, pady=4)
 
     # Item list
-    tk.Label(right_f, text="  PLACED ITEMS", bg=BG_PANEL, fg=TEAL,
+    tk.Label(right_f, text=tr("gfx_placement.placed_items", "  PLACED ITEMS"), bg=BG_PANEL, fg=TEAL,
              font=("Helvetica",8,"bold"), anchor="w").pack(fill="x")
     props_frame = tk.Frame(right_f, bg=BG_PANEL); props_frame.pack(fill="x", padx=6)
 
@@ -2197,7 +2247,7 @@ def _open_gfx_placement_editor(win, initial_items=None, on_confirm=None):
     tk.Frame(right_f, bg=BORDER_G, height=1).pack(fill="x", padx=4, pady=4)
 
     # Generated code
-    tk.Label(right_f, text="  GENERATED GFX CODE", bg=BG_PANEL, fg=GREEN,
+    tk.Label(right_f, text=tr("gfx_placement.generated_code", "  GENERATED GFX CODE"), bg=BG_PANEL, fg=GREEN,
              font=("Helvetica",8,"bold"), anchor="w").pack(fill="x")
     code_text = tk.Text(right_f, bg="#080b10", fg=GREEN, insertbackground=BLUE,
                         font=("Courier",8), relief="flat", height=10, wrap="none",
@@ -2247,16 +2297,16 @@ def _open_gfx_placement_editor(win, initial_items=None, on_confirm=None):
     # Bottom bar
     tk.Frame(pwin, bg=BORDER_G, height=1).pack(fill="x")
     bot2=tk.Frame(pwin,bg=BG_DARK); bot2.pack(fill="x",padx=10,pady=6)
-    tk.Button(bot2,text="Cancel",command=pwin.destroy,bg=BG_CARD,fg=TEXT,
+    tk.Button(bot2,text=tr("common.cancel", "Cancel"),command=pwin.destroy,bg=BG_CARD,fg=TEXT,
               relief="flat",font=("Helvetica",9),padx=10,pady=4,cursor="hand2").pack(side="right",padx=4)
     def _confirm():
         code=code_text.get("1.0","end-1c")
         if on_confirm: on_confirm(list(items), code)
         pwin.destroy()
-    tk.Button(bot2,text="✓  Confirm Placement",command=_confirm,
+    tk.Button(bot2,text=tr("gfx_placement.confirm", "Confirm Placement"),command=_confirm,
               bg="#14532d",fg=GREEN,relief="flat",font=("Helvetica",10,"bold"),
               padx=14,pady=5,cursor="hand2").pack(side="right")
-    tk.Label(bot2,text="Positions are written to the GFX code panel",
+    tk.Label(bot2,text=tr("gfx_placement.positions_hint", "Positions are written to the GFX code panel"),
              bg=BG_DARK,fg=TEXT_DIM,font=("Helvetica",8,"italic")).pack(side="left",padx=4)
 
 
@@ -2264,7 +2314,7 @@ def _open_gfx_placement_editor(win, initial_items=None, on_confirm=None):
 def open_decision_wizard(app):
     """HOI4 Decision / Decision Category maker — matches mockup layout."""
     win = tk.Toplevel(app)
-    win.title("Decision Maker")
+    win.title(tr("wizard.decision.title", "Decision Maker"))
     win.configure(bg=BG_DARK)
     win.geometry("1340x820")
     win.resizable(True, True)
@@ -2283,12 +2333,12 @@ def open_decision_wizard(app):
 
     def _do_undo():
         if not _undo_stack:
-            _dm_status.config(text="  ⚠  Nothing to undo"); return
+            _dm_status.config(text=tr("common.status.nothing_to_undo", "  !  Nothing to undo")); return
         cats_snap, decs_snap = _undo_stack.pop()
         dm_cats.clear(); dm_cats.extend(cats_snap)
         dm_decs.clear(); dm_decs.extend(decs_snap)
         _rebuild_tree(); _rebuild_editor()
-        _dm_status.config(text="  ↩  Undo applied")
+        _dm_status.config(text=tr("common.status.undo_applied", "  undo applied"))
 
     def _autosave():
         """Save current state to JSON sidecar."""
@@ -2438,7 +2488,7 @@ def open_decision_wizard(app):
     # ── TITLE BAR ────────────────────────────────────────────────────────────
     titlebar = tk.Frame(win, bg="#080b10", height=42)
     titlebar.pack(fill="x"); titlebar.pack_propagate(False)
-    tk.Label(titlebar, text="⚖  DECISION MAKER", bg="#080b10", fg=C_GOLD,
+    tk.Label(titlebar, text=tr("wizard.decision.header", "DECISION MAKER"), bg="#080b10", fg=C_GOLD,
              font=("Courier", 13, "bold")).pack(side="left", padx=14)
     _dm_status = tk.Label(titlebar, text="", bg="#080b10", fg=C_DIM,
                           font=("Helvetica", 9, "italic"))
@@ -2459,17 +2509,17 @@ def open_decision_wizard(app):
             _collect(); _snapshot(); fn()
         return _inner
 
-    _tbtn("＋ New Category",    lambda: (_collect(), _snapshot(), _add_cat()),    C_GREEN)
-    _tbtn("＋ New Decision",    lambda: (_collect(), _snapshot(), _add_dec()),    C_BLUE)
-    _tbtn("Import .txt",        lambda: (_snapshot(), _import_txt()), C_TEAL)
-    _tbtn("Import .yml loc",    lambda: _import_yml_loc(), C_TEAL)
-    _tbtn("Import scripted_loc",lambda: _import_scripted_loc(), C_TEAL)
+    _tbtn(tr("decision.new_category", "+ New Category"),    lambda: (_collect(), _snapshot(), _add_cat()),    C_GREEN)
+    _tbtn(tr("decision.new_decision", "+ New Decision"),    lambda: (_collect(), _snapshot(), _add_dec()),    C_BLUE)
+    _tbtn(tr("common.import_txt", "Import .txt"),        lambda: (_snapshot(), _import_txt()), C_TEAL)
+    _tbtn(tr("common.import_yml_loc", "Import .yml loc"),    lambda: _import_yml_loc(), C_TEAL)
+    _tbtn(tr("common.import_scripted_loc", "Import scripted_loc"),lambda: _import_scripted_loc(), C_TEAL)
     if MOD.loaded:
-        _tbtn("Browse Mod", _browse_mod_decisions, C_TEAL)
-    _tbtn("Export .txt",        lambda: _export_txt(), C_GOLD)
-    _tbtn("Copy .yml",          lambda: _copy_yml(),   C_GOLD)
-    _tbtn("Save to Mod",        lambda: _save_to_mod(), C_GREEN)
-    _tbtn("↩ Undo",             lambda: _do_undo(),    C_DIM)
+        _tbtn(tr("common.browse_mod", "Browse Mod"), _browse_mod_decisions, C_TEAL)
+    _tbtn(tr("common.export_txt", "Export .txt"),        lambda: _export_txt(), C_GOLD)
+    _tbtn(tr("common.copy_yml", "Copy .yml"),          lambda: _copy_yml(),   C_GOLD)
+    _tbtn(tr("common.save_to_mod", "Save to Mod"),        lambda: _save_to_mod(), C_GREEN)
+    _tbtn(tr("common.undo", "↩ Undo"),             lambda: _do_undo(),    C_DIM)
 
     win.bind_all("<Control-z>", lambda e: _do_undo())
     win.bind_all("<Control-Z>", lambda e: _do_undo())
@@ -2505,7 +2555,7 @@ def open_decision_wizard(app):
     paned.add(left_f, minsize=180, width=230, stretch="never")
 
     hdr_row = tk.Frame(left_f, bg=C_DARK); hdr_row.pack(fill="x")
-    tk.Label(hdr_row, text="  CATEGORIES & DECISIONS",
+    tk.Label(hdr_row, text=tr("decision.tree_header", "  CATEGORIES & DECISIONS"),
              bg=C_DARK, fg=C_DIM,
              font=("Courier", 8), anchor="w", pady=6).pack(side="left", fill="x", expand=True)
     tk.Frame(left_f, bg=C_BORDG, height=1).pack(fill="x")
@@ -2527,7 +2577,7 @@ def open_decision_wizard(app):
               font=("Helvetica",8), cursor="hand2", padx=2).pack(side="left")
     # Show All / Hide All quick buttons
     vis_row = tk.Frame(left_f, bg=C_PANEL); vis_row.pack(fill="x", padx=4, pady=2)
-    tk.Label(vis_row, text="Preview:", bg=C_PANEL, fg=C_DIM,
+    tk.Label(vis_row, text=tr("common.preview", "Preview:"), bg=C_PANEL, fg=C_DIM,
              font=("Helvetica",8)).pack(side="left", padx=(2,4))
     def _show_all_cats():
         for c in dm_cats: cat_visible[c["uid"]] = True
@@ -2545,13 +2595,13 @@ def open_decision_wizard(app):
         if target_uid:
             for c in dm_cats: cat_visible[c["uid"]] = (c["uid"] == target_uid)
             _rebuild_tree(); _rebuild_editor(); _rebuild_right()
-    tk.Button(vis_row, text="👁 All",   command=_show_all_cats,
+    tk.Button(vis_row, text=tr("decision.show_all", "Show All"),   command=_show_all_cats,
               bg=C_CARD, fg=C_TEAL, relief="flat",
               font=("Helvetica",8), cursor="hand2", padx=6, pady=2).pack(side="left", padx=1)
-    tk.Button(vis_row, text="🚫 All",  command=_hide_all_cats,
+    tk.Button(vis_row, text=tr("decision.hide_all", "Hide All"),  command=_hide_all_cats,
               bg=C_CARD, fg=C_DIM, relief="flat",
               font=("Helvetica",8), cursor="hand2", padx=6, pady=2).pack(side="left", padx=1)
-    tk.Button(vis_row, text="Solo",     command=_show_only_selected,
+    tk.Button(vis_row, text=tr("decision.solo", "Solo"),     command=_show_only_selected,
               bg=C_CARD, fg=C_GOLD, relief="flat",
               font=("Helvetica",8), cursor="hand2", padx=6, pady=2,
               highlightthickness=1, highlightbackground=GOLD_TAG_BD).pack(side="left", padx=1)
@@ -2737,7 +2787,7 @@ def open_decision_wizard(app):
     mid_f = tk.Frame(paned, bg=C_PANEL)
     paned.add(mid_f, minsize=340, width=440, stretch="never")
 
-    mid_hdr = tk.Label(mid_f, text="  DECISION PROPERTIES",
+    mid_hdr = tk.Label(mid_f, text=tr("decision.properties_header", "  DECISION PROPERTIES"),
                        bg=C_DARK, fg=C_DIM, font=("Courier",8), anchor="w", pady=6)
     mid_hdr.pack(fill="x")
     tk.Frame(mid_f, bg=C_BORDG, height=1).pack(fill="x")
@@ -2852,7 +2902,7 @@ def open_decision_wizard(app):
                     height=rows, wrap="none", undo=True)
         t.pack(fill="x", pady=(2,0))
         brow = tk.Frame(f, bg=C_PANEL); brow.pack(fill="x", pady=(2,0))
-        tk.Button(brow, text="＋ Effect Picker",
+        tk.Button(brow, text=tr("effect_picker.button", "+ Effect Picker"),
                   command=lambda tw=t: _open_effect_picker(tw),
                   bg=C_CARD, fg=C_BLUE, relief="flat",
                   font=("Courier",8), cursor="hand2",
@@ -2876,15 +2926,15 @@ def open_decision_wizard(app):
                        insertbackground=C_BLUE, font=("Courier",10),
                        relief="flat", highlightthickness=0)
         ent.pack(side="left", fill="x", expand=True, ipady=4)
-        tk.Label(drop_outer, text="← drag .dds/.png/.tga",
+        tk.Label(drop_outer, text=tr("gfx.drag_drop_hint", "<- drag .dds/.png/.tga"),
                  bg=C_CARD, fg=C_DIM, font=("Helvetica",7)).pack(side="left", padx=3)
         def _browse():
             def _on_sel(gfx_key, path):
                 sv.set(gfx_key)
             _open_universal_gfx_browser(win, _on_sel,
-                title=f"GFX Browser — {label}",
+                title=tr("gfx.browser_for", "GFX Browser - {label}", label=label),
                 gfx_hints=["decisions","ideas"])
-        tk.Button(drop_outer, text="Browse ▸", command=_browse,
+        tk.Button(drop_outer, text=tr("common.browse", "Browse"), command=_browse,
                   bg=C_CARD, fg=C_PURPLE, relief="flat", font=("Courier",8),
                   cursor="hand2", padx=8, pady=4,
                   highlightthickness=1, highlightbackground=PURP_TAG_BD).pack(side="right", padx=4)
@@ -3048,7 +3098,7 @@ def open_decision_wizard(app):
         _rebuild_tree(); _rebuild_editor()
 
     def _build_cat_editor(cat):
-        mid_hdr.config(text="  CATEGORY PROPERTIES")
+        mid_hdr.config(text=tr("decision.category_properties_header", "  CATEGORY PROPERTIES"))
         tk.Label(mid_frm, text="", bg=C_PANEL, height=1).pack()
         # type badge + id + action buttons
         top = tk.Frame(mid_frm, bg=C_PANEL); top.pack(fill="x", padx=14, pady=(4,8))
@@ -3056,40 +3106,40 @@ def open_decision_wizard(app):
         tk.Label(top, text=cat["cat_id"], bg=C_PANEL, fg=C_TEXT,
                  font=("Courier",11)).pack(side="left")
         # Delete + Duplicate buttons (right-aligned)
-        tk.Button(top, text="⧉ Duplicate", command=lambda: _duplicate_cat(cat["uid"]),
+        tk.Button(top, text=tr("common.duplicate", "Duplicate"), command=lambda: _duplicate_cat(cat["uid"]),
                   bg=C_CARD, fg=C_TEAL, relief="flat", font=("Helvetica",8),
                   cursor="hand2", padx=6, pady=2).pack(side="right", padx=(4,0))
-        tk.Button(top, text="🗑 Delete", command=lambda: _delete_cat(cat["uid"]),
+        tk.Button(top, text=tr("common.delete", "Delete"), command=lambda: _delete_cat(cat["uid"]),
                   bg=C_CARD, fg="#ef4444", relief="flat", font=("Helvetica",8),
                   cursor="hand2", padx=6, pady=2).pack(side="right", padx=(4,0))
 
-        _sec("Identity", C_GOLD)
-        _field("Category ID", _sv("cat_id", cat["cat_id"]), mono=True,
+        _sec(tr("decision.section.identity", "Identity"), C_GOLD)
+        _field(tr("decision.field.category_id", "Category ID"), _sv("cat_id", cat["cat_id"]), mono=True,
                hint='Used in decisions files:  my_category = { ... }')
-        _field("Display Name (localisation)", _sv("loc_name", cat["loc_name"]), hint='Loc key shown in-game. Use §Y...§! for colour.')
-        _field("Description (localisation)",  _sv("loc_desc", cat["loc_desc"]), hint='Tooltip text shown when hovering the category.')
+        _field(tr("decision.field.display_name_loc", "Display Name (localisation)"), _sv("loc_name", cat["loc_name"]), hint='Loc key shown in-game. Use §Y...§! for colour.')
+        _field(tr("decision.field.description_loc", "Description (localisation)"),  _sv("loc_desc", cat["loc_desc"]), hint='Tooltip text shown when hovering the category.')
 
-        _sec("GFX — Icon + Picture", C_PURPLE)
-        _gfx_field("Icon", "icon", cat["icon"],
+        _sec(tr("decision.section.gfx_icon_picture", "GFX - Icon + Picture"), C_PURPLE)
+        _gfx_field(tr("common.icon", "Icon"), "icon", cat["icon"],
                    prefix_note='Auto-prefixed → GFX_decision_category_<n>  (or use full GFX_ name directly)')
-        _gfx_field("Picture (category detail panel)", "picture", cat["picture"],
+        _gfx_field(tr("decision.field.picture_category_detail", "Picture (category detail panel)"), "picture", cat["picture"],
                    warn="Picture only renders if a localisation description is set above")
         # Visual placement button
         prow = tk.Frame(mid_frm, bg=C_PANEL); prow.pack(fill="x", padx=14, pady=(4,2))
-        tk.Button(prow, text="🖼  Visual Placement Editor →",
+        tk.Button(prow, text=tr("gfx_placement.open_visual_editor", "Visual Placement Editor ->"),
                   command=lambda c=cat: _open_placement_cat(c),
                   bg=GOLD_TAG_BG, fg=C_GOLD, relief="flat",
                   font=("Courier",9), cursor="hand2", padx=10, pady=5,
                   highlightthickness=1, highlightbackground=GOLD_TAG_BD).pack(side="left")
 
-        _sec("Triggers", C_TEAL)
+        _sec(tr("decision.section.triggers", "Triggers"), C_TEAL)
         _triggerblock("allowed  (checked ONCE at game start)",
                       "allowed", cat["allowed"], hint="once-only")
         _triggerblock("visible  (checked every frame)",
                       "visible", cat["visible"], hint="per-frame")
 
-        _sec("Options", C_BLUE)
-        _field("Priority", _sv("priority", cat["priority"]), mono=True,
+        _sec(tr("decision.section.options", "Options"), C_BLUE)
+        _field(tr("decision.field.priority", "Priority"), _sv("priority", cat["priority"]), mono=True,
                hint="Higher = closer to top.  Default = 1")
         _toggle("visible_when_empty — show category even with no visible decisions",
                 _bv("visible_when_empty", cat["visible_when_empty"]))
@@ -3135,7 +3185,7 @@ def open_decision_wizard(app):
 
     # ── BUILD DECISION EDITOR ────────────────────────────────────────────────
     def _build_dec_editor(dec):
-        mid_hdr.config(text="  DECISION PROPERTIES")
+        mid_hdr.config(text=tr("decision.properties_header", "  DECISION PROPERTIES"))
         tk.Label(mid_frm, text="", bg=C_PANEL, height=1).pack()
         # type badge row — DECISION + tags
         top = tk.Frame(mid_frm, bg=C_PANEL); top.pack(fill="x", padx=14, pady=(4,8))
@@ -3148,22 +3198,22 @@ def open_decision_wizard(app):
             _type_badge(top, "ONCE", C_ORANGE, ORAN_TAG_BG, ORAN_TAG_BD)
         tk.Label(top, text=dec["dec_id"], bg=C_PANEL, fg=C_TEXT,
                  font=("Courier",11)).pack(side="left")
-        tk.Button(top, text="⧉ Duplicate", command=lambda: _duplicate_dec(dec["uid"]),
+        tk.Button(top, text=tr("common.duplicate", "Duplicate"), command=lambda: _duplicate_dec(dec["uid"]),
                   bg=C_CARD, fg=C_TEAL, relief="flat", font=("Helvetica",8),
                   cursor="hand2", padx=6, pady=2).pack(side="right", padx=(4,0))
-        tk.Button(top, text="🗑 Delete", command=lambda: _delete_dec(dec["uid"]),
+        tk.Button(top, text=tr("common.delete", "Delete"), command=lambda: _delete_dec(dec["uid"]),
                   bg=C_CARD, fg="#ef4444", relief="flat", font=("Helvetica",8),
                   cursor="hand2", padx=6, pady=2).pack(side="right", padx=(4,0))
 
-        _sec("Identity", C_GOLD)
-        _field("Decision ID", _sv("dec_id", dec["dec_id"]), mono=True, hint='Unique key, e.g. TAG_my_decision')
-        _field("Display Name (localisation)", _sv("loc_name", dec["loc_name"]), hint='Loc key shown in-game. Use §Y...§! for colour.')
-        _field("Description (localisation, optional)", _sv("loc_desc", dec.get("loc_desc","")))
-        _gfx_field("Icon", "icon", dec["icon"],
+        _sec(tr("decision.section.identity", "Identity"), C_GOLD)
+        _field(tr("decision.field.decision_id", "Decision ID"), _sv("dec_id", dec["dec_id"]), mono=True, hint='Unique key, e.g. TAG_my_decision')
+        _field(tr("decision.field.display_name_loc", "Display Name (localisation)"), _sv("loc_name", dec["loc_name"]), hint='Loc key shown in-game. Use §Y...§! for colour.')
+        _field(tr("decision.field.description_loc_optional", "Description (localisation, optional)"), _sv("loc_desc", dec.get("loc_desc","")))
+        _gfx_field(tr("common.icon", "Icon"), "icon", dec["icon"],
                    prefix_note='Auto-prefixed → GFX_decision_<n>  (or full GFX_ name). Supports conditional icon blocks.')
-        _field("Chain / group tag (visual only)", _sv("chain", dec["chain"]), mono=True)
+        _field(tr("decision.field.chain_group", "Chain / group tag (visual only)"), _sv("chain", dec["chain"]), mono=True)
 
-        _sec("Triggers", C_TEAL)
+        _sec(tr("decision.section.triggers", "Triggers"), C_TEAL)
         _triggerblock("allowed  (once-only at game start)",
                       "allowed", dec["allowed"], hint="once-only")
         _triggerblock("visible  (per-frame — makes decision show)",
@@ -3171,7 +3221,7 @@ def open_decision_wizard(app):
         _triggerblock("available  (per-frame — enables or greys out)",
                       "available", dec["available"], hint="per-frame")
 
-        _sec("Cost", C_BLUE)
+        _sec(tr("decision.section.cost", "Cost"), C_BLUE)
         use_custom_v = tk.BooleanVar(value=(dec["cost_type"] != "pp"))
         _evars["_use_custom"] = use_custom_v
         _toggle("Use custom cost (non-PP cost)", use_custom_v, hint_tag="visual only")
@@ -3184,14 +3234,14 @@ def open_decision_wizard(app):
                 _evars["cost_type"] = tk.StringVar(value="pp")
                 # inline field inside cost_host
                 cf = tk.Frame(cost_host, bg=C_PANEL); cf.pack(fill="x", **PAD)
-                tk.Label(cf, text="COST (POLITICAL POWER)", bg=C_PANEL, fg=C_DIM,
+                tk.Label(cf, text=tr("decision.cost_pp", "COST (POLITICAL POWER)"), bg=C_PANEL, fg=C_DIM,
                          font=("Courier",8)).pack(fill="x")
                 sv2 = _sv("cost", dec["cost"])
                 tk.Entry(cf, textvariable=sv2, bg=C_CARD, fg=C_TEXT,
                          insertbackground=C_BLUE, font=("Courier",10),
                          relief="flat", highlightthickness=1,
                          highlightbackground=C_BORDG).pack(fill="x", ipady=4, pady=(2,0))
-                tk.Label(cf, text="Can be a variable.  Default = 0",
+                tk.Label(cf, text=tr("decision.cost_hint", "Can be a variable.  Default = 0"),
                          bg=C_PANEL, fg=C_DIM, font=("Helvetica",8,"italic")).pack(fill="x")
             else:
                 _evars["cost_type"] = tk.StringVar(value="custom")
@@ -3232,20 +3282,20 @@ def open_decision_wizard(app):
         use_custom_v.trace_add("write", _rebuild_cost)
         _rebuild_cost()
 
-        _sec("Timer", C_PURPLE)
-        _field("days_remove  (-1 = never auto-removes, blank = no timer)",
+        _sec(tr("decision.section.timer", "Timer"), C_PURPLE)
+        _field(tr("decision.field.days_remove", "days_remove  (-1 = never auto-removes, blank = no timer)"),
                _sv("days_remove", dec["days_remove"]), mono=True)
-        _field("days_re_enable  (cooldown, blank = next day)",
+        _field(tr("decision.field.days_re_enable", "days_re_enable  (cooldown, blank = next day)"),
                _sv("days_re_enable", dec["days_re_enable"]), mono=True)
         _toggle("fire_only_once — disappears after first use",
                 _bv("fire_only_once", dec["fire_only_once"]))
         _toggle("fixed_random_seed — same random result each use (default ON)",
                 _bv("fixed_random_seed", dec["fixed_random_seed"]))
 
-        _sec("Mission Mode", C_PURPLE)
+        _sec(tr("decision.section.mission_mode", "Mission Mode"), C_PURPLE)
         miss_v = _bv("is_mission", dec["is_mission"])
         _evars["_is_mission"] = miss_v
-        _toggle("Turn into a MISSION (adds days_mission_timeout)", miss_v)
+        _toggle(tr("decision.toggle.mission_mode", "Turn into a MISSION (adds days_mission_timeout)"), miss_v)
         miss_host = tk.Frame(mid_frm, bg=C_PANEL); miss_host.pack(fill="x")
         def _rebuild_mission(*_):
             if not miss_host.winfo_exists(): return
@@ -3269,12 +3319,12 @@ def open_decision_wizard(app):
                 tk.Checkbutton(rr,variable=bv2,bg=C_CARD,activebackground=C_CARD,
                                selectcolor=C_GREEN,font=("Helvetica",9),cursor="hand2").pack(side="left")
                 tk.Label(rr,text=lbl3,bg=C_CARD,fg=C_DIM,font=("Helvetica",9)).pack(side="left")
-            _mtoggle("selectable_mission — player must click to activate",
+            _mtoggle(tr("decision.toggle.selectable_mission", "selectable_mission - player must click to activate"),
                      "selectable_mission", dec["selectable_mission"])
-            _mtoggle("is_good — swaps tooltip to show 'Effects when failed'",
+            _mtoggle(tr("decision.toggle.is_good", "is_good - swaps tooltip to show 'Effects when failed'"),
                      "is_good", dec["is_good"])
             # activation trigger
-            tk.Label(cf,text="ACTIVATION  (REPLACES VISIBLE — CHECKED DAILY)",
+            tk.Label(cf,text=tr("decision.field.activation", "ACTIVATION  (REPLACES VISIBLE - CHECKED DAILY)"),
                      bg=C_CARD,fg=C_DIM,font=("Courier",8),padx=6).pack(fill="x",pady=(4,0))
             at=tk.Text(cf,bg=BG_DARK,fg=C_GREEN,insertbackground=C_BLUE,
                        font=("Courier",9),relief="flat",highlightthickness=1,
@@ -3287,7 +3337,7 @@ def open_decision_wizard(app):
             tk.Label(wb2,text="⚠ visible = {} does NOTHING in missions — use activation instead",
                      bg=ORAN_TAG_BG,fg=C_ORANGE,font=("Helvetica",8),padx=4,pady=3).pack(fill="x")
             # timeout_effect
-            tk.Label(cf,text="TIMEOUT_EFFECT  (FIRES IF TIMER RUNS OUT)",
+            tk.Label(cf,text=tr("decision.field.timeout_effect", "TIMEOUT_EFFECT  (FIRES IF TIMER RUNS OUT)"),
                      bg=C_CARD,fg=C_DIM,font=("Courier",8),padx=6).pack(fill="x",pady=(4,0))
             te=tk.Text(cf,bg=BG_DARK,fg=C_GREEN,insertbackground=C_BLUE,
                        font=("Courier",9),relief="flat",highlightthickness=1,
@@ -3296,7 +3346,7 @@ def open_decision_wizard(app):
             _reg_text("timeout_effect",te,dec.get("timeout_effect",""))
         miss_v.trace_add("write",_rebuild_mission); _rebuild_mission()
 
-        _sec("Targeting", C_TEAL)
+        _sec(tr("decision.section.targeting", "Targeting"), C_TEAL)
         tgt_country_v = tk.BooleanVar(value=(dec["targeted"]=="country"))
         tgt_state_v   = tk.BooleanVar(value=(dec["targeted"]=="state"))
         _evars["_tgt_country"] = tgt_country_v
@@ -3317,14 +3367,14 @@ def open_decision_wizard(app):
         tk.Checkbutton(row_tgt, variable=tgt_country_v, bg=C_PANEL,
                        activebackground=C_PANEL, selectcolor=C_GREEN,
                        font=("Helvetica",9), cursor="hand2").pack(side="left")
-        tk.Label(row_tgt, text="Targeted decision (FROM = target country)",
+        tk.Label(row_tgt, text=tr("decision.targeted_country", "Targeted decision (FROM = target country)"),
                  bg=C_PANEL, fg=C_DIM, font=("Helvetica",9)).pack(side="left")
         tgt_country_v.trace_add("write", _on_tgt_country)
         row_tst = tk.Frame(mid_frm, bg=C_PANEL); row_tst.pack(fill="x", padx=14, pady=3)
         tk.Checkbutton(row_tst, variable=tgt_state_v, bg=C_PANEL,
                        activebackground=C_PANEL, selectcolor=C_GREEN,
                        font=("Helvetica",9), cursor="hand2").pack(side="left")
-        tk.Label(row_tst, text="State targeted (FROM = target state)",
+        tk.Label(row_tst, text=tr("decision.targeted_state", "State targeted (FROM = target state)"),
                  bg=C_PANEL, fg=C_DIM, font=("Helvetica",9)).pack(side="left")
         tgt_state_v.trace_add("write", _on_tgt_state)
 
@@ -3454,7 +3504,7 @@ def open_decision_wizard(app):
                 om2["menu"].config(bg=BG_DARK,fg=C_TEXT)
                 om2.pack(fill="x",pady=2)
             # war warnings (targeted)
-            tk.Label(cf,text="WAR WARNINGS (TARGETED)",bg=C_CARD,fg=C_RED,
+            tk.Label(cf,text=tr("decision.field.war_warnings_targeted", "WAR WARNINGS (TARGETED)"),bg=C_CARD,fg=C_RED,
                      font=("Courier",9,"bold"),padx=6,pady=(8,2)).pack(fill="x")
             def _wt(lbl3,k3,v3):
                 rr=tk.Frame(cf,bg=C_CARD); rr.pack(fill="x",padx=6,pady=1)
@@ -3470,18 +3520,18 @@ def open_decision_wizard(app):
             tk.Label(cf,text="",bg=C_CARD,pady=3).pack()
         _rebuild_tgt()
 
-        _sec("Highlight States & Map Mode", C_TEAL)
-        tk.Label(mid_frm, text="  Paste raw highlight_states block. For non-targeted decisions that show on map, also set on_map_mode.",
+        _sec(tr("decision.section.highlight_map", "Highlight States & Map Mode"), C_TEAL)
+        tk.Label(mid_frm, text=tr("decision.hint.highlight_map", "  Paste raw highlight_states block. For non-targeted decisions that show on map, also set on_map_mode."),
                  bg=C_PANEL, fg=C_DIM, font=("Helvetica",8,"italic"),
                  wraplength=380).pack(fill="x", padx=14)
-        _triggerblock("highlight_states  (optional — highlights states on map)",
+        _triggerblock(tr("decision.field.highlight_states", "highlight_states  (optional - highlights states on map)"),
                       "highlight_states", dec.get("highlight_states",""), rows=3)
         # on_map_mode for non-targeted decisions — store in the shared "on_map_mode" field
-        _field("on_map_mode  (non-targeted, e.g. map_and_decisions_view — leave blank to omit)",
+        _field(tr("decision.field.on_map_mode", "on_map_mode  (non-targeted, e.g. map_and_decisions_view - leave blank to omit)"),
                _sv("on_map_mode", dec.get("on_map_mode","")), mono=True)
 
-        _sec("Effects", C_GREEN)
-        _effectblock("complete_effect  (fires immediately on selection)",
+        _sec(tr("decision.section.effects", "Effects"), C_GREEN)
+        _effectblock(tr("decision.field.complete_effect", "complete_effect  (fires immediately on selection)"),
                      "complete_effect", dec["complete_effect"], rows=4)
 
         # timer effects — shown only when days_remove is set
@@ -3502,7 +3552,7 @@ def open_decision_wizard(app):
                            highlightbackground=C_BORDG,height=rows2,wrap="none",undo=True)
                 t2.pack(fill="x",pady=(2,0))
                 br2=tk.Frame(sf,bg=C_PANEL); br2.pack(fill="x",pady=(2,0))
-                tk.Button(br2,text="＋ Effect Picker",command=lambda tw=t2:_open_effect_picker(tw),
+                tk.Button(br2,text=tr("effect_picker.button", "+ Effect Picker"),command=lambda tw=t2:_open_effect_picker(tw),
                           bg=C_CARD,fg=C_BLUE,relief="flat",font=("Courier",8),
                           cursor="hand2",padx=8,pady=2,highlightthickness=1,
                           highlightbackground=BLUE_TAG_BD).pack(side="right")
@@ -3521,12 +3571,12 @@ def open_decision_wizard(app):
                 tk.Checkbutton(rr,variable=bv2,bg=C_PANEL,activebackground=C_PANEL,
                                selectcolor=C_GREEN,font=("Helvetica",9),cursor="hand2").pack(side="left")
                 tk.Label(rr,text=lbl3,bg=C_PANEL,fg=C_DIM,font=("Helvetica",9)).pack(side="left")
-            _sub_effectblock("remove_effect  (fires when timer ends)",   "remove_effect", dec["remove_effect"])
-            _sub_effectblock("cancel_effect  (fires on early cancel, no remove_effect)", "cancel_effect",  dec["cancel_effect"],rows2=2)
-            _sub_trigblock("cancel_trigger  (cancels timer without remove_effect)", "cancel_trigger", dec["cancel_trigger"])
-            _sub_toggle2("cancel_if_not_visible — auto-cancel when not visible", "cancel_if_not_visible", dec["cancel_if_not_visible"])
-            _sub_effectblock("modifier  (active during timer)", "modifier", dec["modifier"],rows2=2)
-            _sub_trigblock("remove_trigger  (instantly fires remove_effect)", "remove_trigger", dec["remove_trigger"])
+            _sub_effectblock(tr("decision.field.remove_effect", "remove_effect  (fires when timer ends)"),   "remove_effect", dec["remove_effect"])
+            _sub_effectblock(tr("decision.field.cancel_effect", "cancel_effect  (fires on early cancel, no remove_effect)"), "cancel_effect",  dec["cancel_effect"],rows2=2)
+            _sub_trigblock(tr("decision.field.cancel_trigger", "cancel_trigger  (cancels timer without remove_effect)"), "cancel_trigger", dec["cancel_trigger"])
+            _sub_toggle2(tr("decision.toggle.cancel_if_not_visible", "cancel_if_not_visible - auto-cancel when not visible"), "cancel_if_not_visible", dec["cancel_if_not_visible"])
+            _sub_effectblock(tr("decision.field.modifier", "modifier  (active during timer)"), "modifier", dec["modifier"],rows2=2)
+            _sub_trigblock(tr("decision.field.remove_trigger", "remove_trigger  (instantly fires remove_effect)"), "remove_trigger", dec["remove_trigger"])
         if "days_remove" in _evars:
             _evars["days_remove"].trace_add("write", _rebuild_timer_fx)
         _rebuild_timer_fx()
@@ -3537,17 +3587,17 @@ def open_decision_wizard(app):
         _editor_hooks["rebuild_cost"]     = _rebuild_cost
         _editor_hooks["rebuild_mission"]  = _rebuild_mission
 
-        _sec("AI", C_ORANGE)
+        _sec(tr("decision.section.ai", "AI"), C_ORANGE)
         # red warning banner
         rb = tk.Frame(mid_frm, bg=RED_TAG_BG, highlightthickness=1,
                       highlightbackground=RED_TAG_BD)
         rb.pack(fill="x", padx=14, pady=(0,4))
-        tk.Label(rb, text="⚠ AI will NEVER take this decision by default — ai_will_do is required",
+        tk.Label(rb, text=tr("decision.warning.ai_will_do_required", "AI will NEVER take this decision by default - ai_will_do is required"),
                  bg=RED_TAG_BG, fg=C_RED, font=("Helvetica",9),
                  padx=6, pady=4).pack(fill="x")
-        _triggerblock("ai_will_do  (MTTH block — base + modifier triggers)",
+        _triggerblock(tr("decision.field.ai_will_do", "ai_will_do  (MTTH block - base + modifier triggers)"),
                       "ai_will_do", dec["ai_will_do"], rows=3)
-        _field("priority", _sv("priority", dec["priority"]), mono=True,
+        _field(tr("decision.field.priority_raw", "priority"), _sv("priority", dec["priority"]), mono=True,
                hint="Higher = shown earlier in AI evaluation")
 
     # ── rebuild_editor  (clears mid_frm and dispatches) ──────────────────────
@@ -3665,7 +3715,7 @@ def open_decision_wizard(app):
             _build_dec_editor(obj)
         else:
             tk.Label(mid_frm,
-                     text="\n  Select a category or decision\n  from the tree on the left.",
+                     text=tr("decision.empty_selection", "\n  Select a category or decision\n  from the tree on the left."),
                      bg=C_PANEL, fg=C_DIM, font=("Helvetica",10),
                      justify="center").pack(pady=40)
         _editor_state["type"] = new_type
@@ -3683,7 +3733,7 @@ def open_decision_wizard(app):
     tab_bar = tk.Frame(right_f, bg=C_PANEL); tab_bar.pack(fill="x")
     _rtab = tk.StringVar(value="preview")
     _tab_btns = {}
-    for tid, tlbl in [("preview","🎮 Preview"),("chain","🔗 Chain View"),("code","{ } Code")]:
+    for tid, tlbl in [("preview",tr("common.preview", "Preview")),("chain",tr("decision.tab.chain_view", "Chain View")),("code",tr("tab.code", "Code"))]:
         def _mktab(t=tid):
             _rtab.set(t); _update_tab_styles(); _rebuild_right()
         b = tk.Button(tab_bar, text=tlbl, command=_mktab,
@@ -3692,14 +3742,14 @@ def open_decision_wizard(app):
                       padx=14, pady=8, bd=0)
         b.pack(side="left")
         _tab_btns[tid] = b
-    tk.Button(tab_bar, text="↺  Refresh",
+    tk.Button(tab_bar, text=tr("common.refresh", "Refresh"),
               command=lambda: _rebuild_right(),
               bg=C_CARD, fg=C_TEAL, relief="flat",
               font=("Courier",8), cursor="hand2",
               padx=8, pady=2,
               highlightthickness=1, highlightbackground=C_TEAL
               ).pack(side="right", padx=(0,6), pady=4)
-    tk.Label(tab_bar, text="approximate in-game appearance",
+    tk.Label(tab_bar, text=tr("decision.preview.approximate_hint", "approximate in-game appearance"),
              bg=C_PANEL, fg=C_DIM, font=("Helvetica",8,"italic")).pack(side="right", padx=10)
     tk.Frame(tab_bar, bg=C_BORDG, height=1).pack(side="bottom", fill="x")
 
@@ -4013,7 +4063,7 @@ def open_decision_wizard(app):
                 warn_f = tk.Frame(right_body, bg="#3a1a00")
                 warn_f.pack(fill="x")
                 tk.Label(warn_f,
-                    text="⚠  Icons are .dds files — install 'pillow-dds' for full GFX support: pip install pillow-dds",
+                    text=tr("decision.warning.dds_support", "Icons are .dds files - install 'pillow-dds' for full GFX support: pip install pillow-dds"),
                     bg="#3a1a00", fg="#f59e0b", font=("Helvetica",8),
                     pady=4, padx=8).pack(anchor="w")
 
@@ -4257,7 +4307,7 @@ def open_decision_wizard(app):
                 -1 if (e.delta>0 if e.num not in (4,5) else e.num==4) else 1,"units"))
         sb.pack(side="right", fill="y"); cv.pack(fill="both", expand=True)
 
-        tk.Label(frm, text="  Decision chains — decisions sharing a chain tag are visualised as a group",
+        tk.Label(frm, text=tr("decision.chain.description", "  Decision chains - decisions sharing a chain tag are visualised as a group"),
                  bg=C_DARK, fg=C_DIM, font=("Helvetica",8,"italic"), pady=8).pack(fill="x")
 
         all_decs = [d for cat in dm_cats for d in _decs_for(cat["uid"])]
@@ -4302,10 +4352,9 @@ def open_decision_wizard(app):
         # Chain assignment card
         asgn = tk.Frame(frm, bg=C_CARD, highlightthickness=1, highlightbackground=C_BORDG)
         asgn.pack(fill="x", padx=10, pady=14)
-        tk.Label(asgn, text="  CHAIN ASSIGNMENT", bg=C_CARD, fg=C_GOLD,
+        tk.Label(asgn, text=tr("decision.chain.assignment", "  CHAIN ASSIGNMENT"), bg=C_CARD, fg=C_GOLD,
                  font=("Courier",9,"bold"), pady=4).pack(anchor="w")
-        tk.Label(asgn, text="  Assign decisions to chains to track sequences. "
-                            "Chains are stored as comments — no engine impact.",
+        tk.Label(asgn, text=tr("decision.chain.assignment_hint", "  Assign decisions to chains to track sequences. Chains are stored as comments - no engine impact."),
                  bg=C_CARD, fg=C_DIM, font=("Helvetica",9),
                  wraplength=360, justify="left").pack(fill="x", padx=6)
         inp_row = tk.Frame(asgn, bg=C_CARD); inp_row.pack(fill="x", padx=6, pady=8)
@@ -4315,7 +4364,7 @@ def open_decision_wizard(app):
                              highlightbackground=C_BORDG)
         chain_inp.insert(0, "chain name...")
         chain_inp.pack(side="left", fill="x", expand=True, ipady=4)
-        tk.Button(inp_row, text="+ New Chain",
+        tk.Button(inp_row, text=tr("decision.chain.new", "+ New Chain"),
                   bg=TEAL_TAG_BG, fg=C_TEAL, relief="flat",
                   font=("Courier",9), cursor="hand2",
                   padx=10, pady=4, highlightthickness=1,
@@ -4399,7 +4448,7 @@ def open_decision_wizard(app):
         def _toggle_wrap():
             _wrap_mode[0] = not _wrap_mode[0]
             code_t.config(wrap="word" if _wrap_mode[0] else "none")
-            wrap_btn.config(text="⮐ Unwrap" if _wrap_mode[0] else "⮐ Wrap")
+            wrap_btn.config(text=tr("common.unwrap", "Unwrap") if _wrap_mode[0] else tr("common.wrap", "Wrap"))
 
         def _load(tab):
             code_t.config(state="normal"); code_t.delete("1.0","end")
@@ -4427,10 +4476,10 @@ def open_decision_wizard(app):
             import re as _re2
             raw = code_t.get("1.0", "end-1c").strip()
             if not raw:
-                _dm_status.config(text="  ✗  Nothing to apply"); return
+                _dm_status.config(text=tr("decision.status.nothing_to_apply", "  x  Nothing to apply")); return
             tab = ctab_v.get()
             if tab not in ("decisions", "scripted_loc"):
-                _dm_status.config(text="  ⚠  Only 'decisions .txt' and 'scripted_loc .txt' edits can be applied"); return
+                _dm_status.config(text=tr("decision.status.only_code_tabs_apply", "  !  Only 'decisions .txt' and 'scripted_loc .txt' edits can be applied")); return
             if tab == "scripted_loc":
                 if MOD.edit_scripted_loc_file:
                     try:
@@ -4441,7 +4490,7 @@ def open_decision_wizard(app):
                         _dm_status.config(text=f"  ✗  Save error: {_ex}")
                 else:
                     win.clipboard_clear(); win.clipboard_append(raw)
-                    _dm_status.config(text="  ✓  Copied (no scripted loc file set in Edit Targets)")
+                    _dm_status.config(text=tr("decision.status.copied_no_scripted_loc", "  ok  Copied (no scripted loc file set in Edit Targets)"))
                 return
 
             # ── Parse the raw decisions text directly (no monkeypatch) ──────
@@ -4584,21 +4633,21 @@ def open_decision_wizard(app):
                 _dm_status.config(text=f"  ✗  Parse error: {_ex}")
                 _tb.print_exc()
 
-        tk.Button(bot, text="⬆  Apply edits",
+        tk.Button(bot, text=tr("decision.code.apply_edits", "Apply edits"),
                   command=_apply_code_edits,
                   bg=C_CARD, fg=C_GREEN, relief="flat", font=("Courier",9,"bold"),
                   cursor="hand2", padx=10, pady=3,
                   highlightthickness=1, highlightbackground=C_GREEN
                   ).pack(side="left", padx=6, pady=3)
-        tk.Label(bot, text="Edit code directly then click Apply to save changes",
+        tk.Label(bot, text=tr("decision.code.edit_hint", "Edit code directly then click Apply to save changes"),
                  bg=C_DARK, fg=C_DIM, font=("Helvetica",8,"italic")).pack(side="left")
-        tk.Button(bot, text="Copy to clipboard",
+        tk.Button(bot, text=tr("common.copy_to_clipboard", "Copy to Clipboard"),
                   command=lambda: [win.clipboard_clear(),
                                    win.clipboard_append(code_t.get("1.0","end-1c")),
-                                   _dm_status.config(text="  ✓  Copied")],
+                                   _dm_status.config(text=tr("common.status.copied", "  ok  Copied"))],
                   bg=C_CARD, fg=C_DIM, relief="flat", font=("Courier",9),
                   cursor="hand2", padx=10, pady=3).pack(side="right", padx=6, pady=3)
-        wrap_btn = tk.Button(bot, text="⮐ Wrap", command=_toggle_wrap,
+        wrap_btn = tk.Button(bot, text=tr("common.wrap", "Wrap"), command=_toggle_wrap,
                   bg=C_CARD, fg=C_DIM, relief="flat", font=("Courier",9),
                   cursor="hand2", padx=10, pady=3)
         wrap_btn.pack(side="right", padx=2, pady=3)
@@ -4941,29 +4990,29 @@ def open_decision_wizard(app):
     def _browse_mod_decisions():
         import glob as _glob
         if not MOD.loaded or not MOD.root:
-            messagebox.showinfo("No Mod Loaded",
-                "Load a mod first to browse existing decisions.", parent=win)
+            messagebox.showinfo(tr("dialog.no_mod_loaded.title", "No Mod Loaded"),
+                tr("decision.dialog.load_mod_to_browse", "Load a mod first to browse existing decisions."), parent=win)
             return
         dec_dir = os.path.join(MOD.root, "common", "decisions")
         if not os.path.isdir(dec_dir):
-            messagebox.showinfo("Not Found",
-                "No common/decisions/ directory found in mod.", parent=win)
+            messagebox.showinfo(tr("dialog.not_found.title", "Not Found"),
+                tr("decision.dialog.no_decisions_dir", "No common/decisions/ directory found in mod."), parent=win)
             return
         files = sorted(_glob.glob(os.path.join(dec_dir, "*.txt")))
         if not files:
-            messagebox.showinfo("No Files Found",
-                "No .txt files found in common/decisions/.", parent=win)
+            messagebox.showinfo(tr("dialog.no_files_found.title", "No Files Found"),
+                tr("decision.dialog.no_decision_files", "No .txt files found in common/decisions/."), parent=win)
             return
 
         dlg = tk.Toplevel(win)
-        dlg.title("Browse Mod Decisions")
+        dlg.title(tr("decision.browse_mod_decisions.title", "Browse Mod Decisions"))
         dlg.configure(bg=BG_DARK)
         dlg.geometry("520x440")
         dlg.resizable(True, True)
         dlg.grab_set()
-        tk.Label(dlg, text="BROWSE MOD DECISIONS", bg=BG_DARK, fg=TEXT,
+        tk.Label(dlg, text=tr("decision.browse_mod_decisions.header", "BROWSE MOD DECISIONS"), bg=BG_DARK, fg=TEXT,
                  font=("Helvetica",11,"bold"), pady=8).pack(fill="x", padx=12)
-        tk.Label(dlg, text="Select a file to import. Already-loaded decisions are preserved.",
+        tk.Label(dlg, text=tr("decision.browse_mod_decisions.hint", "Select a file to import. Already-loaded decisions are preserved."),
                  bg=BG_DARK, fg=TEXT_DIM, font=("Helvetica",9)).pack(fill="x", padx=12)
         tk.Frame(dlg, bg=BORDER_G, height=1).pack(fill="x", pady=(4,0))
 
@@ -5001,9 +5050,9 @@ def open_decision_wizard(app):
                     pass
             if new_cats:
                 dupes = ", ".join(sorted(set(new_cats)))
-                if not messagebox.askyesno("Duplicate Categories",
+                if not messagebox.askyesno(tr("decision.dialog.duplicate_categories.title", "Duplicate Categories"),
                         f"These category IDs already exist:\n{dupes}\n\n"
-                        "Import anyway? (duplicates will be added as new entries)",
+                        + tr("decision.dialog.duplicate_categories.body", "Import anyway? (duplicates will be added as new entries)"),
                         parent=dlg):
                     return
             dlg.destroy()
@@ -5013,11 +5062,11 @@ def open_decision_wizard(app):
         lb.bind("<Double-Button-1>", lambda e: _do_import())
         bot_dlg = tk.Frame(dlg, bg=BG_DARK, pady=6)
         bot_dlg.pack(fill="x")
-        tk.Button(bot_dlg, text="Import Selected", command=_do_import,
+        tk.Button(bot_dlg, text=tr("common.import_selected", "Import Selected"), command=_do_import,
                   bg="#14532d", fg="#4ade80", relief="flat",
                   font=("Helvetica",10,"bold"), padx=16, pady=5,
                   cursor="hand2").pack(side="left", padx=10)
-        tk.Button(bot_dlg, text="Cancel", command=dlg.destroy,
+        tk.Button(bot_dlg, text=tr("common.cancel", "Cancel"), command=dlg.destroy,
                   bg=BG_CARD, fg=TEXT, relief="flat",
                   font=("Helvetica",10), padx=12, pady=5,
                   cursor="hand2").pack(side="right", padx=10)
@@ -5339,7 +5388,7 @@ def open_decision_wizard(app):
     def _copy_yml():
         _collect()
         win.clipboard_clear(); win.clipboard_append(_gen_yml())
-        _dm_status.config(text="  ✓  YML copied to clipboard")
+        _dm_status.config(text=tr("common.status.yml_copied", "  ok  YML copied to clipboard"))
 
     def _save_to_mod():
         _collect()
@@ -5419,7 +5468,7 @@ def open_decision_wizard(app):
         msg="Saved:\n"+"\n".join(saved)
         if errs: msg+="\n\nErrors:\n"+"\n".join(errs)
         messagebox.showinfo("Saved to Mod",msg,parent=win)
-        _dm_status.config(text="  ✓  Saved to mod")
+        _dm_status.config(text=tr("common.status.saved_to_mod", "  ok  Saved to mod"))
 
     # ── init ─────────────────────────────────────────────────────────────────
     # ── Autosave restore prompt ──────────────────────────────────────────────
@@ -5458,7 +5507,7 @@ def open_decision_wizard(app):
 
 def open_dyn_mod_wizard(app):
     """Wizard to create a HOI4 dynamic modifier .txt file."""
-    win = tk.Toplevel(app); win.title("Dynamic Modifier Generator")
+    win = tk.Toplevel(app); win.title(tr("wizard.dynamic_modifier.title", "Dynamic Modifier Generator"))
     win.configure(bg=BG_DARK); win.geometry("640x720"); win.resizable(True,True)
     win.grab_set()
     _dm_autosave_p = tempfile.gettempdir() + "/hoi4_cm_dynmod_autosave.json"
@@ -5473,7 +5522,7 @@ def open_dyn_mod_wizard(app):
     win.protocol("WM_DELETE_WINDOW", _dynmod_close)
     _dm_svars = {}   # populated below
 
-    tk.Label(win,text="DYNAMIC MODIFIER GENERATOR",bg=BG_DARK,fg=TEXT,
+    tk.Label(win,text=tr("wizard.dynamic_modifier.header", "DYNAMIC MODIFIER GENERATOR"),bg=BG_DARK,fg=TEXT,
              font=("Helvetica",11,"bold"),pady=10).pack(fill="x",padx=14)
     tk.Frame(win,bg=BORDER_G,height=1).pack(fill="x")
 
@@ -5510,11 +5559,11 @@ def open_dyn_mod_wizard(app):
     def sep(): tk.Frame(frm,bg=BORDER_G,height=1).pack(fill="x",padx=8,pady=6)
 
     # ── Core fields ──────────────────────────────────────────
-    lbl("MODIFIER ID  (must match add_dynamic_modifier = { modifier = ... })",bold=True)
+    lbl(tr("dynamic_modifier.field.modifier_id", "MODIFIER ID  (must match add_dynamic_modifier = { modifier = ... })"),bold=True)
     v_id = tk.StringVar(value="TAG_my_dynamic_modifier")
     entry(v_id)
 
-    lbl("Scope:  country | state | unit_leader")
+    lbl(tr("dynamic_modifier.field.scope", "Scope:  country | state | unit_leader"))
     v_scope = tk.StringVar(value="country")
     om_scope=tk.OptionMenu(frm,v_scope,"country","state","unit_leader")
     om_scope.config(bg=BG_CARD,fg=TEXT,activebackground=BORDER_G,font=("Helvetica",10),
@@ -5522,7 +5571,7 @@ def open_dyn_mod_wizard(app):
     om_scope["menu"].config(bg=BG_CARD,fg=TEXT,activebackground=BORDER_G)
     om_scope.pack(fill="x",padx=12,pady=2)
 
-    lbl("Icon GFX  (optional — shows in national spirits list if set)")
+    lbl(tr("dynamic_modifier.field.icon_gfx", "Icon GFX  (optional - shows in national spirits list if set)"))
     v_icon = tk.StringVar(value="")
     _icon_row = tk.Frame(frm, bg=BG_PANEL); _icon_row.pack(fill="x", padx=12, pady=2)
     tk.Entry(_icon_row, textvariable=v_icon, bg=BG_CARD, fg=TEXT,
@@ -5532,7 +5581,7 @@ def open_dyn_mod_wizard(app):
     def _open_dynmod_gfx_browser():
         ideas_root = os.path.join(MOD.root, MOD.path_ideas_gfx) if MOD.loaded else None
         if not MOD.loaded or not ideas_root or not os.path.isdir(ideas_root):
-            folder = filedialog.askdirectory(title="Select idea GFX folder (gfx/interface/ideas)")
+            folder = filedialog.askdirectory(title=tr("filedialog.select_idea_gfx_folder_hint", "Select idea GFX folder (gfx/interface/ideas)"))
             if not folder: return
             ideas_root = folder
         folders = []
@@ -5547,13 +5596,13 @@ def open_dyn_mod_wizard(app):
             messagebox.showinfo("No Folders",
                 "No image files or subfolders found in the ideas GFX path.", parent=win)
             return
-        bwin = tk.Toplevel(win); bwin.title("GFX Browser  —  Ideas / Dynamic Modifier")
+        bwin = tk.Toplevel(win); bwin.title(tr("gfx.browser.ideas_dynamic_title", "GFX Browser  -  Ideas / Dynamic Modifier"))
         bwin.configure(bg=BG_DARK); bwin.geometry("900x580"); bwin.resizable(True,True)
         bwin.grab_set()
         panes = tk.Frame(bwin, bg=BG_DARK); panes.pack(fill="both", expand=True, padx=8, pady=8)
         lf = tk.Frame(panes, bg=BG_PANEL, width=200)
         lf.pack(side="left", fill="y", padx=(0,6)); lf.pack_propagate(False)
-        tk.Label(lf, text="  FOLDERS", bg=BG_PANEL, fg=TEXT_DIM,
+        tk.Label(lf, text=tr("gfx.folders", "  FOLDERS"), bg=BG_PANEL, fg=TEXT_DIM,
                  font=("Helvetica",9,"bold"), anchor="w", pady=6).pack(fill="x")
         tk.Frame(lf, bg=BORDER_G, height=1).pack(fill="x")
         folder_lb = tk.Listbox(lf, bg=BG_CARD, fg=TEXT, selectbackground=BLUE,
@@ -5565,13 +5614,13 @@ def open_dyn_mod_wizard(app):
         for display, _ in folders: folder_lb.insert("end", "  " + display)
         rf = tk.Frame(panes, bg=BG_DARK); rf.pack(side="left", fill="both", expand=True)
         top_r = tk.Frame(rf, bg=BG_DARK); top_r.pack(fill="x", pady=(0,6))
-        tk.Label(top_r, text="Filter:", bg=BG_DARK, fg=TEXT_DIM, font=("Helvetica",9)).pack(side="left")
+        tk.Label(top_r, text=tr("common.filter", "Filter:"), bg=BG_DARK, fg=TEXT_DIM, font=("Helvetica",9)).pack(side="left")
         search_var = tk.StringVar()
         tk.Entry(top_r, textvariable=search_var, bg=BG_CARD, fg=TEXT,
                  insertbackground=BLUE, font=("Helvetica",10), relief="flat",
                  highlightthickness=1, highlightbackground=BORDER_G
                  ).pack(side="left", padx=6, fill="x", expand=True, ipady=3)
-        status_lbl = tk.Label(top_r, text="select a folder", bg=BG_DARK,
+        status_lbl = tk.Label(top_r, text=tr("gfx.select_folder_status", "select a folder"), bg=BG_DARK,
                               fg=TEXT_DIM, font=("Helvetica",9)); status_lbl.pack(side="right", padx=6)
         cv_frame = tk.Frame(rf, bg=BG_PANEL); cv_frame.pack(fill="both", expand=True)
         cv = tk.Canvas(cv_frame, bg=BG_PANEL, highlightthickness=0)
@@ -5582,12 +5631,12 @@ def open_dyn_mod_wizard(app):
         selected_var2 = tk.StringVar(value="")
         tk.Label(bot2, textvariable=selected_var2, bg=BG_DARK, fg=BLUE,
                  font=("Helvetica",9)).pack(side="left", padx=4)
-        tk.Button(bot2, text="Cancel", command=bwin.destroy,
+        tk.Button(bot2, text=tr("common.cancel", "Cancel"), command=bwin.destroy,
                   bg=BG_CARD, fg=TEXT, relief="flat", font=("Helvetica",9),
                   padx=10, pady=4, cursor="hand2").pack(side="right", padx=4)
         def _apply_dynmod_icon():
             v_icon.set(selected_var2.get()); bwin.destroy()
-        _sel_btn2 = tk.Button(bot2, text="Select ->", command=_apply_dynmod_icon,
+        _sel_btn2 = tk.Button(bot2, text=tr("common.select_arrow", "Select ->"), command=_apply_dynmod_icon,
                               bg="#1a3322", fg="#4b7a5e", relief="flat",
                               font=("Helvetica",10,"bold"), padx=14, pady=5,
                               cursor="arrow", state="disabled")
@@ -5678,7 +5727,7 @@ def open_dyn_mod_wizard(app):
                 threading.Thread(target=_bg_load2,args=(snap,to_load),daemon=True).start()
         def _rebuild2(pairs):
             cv.delete("all"); _st2.update({"pairs":pairs,"drawn":set(),"canvas_ids":{},"sel_idx":None})
-            if not pairs: status_lbl.config(text="0 icons"); return
+            if not pairs: status_lbl.config(text=tr("gfx.icons_count", "{count} icons", count=0)); return
             status_lbl.config(text="%d icons"%len(pairs))
             rows=(len(pairs)+COLS2-1)//COLS2
             cv.configure(scrollregion=(0,0,PAD2+COLS2*(TILE_W2+PAD2),PAD2+rows*(TILE_H2+PAD2)))
@@ -5694,7 +5743,7 @@ def open_dyn_mod_wizard(app):
                     pairs.append(("GFX_idea_"+stem, os.path.join(rd,fname)))
             return pairs
         def _load_folder2(folder_path):
-            status_lbl.config(text="scanning..."); bwin.update_idletasks()
+            status_lbl.config(text=tr("gfx.scanning", "scanning...")); bwin.update_idletasks()
             _rebuild2(_collect_files2(folder_path))
         def _on_folder_select2(evt=None):
             s=folder_lb.curselection()
@@ -5707,21 +5756,19 @@ def open_dyn_mod_wizard(app):
         search_var.trace_add("write",lambda *_:_safe_after(bwin,300,
             lambda:_on_folder_select2() if folder_lb.curselection() else None))
         if folders: folder_lb.selection_set(0); _load_folder2(folders[0][1])
-    tk.Button(_icon_row, text="Browse GFX ▸", command=_open_dynmod_gfx_browser,
+    tk.Button(_icon_row, text=tr("gfx.browse_gfx", "Browse GFX >"), command=_open_dynmod_gfx_browser,
               bg=BG_CARD, fg=TEXT_DIM, relief="flat",
               font=("Helvetica",9), cursor="hand2", padx=8, pady=4
               ).pack(side="right", padx=(4,0))
 
-    lbl("Enable Trigger  (optional — modifier removed when trigger becomes false)\ne.g.  has_country_flag = TAG_modifier_active")
+    lbl(tr("dynamic_modifier.field.enable_trigger", "Enable Trigger  (optional - modifier removed when trigger becomes false)\ne.g.  has_country_flag = TAG_modifier_active"))
     v_enable = tk.Text(frm,bg=BG_CARD,fg=TEXT,insertbackground=BLUE,font=("Courier",10),
                        relief="flat",highlightthickness=1,highlightbackground=BORDER_G,
                        height=3,wrap="none"); v_enable.pack(fill="x",padx=12,pady=2)
 
     sep()
-    lbl("VARIABLE MODIFIERS  (modifier_key = variable_name = tooltip_key, one per line)",bold=True)
-    lbl("Format:  stability_factor = TAG_stability_var = stability_factor_tt\n"
-        "The 3rd value is the tooltip localisation key shown to the player in the focus reward.\n"
-        "Leave tooltip blank to omit it:  stability_factor = TAG_stability_var")
+    lbl(tr("dynamic_modifier.section.variable_modifiers", "VARIABLE MODIFIERS  (modifier_key = variable_name = tooltip_key, one per line)"),bold=True)
+    lbl(tr("dynamic_modifier.hint.variable_modifiers", "Format:  stability_factor = TAG_stability_var = stability_factor_tt\nThe 3rd value is the tooltip localisation key shown to the player in the focus reward.\nLeave tooltip blank to omit it:  stability_factor = TAG_stability_var"))
     v_mods = tk.Text(frm,bg=BG_CARD,fg=TEXT,insertbackground=BLUE,font=("Courier",10),
                      relief="flat",highlightthickness=1,highlightbackground=BORDER_G,
                      height=8,wrap="none"); v_mods.pack(fill="x",padx=12,pady=2)
@@ -5731,18 +5778,18 @@ def open_dyn_mod_wizard(app):
         "political_power_factor = TAG_political_power_var = political_power_gain_tt")
 
     sep()
-    lbl("CONSTANT MODIFIERS  (modifier_key = 0.05, one per line)\nExample:  political_power_gain = 0.1",bold=True)
-    lbl("These are fixed values (not variable-driven).")
+    lbl(tr("dynamic_modifier.section.constant_modifiers", "CONSTANT MODIFIERS  (modifier_key = 0.05, one per line)\nExample:  political_power_gain = 0.1"),bold=True)
+    lbl(tr("dynamic_modifier.hint.constant_modifiers", "These are fixed values (not variable-driven)."))
     v_const = tk.Text(frm,bg=BG_CARD,fg=TEXT,insertbackground=BLUE,font=("Courier",10),
                       relief="flat",highlightthickness=1,highlightbackground=BORDER_G,
                       height=4,wrap="none"); v_const.pack(fill="x",padx=12,pady=2)
 
     sep()
-    lbl("LOCALISATION  (for the modifier's display name & description)",bold=True)
-    lbl("Display Name  (shown in national spirits panel)")
+    lbl(tr("dynamic_modifier.section.localisation", "LOCALISATION  (for the modifier's display name & description)"),bold=True)
+    lbl(tr("dynamic_modifier.field.display_name", "Display Name  (shown in national spirits panel)"))
     v_loc_name = tk.StringVar(value="My Dynamic Modifier")
     entry(v_loc_name)
-    lbl("Description")
+    lbl(tr("common.description_no_colon", "Description"))
     v_loc_desc = tk.StringVar(value="Scaling bonuses from economic variables.")
     entry(v_loc_desc)
 
@@ -5750,19 +5797,19 @@ def open_dyn_mod_wizard(app):
     # ── Right pane: preview header + text ────────────────
     dm_prev_hdr = tk.Frame(dm_right, bg=BG_DARK)
     dm_prev_hdr.pack(fill="x", pady=(8,2))
-    tk.Label(dm_prev_hdr, text="  OUTPUT PREVIEW", bg=BG_DARK, fg=TEXT_DIM,
+    tk.Label(dm_prev_hdr, text=tr("common.output_preview", "  OUTPUT PREVIEW"), bg=BG_DARK, fg=TEXT_DIM,
              font=("Helvetica",9,"bold"), anchor="w").pack(side="left")
     _dm_edit_mode    = [False]
     _dm_raw_override = [None]
 
-    _dm_edit_btn = tk.Button(dm_prev_hdr, text="✎ Edit",
+    _dm_edit_btn = tk.Button(dm_prev_hdr, text=tr("common.edit", "Edit"),
                               bg=BG_CARD, fg=TEXT_DIM, relief="flat",
                               font=("Helvetica",8,"bold"), padx=8, pady=1,
                               cursor="hand2",
                               highlightthickness=1, highlightbackground=BORDER_G)
     _dm_edit_btn.pack(side="right", padx=4)
 
-    _dm_save_raw_btn = tk.Button(dm_prev_hdr, text="💾 Save Raw",
+    _dm_save_raw_btn = tk.Button(dm_prev_hdr, text=tr("common.save_raw", "Save Raw"),
                                   bg=BG_CARD, fg=TEXT_DIM, relief="flat",
                                   font=("Helvetica",8,"bold"), padx=8, pady=1,
                                   cursor="hand2",
@@ -5770,7 +5817,7 @@ def open_dyn_mod_wizard(app):
     _dm_save_raw_btn.pack(side="right", padx=2)
 
 
-    _dm_lock_lbl = tk.Label(dm_prev_hdr, text="live", bg=BG_DARK, fg=TEXT_DIM,
+    _dm_lock_lbl = tk.Label(dm_prev_hdr, text=tr("common.live", "live"), bg=BG_DARK, fg=TEXT_DIM,
                              font=("Helvetica",7,"italic"))
     _dm_lock_lbl.pack(side="right")
     dm_prev_sb = tk.Scrollbar(dm_right, orient="vertical")
@@ -5791,18 +5838,18 @@ def open_dyn_mod_wizard(app):
         if _dm_edit_mode[0]:
             preview.config(state="normal", bg="#0d1a0d",
                            highlightbackground="#4ade80")
-            _dm_edit_btn.config(text="✖ Cancel Edit", fg=TEXT_DIM, bg=BG_CARD)
-            _dm_lock_lbl.config(text="editing…", fg="#fbbf24")
+            _dm_edit_btn.config(text=tr("common.cancel_edit", "Cancel Edit"), fg=TEXT_DIM, bg=BG_CARD)
+            _dm_lock_lbl.config(text=tr("common.editing", "editing..."), fg="#fbbf24")
         else:
             preview.config(state="normal", bg="#0d1117",
                            highlightbackground=BORDER_G)
             _dm_show_preview()
             preview.config(state="disabled")
             _dm_raw_override[0] = None
-            _dm_edit_btn.config(text="✎ Edit", fg=TEXT_DIM, bg=BG_CARD)
-            _dm_save_raw_btn.config(text="💾 Save Raw", fg=TEXT_DIM, bg=BG_CARD)
+            _dm_edit_btn.config(text=tr("common.edit", "Edit"), fg=TEXT_DIM, bg=BG_CARD)
+            _dm_save_raw_btn.config(text=tr("common.save_raw", "Save Raw"), fg=TEXT_DIM, bg=BG_CARD)
             preview.config(bg="#0d1117", highlightbackground=BORDER_G)
-            _dm_lock_lbl.config(text="live", fg=TEXT_DIM)
+            _dm_lock_lbl.config(text=tr("common.live", "live"), fg=TEXT_DIM)
 
     def _dm_save_raw():
         """Save raw preview: sync safe scalar fields back, store override,
@@ -5813,7 +5860,7 @@ def open_dyn_mod_wizard(app):
         _dm_edit_mode[0] = False
         preview.config(state="disabled", bg="#0d1117",
                        highlightbackground=ORANGE)
-        _dm_edit_btn.config(text="✎ Edit", fg=TEXT_DIM, bg=BG_CARD)
+        _dm_edit_btn.config(text=tr("common.edit", "Edit"), fg=TEXT_DIM, bg=BG_CARD)
 
 
         changes = []
@@ -5905,7 +5952,7 @@ def open_dyn_mod_wizard(app):
                         if val != v_loc_name.get():
                             v_loc_name.set(val); changes.append(f"Display name → {val!r}")
 
-        _dm_lock_lbl.config(text="raw override active", fg=ORANGE)
+        _dm_lock_lbl.config(text=tr("common.raw_override_active", "raw override active"), fg=ORANGE)
 
         parts = []
         if changes:
@@ -6344,9 +6391,9 @@ def open_dyn_mod_wizard(app):
         dlg.geometry("560x440")
         dlg.resizable(True, True)
         dlg.grab_set()
-        tk.Label(dlg, text="BROWSE DYNAMIC MODIFIERS", bg=BG_DARK, fg=TEXT,
+        tk.Label(dlg, text=tr("dynamic_modifier.browser.header", "BROWSE DYNAMIC MODIFIERS"), bg=BG_DARK, fg=TEXT,
                  font=("Helvetica",11,"bold"), pady=8).pack(fill="x", padx=12)
-        tk.Label(dlg, text="Select a modifier to load it into the editor.",
+        tk.Label(dlg, text=tr("dynamic_modifier.browser.description", "Select a modifier to load it into the editor."),
                  bg=BG_DARK, fg=TEXT_DIM, font=("Helvetica",9)).pack(fill="x", padx=12)
         tk.Frame(dlg, bg=BORDER_G, height=1).pack(fill="x", pady=(4,0))
 
@@ -6483,31 +6530,31 @@ def open_dyn_mod_wizard(app):
         lb.bind("<Double-Button-1>", lambda e: _load_selected())
         bot_dlg = tk.Frame(dlg, bg=BG_DARK, pady=6)
         bot_dlg.pack(fill="x")
-        tk.Button(bot_dlg, text="Load Selected", command=_load_selected,
+        tk.Button(bot_dlg, text=tr("common.load_selected", "Load Selected"), command=_load_selected,
                   bg="#14532d", fg="#4ade80", relief="flat",
                   font=("Helvetica",10,"bold"), padx=16, pady=5,
                   cursor="hand2").pack(side="left", padx=10)
-        tk.Button(bot_dlg, text="Cancel", command=dlg.destroy,
+        tk.Button(bot_dlg, text=tr("common.cancel", "Cancel"), command=dlg.destroy,
                   bg=BG_CARD, fg=TEXT, relief="flat",
                   font=("Helvetica",10), padx=12, pady=5,
                   cursor="hand2").pack(side="right", padx=10)
 
     bf=tk.Frame(win,bg=BG_DARK); bf.pack(fill="x",padx=12,pady=8)
-    tk.Button(bf,text="⟳ Refresh",command=_preview,bg=BG_CARD,fg=TEXT,
+    tk.Button(bf,text=tr("common.refresh", "Refresh"),command=_preview,bg=BG_CARD,fg=TEXT,
               font=("Helvetica",9,"bold"),relief="flat",padx=12,pady=5,
               cursor="hand2",highlightthickness=1,highlightbackground=BORDER_G).pack(side="left",padx=2)
     def _dm_copy():
         txt = _dm_get_output()
         win.clipboard_clear(); win.clipboard_append(txt)
-    tk.Button(bf,text="⎘ Copy",command=_dm_copy,bg=BG_CARD,fg=TEXT,
+    tk.Button(bf,text=tr("common.copy", "Copy"),command=_dm_copy,bg=BG_CARD,fg=TEXT,
               font=("Helvetica",9,"bold"),relief="flat",padx=12,pady=5,
               cursor="hand2",highlightthickness=1,highlightbackground=BORDER_G).pack(side="left",padx=2)
     if MOD.loaded:
-        tk.Button(bf, text="Browse Mod", command=_browse_mod_dynmods, bg=BG_CARD, fg=BLUE,
+        tk.Button(bf, text=tr("common.browse_mod", "Browse Mod"), command=_browse_mod_dynmods, bg=BG_CARD, fg=BLUE,
                   font=("Helvetica",9,"bold"), relief="flat", padx=12, pady=5,
                   cursor="hand2", highlightthickness=1, highlightbackground=BORDER_G
                   ).pack(side="left", padx=2)
-    tk.Button(bf,text="Generate All Files →",command=_save_file,
+    tk.Button(bf,text=tr("common.generate_all_files", "Generate All Files ->"),command=_save_file,
               bg="#14532d",fg="#0a0a0a",font=("Helvetica",10,"bold"),
               relief="flat",padx=14,pady=6,cursor="hand2",highlightthickness=0).pack(side="right",padx=2)
 
@@ -6520,7 +6567,7 @@ def open_dyn_mod_wizard(app):
 def open_additional_income_wizard(app):
     """MD Additional Income Wizard — creates/links a spirit and wires up all 3 money system files."""
     win = tk.Toplevel(app)
-    win.title("💰  MD Additional Income Wizard")
+    win.title(tr("wizard.additional_income.title", "MD Additional Income Wizard"))
     win.configure(bg=BG_DARK)
     win.geometry("700x740")
     win.resizable(True, True)
@@ -6529,10 +6576,10 @@ def open_additional_income_wizard(app):
     # ── Header ───────────────────────────────────────────────────────────
     hdr = tk.Frame(win, bg="#0d2b1a", pady=8)
     hdr.pack(fill="x")
-    tk.Label(hdr, text="💰  Additional Income Wizard",
+    tk.Label(hdr, text=tr("wizard.additional_income.header", "Additional Income Wizard"),
              bg="#0d2b1a", fg="#4ade80",
              font=("Helvetica", 13, "bold")).pack(side="left", padx=12)
-    tk.Label(hdr, text="Wires up 00_money_system.txt · money_scripted_localization.txt · MD_money_l_english.yml",
+    tk.Label(hdr, text=tr("wizard.additional_income.subtitle", "Wires up 00_money_system.txt · money_scripted_localization.txt · MD_money_l_english.yml"),
              bg="#0d2b1a", fg=TEXT_DIM,
              font=("Helvetica", 8)).pack(side="left", padx=4)
     tk.Button(hdr, text="✕", command=win.destroy,
@@ -6575,31 +6622,31 @@ def open_additional_income_wizard(app):
     inner.pack(fill="both", expand=True, padx=12, pady=8)
 
     # ── SECTION 1: Income Source Identity ────────────────────────────────
-    tk.Label(inner, text="  INCOME SOURCE IDENTITY", bg=BG_PANEL, fg=TEXT_DIM,
+    tk.Label(inner, text=tr("income.section.identity", "  INCOME SOURCE IDENTITY"), bg=BG_PANEL, fg=TEXT_DIM,
              font=("Helvetica", 8, "bold"), anchor="w").pack(fill="x")
     tk.Frame(inner, bg=BORDER_G, height=1).pack(fill="x", pady=(2,6))
 
-    _lbl(inner, "The idea/spirit that gates this income source.")
-    v_idea_id       = _field(inner, "Idea / Spirit ID",    "HKG_free_trade_bonus",  "e.g. HKG_free_trade_bonus")
-    v_country_tag   = _field(inner, "Country Tag",         "HKG",                   "3-letter tag, e.g. HKG")
+    _lbl(inner, tr("income.hint.identity", "The idea/spirit that gates this income source."))
+    v_idea_id       = _field(inner, tr("income.field.idea_spirit_id", "Idea / Spirit ID"),    "HKG_free_trade_bonus",  "e.g. HKG_free_trade_bonus")
+    v_country_tag   = _field(inner, tr("income.field.country_tag", "Country Tag"),         "HKG",                   tr("income.hint.country_tag", "3-letter tag, e.g. HKG"))
 
     _sep(inner)
-    tk.Label(inner, text="  INCOME RATE", bg=BG_PANEL, fg=TEXT_DIM,
+    tk.Label(inner, text=tr("income.section.rate", "  INCOME RATE"), bg=BG_PANEL, fg=TEXT_DIM,
              font=("Helvetica", 8, "bold"), anchor="w").pack(fill="x")
     tk.Frame(inner, bg=BORDER_G, height=1).pack(fill="x", pady=(2,6))
 
-    _lbl(inner, "Variable and amount used inside calculate_additional_income_rate.")
-    v_variable_name = _field(inner, "Variable Name",       "HKG_trade_income_gain", "e.g. HKG_trade_income_gain")
+    _lbl(inner, tr("income.hint.rate", "Variable and amount used inside calculate_additional_income_rate."))
+    v_variable_name = _field(inner, tr("income.field.variable_name", "Variable Name"),       "HKG_trade_income_gain", "e.g. HKG_trade_income_gain")
 
     # ── Formula Type ───────────────────────────────────────────────────────
     formula_var = tk.StringVar(value="fixed")
     ftype_frm = tk.Frame(inner, bg=BG_PANEL)
     ftype_frm.pack(fill="x", pady=(4, 2))
-    tk.Label(ftype_frm, text="Formula Type:", bg=BG_PANEL, fg=TEXT_DIM,
+    tk.Label(ftype_frm, text=tr("income.field.formula_type", "Formula Type:"), bg=BG_PANEL, fg=TEXT_DIM,
              font=("Helvetica", 9), width=22, anchor="w").pack(side="left")
-    for _val, _lbl_txt in [("fixed",      "Fixed rate  (e.g. 0.05 = +5%)"),
-                            ("gdp_pct",   "% of GDP  (e.g. 0.004 = 0.4% GDP/week)"),
-                            ("population","Per-capita  (e.g. 0.00016 × population_total)")]:
+    for _val, _lbl_txt in [("fixed",      tr("income.formula.fixed", "Fixed rate  (e.g. 0.05 = +5%)")),
+                            ("gdp_pct",   tr("income.formula.gdp_pct", "% of GDP  (e.g. 0.004 = 0.4% GDP/week)")),
+                            ("population",tr("income.formula.population", "Per-capita  (e.g. 0.00016 x population_total)"))]:
         tk.Radiobutton(ftype_frm, text=_lbl_txt, variable=formula_var, value=_val,
                        bg=BG_PANEL, fg=TEXT, selectcolor=BG_CARD,
                        font=("Helvetica", 9), activebackground=BG_PANEL).pack(side="left", padx=6)
@@ -6609,34 +6656,34 @@ def open_additional_income_wizard(app):
     hint_lbl.pack(fill="x", padx=4, pady=(0, 4))
 
     _FORMULA_HINTS = {
-        "fixed":      "Amount = fixed rate added to additional_income_rate.  e.g. 0.05",
-        "gdp_pct":    "Amount = multiplier applied to gdp_total each week.  e.g. 0.004 (≈ 20% of GDP/year)",
-        "population": "Amount = multiplier applied to population_total.  e.g. 0.00016 (≈ $160 per million people)",
+        "fixed":      tr("income.formula_hint.fixed", "Amount = fixed rate added to additional_income_rate.  e.g. 0.05"),
+        "gdp_pct":    tr("income.formula_hint.gdp_pct", "Amount = multiplier applied to gdp_total each week.  e.g. 0.004 (~20% of GDP/year)"),
+        "population": tr("income.formula_hint.population", "Amount = multiplier applied to population_total.  e.g. 0.00016 (~$160 per million people)"),
     }
     def _update_hint(*_):
         hint_lbl.config(text="  " + _FORMULA_HINTS.get(formula_var.get(), ""))
     formula_var.trace_add("write", _update_hint)
     _update_hint()
 
-    v_amount        = _field(inner, "Amount / Multiplier",  "0.05",                  "value depends on formula type above")
-    v_tooltip_key   = _field(inner, "Tooltip Key",         "HKG_trade_income_TT",   "shown in spirit modifier section")
+    v_amount        = _field(inner, tr("income.field.amount_multiplier", "Amount / Multiplier"),  "0.05",                  tr("income.hint.amount_multiplier", "value depends on formula type above"))
+    v_tooltip_key   = _field(inner, tr("income.field.tooltip_key", "Tooltip Key"),         "HKG_trade_income_TT",   tr("income.hint.tooltip_key", "shown in spirit modifier section"))
 
     _sep(inner)
-    tk.Label(inner, text="  SPIRIT / IDEA DETAILS  (for the idea file)", bg=BG_PANEL, fg=TEXT_DIM,
+    tk.Label(inner, text=tr("income.section.spirit_details", "  SPIRIT / IDEA DETAILS  (for the idea file)"), bg=BG_PANEL, fg=TEXT_DIM,
              font=("Helvetica", 8, "bold"), anchor="w").pack(fill="x")
     tk.Frame(inner, bg=BORDER_G, height=1).pack(fill="x", pady=(2,6))
 
-    _lbl(inner, "These fill the localisation and idea block. You can edit the generated file after.")
-    v_spirit_name   = _field(inner, "Spirit Display Name",  "Free Trade Bonus",      "shown in-game")
-    v_spirit_desc   = _field(inner, "Spirit Description",   "Our open trade policies generate additional government revenue.", "", width=48)
+    _lbl(inner, tr("income.hint.spirit_details", "These fill the localisation and idea block. You can edit the generated file after."))
+    v_spirit_name   = _field(inner, tr("income.field.spirit_display_name", "Spirit Display Name"),  "Free Trade Bonus",      tr("income.hint.shown_in_game", "shown in-game"))
+    v_spirit_desc   = _field(inner, tr("income.field.spirit_description", "Spirit Description"),   "Our open trade policies generate additional government revenue.", "", width=48)
 
     _sep(inner)
-    tk.Label(inner, text="  LOCALISATION TOOLTIP TEXT", bg=BG_PANEL, fg=TEXT_DIM,
+    tk.Label(inner, text=tr("income.section.tooltip_text", "  LOCALISATION TOOLTIP TEXT"), bg=BG_PANEL, fg=TEXT_DIM,
              font=("Helvetica", 8, "bold"), anchor="w").pack(fill="x")
     tk.Frame(inner, bg=BORDER_G, height=1).pack(fill="x", pady=(2,6))
 
-    _lbl(inner, "Text shown in the Additional Income Revenues tooltip breakdown.")
-    v_tooltip_text  = _field(inner, "Tooltip Display Text", "+5% Additional Income from Free Trade", "", width=48)
+    _lbl(inner, tr("income.hint.tooltip_text", "Text shown in the Additional Income Revenues tooltip breakdown."))
+    v_tooltip_text  = _field(inner, tr("income.field.tooltip_display_text", "Tooltip Display Text"), "+5% Additional Income from Free Trade", "", width=48)
 
     _sep(inner)
 
@@ -6644,14 +6691,14 @@ def open_additional_income_wizard(app):
     status_frm = tk.Frame(inner, bg="#050810",
                           highlightthickness=1, highlightbackground=BORDER_G)
     status_frm.pack(fill="x", pady=4)
-    status_lbl = tk.Label(status_frm, text="  Load a mod first to enable automatic file editing.",
+    status_lbl = tk.Label(status_frm, text=tr("income.status.load_mod_first", "  Load a mod first to enable automatic file editing."),
                           bg="#050810", fg=TEXT_DIM,
                           font=("Helvetica", 8), anchor="w", justify="left", wraplength=620)
     status_lbl.pack(fill="x", padx=6, pady=4)
 
     def _refresh_status():
         if not MOD.loaded or not MOD.root:
-            status_lbl.config(text="  ⚠  No mod loaded — load your mod first.", fg=ORANGE)
+            status_lbl.config(text=tr("income.status.no_mod_loaded", "  !  No mod loaded - load your mod first."), fg=ORANGE)
             return
         MOD._scan_md_money_files()
         lines = []
@@ -6662,7 +6709,7 @@ def open_additional_income_wizard(app):
         status_lbl.config(text="\n".join(lines), fg=TEXT_DIM)
 
     _refresh_status()
-    tk.Button(inner, text="⟳ Refresh File Status", command=_refresh_status,
+    tk.Button(inner, text=tr("income.refresh_file_status", "Refresh File Status"), command=_refresh_status,
               bg=BG_CARD, fg=TEXT_DIM, font=("Helvetica", 8), relief="flat",
               padx=6, pady=2, cursor="hand2",
               highlightthickness=1, highlightbackground=BORDER_G).pack(anchor="e", pady=(2,0))
@@ -6672,13 +6719,13 @@ def open_additional_income_wizard(app):
     mode_var = tk.StringVar(value="wire_only")
     mode_frm = tk.Frame(inner, bg=BG_PANEL)
     mode_frm.pack(fill="x", pady=2)
-    tk.Label(mode_frm, text="Action:", bg=BG_PANEL, fg=TEXT_DIM,
+    tk.Label(mode_frm, text=tr("income.field.action", "Action:"), bg=BG_PANEL, fg=TEXT_DIM,
              font=("Helvetica", 9), width=22, anchor="w").pack(side="left")
-    tk.Radiobutton(mode_frm, text="Wire up money system files only (spirit already exists)",
+    tk.Radiobutton(mode_frm, text=tr("income.action.wire_only", "Wire up money system files only (spirit already exists)"),
                    variable=mode_var, value="wire_only",
                    bg=BG_PANEL, fg=TEXT, selectcolor=BG_CARD,
                    font=("Helvetica", 9), activebackground=BG_PANEL).pack(side="left", padx=4)
-    tk.Radiobutton(mode_frm, text="Also generate spirit code snippet",
+    tk.Radiobutton(mode_frm, text=tr("income.action.also_spirit", "Also generate spirit code snippet"),
                    variable=mode_var, value="also_spirit",
                    bg=BG_PANEL, fg=TEXT, selectcolor=BG_CARD,
                    font=("Helvetica", 9), activebackground=BG_PANEL).pack(side="left", padx=4)
@@ -6715,13 +6762,13 @@ def open_additional_income_wizard(app):
         formula_type  = formula_var.get()
 
         if not idea_id or not variable_name or not amount or not tooltip_key:
-            messagebox.showwarning("Missing Fields",
-                "Please fill in Idea ID, Variable Name, Amount, and Tooltip Key.", parent=win)
+            messagebox.showwarning(tr("dialog.missing_fields.title", "Missing Fields"),
+                tr("income.dialog.missing_fields.body", "Please fill in Idea ID, Variable Name, Amount, and Tooltip Key."), parent=win)
             return
 
         if not MOD.loaded or not MOD.root:
-            messagebox.showwarning("No Mod Loaded",
-                "Load your mod first (File → Load Mod) so the tool can edit the money system files.", parent=win)
+            messagebox.showwarning(tr("dialog.no_mod_loaded.title", "No Mod Loaded"),
+                tr("income.dialog.no_mod_loaded.body", "Load your mod first (File > Load Mod) so the tool can edit the money system files."), parent=win)
             return
 
         output_lines = []
@@ -6795,7 +6842,7 @@ def open_additional_income_wizard(app):
 
     btn_row = tk.Frame(inner, bg=BG_PANEL)
     btn_row.pack(fill="x", pady=(8,2))
-    tk.Button(btn_row, text="💾  Apply — Wire Up Money System Files",
+    tk.Button(btn_row, text=tr("income.apply_wire_money", "Apply - Wire Up Money System Files"),
               command=_apply,
               bg="#14532d", fg="#4ade80",
               font=("Helvetica", 10, "bold"), relief="flat",
@@ -6946,7 +6993,7 @@ def open_event_wizard(app):
 
     # ── Window ───────────────────────────────────────────────────────
     win = tk.Toplevel(app)
-    win.title("Event Maker")
+    win.title(tr("wizard.event.title", "Event Maker"))
     win.configure(bg=BG_DARK)
     win.geometry("1320x820")
     win.resizable(True, True)
@@ -7038,7 +7085,7 @@ def open_event_wizard(app):
         # ── empty state ──────────────────────────────────────────────
         if ev is None:
             cv.create_text(W//2, H//2,
-                text="＋ Create or select an event\nto see preview",
+                text=tr("event.empty_preview", "+ Create or select an event\nto see preview"),
                 fill="#5a6070", font=("Helvetica",11,"italic"), justify="center")
             return
 
@@ -7377,7 +7424,7 @@ def open_event_wizard(app):
         Inserts rendered HOI4 code into target_text (a tk.Text widget).
         """
         pwin = tk.Toplevel(win)
-        pwin.title("Effect Picker")
+        pwin.title(tr("effect_picker.title", "Effect Picker"))
         pwin.configure(bg=BG_DARK)
         pwin.geometry("620x580")
         pwin.resizable(True, True)
@@ -7388,7 +7435,8 @@ def open_event_wizard(app):
         hdr.pack(fill="x", padx=10, pady=(8,0))
         tk.Label(hdr, text="🔍", bg=BG_DARK, fg=TEXT_DIM,
                  font=("Helvetica",11)).pack(side="left", padx=(0,4))
-        eff_search_var = tk.StringVar(value="Search effects…")
+        _search_ph = tr("focus.effects.search_placeholder", "Search effects...")
+        eff_search_var = tk.StringVar(value=_search_ph)
         eff_search_ent = tk.Entry(hdr, textvariable=eff_search_var,
                                    bg=BG_CARD, fg=TEXT_DIM,
                                    insertbackground=BLUE,
@@ -7397,11 +7445,11 @@ def open_event_wizard(app):
                                    highlightbackground=BORDER_G)
         eff_search_ent.pack(fill="x", expand=True, ipady=4)
         def _ph_in(e):
-            if eff_search_var.get() == "Search effects…":
+            if eff_search_var.get() == _search_ph:
                 eff_search_var.set(""); eff_search_ent.config(fg=TEXT)
         def _ph_out(e):
             if not eff_search_var.get():
-                eff_search_var.set("Search effects…")
+                eff_search_var.set(_search_ph)
                 eff_search_ent.config(fg=TEXT_DIM)
         eff_search_ent.bind("<FocusIn>",  _ph_in)
         eff_search_ent.bind("<FocusOut>", _ph_out)
@@ -7409,7 +7457,7 @@ def open_event_wizard(app):
         # ── category + effect dropdown ─────────────────────────────────
         cat_row = tk.Frame(pwin, bg=BG_DARK)
         cat_row.pack(fill="x", padx=10, pady=(4,0))
-        tk.Label(cat_row, text="Category:", bg=BG_DARK, fg=TEXT_DIM,
+        tk.Label(cat_row, text=tr("common.category", "Category:"), bg=BG_DARK, fg=TEXT_DIM,
                  font=("Helvetica",9)).pack(side="left")
         eff_cat = tk.StringVar(value=EFFECT_CATS[0])
         cat_menu = tk.OptionMenu(cat_row, eff_cat, *EFFECT_CATS,
@@ -7448,15 +7496,16 @@ def open_event_wizard(app):
 
         def _filter_dd(*_):
             raw = eff_search_var.get()
-            if raw == "Search effects…" or not raw.strip():
+            if raw == _search_ph or not raw.strip():
                 _rebuild_dd(); return
             q = raw.strip().lower()
             matches = [(k, v["label"]) for k,v in EFFECT_DEFS.items()
-                       if q in k.lower() or q in v["label"].lower()
+                       if q in k.lower()
+                       or q in v["label"].lower()
                        or q in v.get("cat","").lower()]
             for w in dd_frame.winfo_children(): w.destroy()
             if not matches:
-                tk.Label(dd_frame, text="No effects found",
+                tk.Label(dd_frame, text=tr("focus.effects.none_found", "No effects found"),
                           bg=BG_DARK, fg=TEXT_DIM,
                           font=("Helvetica",9)).pack(anchor="w")
                 return
@@ -7513,14 +7562,18 @@ def open_event_wizard(app):
             defn = EFFECT_DEFS.get(key, {})
             if not defn:
                 tk.Label(fields_frm,
-                          text=f"  Unknown effect: {key!r}\n  Will be inserted as raw snippet.",
+                          text=tr(
+                              "effect_picker.unknown_effect",
+                              "  Unknown effect: {effect}\n  Will be inserted as raw snippet.",
+                              effect=repr(key),
+                          ),
                           bg=BG_PANEL, fg=ORANGE,
                           font=("Helvetica",9,"italic"),
                           justify="left").pack(anchor="w", padx=8, pady=8)
                 return
 
             tk.Label(fields_frm,
-                      text=f"  [{defn.get('cat','')}]  {defn.get('label',key)}",
+                      text=f"  [{defn.get('cat','')}]  {defn.get('label', key)}",
                       bg=BG_PANEL, fg=TEXT,
                       font=("Helvetica",10,"bold"),
                       anchor="w").pack(fill="x", padx=8, pady=(8,2))
@@ -7604,7 +7657,7 @@ def open_event_wizard(app):
         tk.Frame(pwin, bg=BORDER_G, height=1).pack(fill="x", padx=8)
         prev_frame = tk.Frame(pwin, bg=BG_DARK)
         prev_frame.pack(fill="x", padx=8, pady=(4,0))
-        tk.Label(prev_frame, text="  Preview:", bg=BG_DARK, fg=TEXT_DIM,
+        tk.Label(prev_frame, text=tr("effect_picker.preview", "  Preview:"), bg=BG_DARK, fg=TEXT_DIM,
                   font=("Helvetica",8,"bold")).pack(anchor="w")
         prev_lbl = tk.Label(prev_frame, text="", bg=BG_DARK, fg=GREEN,
                              font=("Courier",9), anchor="w", justify="left",
@@ -7630,7 +7683,7 @@ def open_event_wizard(app):
         bot = tk.Frame(pwin, bg=BG_DARK)
         bot.pack(fill="x", padx=10, pady=6)
 
-        tk.Button(bot, text="Cancel", command=pwin.destroy,
+        tk.Button(bot, text=tr("common.cancel", "Cancel"), command=pwin.destroy,
                    bg=BG_CARD, fg=TEXT, relief="flat",
                    font=("Helvetica",9), padx=10, pady=4,
                    cursor="hand2").pack(side="right", padx=4)
@@ -7641,7 +7694,7 @@ def open_event_wizard(app):
             _schedule_preview()
             pwin.destroy()
 
-        tk.Button(bot, text="＋  Insert Effect",
+        tk.Button(bot, text=tr("effect_picker.insert_effect", "+ Insert Effect"),
                    command=_insert_effect,
                    bg="#14532d", fg=GREEN, relief="flat",
                    font=("Helvetica",10,"bold"),
@@ -7649,7 +7702,7 @@ def open_event_wizard(app):
                    cursor="hand2").pack(side="right")
 
         tk.Label(bot,
-                  text="Inserts snippet at end of effects box",
+                  text=tr("effect_picker.insert_hint", "Inserts snippet at end of effects box"),
                   bg=BG_DARK, fg=TEXT_DIM,
                   font=("Helvetica",8,"italic")).pack(side="left", padx=4)
 
@@ -7665,7 +7718,7 @@ def open_event_wizard(app):
     topbar = tk.Frame(win, bg=BG_DARK, height=44)
     topbar.pack(fill="x"); topbar.pack_propagate(False)
 
-    tk.Label(topbar, text="EVENT MAKER", bg=BG_DARK, fg=TEXT,
+    tk.Label(topbar, text=tr("wizard.event.header", "EVENT MAKER"), bg=BG_DARK, fg=TEXT,
              font=("Helvetica",11,"bold"), padx=12).pack(side="left")
     tk.Frame(topbar, bg=BORDER_G, width=1, height=24).pack(side="left", padx=4, pady=10)
 
@@ -7704,8 +7757,8 @@ def open_event_wizard(app):
                          ).pack(side="left", fill="x", expand=True, ipady=2)
                 sv.trace_add("write",
                     lambda *a,k=key,v=sv: [opt.update({k:v.get()}),_schedule_preview()])
-        _row("name:",      "name")
-        _row("text:",      "text")
+        _row(tr("event.option.name", "name:"),      "name")
+        _row(tr("event.option.text", "text:"),      "text")
         # Effects row with picker button
         eff_hdr_r = tk.Frame(frm, bg=BG_CARD); eff_hdr_r.pack(fill="x", padx=6, pady=(4,0))
         tk.Label(eff_hdr_r, text="effects:", bg=BG_CARD, fg=TEXT_DIM,
@@ -7722,13 +7775,13 @@ def open_event_wizard(app):
         eff_t.pack(side="left", fill="x", expand=True, ipady=2)
         eff_t.bind("<KeyRelease>",
             lambda e, k="effects", w=eff_t: [opt.update({k: w.get("1.0","end-1c")}), _schedule_preview()])
-        tk.Button(eff_hdr_r, text="🔍 Effect Picker",
+        tk.Button(eff_hdr_r, text=tr("effect_picker.button_search", "Search Effect Picker"),
                   bg=BG_CARD, fg=BLUE, relief="flat",
                   font=("Helvetica",8), cursor="hand2", padx=6, pady=1,
                   highlightthickness=1, highlightbackground=BORDER,
                   command=lambda t=eff_t: _open_effect_picker(t)
                   ).pack(side="right")
-        _row("ai_chance:", "ai_chance")
+        _row(tr("event.option.ai_chance", "ai_chance:"), "ai_chance")
 
     def _add_option():
         if not sel[0]: return
@@ -7836,7 +7889,7 @@ def open_event_wizard(app):
     def _copy_yml():
         if not events: messagebox.showwarning("YML","No events.",parent=win); return
         win.clipboard_clear(); win.clipboard_append(_generate_yml())
-        status_lbl.config(text="  ✓  Localisation YML copied!")
+        status_lbl.config(text=tr("common.status.loc_yml_copied", "  ok  Localisation YML copied!"))
         messagebox.showinfo("Copied",
             "Localisation YML copied to clipboard.\n\nPaste into:\n"
             "  localisation/english/[modname]_l_english.yml", parent=win)
@@ -7977,7 +8030,7 @@ def open_event_wizard(app):
         if errs:     msg += ("\n\n" if msg else "") + "Errors:\n" + "\n".join(errs)
         if not msg:  msg = "Nothing to save."
         messagebox.showinfo("Saved to Mod", msg, parent=win)
-        if saved: status_lbl.config(text="  \u2713  Saved to mod")
+        if saved: status_lbl.config(text=tr("common.status.saved_to_mod", "  ok  Saved to mod"))
 
     def _browse_mod_events():
         import glob as _glob, re as _re2
@@ -8002,9 +8055,9 @@ def open_event_wizard(app):
         dlg.geometry("520x440")
         dlg.resizable(True, True)
         dlg.grab_set()
-        tk.Label(dlg, text="BROWSE MOD EVENTS", bg=BG_DARK, fg=TEXT,
+        tk.Label(dlg, text=tr("event.browser.header", "BROWSE MOD EVENTS"), bg=BG_DARK, fg=TEXT,
                  font=("Helvetica",11,"bold"), pady=8).pack(fill="x", padx=12)
-        tk.Label(dlg, text="Select a file to import. Already-loaded events are preserved.",
+        tk.Label(dlg, text=tr("event.browser.description", "Select a file to import. Already-loaded events are preserved."),
                  bg=BG_DARK, fg=TEXT_DIM, font=("Helvetica",9)).pack(fill="x", padx=12)
         tk.Frame(dlg, bg=BORDER_G, height=1).pack(fill="x", pady=(4,0))
 
@@ -8049,11 +8102,11 @@ def open_event_wizard(app):
         lb.bind("<Double-Button-1>", lambda e: _do_import())
         bot_dlg = tk.Frame(dlg, bg=BG_DARK, pady=6)
         bot_dlg.pack(fill="x")
-        tk.Button(bot_dlg, text="Import File", command=_do_import,
+        tk.Button(bot_dlg, text=tr("common.import_file", "Import File"), command=_do_import,
                   bg="#14532d", fg="#4ade80", relief="flat",
                   font=("Helvetica",10,"bold"), padx=16, pady=5,
                   cursor="hand2").pack(side="left", padx=10)
-        tk.Button(bot_dlg, text="Cancel", command=dlg.destroy,
+        tk.Button(bot_dlg, text=tr("common.cancel", "Cancel"), command=dlg.destroy,
                   bg=BG_CARD, fg=TEXT, relief="flat",
                   font=("Helvetica",10), padx=12, pady=5,
                   cursor="hand2").pack(side="right", padx=10)
@@ -8196,7 +8249,7 @@ def open_event_wizard(app):
 
         # ── Window ────────────────────────────────────────────────────
         bwin = tk.Toplevel(win)
-        bwin.title("GFX Browser  —  Event Pictures")
+        bwin.title(tr("gfx.browser.event_pictures_title", "GFX Browser  -  Event Pictures"))
         bwin.configure(bg=BG_DARK)
         bwin.geometry("900x580")
         bwin.resizable(True, True)
@@ -8209,7 +8262,7 @@ def open_event_wizard(app):
         lf = tk.Frame(panes, bg=BG_PANEL, width=200)
         lf.pack(side="left", fill="y", padx=(0,6))
         lf.pack_propagate(False)
-        tk.Label(lf, text="  FOLDERS", bg=BG_PANEL, fg=TEXT_DIM,
+        tk.Label(lf, text=tr("gfx.folders", "  FOLDERS"), bg=BG_PANEL, fg=TEXT_DIM,
                  font=("Helvetica",9,"bold"), anchor="w", pady=6).pack(fill="x")
         tk.Frame(lf, bg=BORDER_G, height=1).pack(fill="x")
         folder_lb = tk.Listbox(lf, bg=BG_CARD, fg=TEXT,
@@ -8229,7 +8282,7 @@ def open_event_wizard(app):
 
         top_r = tk.Frame(rf, bg=BG_DARK)
         top_r.pack(fill="x", pady=(0,6))
-        tk.Label(top_r, text="Filter:", bg=BG_DARK, fg=TEXT_DIM,
+        tk.Label(top_r, text=tr("common.filter", "Filter:"), bg=BG_DARK, fg=TEXT_DIM,
                  font=("Helvetica",9)).pack(side="left")
         search_var = tk.StringVar()
         tk.Entry(top_r, textvariable=search_var, bg=BG_CARD, fg=TEXT,
@@ -8237,7 +8290,7 @@ def open_event_wizard(app):
                  relief="flat", highlightthickness=1,
                  highlightbackground=BORDER_G).pack(
                      side="left", padx=6, fill="x", expand=True, ipady=3)
-        status_lbl = tk.Label(top_r, text="select a folder", bg=BG_DARK,
+        status_lbl = tk.Label(top_r, text=tr("gfx.select_folder_status", "select a folder"), bg=BG_DARK,
                               fg=TEXT_DIM, font=("Helvetica",9))
         status_lbl.pack(side="right", padx=6)
 
@@ -8256,7 +8309,7 @@ def open_event_wizard(app):
         _initial_gfx = v_picture.get() if 'v_picture' in dir() else ""
         tk.Label(bot, textvariable=selected_var, bg=BG_DARK,
                  fg=BLUE, font=("Helvetica",9)).pack(side="left", padx=4)
-        tk.Button(bot, text="Cancel", command=bwin.destroy,
+        tk.Button(bot, text=tr("common.cancel", "Cancel"), command=bwin.destroy,
                   bg=BG_CARD, fg=TEXT, relief="flat",
                   font=("Helvetica",9), padx=10, pady=4,
                   cursor="hand2").pack(side="right", padx=4)
@@ -8270,7 +8323,7 @@ def open_event_wizard(app):
                 _schedule_preview()
             bwin.destroy()
 
-        _sel_btn = tk.Button(bot, text="Select ->", command=_apply,
+        _sel_btn = tk.Button(bot, text=tr("common.select_arrow", "Select ->"), command=_apply,
                              bg="#1a3322", fg="#4b7a5e", relief="flat",
                              font=("Helvetica",10,"bold"), padx=14, pady=5,
                              cursor="arrow", state="disabled")
@@ -8433,7 +8486,7 @@ def open_event_wizard(app):
             _st["canvas_ids"].clear()
             _st["sel_idx"]    = None
             if not pairs:
-                status_lbl.config(text="0 icons"); return
+                status_lbl.config(text=tr("gfx.icons_count", "{count} icons", count=0)); return
             status_lbl.config(text="%d icons" % len(pairs))
             rows    = (len(pairs)+COLS-1)//COLS
             total_h = PAD + rows*(TILE_H+PAD)
@@ -8457,7 +8510,7 @@ def open_event_wizard(app):
             return pairs
 
         def _load_folder(folder_path):
-            status_lbl.config(text="scanning...")
+            status_lbl.config(text=tr("gfx.scanning", "scanning..."))
             bwin.update_idletasks()
             pairs = _collect_files(folder_path)
             _rebuild(pairs)
@@ -8494,14 +8547,14 @@ def open_event_wizard(app):
         b.pack(side="left", padx=2, pady=6)
         return b
 
-    _tb_btn("+ New",       _new_event,    GREEN)
-    _tb_btn("Import .txt", _import_txt,   BLUE)
+    _tb_btn(tr("event.new", "+ New"),       _new_event,    GREEN)
+    _tb_btn(tr("common.import_txt", "Import .txt"), _import_txt,   BLUE)
     if MOD.loaded:
-        _tb_btn("Browse Mod", _browse_mod_events, BLUE)
-    _tb_btn("Export .txt", _export_txt,   TEXT)
-    _tb_btn("Copy .yml",   _copy_yml,     GOLD)
-    _tb_btn("Save to Mod", _save_to_mod,  GREEN)
-    _tb_btn("Delete",      _delete_event, RED)
+        _tb_btn(tr("common.browse_mod", "Browse Mod"), _browse_mod_events, BLUE)
+    _tb_btn(tr("common.export_txt", "Export .txt"), _export_txt,   TEXT)
+    _tb_btn(tr("common.copy_yml", "Copy .yml"),   _copy_yml,     GOLD)
+    _tb_btn(tr("common.save_to_mod", "Save to Mod"), _save_to_mod,  GREEN)
+    _tb_btn(tr("common.delete", "Delete"),      _delete_event, RED)
 
     tk.Frame(win, bg=BORDER_G, height=1).pack(fill="x")
 
@@ -8511,7 +8564,7 @@ def open_event_wizard(app):
     # LEFT: event list
     left_frm = tk.Frame(body, bg=BG_PANEL, width=200)
     left_frm.pack(side="left", fill="y"); left_frm.pack_propagate(False)
-    tk.Label(left_frm, text="  EVENTS", bg=BG_DARK, fg=TEXT_DIM,
+    tk.Label(left_frm, text=tr("event.list_header", "  EVENTS"), bg=BG_DARK, fg=TEXT_DIM,
              font=("Helvetica",9,"bold"), pady=6).pack(fill="x")
     tk.Frame(left_frm, bg=BORDER, height=1).pack(fill="x")
     # ── Event search bar ────────────────────────────────────────────────
@@ -8546,7 +8599,7 @@ def open_event_wizard(app):
     # MIDDLE: scrollable form
     mid_frm = tk.Frame(body, bg=BG_PANEL, width=420)
     mid_frm.pack(side="left", fill="y"); mid_frm.pack_propagate(False)
-    tk.Label(mid_frm, text="  EVENT PROPERTIES", bg=BG_DARK, fg=TEXT_DIM,
+    tk.Label(mid_frm, text=tr("event.properties_header", "  EVENT PROPERTIES"), bg=BG_DARK, fg=TEXT_DIM,
              font=("Helvetica",9,"bold"), pady=6).pack(fill="x")
     tk.Frame(mid_frm, bg=BORDER, height=1).pack(fill="x")
     form_wrap = tk.Frame(mid_frm, bg=BG_PANEL)
@@ -8569,13 +8622,13 @@ def open_event_wizard(app):
     right_frm.pack(side="left", fill="both", expand=True)
 
     tab_bar = tk.Frame(right_frm, bg=BG_DARK); tab_bar.pack(fill="x")
-    tab_preview_btn = tk.Button(tab_bar, text="  LIVE PREVIEW  ",
+    tab_preview_btn = tk.Button(tab_bar, text=tr("event.tab.live_preview", "  LIVE PREVIEW  "),
                                 bg=BORDER_G, fg=TEXT,
                                 font=("Helvetica",9,"bold"), relief="flat",
                                 padx=10, pady=5, cursor="hand2",
                                 command=lambda: _show_tab("preview"))
     tab_preview_btn.pack(side="left")
-    tab_gfx_btn = tk.Button(tab_bar, text="  GFX PICKER  ",
+    tab_gfx_btn = tk.Button(tab_bar, text=tr("event.tab.gfx_picker", "  GFX PICKER  "),
                             bg=BG_DARK, fg=TEXT_DIM,
                             font=("Helvetica",9,"bold"), relief="flat",
                             padx=10, pady=5, cursor="hand2",
@@ -8585,7 +8638,7 @@ def open_event_wizard(app):
 
     # LIVE PREVIEW panel
     preview_panel = tk.Frame(right_frm, bg=BG_DARK)
-    tk.Label(preview_panel, text="  approximate in-game appearance",
+    tk.Label(preview_panel, text=tr("event.preview_hint", "  approximate in-game appearance"),
              bg=BG_DARK, fg=TEXT_DIM, font=("Helvetica",7,"italic"), pady=2).pack(fill="x")
     tk.Frame(preview_panel, bg=BORDER, height=1).pack(fill="x")
     preview_cv = tk.Canvas(preview_panel, bg=BG_DARK, highlightthickness=0)
@@ -8596,7 +8649,7 @@ def open_event_wizard(app):
     gfx_panel = tk.Frame(right_frm, bg=BG_DARK)
 
     _gfx_hdr = tk.Frame(gfx_panel, bg=BG_DARK); _gfx_hdr.pack(fill="x")
-    tk.Label(_gfx_hdr, text="  EVENT PICTURE BROWSER",
+    tk.Label(_gfx_hdr, text=tr("event.picture_browser_header", "  EVENT PICTURE BROWSER"),
              bg=BG_DARK, fg=TEXT_DIM,
              font=("Helvetica",9,"bold"), pady=6).pack(side="left")
     gfx_dim_lbl = tk.Label(_gfx_hdr, text="", bg=BG_DARK, fg=TEXT_DIM,
@@ -8605,14 +8658,14 @@ def open_event_wizard(app):
     tk.Frame(gfx_panel, bg=BORDER, height=1).pack(fill="x")
 
     _gfx_flt = tk.Frame(gfx_panel, bg=BG_DARK); _gfx_flt.pack(fill="x", padx=8, pady=4)
-    tk.Label(_gfx_flt, text="Filter:", bg=BG_DARK, fg=TEXT_DIM,
+    tk.Label(_gfx_flt, text=tr("common.filter", "Filter:"), bg=BG_DARK, fg=TEXT_DIM,
              font=("Helvetica",9)).pack(side="left")
     v_gfx_search = tk.StringVar()
     tk.Entry(_gfx_flt, textvariable=v_gfx_search, bg=BG_CARD, fg=TEXT,
              insertbackground=BLUE, font=("Helvetica",10), relief="flat",
              highlightthickness=1, highlightbackground=BORDER_G
              ).pack(side="left", padx=6, fill="x", expand=True, ipady=3)
-    gfx_status_lbl = tk.Label(_gfx_flt, text="load a mod or Browse GFX >",
+    gfx_status_lbl = tk.Label(_gfx_flt, text=tr("event.gfx_load_hint", "load a mod or Browse GFX >"),
                                bg=BG_DARK, fg=TEXT_DIM, font=("Helvetica",8))
     gfx_status_lbl.pack(side="right", padx=4)
 
@@ -8631,12 +8684,12 @@ def open_event_wizard(app):
     _gfx_bot = tk.Frame(gfx_panel, bg=BG_DARK); _gfx_bot.pack(fill="x", padx=8, pady=6)
     _gfx_sel_lbl = tk.Label(_gfx_bot, text="", bg=BG_DARK, fg=BLUE, font=("Helvetica",9))
     _gfx_sel_lbl.pack(side="left", padx=4)
-    tk.Button(_gfx_bot, text="Browse GFX >",
+    tk.Button(_gfx_bot, text=tr("gfx.browse_gfx", "Browse GFX >"),
               command=_open_event_gfx_browser,
               bg=BG_CARD, fg=TEXT_DIM, relief="flat",
               font=("Helvetica",9), cursor="hand2", padx=10, pady=4
               ).pack(side="right", padx=4)
-    _gfx_sel_btn = tk.Button(_gfx_bot, text="Select ->",
+    _gfx_sel_btn = tk.Button(_gfx_bot, text=tr("common.select_arrow", "Select ->"),
                              bg="#1a3322", fg="#4b7a5e", relief="flat",
                              font=("Helvetica",10,"bold"), padx=14, pady=4,
                              cursor="arrow", state="disabled")
@@ -8783,7 +8836,7 @@ def open_event_wizard(app):
     def _gfx_rebuild(pairs):
         gfx_cv.delete("all")
         _gfx_st.update({"pairs":pairs,"drawn":set(),"canvas_ids":{},"sel_idx":None})
-        if not pairs: gfx_status_lbl.config(text="0 icons"); return
+        if not pairs: gfx_status_lbl.config(text=tr("gfx.icons_count", "{count} icons", count=0)); return
         gfx_status_lbl.config(text="%d icons" % len(pairs))
         rows    = (len(pairs)+GFX_COLS-1)//GFX_COLS
         total_h = GFX_PAD + rows*(GFX_TILE_H+GFX_PAD)
@@ -8814,7 +8867,7 @@ def open_event_wizard(app):
                         stem = os.path.splitext(fname)[0]
                         pairs.append((prefix+stem, os.path.join(rd, fname)))
                 _gfx_rebuild(pairs); return
-        gfx_status_lbl.config(text="load a mod or Browse GFX >")
+        gfx_status_lbl.config(text=tr("event.gfx_load_hint", "load a mod or Browse GFX >"))
 
     def _update_gfx_compat(gfx_name=None):
         if gfx_name is None: gfx_name = v_picture.get() if sel[0] else ""
@@ -8890,10 +8943,10 @@ def open_event_wizard(app):
         return t
 
     # ── Type ──────────────────────────────────────────────────────
-    _sec("TYPE")
+    _sec(tr("event.section.type", "TYPE"))
     type_row = tk.Frame(F, bg=BG_PANEL); type_row.pack(fill="x", **PAD)
     v_etype = tk.StringVar(value="country_event")
-    for val, lbl in [("country_event","Country Event"),("news_event","News Event")]:
+    for val, lbl in [("country_event",tr("event.type.country_event", "Country Event")),("news_event",tr("event.type.news_event", "News Event"))]:
         tk.Radiobutton(type_row, text=lbl, variable=v_etype, value=val,
                        bg=BG_PANEL, fg=TEXT, selectcolor=BG_DARK,
                        activebackground=BG_PANEL, font=("Helvetica",9),
@@ -8901,32 +8954,32 @@ def open_event_wizard(app):
     v_etype.trace_add("write", _schedule_preview)   # safe: _schedule_preview defined above
 
     # ── Identity ──────────────────────────────────────────────────
-    _hsep(); _sec("IDENTITY")
-    v_eid        = _entry_var("Event ID  (namespace.number):", "my_namespace.1")
-    v_title_text = _entry_var("Title text  (shown in preview):", "My Event Title")
+    _hsep(); _sec(tr("event.section.identity", "IDENTITY"))
+    v_eid        = _entry_var(tr("event.field.event_id", "Event ID  (namespace.number):"), "my_namespace.1")
+    v_title_text = _entry_var(tr("event.field.title_text", "Title text  (shown in preview):"), "My Event Title")
 
-    _lbl("  Description:")
+    _lbl(tr("event.field.description", "  Description:"))
     v_desc_text  = _textbox("", height=4)
 
     # ── Picture ───────────────────────────────────────────────────
-    _hsep(); _sec("PICTURE")
+    _hsep(); _sec(tr("event.section.picture", "PICTURE"))
     pic_row = tk.Frame(F, bg=BG_PANEL); pic_row.pack(fill="x", padx=8, pady=2)
-    tk.Label(pic_row, text="GFX key:", bg=BG_PANEL, fg=TEXT_DIM,
+    tk.Label(pic_row, text=tr("event.field.gfx_key", "GFX key:"), bg=BG_PANEL, fg=TEXT_DIM,
              font=("Helvetica",8)).pack(side="left")
     v_picture = tk.StringVar(value="GFX_report_event_generic_handshake")
     tk.Entry(pic_row, textvariable=v_picture, bg=BG_CARD, fg=TEXT,
              insertbackground=BLUE, font=("Helvetica",9), relief="flat",
              highlightthickness=1, highlightbackground=BORDER
              ).pack(side="left", fill="x", expand=True, ipady=2, padx=(4,4))
-    tk.Button(pic_row, text="Browse GFX ▸", command=_open_event_gfx_browser,
+    tk.Button(pic_row, text=tr("gfx.browse_gfx", "Browse GFX >"), command=_open_event_gfx_browser,
               bg=BG_CARD, fg=TEXT_DIM, relief="flat",
               font=("Helvetica",8), cursor="hand2", padx=6
               ).pack(side="right")
     v_picture.trace_add("write", _schedule_preview)
-    _lbl("  Click 'Browse GFX' to open the image browser")
+    _lbl(tr("event.hint.browse_gfx", "  Click 'Browse GFX' to open the image browser"))
 
     # ── Flags ─────────────────────────────────────────────────────
-    _hsep(); _sec("FLAGS")
+    _hsep(); _sec(tr("event.section.flags", "FLAGS"))
     v_major = tk.BooleanVar(value=False); v_fire_once = tk.BooleanVar(value=False)
     v_triggered = tk.BooleanVar(value=True); v_hidden = tk.BooleanVar(value=False)
     flags_row = tk.Frame(F, bg=BG_PANEL); flags_row.pack(fill="x", padx=8)
@@ -8939,16 +8992,16 @@ def open_event_wizard(app):
         v.trace_add("write", _schedule_preview)
 
     # ── MTTH ──────────────────────────────────────────────────────
-    _hsep(); _sec("MEAN TIME TO HAPPEN  (leave blank for is_triggered_only)")
+    _hsep(); _sec(tr("event.section.mtth", "MEAN TIME TO HAPPEN  (leave blank for is_triggered_only)"))
     mtth_row = tk.Frame(F, bg=BG_PANEL); mtth_row.pack(fill="x", padx=8, pady=2)
-    tk.Label(mtth_row, text="days:", bg=BG_PANEL, fg=TEXT_DIM,
+    tk.Label(mtth_row, text=tr("event.field.days", "days:"), bg=BG_PANEL, fg=TEXT_DIM,
              font=("Helvetica",8), width=7).pack(side="left")
     v_mtth_d = tk.StringVar()
     tk.Entry(mtth_row, textvariable=v_mtth_d, bg=BG_CARD, fg=TEXT,
              insertbackground=BLUE, font=("Helvetica",9), relief="flat",
              highlightthickness=1, highlightbackground=BORDER, width=6
              ).pack(side="left", ipady=2, padx=(0,10))
-    tk.Label(mtth_row, text="months:", bg=BG_PANEL, fg=TEXT_DIM,
+    tk.Label(mtth_row, text=tr("event.field.months", "months:"), bg=BG_PANEL, fg=TEXT_DIM,
              font=("Helvetica",8), width=8).pack(side="left")
     v_mtth_m = tk.StringVar()
     tk.Entry(mtth_row, textvariable=v_mtth_m, bg=BG_CARD, fg=TEXT,
@@ -8959,14 +9012,14 @@ def open_event_wizard(app):
     v_mtth_m.trace_add("write", _schedule_preview)
 
     # ── Trigger / Immediate ───────────────────────────────────────
-    _hsep(); _sec("TRIGGER  (raw HOI4 — leave blank if is_triggered_only)")
+    _hsep(); _sec(tr("event.section.trigger", "TRIGGER  (raw HOI4 - leave blank if is_triggered_only)"))
     t_trigger = _textbox("", height=3)
     _hsep()
     imm_hdr = tk.Frame(F, bg=BG_PANEL); imm_hdr.pack(fill="x", padx=8, pady=(4,0))
-    tk.Label(imm_hdr, text="IMMEDIATE EFFECTS  (optional)",
+    tk.Label(imm_hdr, text=tr("event.section.immediate_effects", "IMMEDIATE EFFECTS  (optional)"),
              bg=BG_PANEL, fg=TEXT_DIM,
              font=("Helvetica",8,"bold")).pack(side="left")
-    tk.Button(imm_hdr, text="🔍 Effect Picker",
+    tk.Button(imm_hdr, text=tr("effect_picker.button_search", "Search Effect Picker"),
               bg=BG_CARD, fg=BLUE, relief="flat",
               font=("Helvetica",8), cursor="hand2", padx=6, pady=1,
               highlightthickness=1, highlightbackground=BORDER,
@@ -8977,9 +9030,9 @@ def open_event_wizard(app):
     # ── Options ───────────────────────────────────────────────────
     _hsep()
     opt_hdr = tk.Frame(F, bg=BG_PANEL); opt_hdr.pack(fill="x", padx=8, pady=2)
-    tk.Label(opt_hdr, text="OPTIONS", bg=BG_PANEL, fg=TEXT_DIM,
+    tk.Label(opt_hdr, text=tr("event.section.options", "OPTIONS"), bg=BG_PANEL, fg=TEXT_DIM,
              font=("Helvetica",8,"bold")).pack(side="left")
-    tk.Button(opt_hdr, text="＋ Add Option", command=_add_option,
+    tk.Button(opt_hdr, text=tr("event.add_option", "+ Add Option"), command=_add_option,
               bg=BG_CARD, fg=GREEN, relief="flat",
               font=("Helvetica",8), cursor="hand2", padx=6, pady=2,
               highlightthickness=1, highlightbackground=BORDER
@@ -8989,7 +9042,7 @@ def open_event_wizard(app):
 
     # ── Apply button ──────────────────────────────────────────────
     _hsep()
-    tk.Button(F, text="💾  Apply Changes", command=_apply_event,
+    tk.Button(F, text=tr("common.apply_changes", "Apply Changes"), command=_apply_event,
               bg=BG_CARD, fg=GREEN, font=("Helvetica",10,"bold"),
               relief="flat", pady=5, cursor="hand2",
               highlightthickness=1, highlightbackground=BORDER_G
@@ -9667,7 +9720,7 @@ class App(tk.Tk):
         _apply_tk_dpi_scaling(self)
         log.info("App.__init__: tk.Tk initialized")
         _app_ref = self
-        self.title("HOI4 Content Maker  —  no tree  [Wiki Accurate v2]")
+        self.title(tr("app.title.no_tree", "HOI4 Content Maker  -  no tree  [Wiki Accurate v2]"))
         # Restore saved geometry if available, else use default
         saved_geom = getattr(MOD, "_saved_geometry", "")
         self.geometry(saved_geom if saved_geom else "1440x880")
@@ -9764,7 +9817,7 @@ class App(tk.Tk):
         tk.Frame(menubar, bg=BORDER_G, height=1).place(relx=0, rely=1, relwidth=1)
 
         # Branding
-        tk.Label(menubar, text="HOI4 CONTENT MAKER", bg="#080b10", fg=TEXT_DIM,
+        tk.Label(menubar, text=tr("app.brand", "HOI4 CONTENT MAKER"), bg="#080b10", fg=TEXT_DIM,
                  font=("Helvetica",9,"bold"), padx=12).pack(side="left")
         tk.Frame(menubar, bg=BORDER_G, width=1, height=18).pack(side="left", padx=2)
 
@@ -9888,92 +9941,92 @@ class App(tk.Tk):
             return btn
 
         # ── FILE MENU ─────────────────────────────────────────────
-        _menu_btn(menubar, "File", [
-            "Project",
-            ("✦  New Tree",         self._new_tree_dialog, "Ctrl+N",
-             "Start fresh — set country tag and auto-prefix all focus IDs."),
-            ("💾  Save Project",     self._save,            "Ctrl+S",
-             "Save as .json so you can reopen and keep editing later."),
-            ("📂  Load Project",     self._load,            "Ctrl+O",
-             "Open a previously saved .json project file."),
+        _menu_btn(menubar, tr("menu.file", "File"), [
+            tr("menu.section.project", "Project"),
+            (tr("menu.new_tree", "New Tree"),         self._new_tree_dialog, "Ctrl+N",
+             tr("menu.new_tree.tip", "Start fresh - set country tag and auto-prefix all focus IDs.")),
+            (tr("menu.save_project", "Save Project"),     self._save,            "Ctrl+S",
+             tr("menu.save_project.tip", "Save as .json so you can reopen and keep editing later.")),
+            (tr("menu.load_project", "Load Project"),     self._load,            "Ctrl+O",
+             tr("menu.load_project.tip", "Open a previously saved .json project file.")),
             None,
-            "Recent",
-            *([("  (no recent files)", None)] if not getattr(MOD,"_recent_mods",[])
+            tr("menu.section.recent", "Recent"),
+            *([(tr("menu.no_recent_files", "  (no recent files)"), None)] if not getattr(MOD,"_recent_mods",[])
               else [(f"  {r}", lambda p=r: self._load_mod_path(p))
                     for r in (getattr(MOD,"_recent_mods",[]) or [])]),
             None,
-            "Import / Export",
-            ("⬆  Export .txt",      self._export,          "Ctrl+E",
-             "Write HOI4-ready script to a .txt file for your mod folder."),
-            ("⬆  Export to Mod",    self._export,          "Ctrl+Shift+E",
-             "Write directly into your loaded mod's national_focus folder."),
-            ("⬇  Import .txt",      self._import_txt,      "",
-             "Read an existing HOI4 focus tree .txt and populate the canvas."),
-            ("📐  Import Draw.io",   self._import_drawio,   "",
-             "Convert a Draw.io diagram into focus nodes and prereq arrows."),
+            tr("menu.section.import_export", "Import / Export"),
+            (tr("menu.export_txt", "Export .txt"),      self._export,          "Ctrl+E",
+             tr("menu.export_txt.tip", "Write HOI4-ready script to a .txt file for your mod folder.")),
+            (tr("menu.export_mod", "Export to Mod"),    self._export,          "Ctrl+Shift+E",
+             tr("menu.export_mod.tip", "Write directly into your loaded mod's national_focus folder.")),
+            (tr("menu.import_txt", "Import .txt"),      self._import_txt,      "",
+             tr("menu.import_txt.tip", "Read an existing HOI4 focus tree .txt and populate the canvas.")),
+            (tr("menu.import_drawio", "Import Draw.io"),   self._import_drawio,   "",
+             tr("menu.import_drawio.tip", "Convert a Draw.io diagram into focus nodes and prerequisite arrows.")),
         ])
 
         # ── EDIT MENU ─────────────────────────────────────────────
-        _menu_btn(menubar, "Edit", [
-            ("↩  Undo",               self._undo,               "Ctrl+Z",
-             "Revert the last canvas action (move, add, delete, edit)."),
+        _menu_btn(menubar, tr("menu.edit", "Edit"), [
+            (tr("menu.undo", "Undo"),               self._undo,               "Ctrl+Z",
+             tr("menu.undo.tip", "Revert the last canvas action (move, add, delete, edit).")),
             None,
-            ("⧉  Duplicate Focus",    self._duplicate_focus,    "",
-             "Copy the selected focus — gets a _copy suffix, shifted one column right."),
-            ("⟳  Bulk Rename Prefix", self._bulk_rename_dialog, "",
-             "Replace a prefix across all focus IDs, prereqs and mutex links at once."),
+            (tr("menu.duplicate_focus", "Duplicate Focus"),    self._duplicate_focus,    "",
+             tr("menu.duplicate_focus.tip", "Copy the selected focus - gets a _copy suffix, shifted one column right.")),
+            (tr("menu.bulk_rename_prefix", "Bulk Rename Prefix"), self._bulk_rename_dialog, "",
+             tr("menu.bulk_rename_prefix.tip", "Replace a prefix across all focus IDs, prerequisites and mutex links at once.")),
             None,
-            ("☐  Select All",         self._select_all_focuses, "Ctrl+A",
-             "Enable multi-select and mark every focus on the canvas."),
-            ("🗑  Delete Selected",    self._delete_selected,    "Del",
-             "Remove all multi-selected focuses after confirmation."),
+            (tr("menu.select_all", "Select All"),         self._select_all_focuses, "Ctrl+A",
+             tr("menu.select_all.tip", "Enable multi-select and mark every focus on the canvas.")),
+            (tr("menu.delete_selected", "Delete Selected"),    self._delete_selected,    "Del",
+             tr("menu.delete_selected.tip", "Remove all multi-selected focuses after confirmation.")),
         ])
 
         # ── VIEW MENU ─────────────────────────────────────────────
-        _menu_btn(menubar, "View", [
-            ("⊞  Toggle Grid",        self._toggle_grid,        "G",
-             "Show or hide the background snap grid on the canvas."),
-            ("🗺  Toggle Minimap",     self._toggle_minimap,     "M",
-             "Show or hide the minimap overview in the bottom-right corner."),
-            ("📋  Toggle Focus List",  self._toggle_focus_list,  "F",
-             "Collapse or expand the left-side focus list panel."),
+        _menu_btn(menubar, tr("menu.view", "View"), [
+            (tr("menu.toggle_grid", "Toggle Grid"),        self._toggle_grid,        "G",
+             tr("menu.toggle_grid.tip", "Show or hide the background snap grid on the canvas.")),
+            (tr("menu.toggle_minimap", "Toggle Minimap"),     self._toggle_minimap,     "M",
+             tr("menu.toggle_minimap.tip", "Show or hide the minimap overview in the bottom-right corner.")),
+            (tr("menu.toggle_focus_list", "Toggle Focus List"),  self._toggle_focus_list,  "F",
+             tr("menu.toggle_focus_list.tip", "Collapse or expand the left-side focus list panel.")),
             None,
-            ("⊡  Fit All Focuses",    self._fit_all,            "0",
-             "Zoom and pan so every focus on the canvas is visible at once."),
+            (tr("menu.fit_all_focuses", "Fit All Focuses"),    self._fit_all,            "0",
+             tr("menu.fit_all_focuses.tip", "Zoom and pan so every focus on the canvas is visible at once.")),
         ])
 
         # ── TOOLS MENU ────────────────────────────────────────────
-        _menu_btn(menubar, "Tools", [
-            ("🛡  National Spirit Builder", self._national_spirit_wizard, "",
-             "Create ideas/spirits with a modifier editor and live HOI4 preview."),
-            ("⚙  Dynamic Modifier",         self._dyn_mod_wizard,         "",
-             "Build add_dynamic_modifier effects with variable-driven scaling."),
-            ("⚖  Decision Maker",          self._decision_wizard,        "",
-             "Build decisions and decision categories with GFX placement editor."),
-            ("📜  Event Maker",              self._event_wizard,           "",
-             "Build country_event / news_event blocks with options and live preview."),
+        _menu_btn(menubar, tr("menu.tools", "Tools"), [
+            (tr("menu.national_spirit_builder", "National Spirit Builder"), self._national_spirit_wizard, "",
+             tr("menu.national_spirit_builder.tip", "Create ideas/spirits with a modifier editor and live HOI4 preview.")),
+            (tr("menu.dynamic_modifier", "Dynamic Modifier"),         self._dyn_mod_wizard,         "",
+             tr("menu.dynamic_modifier.tip", "Build add_dynamic_modifier effects with variable-driven scaling.")),
+            (tr("menu.decision_maker", "Decision Maker"),          self._decision_wizard,        "",
+             tr("menu.decision_maker.tip", "Build decisions and decision categories with GFX placement editor.")),
+            (tr("menu.event_maker", "Event Maker"),              self._event_wizard,           "",
+             tr("menu.event_maker.tip", "Build country_event / news_event blocks with options and live preview.")),
             None,
-            ("✓  Validate Tree",            self._validate_tree,          "",
-             "Check for broken prereqs, missing effects, and bad GFX references."),
-            ("📦  Load Mod",                self._load_mod,               "",
-             "Point to your mod root folder to browse GFX and enable direct export."),
-            ("🎯  Set Edit Targets",         self._show_post_load_prompt,  "",
-             "Choose which existing ideas/events files new content should be appended to."),
-            ("⚙  Settings",                 self._open_settings,          "",
-             "Configure mod path, GFX directories, MD detection, and UI options."),
+            (tr("menu.validate_tree", "Validate Tree"),            self._validate_tree,          "",
+             tr("menu.validate_tree.tip", "Check for broken prerequisites, missing effects, and bad GFX references.")),
+            (tr("menu.load_mod", "Load Mod"),                self._load_mod,               "",
+             tr("menu.load_mod.tip", "Point to your mod root folder to browse GFX and enable direct export.")),
+            (tr("menu.set_edit_targets", "Set Edit Targets"),         self._show_post_load_prompt,  "",
+             tr("menu.set_edit_targets.tip", "Choose which existing ideas/events files new content should be appended to.")),
+            (tr("menu.settings", "Settings"),                 self._open_settings,          "",
+             tr("menu.settings.tip", "Configure mod path, GFX directories, MD detection, and UI options.")),
         ])
 
         # Right side of menu bar
-        self._errlog_btn = tk.Button(menubar, text="⚠ Log",
+        self._errlog_btn = tk.Button(menubar, text=tr("menu.error_log", "Log"),
                                      command=self._show_error_log,
                                      bg="#080b10", fg="#6e7681",
                                      font=("Helvetica",8,"bold"), relief="flat",
                                      padx=8, pady=0, cursor="hand2", bd=0,
                                      activebackground=BG_CARD, activeforeground=TEXT)
         self._errlog_btn.pack(side="right", padx=4)
-        Tooltip(self._errlog_btn, "View in-app error log.\nTurns red if any errors are caught during the session.")
+        Tooltip(self._errlog_btn, tr("menu.error_log.tip", "View in-app error log.\nTurns red if any errors are caught during the session."))
         tk.Frame(menubar, bg=BORDER_G, width=1, height=16).pack(side="right", padx=2)
-        self._mod_lbl = tk.Label(menubar, text="No mod loaded", bg="#080b10", fg=TEXT_DIM,
+        self._mod_lbl = tk.Label(menubar, text=tr("status.no_mod_loaded", "No mod loaded"), bg="#080b10", fg=TEXT_DIM,
                                  font=("Helvetica",8,"italic"), padx=8)
         self._mod_lbl.pack(side="right")
         # close menu when clicking on canvas
@@ -9984,7 +10037,7 @@ class App(tk.Tk):
 
         # hint label (used by _hint() method)
         self._hint_lbl = tk.Label(toolbar,
-            text="Right-click canvas to place a focus  •  Ctrl+drag to pan  •  Scroll to zoom",
+            text=tr("hint.canvas_controls", "Right-click canvas to place a focus  -  Ctrl+drag to pan  -  Scroll to zoom"),
             bg=BG_DARK, fg=TEXT_DIM, font=("Helvetica",8,"italic"), anchor="w", padx=10)
         self._hint_lbl.pack(fill="x", pady=1)
 
@@ -10010,50 +10063,50 @@ class App(tk.Tk):
             b.pack(side="left", padx=padx, pady=3)
             Tooltip(b, tip); return b
 
-        _tb_lbl("Canvas")
-        _tb_btn("＋ Focus", self._add_focus, TEXT, "#1e3a6e",
-                "Add a new focus.\nAlso: right-click the canvas.")
-        self._conn_btn = _tb_btn("⇄ Prereq", self._toggle_connect, TEXT, BG_CARD,
-                "Open the prerequisite picker for the selected focus.")
-        self._mutex_btn = _tb_btn("⊗ Mutex", self._toggle_mutex, ORANGE, BG_CARD,
-                "Draw a mutually exclusive link.")
+        _tb_lbl(tr("toolbar.section.canvas", "Canvas"))
+        _tb_btn(tr("toolbar.add_focus", "+ Focus"), self._add_focus, TEXT, "#1e3a6e",
+                tr("toolbar.add_focus.tip", "Add a new focus.\nAlso: right-click the canvas."))
+        self._conn_btn = _tb_btn(tr("toolbar.prereq", "Prereq"), self._toggle_connect, TEXT, BG_CARD,
+                tr("toolbar.prereq.tip", "Open the prerequisite picker for the selected focus."))
+        self._mutex_btn = _tb_btn(tr("toolbar.mutex", "Mutex"), self._toggle_mutex, ORANGE, BG_CARD,
+                tr("toolbar.mutex.tip", "Draw a mutually exclusive link."))
         _tb_sep()
-        _tb_lbl("Tools")
-        _tb_btn("🛡 Ideas", self._national_spirit_wizard, TEXT, "#1a2040",
-                "Build National Spirits / Ideas.")
-        _tb_btn("⚙ Dyn Mod", self._dyn_mod_wizard, TEXT, BG_CARD,
-                "Dynamic Modifier wizard.")
-        _tb_btn("⚖ Decisions", self._decision_wizard, TEXT, BG_CARD,
-                "Decision / Decision Category maker.")
-        _tb_btn("📜 Events", self._event_wizard, TEXT, BG_CARD,
-                "Event Maker wizard.")
-        _tb_btn("💰 Add Income", self._additional_income_wizard, "#4ade80", "#0d2b1a",
-                "MD Additional Income Wizard — creates/links a spirit and wires up all money system files automatically.")
+        _tb_lbl(tr("toolbar.section.tools", "Tools"))
+        _tb_btn(tr("toolbar.ideas", "Ideas"), self._national_spirit_wizard, TEXT, "#1a2040",
+                tr("toolbar.ideas.tip", "Build National Spirits / Ideas."))
+        _tb_btn(tr("toolbar.dyn_mod", "Dyn Mod"), self._dyn_mod_wizard, TEXT, BG_CARD,
+                tr("toolbar.dyn_mod.tip", "Dynamic Modifier wizard."))
+        _tb_btn(tr("toolbar.decisions", "Decisions"), self._decision_wizard, TEXT, BG_CARD,
+                tr("toolbar.decisions.tip", "Decision / Decision Category maker."))
+        _tb_btn(tr("toolbar.events", "Events"), self._event_wizard, TEXT, BG_CARD,
+                tr("toolbar.events.tip", "Event Maker wizard."))
+        _tb_btn(tr("toolbar.add_income", "Add Income"), self._additional_income_wizard, "#4ade80", "#0d2b1a",
+                tr("toolbar.add_income.tip", "MD Additional Income Wizard - creates/links a spirit and wires up all money system files automatically."))
         _tb_sep()
-        _tb_lbl("Select")
-        self._msel_btn = _tb_btn("☐ Multi", self._toggle_multisel, TEXT, "#1a1a2e",
-                "Toggle multi-select mode.\nCtrl+click focuses, then Delete.")
-        _tb_btn("🗑 Del Selected", self._delete_selected, TEXT, "#4a1010",
-                "Delete all selected focuses.")
+        _tb_lbl(tr("toolbar.section.select", "Select"))
+        self._msel_btn = _tb_btn(tr("toolbar.multi", "Multi"), self._toggle_multisel, TEXT, "#1a1a2e",
+                tr("toolbar.multi.tip", "Toggle multi-select mode.\nCtrl+click focuses, then Delete."))
+        _tb_btn(tr("toolbar.delete_selected", "Del Selected"), self._delete_selected, TEXT, "#4a1010",
+                tr("toolbar.delete_selected.tip", "Delete all selected focuses."))
         _tb_sep()
-        _tb_btn("✕ Clear All", self._clear_all, TEXT, "#7f1d1d",
-                "Delete ALL focuses from the canvas.\nSave first!")
+        _tb_btn(tr("toolbar.clear_all", "Clear All"), self._clear_all, TEXT, "#7f1d1d",
+                tr("toolbar.clear_all.tip", "Delete ALL focuses from the canvas.\nSave first!"))
         _tb_sep()
-        _tb_lbl("Multi-Tree")
-        _tb_btn("+ Shared", lambda: self._load_extra_tree("shared"), TEXT, "#2d1c08",
-                "Load a shared_focus tree alongside the main tree.\nIts focuses appear on canvas with amber [S] badges.")
-        _tb_btn("+ Joint",  lambda: self._load_extra_tree("joint"),  TEXT, "#1a0d40",
-                "Load a joint_focus tree alongside the main tree.\nIts focuses appear on canvas with purple [J] badges.")
-        _tb_btn("📂 Load All", self._load_all_trees,                 TEXT, "#0d1a2e",
-                "Scan the mod's national_focus folder and load selected trees from a checklist.")
-        _tb_btn("💾 All",   self._save_all_trees,                    "#4ade80", "#0d1a0a",
-                "Export all loaded trees (main + shared + joint) at once.")
+        _tb_lbl(tr("toolbar.section.multi_tree", "Multi-Tree"))
+        _tb_btn(tr("toolbar.shared", "+ Shared"), lambda: self._load_extra_tree("shared"), TEXT, "#2d1c08",
+                tr("toolbar.shared.tip", "Load a shared_focus tree alongside the main tree.\nIts focuses appear on canvas with amber [S] badges."))
+        _tb_btn(tr("toolbar.joint", "+ Joint"),  lambda: self._load_extra_tree("joint"),  TEXT, "#1a0d40",
+                tr("toolbar.joint.tip", "Load a joint_focus tree alongside the main tree.\nIts focuses appear on canvas with purple [J] badges."))
+        _tb_btn(tr("toolbar.load_all", "Load All"), self._load_all_trees,                 TEXT, "#0d1a2e",
+                tr("toolbar.load_all.tip", "Scan the mod's national_focus folder and load selected trees from a checklist."))
+        _tb_btn(tr("toolbar.save_all", "Save All"),   self._save_all_trees,                    "#4ade80", "#0d1a0a",
+                tr("toolbar.save_all.tip", "Export all loaded trees (main + shared + joint) at once."))
 
         # Coord display right side
         self._coord_lbl = tk.Label(row2, text="  x=0  y=0  ", bg="#090d14",
                                    fg=TEXT_DIM, font=("Courier",9), padx=4)
         self._coord_lbl.pack(side="right", padx=4)
-        tk.Label(row2, text="Cursor:", bg="#090d14", fg=TEXT_DIM,
+        tk.Label(row2, text=tr("toolbar.cursor", "Cursor:"), bg="#090d14", fg=TEXT_DIM,
                  font=("Helvetica",8)).pack(side="right")
 
         # Continuous Focus Position inputs (tree-level setting)
@@ -10079,7 +10132,7 @@ class App(tk.Tk):
         _cfp_x_ent.bind("<FocusOut>", _cfp_commit)
         _cfp_x_ent.bind("<Return>",   _cfp_commit)
         tk.Label(row2, text="x:", bg="#090d14", fg=TEXT_DIM, font=("Courier",9)).pack(side="right")
-        tk.Label(row2, text="Continuous Focus Pos:", bg="#090d14", fg=TEXT_DIM,
+        tk.Label(row2, text=tr("toolbar.continuous_focus_pos", "Continuous Focus Pos:"), bg="#090d14", fg=TEXT_DIM,
                  font=("Helvetica",8)).pack(side="right")
 
     def _build_keybinds(self):
@@ -10123,16 +10176,16 @@ class App(tk.Tk):
             tk.Frame(f, bg=BORDER_G, width=1).pack(side="right", fill="y")
             if var: lbl.config(textvariable=var)
             return lbl
-        self._sb_tree_lbl  = _sb_item("Tree: ", TEXT_DIM)
-        self._sb_tree_val  = tk.Label(self._statusbar, text="no tree",
+        self._sb_tree_lbl  = _sb_item(tr("status.tree", "Tree: "), TEXT_DIM)
+        self._sb_tree_val  = tk.Label(self._statusbar, text=tr("status.no_tree", "no tree"),
                                        bg="#060810", fg=YELLOW,
                                        font=("Courier",9), padx=0)
         self._sb_tree_val.pack(side="left")
         tk.Frame(self._statusbar, bg=BORDER_G, width=1).pack(side="left", fill="y", padx=(6,0))
-        self._sb_focus_lbl = _sb_item("Focuses: 0")
-        self._sb_sel_lbl   = _sb_item("Selected: —")
-        self._sb_zoom_lbl  = _sb_item("Zoom: 100%")
-        self._sb_mod_lbl2  = _sb_item("Mod: none")
+        self._sb_focus_lbl = _sb_item(tr("status.focuses", "Focuses: {count}", count=0))
+        self._sb_sel_lbl   = _sb_item(tr("status.selected", "Selected: {focus}", focus="—"))
+        self._sb_zoom_lbl  = _sb_item(tr("status.zoom", "Zoom: {zoom}%", zoom=100))
+        self._sb_mod_lbl2  = _sb_item(tr("status.mod_none", "Mod: none"))
         tk.Label(self._statusbar, text="HOI4 Content Maker  [Wiki Accurate v2]",
                  bg="#060810", fg="#2a3548", font=("Courier",8), padx=10
                  ).pack(side="right")
@@ -10148,7 +10201,7 @@ class App(tk.Tk):
         # header
         lp_hdr = tk.Frame(self._left_panel, bg="#060810")
         lp_hdr.place(x=0, y=0, relwidth=1, height=28)
-        tk.Label(lp_hdr, text="🎯 FOCUSES", bg="#060810", fg=TEXT_DIM,
+        tk.Label(lp_hdr, text=tr("focus_list.header", "FOCUSES"), bg="#060810", fg=TEXT_DIM,
                  font=("Helvetica",8,"bold"), padx=8).pack(side="left")
         self._lp_collapse_btn = tk.Button(lp_hdr, text="◀",
                                            command=self._toggle_focus_list,
@@ -10166,10 +10219,10 @@ class App(tk.Tk):
                            font=("Helvetica",9), relief="flat",
                            highlightthickness=1, highlightbackground=BORDER_G)
         lp_ent.pack(fill="x", ipady=3)
-        lp_ent.insert(0, "Search…")
+        lp_ent.insert(0, tr("common.search_placeholder", "Search..."))
         lp_ent.bind("<FocusIn>",  lambda e: (lp_ent.delete(0,"end"), lp_ent.config(fg=TEXT))
-                                             if lp_ent.get()=="Search…" else None)
-        lp_ent.bind("<FocusOut>", lambda e: (lp_ent.insert(0,"Search…"), lp_ent.config(fg=TEXT_DIM))
+                                             if lp_ent.get()==tr("common.search_placeholder", "Search...") else None)
+        lp_ent.bind("<FocusOut>", lambda e: (lp_ent.insert(0,tr("common.search_placeholder", "Search...")), lp_ent.config(fg=TEXT_DIM))
                                              if not lp_ent.get() else None)
         self._lp_search_var.trace_add("write", lambda *_: self._refresh_focus_list())
         # list
@@ -10232,25 +10285,25 @@ class App(tk.Tk):
         """Flash the error log button when a new error is recorded."""
         if hasattr(self, "_errlog_btn"):
             self._errlog_btn.config(
-                text=f"⚠ Errors ({count})",
+                text=tr("error_log.badge_errors", "! Errors ({count})", count=count),
                 fg="#f87171", bg="#450a0a")
             self.after(3000, lambda: self._errlog_btn.config(
-                text=f"⚠ Log ({count})",
+                text=tr("error_log.badge_log_count", "! Log ({count})", count=count),
                 fg="#f87171", bg="#450a0a") if count > 0 else None)
 
     def _show_error_log(self):
         """Open the in-app error log window."""
         win = tk.Toplevel(self)
-        win.title("Error Log")
+        win.title(tr("error_log.title", "Error Log"))
         win.configure(bg="#0d1117")
         win.geometry("760x480")
         win.resizable(True, True)
 
         # Header
         hdr = tk.Frame(win, bg="#080c12", pady=8); hdr.pack(fill="x")
-        tk.Label(hdr, text="  ⚠  Error Log", bg="#080c12", fg="#f87171",
+        tk.Label(hdr, text=tr("error_log.header", "  !  Error Log"), bg="#080c12", fg="#f87171",
                  font=("Courier", 12, "bold")).pack(side="left", padx=8)
-        tk.Button(hdr, text="🗑 Clear", command=lambda: _clear(),
+        tk.Button(hdr, text=tr("common.clear", "Clear"), command=lambda: _clear(),
                   bg="#450a0a", fg="#f87171", font=("Helvetica", 9),
                   relief="flat", padx=8, pady=3, cursor="hand2").pack(side="right", padx=8)
         tk.Button(hdr, text="✕", command=win.destroy,
@@ -10260,7 +10313,7 @@ class App(tk.Tk):
 
         # No errors label
         no_err = tk.Label(win,
-                          text="\n\n  ✓  No errors recorded.\n\n  The program is running cleanly.",
+                          text=tr("error_log.empty", "\n\n  ok  No errors recorded.\n\n  The program is running cleanly."),
                           bg="#0d1117", fg="#22c55e",
                           font=("Courier", 11), justify="left", anchor="nw")
 
@@ -10301,7 +10354,7 @@ class App(tk.Tk):
         def _clear():
             self._error_entries.clear()
             if hasattr(self, "_errlog_btn"):
-                self._errlog_btn.config(text="⚠ Log", fg="#6e7681", bg="#161b22")
+                self._errlog_btn.config(text=tr("error_log.badge_log", "! Log"), fg="#6e7681", bg="#161b22")
             _refresh()
 
         _refresh()
@@ -10357,14 +10410,14 @@ class App(tk.Tk):
                 tk.Label(self._tree_meta_sf_box, text=f"  {sf}", bg=BG_CARD,
                          fg="#86efac", font=("Courier",8), anchor="w").pack(fill="x", padx=2, pady=1)
         else:
-            tk.Label(self._tree_meta_sf_box, text="  (none)", bg=BG_CARD,
+            tk.Label(self._tree_meta_sf_box, text=tr("common.none_parenthesized", "  (none)"), bg=BG_CARD,
                      fg=TEXT_DIM, font=("Helvetica",8,"italic")).pack(anchor="w", padx=2)
         if jflist:
             for jf in jflist:
                 tk.Label(self._tree_meta_jf_box, text=f"  {jf}", bg=BG_CARD,
                          fg="#fbbf24", font=("Courier",8), anchor="w").pack(fill="x", padx=2, pady=1)
         else:
-            tk.Label(self._tree_meta_jf_box, text="  (none)", bg=BG_CARD,
+            tk.Label(self._tree_meta_jf_box, text=tr("common.none_parenthesized", "  (none)"), bg=BG_CARD,
                      fg=TEXT_DIM, font=("Helvetica",8,"italic")).pack(anchor="w", padx=2)
 
     # ── SIDEBAR ──────────────────────────────────────────────────
@@ -10372,7 +10425,7 @@ class App(tk.Tk):
         # ── Loaded Trees Panel ────────────────────────────────────────
         _lt_outer = tk.Frame(sb, bg=BG_PANEL); _lt_outer.pack(fill="x")
         tk.Frame(_lt_outer, bg=BORDER_G, height=1).pack(fill="x")
-        tk.Label(_lt_outer, text="  LOADED TREES", bg=BG_PANEL, fg=TEXT_DIM,
+        tk.Label(_lt_outer, text=tr("sidebar.loaded_trees", "  LOADED TREES"), bg=BG_PANEL, fg=TEXT_DIM,
                  font=("Helvetica", 7, "bold"), anchor="w").pack(fill="x", padx=4, pady=(3, 0))
         self._loaded_trees_inner = tk.Frame(sb, bg=BG_PANEL)
         self._loaded_trees_inner.pack(fill="x")
@@ -10382,7 +10435,7 @@ class App(tk.Tk):
         # ── Tree Meta Panel (shared/joint focuses) ────────────────────
         meta = tk.Frame(sb, bg=BG_PANEL); meta.pack(fill="x")
         tk.Frame(meta, bg=BORDER_G, height=1).pack(fill="x")
-        tk.Label(meta, text="  TREE REFERENCES", bg=BG_PANEL, fg=TEXT_DIM,
+        tk.Label(meta, text=tr("sidebar.tree_references", "  TREE REFERENCES"), bg=BG_PANEL, fg=TEXT_DIM,
                  font=("Helvetica",7,"bold"), anchor="w").pack(fill="x", padx=4, pady=(3,0))
         # Shared focuses row
         sf_row = tk.Frame(meta, bg=BG_PANEL); sf_row.pack(fill="x", padx=4, pady=(1,0))
@@ -10403,7 +10456,7 @@ class App(tk.Tk):
 
         # ── Header ───────────────────────────────────────────────────
         hdr = tk.Frame(sb, bg=BG_DARK); hdr.pack(fill="x")
-        tk.Label(hdr, text="  FOCUS PROPERTIES", bg=BG_DARK, fg=TEXT,
+        tk.Label(hdr, text=tr("sidebar.focus_properties", "  FOCUS PROPERTIES"), bg=BG_DARK, fg=TEXT,
                  font=("Helvetica", 10, "bold"), anchor="w", pady=8).pack(side="left")
         self._tree_src_lbl = tk.Label(hdr, text="", bg=BG_DARK, fg=TEXT_DIM,
                                       font=("Helvetica", 8, "italic"), anchor="e", padx=6)
@@ -10413,8 +10466,7 @@ class App(tk.Tk):
         # ── "No selection" placeholder ────────────────────────────────
         wrap = tk.Frame(sb, bg=BG_PANEL); wrap.pack(fill="both", expand=True)
         self._sb_none = tk.Label(wrap,
-            text="\n\n  Click a focus to\n  edit its properties.\n\n"
-                 "  Right-click the canvas\n  to create a new focus.",
+            text=tr("sidebar.no_selection", "\n\n  Click a focus to\n  edit its properties.\n\n  Right-click the canvas\n  to create a new focus."),
             bg=BG_PANEL, fg=TEXT_DIM, font=("Helvetica", 10, "italic"),
             justify="left", anchor="nw")
         self._sb_none.pack(fill="both", expand=True)
@@ -10443,11 +10495,16 @@ class App(tk.Tk):
                     panel.pack_forget()
                     btn._line.config(bg=BG_DARK)
 
-        tab_names = ["Properties", "Effects", "Conditions", "Code"]
+        tab_names = [
+            ("Properties", tr("tab.properties", "Properties")),
+            ("Effects", tr("tab.effects", "Effects")),
+            ("Conditions", tr("tab.conditions", "Conditions")),
+            ("Code", tr("tab.code", "Code")),
+        ]
 
-        for tname in tab_names:
+        for tname, tlabel in tab_names:
             col = tk.Frame(tab_bar, bg=BG_DARK); col.pack(side="left", expand=True, fill="x")
-            btn = tk.Button(col, text=tname, bg=BG_DARK, fg=TEXT_DIM,
+            btn = tk.Button(col, text=tlabel, bg=BG_DARK, fg=TEXT_DIM,
                             font=("Helvetica", 9, "bold"), relief="flat",
                             activebackground=BG_PANEL, activeforeground=BLUE,
                             cursor="hand2", pady=6, bd=0, highlightthickness=0,
@@ -10499,8 +10556,8 @@ class App(tk.Tk):
         self._sb_frm = _make_scroll_panel(p)
         self._sb_frm_props = self._sb_frm
 
-        self._fv_name = self._sb_entry("Focus ID (tag):", "TAG_focus_1")
-        self._fv_icon = self._sb_optmenu("Icon (display only):", ICONS)
+        self._fv_name = self._sb_entry(tr("focus.field.id", "Focus ID (tag):"), "TAG_focus_1")
+        self._fv_icon = self._sb_optmenu(tr("focus.field.icon_display", "Icon (display only):"), ICONS)
         self._fv_icon.trace_add("write", self._on_icon_change)
         self._fv_gfx  = self._sb_gfx_picker()
 
@@ -10515,19 +10572,19 @@ class App(tk.Tk):
         tk.Entry(xyrow, textvariable=self._fv_y, bg=BG_CARD, fg=TEXT, insertbackground=BLUE,
                  font=("Helvetica", 10), relief="flat", highlightthickness=1,
                  highlightbackground=BORDER_G, width=5).pack(side="left", ipady=4)
-        tk.Label(xyrow, text="(grid)", bg=BG_PANEL, fg=TEXT_DIM, font=("Helvetica", 8, "italic")).pack(side="left", padx=4)
+        tk.Label(xyrow, text=tr("focus.field.grid_hint", "(grid)"), bg=BG_PANEL, fg=TEXT_DIM, font=("Helvetica", 8, "italic")).pack(side="left", padx=4)
 
         # ── OFFSETS section ───────────────────────────────────────────────
         tk.Frame(self._sb_frm, bg=BORDER_G, height=1).pack(fill="x", padx=6, pady=(6, 2))
         off_hdr = tk.Frame(self._sb_frm, bg=BG_PANEL); off_hdr.pack(fill="x", padx=8, pady=(2, 0))
-        tk.Label(off_hdr, text="OFFSETS", bg=BG_PANEL, fg=TEXT_DIM,
+        tk.Label(off_hdr, text=tr("focus.offsets.title", "OFFSETS"), bg=BG_PANEL, fg=TEXT_DIM,
                  font=("Helvetica", 8, "bold"), anchor="w").pack(side="left")
-        tk.Label(off_hdr, text="(conditional position shifts)", bg=BG_PANEL, fg=TEXT_DIM,
+        tk.Label(off_hdr, text=tr("focus.offsets.hint", "(conditional position shifts)"), bg=BG_PANEL, fg=TEXT_DIM,
                  font=("Helvetica", 7, "italic"), anchor="w").pack(side="left", padx=4)
         self._offset_entries = []   # list of (x_var, y_var, trig_text) per offset block
         self._offset_box = tk.Frame(self._sb_frm, bg=BG_PANEL)
         self._offset_box.pack(fill="x", padx=8)
-        self._add_offset_btn = tk.Button(self._sb_frm, text="＋  Add Offset",
+        self._add_offset_btn = tk.Button(self._sb_frm, text=tr("focus.offsets.add", "+ Add Offset"),
                   command=self._add_offset,
                   bg=BG_CARD, fg="#06b6d4", font=("Helvetica", 9), relief="flat",
                   padx=6, pady=3, cursor="hand2",
@@ -10535,7 +10592,7 @@ class App(tk.Tk):
         self._add_offset_btn.pack(fill="x", padx=8, pady=(2, 4))
         tk.Frame(self._sb_frm, bg=BORDER_G, height=1).pack(fill="x", padx=6, pady=(2, 4))
 
-        self._fv_cost = self._sb_entry("Cost (1 = 7 days):", "10")
+        self._fv_cost = self._sb_entry(tr("focus.field.cost", "Cost (1 = 7 days):"), "10")
 
         # AI will_do raw block
         f_ai = tk.Frame(self._sb_frm, bg=BG_PANEL); f_ai.pack(fill="x", padx=8, pady=2)
@@ -10553,15 +10610,15 @@ class App(tk.Tk):
         self._fv_ai_raw.insert("1.0", "    base = 1")
         self._fv_ai = None
 
-        self._fv_desc = self._sb_text("Description (localisation):")
+        self._fv_desc = self._sb_text(tr("focus.field.description", "Description (localisation):"))
 
         tk.Frame(self._sb_frm, bg=BORDER_G, height=1).pack(fill="x", padx=6, pady=6)
 
         # PREREQS & MUTEX inside Properties tab
-        self._sb_lbl("PREREQUISITES")
+        self._sb_lbl(tr("focus.prerequisites.title", "PREREQUISITES"))
         self._prereq_box = tk.Frame(self._sb_frm, bg=BG_PANEL)
         self._prereq_box.pack(fill="x", padx=8)
-        self._conn_btn = tk.Button(self._sb_frm, text="+ Add Prerequisite",
+        self._conn_btn = tk.Button(self._sb_frm, text=tr("focus.prerequisites.add", "+ Add Prerequisite"),
                   command=self._pick_prereq,
                   bg=BG_CARD, fg=BLUE, font=("Helvetica", 9), relief="flat",
                   padx=6, pady=4, cursor="hand2",
@@ -10569,10 +10626,10 @@ class App(tk.Tk):
         self._conn_btn.pack(fill="x", padx=8, pady=3)
 
         tk.Frame(self._sb_frm, bg=BORDER_G, height=1).pack(fill="x", padx=6, pady=6)
-        self._sb_lbl("MUTUALLY EXCLUSIVE")
+        self._sb_lbl(tr("focus.mutex.title", "MUTUALLY EXCLUSIVE"))
         self._mutex_box = tk.Frame(self._sb_frm, bg=BG_PANEL)
         self._mutex_box.pack(fill="x", padx=8)
-        tk.Button(self._sb_frm, text="✖  Mutex Mode – draw exclusion line",
+        tk.Button(self._sb_frm, text=tr("focus.mutex.mode", "Mutex Mode - draw exclusion line"),
                   command=self._toggle_mutex,
                   bg=BG_CARD, fg=ORANGE, font=("Helvetica", 9), relief="flat",
                   padx=6, pady=4, cursor="hand2",
@@ -10581,15 +10638,15 @@ class App(tk.Tk):
         tk.Frame(self._sb_frm, bg=BORDER_G, height=1).pack(fill="x", padx=6, pady=6)
 
         # Save / Delete / View Code
-        tk.Button(self._sb_frm, text="Save Changes", command=self._apply,
+        tk.Button(self._sb_frm, text=tr("common.save_changes", "Save Changes"), command=self._apply,
                   bg="#14532d", fg="#0a0a0a", font=("Helvetica", 10, "bold"),
                   relief="flat", pady=6, cursor="hand2",
                   highlightthickness=0).pack(fill="x", padx=8, pady=2)
-        tk.Button(self._sb_frm, text="Delete Focus", command=self._delete_focus,
+        tk.Button(self._sb_frm, text=tr("focus.delete", "Delete Focus"), command=self._delete_focus,
                   bg="#7f1d1d", fg="#0a0a0a", font=("Helvetica", 10),
                   relief="flat", pady=5, cursor="hand2",
                   highlightthickness=0).pack(fill="x", padx=8, pady=2)
-        tk.Button(self._sb_frm, text="View Focus Code  { }",
+        tk.Button(self._sb_frm, text=tr("focus.view_code", "View Focus Code  { }"),
                   command=self._view_code,
                   bg=BG_CARD, fg=TEXT, font=("Helvetica", 10), relief="flat",
                   pady=5, cursor="hand2",
@@ -10605,7 +10662,7 @@ class App(tk.Tk):
             return
         offsets = getattr(f, "offsets", [])
         if not offsets:
-            tk.Label(self._offset_box, text="None", bg=BG_PANEL, fg=TEXT_DIM,
+            tk.Label(self._offset_box, text=tr("common.none", "None"), bg=BG_PANEL, fg=TEXT_DIM,
                      font=("Helvetica", 9, "italic")).pack(anchor="w")
             return
         for i, off in enumerate(offsets):
@@ -10671,6 +10728,13 @@ class App(tk.Tk):
             offs.append({"x": ox, "y": oy, "trigger": otrig})
         self.selected.offsets = offs
 
+    def _focus_flag_label(self, label):
+        return {
+            "cancel_if_invalid": tr("focus.flag.cancel_if_invalid", "Cancel if invalid"),
+            "continue_if_invalid": tr("focus.flag.continue_if_invalid", "Continue if invalid"),
+            "available_if_capitulated": tr("focus.flag.available_if_capitulated", "Available if capitulated"),
+        }.get(label, label)
+
     def _build_sidebar_effects(self, p, _make_scroll_panel):
         # ── TAB 2: Effects ─────────────────────────────────────────────
         eff_frm_outer = _make_scroll_panel(p)
@@ -10689,19 +10753,19 @@ class App(tk.Tk):
             highlightthickness=1, highlightbackground=BORDER_G)
         # Placeholder hint
         def _ph_in(e):
-            if self._eff_search_var.get() == "Search effects…":
+            if self._eff_search_var.get() == tr("focus.effects.search_placeholder", "Search effects..."):
                 self._eff_search_var.set(""); eff_search_entry.config(fg=TEXT)
         def _ph_out(e):
             if not self._eff_search_var.get():
-                self._eff_search_var.set("Search effects…"); eff_search_entry.config(fg=TEXT_DIM)
-        self._eff_search_var.set("Search effects…")
+                self._eff_search_var.set(tr("focus.effects.search_placeholder", "Search effects...")); eff_search_entry.config(fg=TEXT_DIM)
+        self._eff_search_var.set(tr("focus.effects.search_placeholder", "Search effects..."))
         eff_search_entry.config(fg=TEXT_DIM)
         eff_search_entry.bind("<FocusIn>", _ph_in)
         eff_search_entry.bind("<FocusOut>", _ph_out)
         eff_search_entry.pack(fill="x", expand=True, ipady=4)
         # Category filter
         cat_row = tk.Frame(eff_frm_outer, bg=BG_PANEL); cat_row.pack(fill="x", padx=8, pady=(0, 4))
-        tk.Label(cat_row, text="Category:", bg=BG_PANEL, fg=TEXT_DIM,
+        tk.Label(cat_row, text=tr("common.category", "Category:"), bg=BG_PANEL, fg=TEXT_DIM,
                  font=("Helvetica", 9)).pack(side="left")
         self._eff_cat = tk.StringVar(value=EFFECT_CATS[0])
         self._eff_cat_menu_row = cat_row   # store row for rebuilding
@@ -10722,7 +10786,7 @@ class App(tk.Tk):
         self._rebuild_eff_dd()
 
         # + Add Effect button — prominent, full width, TOP of effects
-        tk.Button(eff_frm_outer, text="＋  Add Effect",
+        tk.Button(eff_frm_outer, text=tr("focus.effects.add", "+ Add Effect"),
                   command=self._add_effect,
                   bg="#14532d", fg="#4ade80",
                   font=("Helvetica", 10, "bold"), relief="flat",
@@ -10730,7 +10794,7 @@ class App(tk.Tk):
                   highlightthickness=0).pack(fill="x", padx=8, pady=(2, 6))
 
         tk.Frame(eff_frm_outer, bg=BORDER_G, height=1).pack(fill="x", padx=6)
-        tk.Label(eff_frm_outer, text="  ADDED EFFECTS", bg=BG_PANEL, fg=TEXT_DIM,
+        tk.Label(eff_frm_outer, text=tr("focus.effects.added", "  ADDED EFFECTS"), bg=BG_PANEL, fg=TEXT_DIM,
                  font=("Helvetica", 8, "bold"), anchor="w").pack(fill="x", pady=(4, 2))
 
         # Container for effect cards (same as before, referenced by _add_effect/_render_effects)
@@ -10740,7 +10804,7 @@ class App(tk.Tk):
         # Wire up search filter
         def _filter_eff_dd(*_):
             raw = self._eff_search_var.get()
-            if raw == "Search effects…": return
+            if raw == tr("focus.effects.search_placeholder", "Search effects..."): return
             query = raw.lower().strip()
             for w in self._eff_dd_frame.winfo_children():
                 w.destroy()
@@ -10748,10 +10812,11 @@ class App(tk.Tk):
                 # Show filtered results across ALL categories
                 matches = [(k, v["label"], v["cat"])
                            for k, v in EFFECT_DEFS.items()
-                           if query in k.lower() or query in v["label"].lower()
+                           if query in k.lower()
+                           or query in v["label"].lower()
                            or query in v.get("cat", "").lower()]
                 if not matches:
-                    tk.Label(self._eff_dd_frame, text="No effects found",
+                    tk.Label(self._eff_dd_frame, text=tr("focus.effects.none_found", "No effects found"),
                              bg=BG_PANEL, fg=TEXT_DIM, font=("Helvetica", 9),
                              anchor="w").pack(fill="x")
                     return
@@ -10785,19 +10850,19 @@ class App(tk.Tk):
         _saved = self._sb_frm
         self._sb_frm = cond_frm
 
-        self._sb_lbl("SEARCH FILTERS")
-        self._fv_search  = self._sb_entry("search_filters:", "FOCUS_FILTER_POLITICAL")
+        self._sb_lbl(tr("focus.conditions.search_filters", "SEARCH FILTERS"))
+        self._fv_search  = self._sb_entry(tr("focus.conditions.search_filters_label", "search_filters:"), "FOCUS_FILTER_POLITICAL")
         tk.Frame(cond_frm, bg=BORDER_G, height=1).pack(fill="x", padx=6, pady=4)
-        self._sb_lbl("AVAILABILITY")
+        self._sb_lbl(tr("focus.conditions.availability", "AVAILABILITY"))
         self._fv_avail   = self._sb_rawblock("available = {")
         tk.Frame(cond_frm, bg=BORDER_G, height=1).pack(fill="x", padx=6, pady=4)
-        self._sb_lbl("BYPASS")
+        self._sb_lbl(tr("focus.conditions.bypass", "BYPASS"))
         self._fv_bypass  = self._sb_rawblock("bypass = {")
         tk.Frame(cond_frm, bg=BORDER_G, height=1).pack(fill="x", padx=6, pady=4)
-        self._sb_lbl("CANCEL")
+        self._sb_lbl(tr("focus.conditions.cancel", "CANCEL"))
         self._fv_cancel2 = self._sb_rawblock("cancel = {")
         tk.Frame(cond_frm, bg=BORDER_G, height=1).pack(fill="x", padx=6, pady=4)
-        self._sb_lbl("FLAGS")
+        self._sb_lbl(tr("focus.conditions.flags", "FLAGS"))
         fr = tk.Frame(cond_frm, bg=BG_PANEL); fr.pack(fill="x", padx=8, pady=2)
         self._fv_cancel   = self._sb_check(fr, "cancel_if_invalid", True)
         self._fv_continue = self._sb_check(fr, "continue_if_invalid", False)
@@ -10814,19 +10879,19 @@ class App(tk.Tk):
         code_hdr = tk.Frame(code_outer, bg=BG_DARK)
         code_hdr.pack(fill="x", padx=8, pady=(6,2))
         self._code_edit_mode = [False]
-        self._code_edit_btn = tk.Button(code_hdr, text="✎ Edit",
+        self._code_edit_btn = tk.Button(code_hdr, text=tr("common.edit", "Edit"),
                                          bg=BG_CARD, fg=TEXT_DIM, relief="flat",
                                          font=("Helvetica",8,"bold"), padx=8, pady=2,
                                          cursor="hand2",
                                          highlightthickness=1, highlightbackground=BORDER_G)
         self._code_edit_btn.pack(side="right", padx=2)
-        self._code_mode_lbl = tk.Label(code_hdr, text="live", bg=BG_DARK, fg=TEXT_DIM,
+        self._code_mode_lbl = tk.Label(code_hdr, text=tr("common.live", "live"), bg=BG_DARK, fg=TEXT_DIM,
                                         font=("Helvetica",7,"italic"))
         self._code_mode_lbl.pack(side="right")
         def _copy_code():
             txt = self._code_txt.get("1.0","end").strip()
             self.clipboard_clear(); self.clipboard_append(txt)
-        tk.Button(code_hdr, text="⎘ Copy", command=_copy_code,
+        tk.Button(code_hdr, text=tr("common.copy", "Copy"), command=_copy_code,
                   bg=BG_CARD, fg=TEXT_DIM, relief="flat",
                   font=("Helvetica",8,"bold"), padx=8, pady=2,
                   cursor="hand2",
@@ -10837,8 +10902,8 @@ class App(tk.Tk):
                 # Enter edit mode — make text editable
                 self._code_txt.config(state="normal", bg="#0d1a0d",
                                       highlightbackground="#4ade80")
-                self._code_edit_btn.config(text="🔒 Lock", fg="#4ade80", bg="#1a2c1a")
-                self._code_mode_lbl.config(text="editing", fg="#4ade80")
+                self._code_edit_btn.config(text=tr("common.lock", "Lock"), fg="#4ade80", bg="#1a2c1a")
+                self._code_mode_lbl.config(text=tr("common.editing", "editing"), fg="#4ade80")
             else:
                 # Lock: parse edits into the focus BEFORE overwriting the text
                 if self.selected:
@@ -10853,8 +10918,8 @@ class App(tk.Tk):
                 if self.selected:
                     self._refresh_code_tab(self.selected)
                 self._code_txt.config(state="disabled")
-                self._code_edit_btn.config(text="✎ Edit", fg=TEXT_DIM, bg=BG_CARD)
-                self._code_mode_lbl.config(text="live", fg=TEXT_DIM)
+                self._code_edit_btn.config(text=tr("common.edit", "Edit"), fg=TEXT_DIM, bg=BG_CARD)
+                self._code_mode_lbl.config(text=tr("common.live", "live"), fg=TEXT_DIM)
         self._code_edit_btn.config(command=_toggle_code_edit)
         # code text widget
         code_sb = tk.Scrollbar(code_outer, orient="vertical")
@@ -10934,7 +10999,7 @@ class App(tk.Tk):
 
     def _sb_check(self, parent, label, default):
         var = tk.BooleanVar(value=default)
-        tk.Checkbutton(parent, text=label, variable=var,
+        tk.Checkbutton(parent, text=self._focus_flag_label(label), variable=var,
                        bg=BG_PANEL, fg=TEXT, selectcolor=BG_CARD,
                        activebackground=BG_PANEL, font=("Helvetica", 10),
                        anchor="w", cursor="hand2").pack(fill="x")
@@ -11452,8 +11517,11 @@ class App(tk.Tk):
     def _load_mod_path(self, root):
         """Load a mod directly from a known path (used by Recent Mods menu)."""
         if not root or not os.path.isdir(root):
-            messagebox.showerror("Mod Not Found",
-                f"The folder no longer exists:\n{root}", parent=self)
+            messagebox.showerror(
+                tr("dialog.mod_not_found.title", "Mod Not Found"),
+                tr("dialog.mod_not_found.body", "The folder no longer exists:\n{path}", path=root),
+                parent=self,
+            )
             # Remove stale entry
             if hasattr(MOD, "_recent_mods") and root in MOD._recent_mods:
                 MOD._recent_mods.remove(root)
@@ -11475,7 +11543,7 @@ class App(tk.Tk):
                      else _hoi4_mod_dir if os.path.isdir(_hoi4_mod_dir)
                      else os.path.expanduser("~"))
         root = filedialog.askdirectory(
-            title="Select Mod Root Folder (contains common/, events/, gfx/, …)",
+            title=tr("filedialog.select_mod_root", "Select Mod Root Folder (contains common/, events/, gfx/, ... )"),
             initialdir=_init_dir)
         if not root: return
 
@@ -11487,12 +11555,12 @@ class App(tk.Tk):
         MOD.save_config()
 
         # Progress window
-        pw = tk.Toplevel(self); pw.title("Loading Mod…")
+        pw = tk.Toplevel(self); pw.title(tr("mod.loading.title", "Loading Mod..."))
         pw.configure(bg=BG_DARK); pw.geometry("420x140")
         pw.resizable(False,False); pw.grab_set()
         pw.protocol("WM_DELETE_WINDOW", lambda: None)  # block close during load
 
-        tk.Label(pw, text="Scanning mod folder…", bg=BG_DARK, fg=TEXT,
+        tk.Label(pw, text=tr("mod.loading.scanning", "Scanning mod folder..."), bg=BG_DARK, fg=TEXT,
                  font=("Helvetica",10,"bold"), pady=12).pack()
         prog_lbl = tk.Label(pw, text="", bg=BG_DARK, fg=TEXT_DIM,
                             font=("Helvetica",9))
@@ -11508,7 +11576,7 @@ class App(tk.Tk):
         def progress(i, total, label):
             pct = int((i/total)*380) if total else 380
             _safe_after(pw, 0, lambda i=i, t=total, l=label, p=pct: [
-                prog_lbl.config(text=f"Step {i}/{t}: {l}"),
+                prog_lbl.config(text=tr("mod.loading.step", "Step {step}/{total}: {label}", step=i, total=t, label=l)),
                 bar_fill.place_configure(width=p),
                 pw.update_idletasks()
             ])
@@ -11543,7 +11611,7 @@ class App(tk.Tk):
             MOD.get_image(tn)
 
         sample = list(MOD.sprites.keys())[:5]
-        sample_txt = "\n".join("  " + n for n in sample) if sample else "  (none — check interface/*.gfx)"
+        sample_txt = "\n".join("  " + n for n in sample) if sample else tr("mod.loaded.no_sample_gfx", "  (none - check interface/*.gfx)")
         sampled_items = list(MOD.sprites.items())[:50]
         missing_items = [(k, p) for k, p in sampled_items if not os.path.exists(p)]
         if missing_items:
@@ -11552,26 +11620,36 @@ class App(tk.Tk):
                 _lines.append("  %s\n    path: %s" % (_k, _p))
             _more = (" (+ %d more)" % (len(missing_items) - 5)) if len(missing_items) > 5 else ""
             disk_note = (
-                "\n\n⚠ %d/%d sampled textures not on disk%s\n"
-                "This is likely a missing asset in the mod, not a tool error.\n"
-                "Missing GFX entries:\n%s"
-            ) % (len(missing_items), len(sampled_items), _more, "\n".join(_lines))
+                "\n\n" + tr(
+                    "mod.loaded.missing_textures",
+                    "WARNING: {missing}/{total} sampled textures not on disk{more}\nThis is likely a missing asset in the mod, not a tool error.\nMissing GFX entries:\n{entries}",
+                    missing=len(missing_items), total=len(sampled_items), more=_more, entries="\n".join(_lines)
+                )
+            )
         else:
             disk_note = ""
         err_note = ""
         if MOD._img_errors:
-            err_note = "\n\n⚠ Image errors (first 3):\n" + "\n".join(MOD._img_errors[:3])
-        messagebox.showinfo("Mod Loaded",
-            "Mod: %s\n\n%s\n\nSample GFX names:\n%s%s%s" % (
-                mod_name, MOD.summary().replace("  •  ", "\n"),
-                sample_txt, disk_note, err_note))
+            err_note = "\n\n" + tr("mod.loaded.image_errors", "Image errors (first 3):") + "\n" + "\n".join(MOD._img_errors[:3])
+        messagebox.showinfo(
+            tr("dialog.mod_loaded.title", "Mod Loaded"),
+            tr(
+                "dialog.mod_loaded.body",
+                "Mod: {mod}\n\n{summary}\n\nSample GFX names:\n{sample}{disk_note}{err_note}",
+                mod=mod_name,
+                summary=MOD.summary().replace("  •  ", "\n"),
+                sample=sample_txt,
+                disk_note=disk_note,
+                err_note=err_note,
+            ),
+        )
         # Prompt user to pick edit targets for ideas/events files
         self.after(150, self._show_post_load_prompt)
 
     def _show_post_load_prompt(self):
         """Dialog to pick which existing ideas/events files to append new content to."""
         if not (MOD.loaded and MOD.root):
-            messagebox.showinfo("No Mod", "Please load a mod first.", parent=self)
+            messagebox.showinfo(tr("dialog.no_mod.title", "No Mod"), tr("dialog.no_mod.body", "Please load a mod first."), parent=self)
             return
         root = MOD.root
         ideas_dir  = os.path.join(root, "common", "ideas")
@@ -11580,7 +11658,7 @@ class App(tk.Tk):
         event_files = sorted([f for f in os.listdir(events_dir) if f.endswith(".txt")]) if os.path.isdir(events_dir) else []
 
         dlg = tk.Toplevel(self)
-        dlg.title("Set Edit Targets")
+        dlg.title(tr("edit_targets.title", "Set Edit Targets"))
         dlg.configure(bg=BG_DARK)
         # Cap height to screen height - 80px so the dialog always fits
         _sh = dlg.winfo_screenheight()
@@ -11589,11 +11667,13 @@ class App(tk.Tk):
         dlg.grab_set()
 
         # ── Header (pinned, not scrolled) ─────────────────────────────────
-        tk.Label(dlg, text="  SET EDIT TARGETS", bg=BG_DARK, fg=TEXT,
+        tk.Label(dlg, text=tr("edit_targets.header", "  SET EDIT TARGETS"), bg=BG_DARK, fg=TEXT,
                  font=("Helvetica",11,"bold"), pady=10, anchor="w").pack(fill="x")
         tk.Label(dlg,
-                 text="  Choose which existing files new content will be appended to.\n"
-                      "  New content is always placed at the END of the file — nothing existing is changed.",
+                 text=tr(
+                     "edit_targets.description",
+                     "  Choose which existing files new content will be appended to.\n  New content is always placed at the END of the file - nothing existing is changed.",
+                 ),
                  bg=BG_DARK, fg=TEXT_DIM, font=("Helvetica",9), justify="left", anchor="w"
                  ).pack(fill="x", padx=10)
         tk.Frame(dlg, bg=BORDER_G, height=1).pack(fill="x", pady=(6,0))
@@ -11655,12 +11735,12 @@ class App(tk.Tk):
                     initialdir=bd if os.path.isdir(bd) else root,
                     filetypes=ft)
                 if p: pv.set(p)
-            tk.Button(row, text="Browse…", command=_browse,
+            tk.Button(row, text=tr("common.browse", "Browse"), command=_browse,
                       bg=BG_CARD, fg=TEXT_DIM, relief="flat",
                       font=("Helvetica",9), cursor="hand2", padx=8, pady=3
                       ).pack(side="right")
             if file_list:
-                tk.Label(parent, text="  Quick-pick (double-click to select):",
+                tk.Label(parent, text=tr("edit_targets.quick_pick", "  Quick-pick (double-click to select):"),
                          bg=BG_DARK, fg=TEXT_DIM, font=("Helvetica",8,"italic"), anchor="w"
                          ).pack(fill="x", pady=(4,0))
                 lbf = tk.Frame(parent, bg=BG_DARK); lbf.pack(fill="x")
@@ -11691,22 +11771,22 @@ class App(tk.Tk):
                 if v and os.path.isfile(v):
                     hint_var.set("  ✓  " + os.path.basename(v))
                 elif v:
-                    hint_var.set("  ⚠  File not found — new file will be created")
+                    hint_var.set(tr("edit_targets.file_not_found", "  WARNING: File not found - new file will be created"))
                 else:
-                    hint_var.set("  —  Leave blank to create a new file on save")
+                    hint_var.set(tr("edit_targets.leave_blank", "  -  Leave blank to create a new file on save"))
             path_var.trace_add("write", _update_hint); _update_hint()
             tk.Label(parent, textvariable=hint_var, bg=BG_DARK, fg=TEXT_DIM,
                      font=("Helvetica",8,"italic"), anchor="w").pack(fill="x")
 
         _make_section(body,
-            "💡  Ideas / National Spirits file  (new spirits appended at end):",
+            tr("edit_targets.ideas_file", "Ideas / National Spirits file  (new spirits appended at end):"),
             ideas_path_var, idea_files, ideas_dir,
-            "Select Ideas .txt file")
+            tr("filedialog.select_ideas_txt", "Select Ideas .txt file"))
         tk.Frame(body, bg=BORDER, height=1).pack(fill="x", pady=6)
         _make_section(body,
-            "📋  Events file  (new events appended at end, existing content untouched):",
+            tr("edit_targets.events_file", "Events file  (new events appended at end, existing content untouched):"),
             events_path_var, event_files, events_dir,
-            "Select Events .txt file")
+            tr("filedialog.select_events_txt", "Select Events .txt file"))
 
         tk.Frame(body, bg=BORDER, height=1).pack(fill="x", pady=6)
 
@@ -11720,10 +11800,10 @@ class App(tk.Tk):
                 focus_files = sorted(f for f in os.listdir(_fd) if f.lower().endswith(".txt"))
 
         _make_section(body,
-            "🎯  Focus Tree file  (overwritten in-place on Export):",
+            tr("edit_targets.focus_file", "Focus Tree file  (overwritten in-place on Export):"),
             focus_path_var, focus_files,
             focus_dir or (MOD.root or ""),
-            "Select national_focus .txt file")
+            tr("filedialog.select_national_focus_txt", "Select national_focus .txt file"))
 
         tk.Frame(body, bg=BORDER, height=1).pack(fill="x", pady=6)
 
@@ -11742,10 +11822,10 @@ class App(tk.Tk):
                     loc_files = sorted(f for f in os.listdir(_ld) if f.lower().endswith(".yml"))
 
         _make_section(body,
-            "🌐  Localisation file  (new loc entries appended at end, english):",
+            tr("edit_targets.loc_file", "Localisation file  (new loc entries appended at end, english):"),
             loc_path_var, loc_files,
             loc_dir or (MOD.root or ""),
-            "Select localisation .yml file",
+            tr("filedialog.select_localisation_yml", "Select localisation .yml file"),
             browse_ftypes=(("YML localisation","*.yml"),("All","*.*")))
 
         tk.Frame(body, bg=BORDER, height=1).pack(fill="x", pady=6)
@@ -11760,14 +11840,14 @@ class App(tk.Tk):
                 sloc_files = sorted(f for f in os.listdir(_sld) if f.lower().endswith(".txt"))
 
         _make_section(body,
-            "📝  Scripted Localisation file  (new defined_text blocks appended):",
+            tr("edit_targets.scripted_loc_file", "Scripted Localisation file  (new defined_text blocks appended):"),
             scripted_loc_path_var, sloc_files,
             sloc_dir or (MOD.root or ""),
-            "Select scripted_localisation .txt file",
+            tr("filedialog.select_scripted_localisation_txt", "Select scripted_localisation .txt file"),
             browse_ftypes=(("HOI4 txt","*.txt"),("All","*.*")))
 
         # ── Bottom bar buttons (bot frame already created above the scroll area) ──
-        tk.Label(bot, text="You can change these any time via  🎯 Set Edit Targets  in the toolbar.",
+        tk.Label(bot, text=tr("edit_targets.footer_hint", "You can change these any time via Set Edit Targets in the toolbar."),
                  bg=BG_DARK, fg=TEXT_DIM, font=("Helvetica",8,"italic")).pack(side="left")
 
         def _skip():
@@ -11801,11 +11881,11 @@ class App(tk.Tk):
                 self._mod_lbl.config(text=base + "  |  edit: " + "  +  ".join(parts))
             dlg.grab_release(); dlg.destroy()
 
-        tk.Button(bot, text="Skip", command=_skip,
+        tk.Button(bot, text=tr("common.skip", "Skip"), command=_skip,
                   bg=BG_CARD, fg=TEXT_DIM, relief="flat",
                   font=("Helvetica",10), cursor="hand2", padx=12, pady=5
                   ).pack(side="right", padx=4)
-        tk.Button(bot, text="✓  Confirm", command=_confirm,
+        tk.Button(bot, text=tr("common.confirm", "Confirm"), command=_confirm,
                   bg="#14532d", fg="#c8f0d8", relief="flat",
                   font=("Helvetica",10,"bold"), cursor="hand2", padx=16, pady=5
                   ).pack(side="right")
@@ -11829,7 +11909,7 @@ class App(tk.Tk):
     def _sb_gfx_picker(self):
         """Icon GFX name entry — plain text, no sidebar preview (shown on canvas only)."""
         f = tk.Frame(self._sb_frm, bg=BG_PANEL); f.pack(fill="x", padx=8, pady=2)
-        tk.Label(f, text="Icon GFX name (export):", bg=BG_PANEL, fg=TEXT_DIM,
+        tk.Label(f, text=tr("focus.field.icon_gfx_export", "Icon GFX name (export):"), bg=BG_PANEL, fg=TEXT_DIM,
                  font=("Helvetica",9), anchor="w").pack(fill="x")
         row = tk.Frame(f, bg=BG_PANEL); row.pack(fill="x")
         var = tk.StringVar(value="GFX_goal_generic_political_pressure")
@@ -11838,7 +11918,7 @@ class App(tk.Tk):
                        relief="flat", highlightthickness=1,
                        highlightbackground=BORDER_G)
         ent.pack(side="left", fill="x", expand=True, ipady=3)
-        tk.Button(row, text="⊞", command=self._open_gfx_browser,
+        tk.Button(row, text=tr("common.browse_symbol", "⊞"), command=self._open_gfx_browser,
                   bg=BG_CARD, fg=TEXT_DIM, relief="flat",
                   font=("Helvetica",11), cursor="hand2",
                   highlightthickness=1, highlightbackground=BORDER_G,
@@ -11869,14 +11949,16 @@ class App(tk.Tk):
         Scroll -> images loaded on demand per visible tile only.
         """
         if not MOD.loaded:
-            folder = filedialog.askdirectory(title="Select folder with icon files")
+            folder = filedialog.askdirectory(title=tr("filedialog.select_icon_folder", "Select folder with icon files"))
             if folder: self._gfx_browse_files(folder)
             return
 
         goals_root = os.path.join(MOD.root, "gfx", "interface", "goals")
         if not os.path.isdir(goals_root):
-            messagebox.showinfo("Not Found",
-                "Could not find gfx/interface/goals/ in mod.")
+            messagebox.showinfo(
+                tr("dialog.not_found.title", "Not Found"),
+                tr("dialog.gfx_goals_not_found", "Could not find gfx/interface/goals/ in mod."),
+            )
             return
 
         # ── Instant: just list directory names, no file counting ──
@@ -11892,12 +11974,14 @@ class App(tk.Tk):
             if os.path.isdir(full):
                 folders.append((entry, full))
         if not folders:
-            messagebox.showinfo("No Folders",
-                "No subfolders found in gfx/interface/goals/"); return
+            messagebox.showinfo(
+                tr("dialog.no_folders.title", "No Folders"),
+                tr("dialog.no_goal_subfolders", "No subfolders found in gfx/interface/goals/"),
+            ); return
 
         # ── Window ────────────────────────────────────────────────
         win = tk.Toplevel(self)
-        win.title("GFX Browser")
+        win.title(tr("gfx.browser.title", "GFX Browser"))
         win.configure(bg=BG_DARK)
         win.geometry("900x580")
         win.resizable(True, True)
@@ -11909,7 +11993,7 @@ class App(tk.Tk):
         lf = tk.Frame(panes, bg=BG_PANEL, width=200)
         lf.pack(side="left", fill="y", padx=(0,6))
         lf.pack_propagate(False)
-        tk.Label(lf, text="  FOLDERS", bg=BG_PANEL, fg=TEXT_DIM,
+        tk.Label(lf, text=tr("gfx.folders", "  FOLDERS"), bg=BG_PANEL, fg=TEXT_DIM,
                  font=("Helvetica",9,"bold"), anchor="w", pady=6).pack(fill="x")
         tk.Frame(lf, bg=BORDER_G, height=1).pack(fill="x")
         folder_lb = tk.Listbox(lf, bg=BG_CARD, fg=TEXT,
@@ -11929,7 +12013,7 @@ class App(tk.Tk):
 
         top_r = tk.Frame(rf, bg=BG_DARK)
         top_r.pack(fill="x", pady=(0,6))
-        tk.Label(top_r, text="Filter:", bg=BG_DARK, fg=TEXT_DIM,
+        tk.Label(top_r, text=tr("gfx.filter", "Filter:"), bg=BG_DARK, fg=TEXT_DIM,
                  font=("Helvetica",9)).pack(side="left")
         search_var = tk.StringVar()
         tk.Entry(top_r, textvariable=search_var, bg=BG_CARD, fg=TEXT,
@@ -11937,7 +12021,7 @@ class App(tk.Tk):
                  relief="flat", highlightthickness=1,
                  highlightbackground=BORDER_G).pack(
                      side="left", padx=6, fill="x", expand=True, ipady=3)
-        status_lbl = tk.Label(top_r, text="select a folder", bg=BG_DARK,
+        status_lbl = tk.Label(top_r, text=tr("gfx.select_folder", "select a folder"), bg=BG_DARK,
                               fg=TEXT_DIM, font=("Helvetica",9))
         status_lbl.pack(side="right", padx=6)
 
@@ -11956,13 +12040,13 @@ class App(tk.Tk):
         _initial_gfx = self._fv_gfx.get()
         tk.Label(bot, textvariable=selected_var, bg=BG_DARK,
                  fg=BLUE, font=("Helvetica",9)).pack(side="left", padx=4)
-        tk.Button(bot, text="Cancel", command=win.destroy,
+        tk.Button(bot, text=tr("common.cancel", "Cancel"), command=win.destroy,
                   bg=BG_CARD, fg=TEXT, relief="flat",
                   font=("Helvetica",9), padx=10, pady=4,
                   cursor="hand2").pack(side="right", padx=4)
         def _apply():
             self._set_gfx(selected_var.get()); win.destroy()
-        _sel_btn = tk.Button(bot, text="Select ->", command=_apply,
+        _sel_btn = tk.Button(bot, text=tr("common.select", "Select"), command=_apply,
                              bg="#1a3322", fg="#4b7a5e", relief="flat",
                              font=("Helvetica",10,"bold"), padx=14, pady=5,
                              cursor="arrow", state="disabled")
@@ -12125,7 +12209,7 @@ class App(tk.Tk):
             _st["sel_idx"]    = None
             # Keep img_cache across folders — avoids reloading same files
             if not pairs:
-                status_lbl.config(text="0 icons"); return
+                status_lbl.config(text=tr("gfx.icons_count", "{count} icons", count=0)); return
             status_lbl.config(text="%d icons" % len(pairs))
             rows   = (len(pairs)+COLS-1)//COLS
             total_h = PAD + rows*(TILE_H+PAD)
@@ -12150,7 +12234,7 @@ class App(tk.Tk):
             return pairs
 
         def _load_folder(folder_path):
-            status_lbl.config(text="scanning...")
+            status_lbl.config(text=tr("gfx.scanning", "scanning..."))
             win.update_idletasks()
             # Collect file list (fast — just filenames, no image loading)
             pairs = _collect_files(folder_path)
@@ -12181,12 +12265,12 @@ class App(tk.Tk):
             (f, os.path.join(folder,f)) for f in os.listdir(folder)
             if f.lower().endswith((".dds",".png",".tga")))
         if not all_files:
-            messagebox.showinfo("No Files","No .dds/.png/.tga files found.")
+            messagebox.showinfo(tr("dialog.no_files.title", "No Files"), tr("dialog.no_gfx_files", "No .dds/.png/.tga files found."))
             return
         pairs = [("GFX_focus_"+os.path.splitext(f)[0], p) for f,p in all_files]
         COLS=5; TILE_W=110; TILE_H=100; PAD=6
         win = tk.Toplevel(self)
-        win.title("GFX Browser"); win.configure(bg=BG_DARK); win.geometry("700x480")
+        win.title(tr("gfx.browser.title", "GFX Browser")); win.configure(bg=BG_DARK); win.geometry("700x480")
         cvf = tk.Frame(win, bg=BG_PANEL)
         cvf.pack(fill="both", expand=True, padx=8, pady=8)
         cv  = tk.Canvas(cvf, bg=BG_PANEL, highlightthickness=0)
@@ -12199,12 +12283,12 @@ class App(tk.Tk):
         bot = tk.Frame(win,bg=BG_DARK); bot.pack(fill="x",padx=8,pady=6)
         tk.Label(bot,textvariable=selected_var,bg=BG_DARK,fg=BLUE,
                  font=("Helvetica",9)).pack(side="left")
-        tk.Button(bot,text="Cancel",command=win.destroy,bg=BG_CARD,fg=TEXT,
+        tk.Button(bot,text=tr("common.cancel", "Cancel"),command=win.destroy,bg=BG_CARD,fg=TEXT,
                   relief="flat",font=("Helvetica",9),padx=10,pady=4,
                   cursor="hand2").pack(side="right",padx=4)
         def _apply():
             self._set_gfx(selected_var.get()); win.destroy()
-        tk.Button(bot,text="Select ->",command=_apply,bg="#14532d",fg="#0a0a0a",
+        tk.Button(bot,text=tr("common.select", "Select"),command=_apply,bg="#14532d",fg="#0a0a0a",
                   relief="flat",font=("Helvetica",10,"bold"),padx=14,pady=5,
                   cursor="hand2").pack(side="right")
         _cache={}; _drawn=set(); _ids={}
@@ -12711,8 +12795,10 @@ class App(tk.Tk):
             return True
         except Exception as ex:
             self._log_error(str(ex))
-            messagebox.showerror("Parse Error",
-                f"Could not parse your edits:\n{ex}\n\nCheck Error Log for details.")
+            messagebox.showerror(
+                tr("dialog.parse_error.title", "Parse Error"),
+                tr("dialog.parse_error.body", "Could not parse your edits:\n{error}\n\nCheck Error Log for details.", error=ex),
+            )
             return False
 
     def _build_focus_code(self, f):
@@ -12814,7 +12900,7 @@ class App(tk.Tk):
     def _refresh_prereqs(self):
         for w in self._prereq_box.winfo_children(): w.destroy()
         if not self.selected or not self.selected.prereqs:
-            tk.Label(self._prereq_box,text="None",bg=BG_PANEL,fg=TEXT_DIM,font=("Helvetica",9,"italic")).pack(anchor="w"); return
+            tk.Label(self._prereq_box,text=tr("common.none", "None"),bg=BG_PANEL,fg=TEXT_DIM,font=("Helvetica",9,"italic")).pack(anchor="w"); return
         for gi,grp in enumerate(self.selected.prereqs):
             names=[self.focuses[p].name if p in self.focuses else f"?{p}" for p in grp]
             row=tk.Frame(self._prereq_box,bg=BG_CARD,highlightthickness=1,highlightbackground=BORDER); row.pack(fill="x",pady=1)
@@ -12823,7 +12909,7 @@ class App(tk.Tk):
     def _refresh_mutex(self):
         for w in self._mutex_box.winfo_children(): w.destroy()
         if not self.selected or not self.selected.mutex:
-            tk.Label(self._mutex_box,text="None",bg=BG_PANEL,fg=TEXT_DIM,font=("Georgia",9,"italic")).pack(anchor="w"); return
+            tk.Label(self._mutex_box,text=tr("common.none", "None"),bg=BG_PANEL,fg=TEXT_DIM,font=("Georgia",9,"italic")).pack(anchor="w"); return
         for i,mid in enumerate(self.selected.mutex):
             name=self.focuses[mid].name if mid in self.focuses else f"?{mid}"
             row=tk.Frame(self._mutex_box,bg=BG_CARD,highlightthickness=1,highlightbackground="#5a2020"); row.pack(fill="x",pady=1)
@@ -12833,14 +12919,14 @@ class App(tk.Tk):
     def _refresh_effects(self):
         for w in self._eff_box.winfo_children(): w.destroy()
         if not self.selected or not self.selected.effects:
-            tk.Label(self._eff_box,text="None",bg=BG_PANEL,fg=TEXT_DIM,font=("Helvetica",9,"italic")).pack(anchor="w"); return
+            tk.Label(self._eff_box,text=tr("common.none", "None"),bg=BG_PANEL,fg=TEXT_DIM,font=("Helvetica",9,"italic")).pack(anchor="w"); return
         for i,eff in enumerate(self.selected.effects): self._draw_eff_card(i,eff)
 
     def _draw_eff_card(self,i,eff):
         etype=eff.get("type",""); defn=EFFECT_DEFS.get(etype,{})
         known = bool(defn)
-        label=defn.get("label",etype) if known else etype
-        cat  =defn.get("cat","raw")   if known else "raw"
+        label=defn.get("label", etype) if known else etype
+        cat  =defn.get("cat","raw") if known else "raw"
         hdr_bg = "#0d1117" if known else "#1a1020"
         lbl_fg = TEXT_DIM  if known else ORANGE
 
@@ -12928,7 +13014,7 @@ class App(tk.Tk):
             # _raw_block: verbatim HOI4 code — show as editable multiline code box
             if etype == "_raw_block":
                 raw_val = fields.get("raw","")
-                tk.Label(ef, text="  raw HOI4  (imported verbatim — editable):",
+                tk.Label(ef, text=tr("focus.effects.raw_imported", "  raw HOI4  (imported verbatim - editable):"),
                          bg=BG_CARD, fg=TEXT_DIM,
                          font=("Helvetica",8,"italic")).pack(anchor="w", padx=6, pady=(2,0))
                 raw_txt = tk.Text(ef, bg="#0d1117", fg="#a8d8a8",
@@ -12947,7 +13033,7 @@ class App(tk.Tk):
                         self.selected.effects[efidx]["fields"]["raw"] = tw.get("1.0","end").strip()
                 raw_txt.bind("<KeyRelease>", _on_raw_edit)
             elif not fields:
-                tk.Label(ef,text="  (no fields — exported as-is)",
+                tk.Label(ef,text=tr("focus.effects.no_fields", "  (no fields - exported as-is)"),
                          bg=BG_CARD,fg=TEXT_DIM,font=("Georgia",8,"italic")).pack(anchor="w",padx=6)
             else:
                 for fkey,fval in list(fields.items()):
@@ -12959,7 +13045,7 @@ class App(tk.Tk):
                     fields=self.selected.effects[efidx].setdefault("fields",{})
                     nk=f"key{len(fields)}"; fields[nk]="value"
                     self._refresh_effects()
-            tk.Button(ef,text="+ add field",command=_add_raw_field,
+            tk.Button(ef,text=tr("focus.effects.add_field", "+ add field"),command=_add_raw_field,
                       bg=BG_CARD,fg=TEXT_DIM,relief="flat",font=("Helvetica",8),
                       cursor="hand2",pady=1).pack(anchor="w",padx=6,pady=(0,3))
 
@@ -12967,7 +13053,10 @@ class App(tk.Tk):
         """Pop up a window to view AND edit the HOI4 script for the selected focus."""
         f = self.selected
         if not f:
-            messagebox.showinfo("View Code", "No focus selected.\nClick a focus on the canvas first.")
+            messagebox.showinfo(
+                tr("focus_code.title", "View Code"),
+                tr("focus_code.no_focus_selected", "No focus selected.\nClick a focus on the canvas first."),
+            )
             return
 
         # Use the canonical full builder so condition blocks and the new
@@ -12977,7 +13066,7 @@ class App(tk.Tk):
 
         # ── Popup window ────────────────────────────────────────────────
         win = tk.Toplevel(self)
-        win.title(f"Focus Code — {f.name}")
+        win.title(tr("focus_code.window_title", "Focus Code - {focus}", focus=f.name))
         win.configure(bg="#0d1117")
         win.geometry("680x580")
         win.resizable(True, True)
@@ -12999,9 +13088,9 @@ class App(tk.Tk):
         def copy_code():
             content = txt.get("1.0", "end")
             win.clipboard_clear(); win.clipboard_append(content)
-            copy_btn.config(text="✓  Copied!")
-            _safe_after(win, 1600, lambda: copy_btn.config(text="📋  Copy"))
-        copy_btn = tk.Button(btn_row, text="📋  Copy",
+            copy_btn.config(text=tr("common.copied", "Copied!"))
+            _safe_after(win, 1600, lambda: copy_btn.config(text=tr("common.copy", "Copy")))
+        copy_btn = tk.Button(btn_row, text=tr("common.copy", "Copy"),
                              command=copy_code, bg="#161b22", fg=BLUE,
                              font=("Helvetica", 9, "bold"), relief="flat",
                              padx=8, pady=3, cursor="hand2",
@@ -13015,9 +13104,9 @@ class App(tk.Tk):
                 _edit_mode[0] = True
                 txt.config(state="normal", bg="#0d1117",
                            highlightthickness=1, highlightbackground=BLUE)
-                edit_btn.config(text="💾  Apply Changes", bg="#14532d", fg="#4ade80")
+                edit_btn.config(text=tr("focus_code.apply_changes", "Apply Changes"), bg="#14532d", fg="#4ade80")
                 discard_btn.pack(side="left", padx=4)
-                mode_lbl.config(text="✏  Edit mode — changes apply to this focus")
+                mode_lbl.config(text=tr("focus_code.edit_mode", "Edit mode - changes apply to this focus"))
             else:
                 # Apply: parse the edited code back into the focus
                 new_code = txt.get("1.0", "end").strip()
@@ -13029,9 +13118,9 @@ class App(tk.Tk):
                 txt.delete("1.0", "end")
                 txt.insert("1.0", self._build_focus_code(f))
                 txt.config(state="disabled", bg="#0a0f18", highlightthickness=0)
-                edit_btn.config(text="✏  Edit Code", bg="#161b22", fg=TEXT)
+                edit_btn.config(text=tr("focus_code.edit_code", "Edit Code"), bg="#161b22", fg=TEXT)
                 discard_btn.pack_forget()
-                mode_lbl.config(text="Read-only  •  press Edit to modify")
+                mode_lbl.config(text=tr("focus_code.read_only", "Read-only - press Edit to modify"))
 
         def discard_edit():
             _edit_mode[0] = False
@@ -13039,21 +13128,21 @@ class App(tk.Tk):
             txt.delete("1.0", "end")
             txt.insert("1.0", code)
             txt.config(state="disabled", bg="#0a0f18", highlightthickness=0)
-            edit_btn.config(text="✏  Edit Code", bg="#161b22", fg=TEXT)
+            edit_btn.config(text=tr("focus_code.edit_code", "Edit Code"), bg="#161b22", fg=TEXT)
             discard_btn.pack_forget()
-            mode_lbl.config(text="Read-only  •  press Edit to modify")
-        edit_btn = tk.Button(btn_row, text="✏  Edit Code",
+            mode_lbl.config(text=tr("focus_code.read_only", "Read-only - press Edit to modify"))
+        edit_btn = tk.Button(btn_row, text=tr("focus_code.edit_code", "Edit Code"),
                              command=toggle_edit, bg="#161b22", fg=TEXT,
                              font=("Helvetica", 9, "bold"), relief="flat",
                              padx=8, pady=3, cursor="hand2",
                              highlightthickness=1, highlightbackground=BORDER_G)
         edit_btn.pack(side="left", padx=(0,4))
-        discard_btn = tk.Button(btn_row, text="✕  Discard",
+        discard_btn = tk.Button(btn_row, text=tr("focus_code.discard", "Discard"),
                                 command=discard_edit, bg="#450a0a", fg="#f87171",
                                 font=("Helvetica", 9), relief="flat",
                                 padx=8, pady=3, cursor="hand2")
         # discard_btn starts hidden — shown in edit mode
-        mode_lbl = tk.Label(btn_row, text="Read-only  •  press Edit to modify",
+        mode_lbl = tk.Label(btn_row, text=tr("focus_code.read_only", "Read-only - press Edit to modify"),
                             bg=BG_PANEL, fg=TEXT_DIM,
                             font=("Helvetica", 8, "italic"))
         mode_lbl.pack(side="right", padx=4)
@@ -13108,13 +13197,13 @@ class App(tk.Tk):
     def _update_title(self):
         """Reflect current tree ID in the window title bar."""
         tid = self._tree_id.get() or "untitled"
-        self.title("HOI4 Content Maker  —  %s  [Wiki Accurate v2]" % tid)
+        self.title(tr("app.title.tree", "HOI4 Content Maker  -  {tree}  [Wiki Accurate v2]", tree=tid))
         self._update_statusbar()
 
     def _new_tree_dialog(self):
         """Dialog to set up a brand-new focus tree with country tag and naming."""
         win = tk.Toplevel(self)
-        win.title("New Focus Tree")
+        win.title(tr("focus.new_tree.title", "New Focus Tree"))
         win.configure(bg=BG_DARK)
         win.geometry("480x420")
         win.resizable(False, True)
@@ -13132,14 +13221,14 @@ class App(tk.Tk):
             e.pack(side="left", fill="x", expand=True, ipady=4)
             return var, e
 
-        tk.Label(win, text="NEW FOCUS TREE", bg=BG_DARK, fg=TEXT,
+        tk.Label(win, text=tr("focus.new_tree.header", "NEW FOCUS TREE"), bg=BG_DARK, fg=TEXT,
                  font=("Helvetica",12,"bold"), pady=14).pack()
         tk.Frame(win, bg=BORDER_G, height=1).pack(fill="x", padx=16)
 
-        var_tag,  ent_tag  = _row("Country Tag  (e.g. JAP):")
-        var_name, ent_name = _row("Country Name (e.g. Japan):")
-        var_tree, ent_tree = _row("Tree ID  (auto-filled):")
-        var_foc,  ent_foc  = _row("Focus prefix  (auto-filled):")
+        var_tag,  ent_tag  = _row(tr("focus.new_tree.country_tag", "Country Tag  (e.g. JAP):"))
+        var_name, ent_name = _row(tr("focus.new_tree.country_name", "Country Name (e.g. Japan):"))
+        var_tree, ent_tree = _row(tr("focus.new_tree.tree_id", "Tree ID  (auto-filled):"))
+        var_foc,  ent_foc  = _row(tr("focus.new_tree.focus_prefix", "Focus prefix  (auto-filled):"))
 
         preview_frame = tk.Frame(win, bg="#0d1525", relief="flat",
                                   highlightthickness=1, highlightbackground=BORDER_G)
@@ -13173,8 +13262,8 @@ class App(tk.Tk):
         def _create():
             tag  = var_tag.get().strip().upper()
             if not tag or len(tag) < 2:
-                messagebox.showwarning("Missing Tag",
-                    "Please enter a valid 2-3 letter country tag.", parent=win)
+                messagebox.showwarning(tr("dialog.missing_tag.title", "Missing Tag"),
+                    tr("dialog.missing_tag.body", "Please enter a valid 2-3 letter country tag."), parent=win)
                 return
             name = var_name.get().strip().lower().replace(" ","_")
             tree_id = var_tree.get().strip() or ("%s_focus" % tag.lower())
@@ -13183,9 +13272,10 @@ class App(tk.Tk):
             # Ask to save before clearing
             if self.focuses:
                 ans = messagebox.askyesnocancel(
-                    "Save Current Tree?",
-                    "You have unsaved work on  '%s'\n\n"
-                    "Save it before starting a new tree?" % self._tree_id.get(),
+                    tr("dialog.save_current_tree.title", "Save Current Tree?"),
+                    tr("dialog.save_current_tree.body",
+                       "You have unsaved work on '{tree}'\n\nSave it before starting a new tree?",
+                       tree=self._tree_id.get()),
                     parent=win)
                 if ans is None:   # Cancel
                     return
@@ -13212,24 +13302,24 @@ class App(tk.Tk):
             self._tree_focus_prefix = foc_pfx
 
             # Update Tree ID field hint
-            self._hint("New tree ready — right-click canvas to add your first focus  •  prefix: %s" % foc_pfx)
+            self._hint(tr("hint.new_tree_ready", "New tree ready - right-click canvas to add your first focus - prefix: {prefix}", prefix=foc_pfx))
 
             # Prefill new focus default name with prefix
             self._default_focus_prefix = foc_pfx
 
             win.destroy()
-            messagebox.showinfo("Tree Created",
-                "Tree ID: %s\nCountry: %s\nFocus prefix: %s\n\n"
-                "Right-click the canvas to place your first focus!" % (
-                    tree_id, tag, foc_pfx))
+            messagebox.showinfo(tr("dialog.tree_created.title", "Tree Created"),
+                tr("dialog.tree_created.body",
+                   "Tree ID: {tree}\nCountry: {tag}\nFocus prefix: {prefix}\n\nRight-click the canvas to place your first focus!",
+                   tree=tree_id, tag=tag, prefix=foc_pfx))
 
         btn_row = tk.Frame(win, bg=BG_DARK)
         btn_row.pack(pady=14)
-        tk.Button(btn_row, text="Cancel", command=win.destroy,
+        tk.Button(btn_row, text=tr("common.cancel", "Cancel"), command=win.destroy,
                   bg=BG_CARD, fg=TEXT, relief="flat",
                   font=("Helvetica",10), padx=16, pady=6,
                   cursor="hand2").pack(side="left", padx=8)
-        tk.Button(btn_row, text="Create Tree", command=_create,
+        tk.Button(btn_row, text=tr("focus.new_tree.create", "Create Tree"), command=_create,
                   bg="#fbbf24", fg="#0a0a0a", relief="flat",
                   font=("Helvetica",10,"bold"), padx=16, pady=6,
                   cursor="hand2").pack(side="left", padx=8)
@@ -13254,7 +13344,7 @@ class App(tk.Tk):
         if not self.selected: return
         self._push_undo("edit focus")
         f=self.selected; raw=self._fv_name.get().strip()
-        if not raw: messagebox.showerror("Error","Focus ID cannot be empty."); return
+        if not raw: messagebox.showerror(tr("dialog.error.title", "Error"), tr("dialog.focus_id_empty", "Focus ID cannot be empty.")); return
         f.name=re.sub(r"[^A-Za-z0-9_]","_",raw); f.icon=self._fv_icon.get()
         f.gfx=self._fv_gfx.get().strip() or "GFX_goal_generic_political_pressure"
         try:
@@ -13272,8 +13362,8 @@ class App(tk.Tk):
             if not any(o.x==nx and o.y==ny and o.id!=f.id for o in self.focuses.values()):
                 f.x=nx; f.y=ny
             else:
-                messagebox.showwarning("Position","Another focus already occupies that grid position.")
-        except ValueError: messagebox.showerror("Error","Cost, AI Will Do, X and Y must be integers."); return
+                messagebox.showwarning(tr("dialog.position.title", "Position"), tr("dialog.position_occupied", "Another focus already occupies that grid position."))
+        except ValueError: messagebox.showerror(tr("dialog.error.title", "Error"), tr("dialog.focus_numeric_fields", "Cost, AI Will Do, X and Y must be integers.")); return
         f.desc=self._fv_desc.get("1.0","end").strip()
         f.search_filters=self._fv_search.get().strip() or "FOCUS_FILTER_POLITICAL"
         f.available_cond=self._fv_avail.get("1.0","end").strip()
@@ -13288,28 +13378,29 @@ class App(tk.Tk):
         self._multisel_mode = not self._multisel_mode
         if self._multisel_mode:
             self._msel_btn.config(bg="#1a2e4a", fg="#00e5ff",
-                                   text="☑ Multi-Select ON")
-            self._hint("Multi-select ON — Ctrl+click focuses to select  •  Del to delete selected")
+                                   text=tr("toolbar.multi_on", "Multi-Select ON"))
+            self._hint(tr("hint.multi_select_on", "Multi-select ON - Ctrl+click focuses to select - Del to delete selected"))
         else:
             self._multi_sel.clear()
             self._msel_btn.config(bg="#1a1a2e", fg=TEXT,
-                                   text="☐ Multi-Select")
-            self._hint("Right-click canvas to place a focus  •  Ctrl+drag to pan  •  Scroll to zoom")
+                                   text=tr("toolbar.multi_select", "Multi-Select"))
+            self._hint(tr("hint.canvas_controls", "Right-click canvas to place a focus  -  Ctrl+drag to pan  -  Scroll to zoom"))
         self._redraw()
 
     def _delete_selected(self):
         """Delete all multi-selected focuses with confirmation."""
         if not self._multi_sel:
-            messagebox.showinfo("No Selection",
-                "No focuses selected.\nCtrl+click focuses (or enable Multi-Select mode) to select them.",
+            messagebox.showinfo(tr("dialog.no_selection.title", "No Selection"),
+                tr("dialog.no_focuses_selected", "No focuses selected.\nCtrl+click focuses (or enable Multi-Select mode) to select them."),
                 parent=self)
             return
         n = len(self._multi_sel)
         names = ", ".join(self.focuses[fid].name for fid in self._multi_sel
                           if fid in self.focuses)
-        if not messagebox.askyesno("Delete Selected",
-            f"Delete {n} selected focus{'es' if n>1 else ''}?\n\n{names}\n\n"
-            "This will also remove all prerequisite links to/from these focuses.",
+        if not messagebox.askyesno(tr("dialog.delete_selected.title", "Delete Selected"),
+            tr("dialog.delete_selected.body",
+               "Delete {count} selected focus(es)?\n\n{names}\n\nThis will also remove all prerequisite links to/from these focuses.",
+               count=n, names=names),
             parent=self):
             return
         self._push_undo("delete selected")
@@ -13328,7 +13419,7 @@ class App(tk.Tk):
         if self.selected and self.selected.id not in self.focuses:
             self.selected = None; self._hide_form()
         self._redraw()
-        self._hint(f"Deleted {n} focus{'es' if n>1 else ''}.")
+        self._hint(tr("hint.deleted_focuses", "Deleted {count} focus(es).", count=n))
 
     def _key_delete(self):
         """Handle Delete key — delete multi-selection or single selected focus."""
@@ -13350,7 +13441,7 @@ class App(tk.Tk):
         for i in self.selected._items: self.cv.delete(i)
         del self.focuses[fid]; self.selected=None; self._hide_form(); self._redraw()
     def _clear_all(self):
-        if not messagebox.askyesno("Clear All","Delete ALL focuses?"): return
+        if not messagebox.askyesno(tr("dialog.clear_all.title", "Clear All"), tr("dialog.clear_all.body", "Delete ALL focuses?")): return
         self.cv.delete("all"); self.focuses.clear(); self.selected=None; self._lines.clear(); self._grid_item=None; self._grid_key=None; self._grid_img=None
         self._extra_trees.clear(); self._shared_focuses.clear(); self._joint_focuses.clear()
         self._refresh_loaded_trees_panel(); self._refresh_tree_meta_panel()
@@ -13360,25 +13451,25 @@ class App(tk.Tk):
     def _pick_prereq(self):
         """Open a selection popup to add a prerequisite to the selected focus."""
         if not self.selected:
-            messagebox.showinfo("Add Prerequisite", "Select a focus first."); return
+            messagebox.showinfo(tr("dialog.add_prereq.title", "Add Prerequisite"), tr("dialog.select_focus_first", "Select a focus first.")); return
         child = self.selected
         # Collect all other focuses, excluding self and already-linked ones
         already = {fid for grp in child.prereqs for fid in grp}
         candidates = [f for f in self.focuses.values()
                       if f.id != child.id and f.id not in already]
         if not candidates:
-            messagebox.showinfo("Add Prerequisite",
-                "No other focuses available to link as prerequisites."); return
+            messagebox.showinfo(tr("dialog.add_prereq.title", "Add Prerequisite"),
+                tr("dialog.no_prereq_candidates", "No other focuses available to link as prerequisites.")); return
 
         win = tk.Toplevel(self)
-        win.title(f"Add Prerequisite → {child.name}")
+        win.title(tr("focus.prereq.window_title", "Add Prerequisite -> {focus}", focus=child.name))
         win.configure(bg=BG_DARK)
         win.geometry("580x520")
         win.resizable(True, True)
         win.grab_set()
         win.transient(self)
 
-        tk.Label(win, text=f"Select prerequisite(s) for:", bg=BG_DARK,
+        tk.Label(win, text=tr("focus.prereq.select_for", "Select prerequisite(s) for:"), bg=BG_DARK,
                  fg=TEXT_DIM, font=("Helvetica", 9)).pack(anchor="w", padx=12, pady=(10,0))
         tk.Label(win, text=child.name, bg=BG_DARK,
                  fg=GOLD_LT, font=("Helvetica", 10, "bold")).pack(anchor="w", padx=12, pady=(0,6))
@@ -13390,12 +13481,12 @@ class App(tk.Tk):
                       insertbackground=TEXT, font=("Helvetica", 9), relief="flat",
                       highlightthickness=1, highlightbackground=BORDER_G)
         se.pack(fill="x", padx=10, pady=(6,2))
-        se.insert(0, "🔍  Filter focuses...")
-        se.bind("<FocusIn>",  lambda e: se.delete(0,"end") if se.get().startswith("🔍") else None)
-        se.bind("<FocusOut>", lambda e: (se.insert(0,"🔍  Filter focuses...") if not se.get().strip() else None))
+        se.insert(0, tr("focus.prereq.filter_placeholder", "Filter focuses..."))
+        se.bind("<FocusIn>",  lambda e: se.delete(0,"end") if se.get() == tr("focus.prereq.filter_placeholder", "Filter focuses...") else None)
+        se.bind("<FocusOut>", lambda e: (se.insert(0, tr("focus.prereq.filter_placeholder", "Filter focuses...")) if not se.get().strip() else None))
 
         # Live selection counter
-        _counter_var = tk.StringVar(value="0 selected")
+        _counter_var = tk.StringVar(value=tr("common.selected_count", "{count} selected", count=0))
         counter_lbl = tk.Label(win, textvariable=_counter_var,
                                bg=BG_DARK, fg=BLUE, font=("Helvetica", 9, "bold"))
         counter_lbl.pack(anchor="e", padx=14)
@@ -13432,15 +13523,15 @@ class App(tk.Tk):
 
         def _on_filter(*_):
             q = sv.get()
-            if q.startswith("🔍"): q = ""
+            if q == tr("focus.prereq.filter_placeholder", "Filter focuses..."): q = ""
             _populate(q)
-            _counter_var.set("0 selected")
+            _counter_var.set(tr("common.selected_count", "{count} selected", count=0))
 
         sv.trace_add("write", _on_filter)
 
         def _update_counter(*_):
             n = len(lb.curselection())
-            _counter_var.set(f"{n} selected")
+            _counter_var.set(tr("common.selected_count", "{count} selected", count=n))
 
         lb.bind("<ButtonRelease-1>", _update_counter)
         lb.bind("<KeyRelease>", _update_counter)
@@ -13474,8 +13565,9 @@ class App(tk.Tk):
                         highlightthickness=1, highlightbackground=BORDER_G)
         expl.pack(fill="x", padx=10, pady=(2,4))
         tk.Label(expl,
-                 text="  OR group: ANY ONE of the selected focuses must be completed\n"
-                      "  AND group: ALL selected focuses must each be completed (added as separate blocks)",
+                 text=tr("focus.prereq.and_or_explanation",
+                         "  OR group: ANY ONE of the selected focuses must be completed\n"
+                         "  AND group: ALL selected focuses must each be completed (added as separate blocks)"),
                  bg="#0d1525", fg=TEXT_DIM, font=("Helvetica", 8), justify="left",
                  anchor="w", padx=4, pady=4).pack(fill="x")
 
@@ -13484,7 +13576,7 @@ class App(tk.Tk):
         def _confirm_or():
             sel = lb.curselection()
             if not sel:
-                messagebox.showwarning("No Selection", "Select at least one focus.", parent=win)
+                messagebox.showwarning(tr("dialog.no_selection.title", "No Selection"), tr("dialog.select_at_least_one_focus", "Select at least one focus."), parent=win)
                 return
             group = [_id_map[i] for i in sel if i in _id_map]
             if not group: return
@@ -13495,7 +13587,7 @@ class App(tk.Tk):
         def _confirm_and():
             sel = lb.curselection()
             if not sel:
-                messagebox.showwarning("No Selection", "Select at least one focus.", parent=win)
+                messagebox.showwarning(tr("dialog.no_selection.title", "No Selection"), tr("dialog.select_at_least_one_focus", "Select at least one focus."), parent=win)
                 return
             fids = [_id_map[i] for i in sel if i in _id_map]
             if not fids: return
@@ -13515,15 +13607,15 @@ class App(tk.Tk):
         lb.bind("<Return>", lambda e: _confirm_or())
         win.bind("<Escape>", lambda e: win.destroy())
 
-        tk.Button(btn_row, text="✓  Add as OR Group",
+        tk.Button(btn_row, text=tr("focus.prereq.add_or", "Add as OR Group"),
                   command=_confirm_or,
                   bg="#14532d", fg="#4ade80", font=("Helvetica", 9, "bold"),
                   relief="flat", padx=10, pady=5, cursor="hand2").pack(side="left", expand=True, fill="x", padx=(0,2))
-        tk.Button(btn_row, text="⊕  Add as AND Group",
+        tk.Button(btn_row, text=tr("focus.prereq.add_and", "Add as AND Group"),
                   command=_confirm_and,
                   bg="#1e3a6e", fg="#93c5fd", font=("Helvetica", 9, "bold"),
                   relief="flat", padx=10, pady=5, cursor="hand2").pack(side="left", expand=True, fill="x", padx=(0,2))
-        tk.Button(btn_row, text="✕  Cancel",
+        tk.Button(btn_row, text=tr("common.cancel", "Cancel"),
                   command=win.destroy,
                   bg="#450a0a", fg="#f87171", font=("Helvetica", 9),
                   relief="flat", padx=10, pady=5, cursor="hand2").pack(side="left", expand=True, fill="x")
@@ -13550,17 +13642,17 @@ class App(tk.Tk):
     def _toggle_mutex(self):
         # undo pushed inside when mutex is actually set
         if self.mutex_mode: self._end_mutex(); return
-        if not self.selected: messagebox.showinfo("Mutex","Select a focus first."); return
+        if not self.selected: messagebox.showinfo(tr("dialog.mutex.title", "Mutex"), tr("dialog.select_focus_first", "Select a focus first.")); return
         self.mutex_mode=True; self.mutex_src=self.selected
-        self._mutex_btn.config(fg=RED,text="✖ Cancel Mutex")
-        self._hint(f"Click a focus to make it MUTUALLY EXCLUSIVE with [{self.mutex_src.name}]")
+        self._mutex_btn.config(fg=RED,text=tr("focus.mutex.cancel", "Cancel Mutex"))
+        self._hint(tr("hint.mutex_pick", "Click a focus to make it MUTUALLY EXCLUSIVE with [{focus}]", focus=self.mutex_src.name))
         cx,cy=self.w2c(self.mutex_src.x,self.mutex_src.y)
         self._temp_line=self.cv.create_line(cx,cy,cx,cy,fill=ORANGE,width=2,dash=(4,4),tags="templine")
     def _end_mutex(self):
         self.mutex_mode=False; self.mutex_src=None
         if self._temp_line: self.cv.delete(self._temp_line); self._temp_line=None
-        self._mutex_btn.config(fg=ORANGE,text="✖ Mutex")
-        self._hint("Right-click canvas to place focus  •  Ctrl+drag to pan  •  Scroll to zoom"); self._redraw()
+        self._mutex_btn.config(fg=ORANGE,text=tr("toolbar.mutex", "Mutex"))
+        self._hint(tr("hint.canvas_controls", "Right-click canvas to place a focus  -  Ctrl+drag to pan  -  Scroll to zoom")); self._redraw()
     def _make_mutex(self,a,b):
         if b.id not in a.mutex: a.mutex.append(b.id)
         if a.id not in b.mutex: b.mutex.append(a.id)
@@ -13613,7 +13705,7 @@ class App(tk.Tk):
                 ("Draw.io / XML", "*.xml *.drawio"),
                 ("All files",     "*.*"),
             ],
-            title="Import Draw.io Diagram"
+            title=tr("filedialog.import_drawio", "Import Draw.io Diagram")
         )
         if not path: return
 
@@ -13621,7 +13713,10 @@ class App(tk.Tk):
             with open(path, "r", encoding="utf-8", errors="replace") as fp:
                 raw_file = fp.read()
         except Exception as e:
-            messagebox.showerror("Draw.io Import", f"Could not read file:\n{e}"); return
+            messagebox.showerror(
+                tr("dialog.drawio_import.title", "Draw.io Import"),
+                tr("dialog.drawio_read_error", "Could not read file:\n{error}", error=e),
+            ); return
 
         # ── Step 2: Parse XML ─────────────────────────────────────────
         def decompress_drawio(b64str):
@@ -13649,8 +13744,10 @@ class App(tk.Tk):
         try:
             graph_root = get_graph_root(raw_file)
         except ET.ParseError as e:
-            messagebox.showerror("Draw.io Import",
-                f"Could not parse XML:\n{e}\n\nExport as Editable Vector XML from Draw.io."); return
+            messagebox.showerror(
+                tr("dialog.drawio_import.title", "Draw.io Import"),
+                tr("dialog.drawio_parse_error", "Could not parse XML:\n{error}\n\nExport as Editable Vector XML from Draw.io.", error=e),
+            ); return
 
         cells = graph_root.findall(".//mxCell")
 
@@ -13697,9 +13794,10 @@ class App(tk.Tk):
             vertices[cid] = {"label": label, "x": x, "y": y, "w": w, "h": h}
 
         if not vertices:
-            messagebox.showwarning("Draw.io Import",
-                "No shapes found in the diagram.\n\n"
-                "Make sure your shapes have labels and are saved as XML."); return
+            messagebox.showwarning(
+                tr("dialog.drawio_import.title", "Draw.io Import"),
+                tr("dialog.drawio_no_shapes", "No shapes found in the diagram.\n\nMake sure your shapes have labels and are saved as XML."),
+            ); return
 
         edges = []
         for c in cells:
@@ -13712,7 +13810,7 @@ class App(tk.Tk):
         result = {}   # filled by dialog
 
         setup = tk.Toplevel(self)
-        setup.title("Draw.io Import — Tree Setup")
+        setup.title(tr("drawio.setup.title", "Draw.io Import - Tree Setup"))
         setup.configure(bg=BG_DARK)
         setup.geometry("480x420")
         setup.resizable(False, False)
@@ -13720,13 +13818,13 @@ class App(tk.Tk):
 
         # Header
         hdr = tk.Frame(setup, bg="#1a0f2e", pady=10); hdr.pack(fill="x")
-        tk.Label(hdr, text="  📐  Draw.io Import — Focus Tree Setup",
+        tk.Label(hdr, text=tr("drawio.setup.header", "  Draw.io Import - Focus Tree Setup"),
                  bg="#1a0f2e", fg="#a78bfa",
                  font=("Helvetica",12,"bold")).pack(side="left", padx=10)
         tk.Frame(setup, bg=BORDER_G, height=1).pack(fill="x")
 
         tk.Label(setup,
-                 text=f"  Found {len(vertices)} focuses  •  {len(edges)} prerequisite arrows",
+                 text=tr("drawio.setup.found", "  Found {focuses} focuses  -  {arrows} prerequisite arrows", focuses=len(vertices), arrows=len(edges)),
                  bg=BG_DARK, fg="#58a6ff",
                  font=("Helvetica",10,"bold"), pady=8, anchor="w").pack(fill="x", padx=16)
         tk.Frame(setup, bg=BORDER_G, height=1).pack(fill="x", padx=16)
@@ -13745,10 +13843,10 @@ class App(tk.Tk):
 
         tk.Label(setup, text="", bg=BG_DARK).pack(pady=2)
 
-        var_tag,  ent_tag  = _field(setup, "Country Tag  (e.g. JAP):")
-        var_name, ent_name = _field(setup, "Country Name (e.g. Japan):")
-        var_tree, ent_tree = _field(setup, "Tree ID  (auto-filled):")
-        var_pfx,  ent_pfx  = _field(setup, "Focus prefix  (auto-filled):")
+        var_tag,  ent_tag  = _field(setup, tr("focus.new_tree.country_tag", "Country Tag  (e.g. JAP):"))
+        var_name, ent_name = _field(setup, tr("focus.new_tree.country_name", "Country Name (e.g. Japan):"))
+        var_tree, ent_tree = _field(setup, tr("focus.new_tree.tree_id", "Tree ID  (auto-filled):"))
+        var_pfx,  ent_pfx  = _field(setup, tr("focus.new_tree.focus_prefix", "Focus prefix  (auto-filled):"))
 
         # Preview code box
         prev_frame = tk.Frame(setup, bg=BG_DARK); prev_frame.pack(fill="x", padx=20, pady=4)
@@ -13794,9 +13892,11 @@ class App(tk.Tk):
         def _confirm():
             tag = var_tag.get().strip().upper()
             if not tag or len(tag) < 2:
-                messagebox.showwarning("Missing Tag",
-                    "Please enter a 2–3 letter country tag (e.g. JAP, GER, USA).",
-                    parent=setup); return
+                messagebox.showwarning(
+                    tr("dialog.missing_tag.title", "Missing Tag"),
+                    tr("dialog.missing_tag.body", "Please enter a valid 2-3 letter country tag."),
+                    parent=setup,
+                ); return
             result["tag"]  = tag
             result["name"] = var_name.get().strip().lower().replace(" ","_")
             result["tree_id"] = var_tree.get().strip() or f"{tag.lower()}_focus"
@@ -13805,11 +13905,11 @@ class App(tk.Tk):
             setup.destroy()
 
         btn_row = tk.Frame(setup, bg=BG_DARK); btn_row.pack(pady=12)
-        tk.Button(btn_row, text="Cancel", command=setup.destroy,
+        tk.Button(btn_row, text=tr("common.cancel", "Cancel"), command=setup.destroy,
                   bg=BG_CARD, fg=TEXT, relief="flat",
                   font=("Helvetica",10), padx=14, pady=6,
                   cursor="hand2").pack(side="left", padx=6)
-        tk.Button(btn_row, text="Next  →", command=_confirm,
+        tk.Button(btn_row, text=tr("common.next", "Next"), command=_confirm,
                   bg="#a78bfa", fg="#0a0614", relief="flat",
                   font=("Helvetica",10,"bold"), padx=14, pady=6,
                   cursor="hand2").pack(side="left", padx=6)
@@ -13922,14 +14022,14 @@ class App(tk.Tk):
 
         # ── Step 6: Preview dialog ────────────────────────────────────
         prev_win = tk.Toplevel(self)
-        prev_win.title("Draw.io Import — Preview")
+        prev_win.title(tr("drawio.preview.title", "Draw.io Import - Preview"))
         prev_win.configure(bg="#0d1117")
         prev_win.geometry("680x560")
         prev_win.grab_set()
         prev_win.resizable(True, True)
 
         phdr = tk.Frame(prev_win, bg="#161b22", pady=8); phdr.pack(fill="x")
-        tk.Label(phdr, text=f"  📐  Preview — {tag} Focus Tree  ({len(vertices)} focuses)",
+        tk.Label(phdr, text=tr("drawio.preview.header", "  Preview - {tag} Focus Tree  ({count} focuses)", tag=tag, count=len(vertices)),
                  bg="#161b22", fg="#a78bfa",
                  font=("Helvetica",12,"bold")).pack(side="left", padx=10)
         tk.Frame(prev_win, bg="#30363d", height=1).pack(fill="x")
@@ -13943,7 +14043,10 @@ class App(tk.Tk):
             for p in (pane_focuses, pane_code): p.pack_forget()
             which.pack(fill="both", expand=True)
 
-        for label, pane in [("Focuses & Links", pane_focuses), ("Code Preview", pane_code)]:
+        for label, pane in [
+            (tr("drawio.preview.tab_focuses", "Focuses & Links"), pane_focuses),
+            (tr("drawio.preview.tab_code", "Code Preview"), pane_code),
+        ]:
             tk.Button(tab_bar, text=label, command=lambda p=pane: _show_pane(p),
                       bg="#0d1117", fg=TEXT_DIM, relief="flat",
                       font=("Helvetica",9,"bold"), padx=14, pady=6,
@@ -14086,8 +14189,7 @@ class App(tk.Tk):
 
         # Bottom bar
         note = tk.Label(prev_win,
-                        text="  ℹ  Shapes → focuses with generic icon.  "
-                             "Click each focus in the sidebar to add effects & icons.",
+                        text=tr("drawio.preview.note", "  Shapes become focuses with generic icons. Click each focus in the sidebar to add effects and icons."),
                         bg="#0d1117", fg="#6e7681",
                         font=("Helvetica",8,"italic"), anchor="w", pady=4)
         note.pack(fill="x", padx=10)
@@ -14099,15 +14201,15 @@ class App(tk.Tk):
             do_it[0] = True
             prev_win.destroy()
 
-        tk.Button(pbtn, text="✓  Import as Skeleton",
+        tk.Button(pbtn, text=tr("drawio.preview.import_skeleton", "Import as Skeleton"),
                   command=_go, bg="#1a3a1a", fg="#4ade80",
                   font=("Helvetica",10,"bold"), relief="flat",
                   padx=16, pady=6, cursor="hand2").pack(side="left", padx=(0,8))
-        tk.Button(pbtn, text="← Back",
+        tk.Button(pbtn, text=tr("common.back", "Back"),
                   command=prev_win.destroy, bg="#161b22", fg=TEXT_DIM,
                   font=("Helvetica",10), relief="flat",
                   padx=12, pady=6, cursor="hand2").pack(side="left", padx=(0,8))
-        tk.Button(pbtn, text="✕  Cancel",
+        tk.Button(pbtn, text=tr("common.cancel", "Cancel"),
                   command=prev_win.destroy, bg="#2d1515", fg="#f87171",
                   font=("Helvetica",10), relief="flat",
                   padx=12, pady=6, cursor="hand2").pack(side="left")
@@ -14156,12 +14258,14 @@ class App(tk.Tk):
                 self.focuses[cid_to_fid[tgt_cid]].prereqs.append([cid_to_fid[src_cid]])
 
         self._redraw()
-        shift_note = (f"  •  ⚠ {len(_auto_shift_log)} auto-shifted to avoid overlap"
+        shift_note = (tr("drawio.imported.auto_shift_note", "  -  {count} auto-shifted to avoid overlap", count=len(_auto_shift_log))
                       if _auto_shift_log else "")
         self._hint(
-            f"📐 Imported {len(self.focuses)} focuses from Draw.io  •  "
-            f"Tag: {tag}  •  Prefix: {prefix}{shift_note}  •  "
-            "Click any focus to add effects & icons"
+            tr(
+                "drawio.imported.hint",
+                "Imported {count} focuses from Draw.io  -  Tag: {tag}  -  Prefix: {prefix}{shift_note}  -  Click any focus to add effects and icons",
+                count=len(self.focuses), tag=tag, prefix=prefix, shift_note=shift_note,
+            )
         )
         if _auto_shift_log:
             detail = "\n".join(
@@ -14169,11 +14273,14 @@ class App(tk.Tk):
                 for lbl,ox,oy,nx,ny in _auto_shift_log[:12]
             )
             if len(_auto_shift_log) > 12:
-                detail += f"\n  … and {len(_auto_shift_log)-12} more"
-            messagebox.showinfo("Auto-Shift Notice",
-                f"{len(_auto_shift_log)} focus(es) were automatically moved to\n"
-                f"avoid overlapping another focus:\n\n{detail}\n\n"
-                "You can drag them to better positions on the canvas.",
+                detail += "\n" + tr("drawio.auto_shift.more", "  ... and {count} more", count=len(_auto_shift_log)-12)
+            messagebox.showinfo(
+                tr("drawio.auto_shift.title", "Auto-Shift Notice"),
+                tr(
+                    "drawio.auto_shift.body",
+                    "{count} focus(es) were automatically moved to\navoid overlapping another focus:\n\n{detail}\n\nYou can drag them to better positions on the canvas.",
+                    count=len(_auto_shift_log), detail=detail,
+                ),
                 parent=self)
 
     def _import_txt(self):
@@ -14185,12 +14292,16 @@ class App(tk.Tk):
                 init_dir = nf_dir
         path=filedialog.askopenfilename(
             initialdir=init_dir,
-            filetypes=[("HOI4 Focus Tree","*.txt"),("All","*.*")],title="Import HOI4 Focus Tree .txt")
+            filetypes=[(tr("filetype.hoi4_focus_tree", "HOI4 Focus Tree"),"*.txt"),(tr("filetype.all", "All"),"*.*")],
+            title=tr("filedialog.import_hoi4_focus_tree", "Import HOI4 Focus Tree .txt"))
         if not path: return
         try:
             with open(path,"r",encoding="utf-8-sig",errors="replace") as fp: raw=fp.read()
         except Exception as e:
-            messagebox.showerror("Import Error",f"Could not read file:\n{e}"); return
+            messagebox.showerror(
+                tr("dialog.import_error.title", "Import Error"),
+                tr("dialog.read_file_error", "Could not read file:\n{error}", error=e),
+            ); return
 
         # Auto-set the edit target so Export writes back to this file in place
         MOD.edit_focus_file = path
@@ -14469,11 +14580,17 @@ class App(tk.Tk):
                 if _re_diag.search(rf'\b{_kw}\s*=\s*\{{', txt):
                     _found_blocks.append(_kw)
             if _found_blocks:
-                _detail = f"File contains blocks: {', '.join(_found_blocks)}\nbut none could be parsed as valid focus blocks."
+                _detail = tr(
+                    "import.blocks_not_parsed",
+                    "File contains blocks: {blocks}\nbut none could be parsed as valid focus blocks.",
+                    blocks=", ".join(_found_blocks),
+                )
             else:
-                _detail = "No recognized HOI4 block types (focus, focus_tree, shared_focus) were found."
-            messagebox.showwarning("Import",
-                f"No focus data found in:\n{os.path.basename(path)}\n\n{_detail}"); return
+                _detail = tr("import.no_recognized_blocks", "No recognized HOI4 block types (focus, focus_tree, shared_focus) were found.")
+            messagebox.showwarning(
+                tr("dialog.import.title", "Import"),
+                tr("dialog.no_focus_data_found", "No focus data found in:\n{file}\n\n{detail}", file=os.path.basename(path), detail=_detail),
+            ); return
 
         # clear existing
         # Clear canvas; _items refs are gone since we cv.delete('all')
@@ -14645,11 +14762,18 @@ class App(tk.Tk):
                     if self._shared_focuses else "")
         _jf_info = (f"\njoint_focus:  {len(self._joint_focuses)} ref(s)"
                     if self._joint_focuses else "")
-        messagebox.showinfo("Import Complete",
-            f"Imported {len(self.focuses)} focuses from:\n{os.path.basename(path)}\n\n"
-            f"Tree ID: {tree_name}{_sf_info}{_jf_info}\n\n"
-            "Note: available/bypass conditions and complex effects\n"
-            "may need manual review.")
+        messagebox.showinfo(
+            tr("dialog.import_complete.title", "Import Complete"),
+            tr(
+                "dialog.import_complete.body",
+                "Imported {count} focuses from:\n{file}\n\nTree ID: {tree}{shared}{joint}\n\nNote: available/bypass conditions and complex effects\nmay need manual review.",
+                count=len(self.focuses),
+                file=os.path.basename(path),
+                tree=tree_name,
+                shared=_sf_info,
+                joint=_jf_info,
+            ),
+        )
 
     # ── MULTI-TREE HELPERS ───────────────────────────────────────
 
@@ -14783,27 +14907,45 @@ class App(tk.Tk):
                 init_dir = nf_dir
         path = filedialog.askopenfilename(
             initialdir=init_dir,
-            filetypes=[("HOI4 Focus Tree", "*.txt"), ("All", "*.*")],
-            title=f"Load {tree_type.capitalize()} Focus Tree .txt")
+            filetypes=[(tr("filetype.hoi4_focus_tree", "HOI4 Focus Tree"), "*.txt"), (tr("filetype.all", "All"), "*.*")],
+            title=tr("filedialog.load_extra_focus_tree", "Load {type} Focus Tree .txt", type=tree_type.capitalize()))
         if not path: return
         # Duplicate check
         for et in self._extra_trees:
             if os.path.normpath(et["file_path"]) == os.path.normpath(path):
-                messagebox.showwarning("Already Loaded",
-                    f"This file is already loaded:\n{os.path.basename(path)}")
+                messagebox.showwarning(
+                    tr("dialog.already_loaded.title", "Already Loaded"),
+                    tr("dialog.already_loaded.body", "This file is already loaded:\n{file}", file=os.path.basename(path)),
+                )
                 return
         try:
             with open(path, "r", encoding="utf-8-sig", errors="replace") as fp:
                 raw = fp.read()
         except Exception as e:
-            messagebox.showerror("Load Error", f"Could not read file:\n{e}"); return
+            messagebox.showerror(
+                tr("dialog.load_error.title", "Load Error"),
+                tr("dialog.read_file_error", "Could not read file:\n{error}", error=e),
+            )
+            return
         try:
             count, tree_id = self._install_extra_tree(raw, path, tree_type)
         except EmptyFocusTreeError as e:
-            messagebox.showwarning("Load Tree", str(e)); return
-        messagebox.showinfo("Loaded",
-            f"Loaded {count} focuses from {tree_type} tree:\n"
-            f"{os.path.basename(path)}\n\nTree ID: {tree_id}")
+            messagebox.showwarning(tr("dialog.load_tree.title", "Load Tree"), str(e))
+            return
+        self._refresh_loaded_trees_panel()
+        self._redraw()
+        self._fit_all()
+        messagebox.showinfo(
+            tr("dialog.loaded.title", "Loaded"),
+            tr(
+                "dialog.extra_tree_loaded.body",
+                "Loaded {count} focuses from {type} tree:\n{file}\n\nTree ID: {tree}",
+                count=count,
+                type=tree_type,
+                file=os.path.basename(path),
+                tree=tree_id,
+            ),
+        )
 
     def _unload_extra_tree(self, tree_idx):
         """Remove all focuses belonging to an extra tree from the canvas."""
@@ -14844,7 +14986,7 @@ class App(tk.Tk):
         if not hasattr(self, "_loaded_trees_inner"): return
         for w in self._loaded_trees_inner.winfo_children(): w.destroy()
         if not self._extra_trees:
-            tk.Label(self._loaded_trees_inner, text="  No extra trees loaded",
+            tk.Label(self._loaded_trees_inner, text=tr("sidebar.no_extra_trees", "  No extra trees loaded"),
                      bg=BG_PANEL, fg=TEXT_DIM, font=("Helvetica", 8, "italic"),
                      anchor="w").pack(fill="x", padx=4, pady=2)
             return
@@ -14860,11 +15002,16 @@ class App(tk.Tk):
                      bg=BG_CARD, fg=TEXT, font=("Courier", 8, "bold"),
                      anchor="w").pack(fill="x", padx=4, pady=(2, 0))
             tk.Label(info_f,
-                     text=f"  {os.path.basename(et['file_path'])}  •  {len(et['focus_ids'])} focuses",
+                     text=tr(
+                         "sidebar.loaded_tree_summary",
+                         "  {file}  -  {count} focuses",
+                         file=os.path.basename(et["file_path"]),
+                         count=len(et["focus_ids"]),
+                     ),
                      bg=BG_CARD, fg=TEXT_DIM, font=("Helvetica", 7),
                      anchor="w").pack(fill="x", padx=4, pady=(0, 2))
             btn_f = tk.Frame(row, bg=BG_CARD); btn_f.pack(side="right", padx=2)
-            tk.Button(btn_f, text="Save", command=lambda i=idx: self._export_extra_tree(i),
+            tk.Button(btn_f, text=tr("common.save", "Save"), command=lambda i=idx: self._export_extra_tree(i),
                       bg=BG_CARD, fg=BLUE, font=("Helvetica", 8), relief="flat",
                       padx=4, pady=1, cursor="hand2").pack(pady=(4, 0))
             tk.Button(btn_f, text="✕", command=lambda i=idx: self._unload_extra_tree(i),
@@ -14878,7 +15025,11 @@ class App(tk.Tk):
         focuses_in_tree = [f for f in self.focuses.values()
                            if getattr(f, "tree_idx", 0) == tree_idx]
         if not focuses_in_tree:
-            messagebox.showwarning("Export", "No focuses in this tree."); return
+            messagebox.showwarning(
+                tr("dialog.export.title", "Export"),
+                tr("dialog.no_focuses_in_tree", "No focuses in this tree."),
+            )
+            return
         out_text = export_focus_tree(
             focuses_in_tree, info,
             focus_lookup=self.focuses, effect_renderer=self._render_effect)
@@ -14890,13 +15041,15 @@ class App(tk.Tk):
                 defaultextension=".txt",
                 filetypes=[("HOI4 Focus Tree", "*.txt"), ("All", "*.*")],
                 initialfile=os.path.basename(info["file_path"]),
-                title=f"Save {info['type'].capitalize()} Tree .txt")
+                title=tr("filedialog.save_extra_tree", "Save {type} Tree .txt", type=info["type"].capitalize()))
         if not path: return
         with open(path, "w", encoding="utf-8") as fp:
             fp.write(out_text)
         info["file_path"] = path
-        messagebox.showinfo("Saved",
-            f"✅  {info['type'].capitalize()} tree saved:\n{os.path.basename(path)}")
+        messagebox.showinfo(
+            tr("dialog.saved.title", "Saved"),
+            tr("dialog.extra_tree_saved", "{type} tree saved:\n{file}", type=info["type"].capitalize(), file=os.path.basename(path)),
+        )
 
     def _load_all_trees(self):
         """Scan national_focus directory and show a checklist so the user can batch-load trees."""
@@ -14908,7 +15061,7 @@ class App(tk.Tk):
                 init_dir = nf_dir
         if not init_dir:
             init_dir = filedialog.askdirectory(
-                title="Select national_focus directory to scan")
+                title=tr("filedialog.select_national_focus_dir", "Select national_focus directory to scan"))
             if not init_dir: return
 
         # Collect all .txt files recursively
@@ -14919,8 +15072,10 @@ class App(tk.Tk):
                     all_files.append(os.path.join(root_d, fn))
 
         if not all_files:
-            messagebox.showinfo("Load All Trees",
-                f"No .txt files found in:\n{init_dir}"); return
+            messagebox.showinfo(
+                tr("load_all.title", "Load All Trees"),
+                tr("load_all.no_txt_files", "No .txt files found in:\n{path}", path=init_dir),
+            ); return
 
         # Already-loaded paths for duplicate detection
         loaded_paths = {os.path.normpath(et["file_path"])
@@ -14928,14 +15083,14 @@ class App(tk.Tk):
 
         # ── Checklist dialog ────────────────────────────────────────
         win = tk.Toplevel(self)
-        win.title("Load All Trees — Select Files")
+        win.title(tr("load_all.select_files.title", "Load All Trees - Select Files"))
         win.configure(bg=BG_DARK)
         win.geometry("740x560")
         win.resizable(True, True)
         win.grab_set()
         win.transient(self)
 
-        tk.Label(win, text=f"  Found {len(all_files)} .txt files in national_focus",
+        tk.Label(win, text=tr("load_all.found_files", "  Found {count} .txt files in national_focus", count=len(all_files)),
                  bg=BG_DARK, fg=TEXT_DIM, font=("Helvetica", 9)).pack(anchor="w", padx=12, pady=(10, 0))
         tk.Label(win, text=f"  {init_dir}",
                  bg=BG_DARK, fg=TEXT_DIM, font=("Courier", 8)).pack(anchor="w", padx=12, pady=(0, 6))
@@ -14943,11 +15098,11 @@ class App(tk.Tk):
 
         # Header row
         hdr = tk.Frame(win, bg="#0d1525"); hdr.pack(fill="x", padx=10, pady=(4, 0))
-        tk.Label(hdr, text="Load", bg="#0d1525", fg=TEXT_DIM,
+        tk.Label(hdr, text=tr("load_all.column.load", "Load"), bg="#0d1525", fg=TEXT_DIM,
                  font=("Helvetica", 8, "bold"), width=5).pack(side="left")
-        tk.Label(hdr, text="Filename", bg="#0d1525", fg=TEXT_DIM,
+        tk.Label(hdr, text=tr("load_all.column.filename", "Filename"), bg="#0d1525", fg=TEXT_DIM,
                  font=("Helvetica", 8, "bold")).pack(side="left", padx=(0, 20))
-        tk.Label(hdr, text="Type", bg="#0d1525", fg=TEXT_DIM,
+        tk.Label(hdr, text=tr("load_all.column.type", "Type"), bg="#0d1525", fg=TEXT_DIM,
                  font=("Helvetica", 8, "bold")).pack(side="right", padx=20)
 
         # Scrollable file list
@@ -15002,15 +15157,15 @@ class App(tk.Tk):
                                 font=("Courier", 8), anchor="w")
             name_lbl.pack(side="left", fill="x", expand=True, padx=2)
             if already:
-                tk.Label(row_f, text=" (loaded)", bg=row_f.cget("bg"),
+                tk.Label(row_f, text=tr("load_all.loaded_marker", " (loaded)"), bg=row_f.cget("bg"),
                          fg="#4ade80", font=("Helvetica", 8, "italic")).pack(side="left")
 
             # Type selector
             type_f = tk.Frame(row_f, bg=row_f.cget("bg"))
             type_f.pack(side="right", padx=4)
-            for lbl, val, col in [("Main", "main", TEXT_DIM),
-                                   ("Shared", "shared", "#f59e0b"),
-                                   ("Joint",  "joint",  "#a855f7")]:
+            for lbl, val, col in [(tr("load_all.type.main", "Main"), "main", TEXT_DIM),
+                                   (tr("load_all.type.shared", "Shared"), "shared", "#f59e0b"),
+                                   (tr("load_all.type.joint", "Joint"),  "joint",  "#a855f7")]:
                 tk.Radiobutton(type_f, text=lbl, variable=type_var, value=val,
                                bg=row_f.cget("bg"), fg=col,
                                selectcolor=BG_DARK, activebackground=row_f.cget("bg"),
@@ -15033,10 +15188,10 @@ class App(tk.Tk):
                 if not already: cv2.set(tv.get() == "joint")
 
         ctrl = tk.Frame(win, bg=BG_DARK); ctrl.pack(fill="x", padx=10, pady=(2, 0))
-        for lbl, cmd in [("☑ All Shared+Joint", _sel_all),
-                          ("☐ None",             _desel_all),
-                          ("Shared only",         _sel_shared),
-                          ("Joint only",          _sel_joint)]:
+        for lbl, cmd in [(tr("load_all.select_all_extra", "All Shared+Joint"), _sel_all),
+                          (tr("common.none", "None"),             _desel_all),
+                          (tr("load_all.shared_only", "Shared only"),         _sel_shared),
+                          (tr("load_all.joint_only", "Joint only"),          _sel_joint)]:
             tk.Button(ctrl, text=lbl, command=cmd,
                       bg=BG_CARD, fg=TEXT_DIM, font=("Helvetica", 8),
                       relief="flat", padx=6, pady=2, cursor="hand2").pack(side="left", padx=2)
@@ -15048,8 +15203,11 @@ class App(tk.Tk):
             to_load = [(fp, tv.get()) for fp, cv2, tv, already in rows
                        if cv2.get() and not already and tv.get() != "main"]
             if not to_load:
-                messagebox.showwarning("Load All Trees",
-                    "No files selected to load.", parent=win)
+                messagebox.showwarning(
+                    tr("load_all.title", "Load All Trees"),
+                    tr("load_all.no_files_selected", "No files selected to load."),
+                    parent=win,
+                )
                 return
             win.destroy()
             ok, fail = [], []
@@ -15061,21 +15219,21 @@ class App(tk.Tk):
                 except Exception as e:
                     fail.append(f"{os.path.basename(fp)}: {e}")
 
-            msg = f"Loaded {len(ok)} file(s).\n"
+            msg = tr("load_all.loaded_count", "Loaded {count} file(s).", count=len(ok)) + "\n"
             if ok:
-                msg += "\nLoaded:\n" + "\n".join(f"  ✓ {n}" for n in ok)
+                msg += "\n" + tr("load_all.loaded_header", "Loaded:") + "\n" + "\n".join(f"  ✓ {n}" for n in ok)
             if fail:
-                msg += "\n\nFailed:\n" + "\n".join(f"  ✕ {e}" for e in fail)
-            messagebox.showinfo("Load All Trees", msg)
+                msg += "\n\n" + tr("load_all.failed_header", "Failed:") + "\n" + "\n".join(f"  ✕ {e}" for e in fail)
+            messagebox.showinfo(tr("load_all.title", "Load All Trees"), msg)
             # Zoom to fit all focuses
             if ok:
                 self._fit_all()
 
-        tk.Button(btn_row, text="📂  Load Selected",
+        tk.Button(btn_row, text=tr("load_all.load_selected", "Load Selected"),
                   command=_do_load,
                   bg="#1e3a6e", fg="#93c5fd", font=("Helvetica", 9, "bold"),
                   relief="flat", padx=12, pady=6, cursor="hand2").pack(side="left", expand=True, fill="x", padx=(0, 4))
-        tk.Button(btn_row, text="✕  Cancel",
+        tk.Button(btn_row, text=tr("common.cancel", "Cancel"),
                   command=win.destroy,
                   bg="#450a0a", fg="#f87171", font=("Helvetica", 9),
                   relief="flat", padx=12, pady=6, cursor="hand2").pack(side="left", expand=True, fill="x")
@@ -15105,21 +15263,22 @@ class App(tk.Tk):
                 results.append(f"{et['type'].capitalize()}: {et['tree_id']}")
             except Exception as e:
                 errors.append(f"{et['tree_id']}: {e}")
-        msg = "Save All Trees complete!\n\n"
+        msg = tr("save_all.complete", "Save All Trees complete!") + "\n\n"
         if results:
-            msg += "Saved:\n" + "\n".join(f"  • {r}" for r in results)
+            msg += tr("save_all.saved_header", "Saved:") + "\n" + "\n".join(f"  • {r}" for r in results)
         if errors:
-            msg += "\n\nErrors:\n" + "\n".join(f"  ✕ {e}" for e in errors)
-        messagebox.showinfo("Save All Trees", msg)
+            msg += "\n\n" + tr("save_all.errors_header", "Errors:") + "\n" + "\n".join(f"  ✕ {e}" for e in errors)
+        messagebox.showinfo(tr("save_all.title", "Save All Trees"), msg)
 
     # ── SAVE / LOAD ─────────────────────────────────────────────
     def _save(self):
         path=filedialog.asksaveasfilename(defaultextension=".json",
-            filetypes=[("JSON Project","*.json"),("All","*.*")],title="Save Project")
+            filetypes=[(tr("filetype.json_project", "JSON Project"),"*.json"),(tr("filetype.all", "All"),"*.*")],
+            title=tr("filedialog.save_project", "Save Project"))
         if not path: return
         data={"tree_name":self._tree_id.get(),"focuses":[f.to_dict() for f in self.focuses.values()]}
         with open(path,"w",encoding="utf-8") as fp: json.dump(data,fp,indent=2)
-        messagebox.showinfo("Saved",f"Project saved:\n{path}")
+        messagebox.showinfo(tr("dialog.saved.title", "Saved"), tr("dialog.project_saved", "Project saved:\n{path}", path=path))
     def _detect_and_apply_tag(self):
         """Scan all loaded focus IDs, detect common country tag prefix, apply to new focuses."""
         if not self.focuses: return
@@ -15141,7 +15300,10 @@ class App(tk.Tk):
             self._default_focus_prefix = ""
 
     def _load(self):
-        path=filedialog.askopenfilename(filetypes=[("JSON Project","*.json"),("All","*.*")],title="Load Project")
+        path=filedialog.askopenfilename(
+            filetypes=[(tr("filetype.json_project", "JSON Project"),"*.json"),(tr("filetype.all", "All"),"*.*")],
+            title=tr("filedialog.load_project", "Load Project"),
+        )
         if not path: return
         with open(path,"r",encoding="utf-8") as fp: data=json.load(fp)
         self.cv.delete("all"); self.focuses.clear(); self.selected=None; self._lines.clear(); self._grid_item=None; self._grid_key=None; self._grid_img=None
@@ -15843,10 +16005,10 @@ class App(tk.Tk):
     def _open_settings(self):
         """Settings panel — GFX paths, MD detection, extra dirs."""
         win = tk.Toplevel(self)
-        win.title("Settings"); win.configure(bg=BG_DARK)
+        win.title(tr("settings.title", "Settings")); win.configure(bg=BG_DARK)
         win.geometry("600x580"); win.resizable(True, True); win.grab_set()
 
-        tk.Label(win, text="SETTINGS", bg=BG_DARK, fg=TEXT,
+        tk.Label(win, text=tr("settings.header", "SETTINGS"), bg=BG_DARK, fg=TEXT,
                  font=("Helvetica",11,"bold"), pady=10).pack(fill="x", padx=14)
         tk.Frame(win, bg=BORDER_G, height=1).pack(fill="x")
 
@@ -15888,13 +16050,13 @@ class App(tk.Tk):
                     os.path.join(MOD.root, v.get())) else (
                     MOD.root if MOD.root and os.path.isdir(MOD.root)
                     else os.path.expanduser("~"))
-                d = filedialog.askdirectory(title="Select folder", initialdir=start)
+                d = filedialog.askdirectory(title=tr("filedialog.select_folder", "Select folder"), initialdir=start)
                 if not d: return
                 # Store relative to mod root if possible, otherwise absolute
                 if MOD.root and d.startswith(MOD.root):
                     d = os.path.relpath(d, MOD.root)
                 v.set(d)
-            tk.Button(row, text="Browse", command=_browse,
+            tk.Button(row, text=tr("common.browse", "Browse"), command=_browse,
                       bg=BG_CARD, fg=TEXT_DIM, relief="flat",
                       font=("Helvetica",8), padx=8, pady=2,
                       cursor="hand2",
@@ -15902,13 +16064,37 @@ class App(tk.Tk):
                       highlightbackground=BORDER_G).pack(side="left", padx=(4,0))
 
         # ── MOD DETECTION STATUS ──────────────────────────────────────
-        _sec("MOD DETECTION")
+        _sec(tr("settings.language.section", "LANGUAGE"))
+        lang_row = tk.Frame(frm, bg=BG_PANEL); lang_row.pack(fill="x", padx=10, pady=4)
+        tk.Label(lang_row, text=tr("settings.language.label", "UI language:"), bg=BG_PANEL,
+                 fg=TEXT_DIM, font=("Helvetica",9), width=18, anchor="w").pack(side="left")
+        lang_var = tk.StringVar(value=I18N_LANG or "en")
+        lang_combo = ttk.Combobox(lang_row, textvariable=lang_var, state="readonly",
+                                  values=list(I18N_LANGS.keys()), width=16)
+        lang_combo.pack(side="left")
+        lang_name = tk.Label(lang_row, text=I18N_LANGS.get(lang_var.get(), ""),
+                             bg=BG_PANEL, fg=TEXT_DIM, font=("Helvetica",8), padx=8)
+        lang_name.pack(side="left")
+        def _apply_lang(*_):
+            old = I18N_LANG
+            new = lang_var.get()
+            set_language(new)
+            lang_name.config(text=I18N_LANGS.get(new, ""))
+            if old != new:
+                messagebox.showinfo(
+                    tr("settings.language.changed.title", "Language Changed"),
+                    tr("settings.language.changed.body",
+                       "Language saved. Restart the app to refresh all existing UI text."),
+                    parent=win)
+        lang_combo.bind("<<ComboboxSelected>>", _apply_lang)
+
+        _sec(tr("settings.mod_detection", "MOD DETECTION"))
         md_color = "#a78bfa" if MOD.is_md else TEXT_DIM
-        _lbl("  Loaded mod:   " + (MOD.mod_name or "None"), fg=md_color)
-        _lbl("  MD detected:  " + ("YES  ⚡ MD categories and effects are visible" if MOD.is_md
-             else "NO   — MD categories hidden"), fg=md_color)
-        _lbl("  Detection checks: folder name, descriptor.mod content.")
-        _lbl("  You can also override manually:")
+        _lbl(tr("settings.loaded_mod", "  Loaded mod:   {mod}", mod=(MOD.mod_name or tr("common.none", "None"))), fg=md_color)
+        _lbl((tr("settings.md_detected_yes", "  MD detected:  YES  -  MD categories and effects are visible") if MOD.is_md
+             else tr("settings.md_detected_no", "  MD detected:  NO   -  MD categories hidden")), fg=md_color)
+        _lbl(tr("settings.detection_checks", "  Detection checks: folder name, descriptor.mod content."))
+        _lbl(tr("settings.override_manually", "  You can also override manually:"))
 
         ovr_row = tk.Frame(frm, bg=BG_PANEL); ovr_row.pack(fill="x", padx=10, pady=6)
 
@@ -15916,15 +16102,15 @@ class App(tk.Tk):
             MOD.is_md = is_md
             self._apply_md_visibility()
             lbl_status.config(
-                text="  Overridden:  MD = %s" % ("ON" if is_md else "OFF"),
+                text=tr("settings.md_overridden", "  Overridden:  MD = {state}", state=("ON" if is_md else "OFF")),
                 fg="#a78bfa" if is_md else "#4ade80")
 
-        tk.Button(ovr_row, text="Force MD ON",
+        tk.Button(ovr_row, text=tr("settings.force_md_on", "Force MD ON"),
                   command=lambda: _force(True),
                   bg="#2d1a4a", fg="#a78bfa", relief="flat",
                   font=("Helvetica",9,"bold"), padx=12, pady=4,
                   cursor="hand2").pack(side="left", padx=4)
-        tk.Button(ovr_row, text="Force MD OFF  (Vanilla)",
+        tk.Button(ovr_row, text=tr("settings.force_md_off", "Force MD OFF  (Vanilla)"),
                   command=lambda: _force(False),
                   bg="#1a2c1a", fg="#4ade80", relief="flat",
                   font=("Helvetica",9,"bold"), padx=12, pady=4,
@@ -15934,16 +16120,16 @@ class App(tk.Tk):
         lbl_status.pack(fill="x")
 
         # ── MOD PATH ─────────────────────────────────────────────
-        _sec("MOD LOAD PATH")
-        _lbl("  Where the Mod button opens by default.")
-        _lbl("  Leave blank to use the HOI4 mod folder automatically.")
+        _sec(tr("settings.mod_load_path", "MOD LOAD PATH"))
+        _lbl(tr("settings.mod_load_path.hint1", "  Where the Mod button opens by default."))
+        _lbl(tr("settings.mod_load_path.hint2", "  Leave blank to use the HOI4 mod folder automatically."))
 
         _default_hoi4 = _default_hoi4_mod_dir()
         if not hasattr(MOD, "custom_mod_path"):
             MOD.custom_mod_path = ""
 
         mp_row = tk.Frame(frm, bg=BG_PANEL); mp_row.pack(fill="x", padx=10, pady=3)
-        tk.Label(mp_row, text="Mod folder:", bg=BG_PANEL, fg=TEXT_DIM,
+        tk.Label(mp_row, text=tr("settings.mod_folder", "Mod folder:"), bg=BG_PANEL, fg=TEXT_DIM,
                  font=("Helvetica",9), width=14, anchor="w").pack(side="left")
         mp_var = tk.StringVar(value=MOD.custom_mod_path or _default_hoi4)
         mp_ent = tk.Entry(mp_row, textvariable=mp_var, bg=BG_CARD, fg=TEXT,
@@ -15956,7 +16142,7 @@ class App(tk.Tk):
         mp_var.trace_add("write", _on_mp_change)
 
         def _browse_mod_path():
-            d = filedialog.askdirectory(title="Select default mod folder",
+            d = filedialog.askdirectory(title=tr("filedialog.select_default_mod_folder", "Select default mod folder"),
                                         initialdir=mp_var.get() if os.path.isdir(mp_var.get())
                                         else os.path.expanduser("~"))
             if d: mp_var.set(d)
@@ -15965,28 +16151,28 @@ class App(tk.Tk):
             mp_var.set(_default_hoi4)
 
         mp_btn_row = tk.Frame(frm, bg=BG_PANEL); mp_btn_row.pack(fill="x", padx=10, pady=(0,4))
-        tk.Button(mp_btn_row, text="Browse", command=_browse_mod_path,
+        tk.Button(mp_btn_row, text=tr("common.browse", "Browse"), command=_browse_mod_path,
                   bg=BG_CARD, fg=TEXT, relief="flat",
                   font=("Helvetica",9), padx=10, pady=3,
                   cursor="hand2").pack(side="left", padx=(0,4))
-        tk.Button(mp_btn_row, text="Reset to HOI4 Default",
+        tk.Button(mp_btn_row, text=tr("settings.reset_hoi4_default", "Reset to HOI4 Default"),
                   command=_reset_mod_path,
                   bg=BG_CARD, fg=TEXT_DIM, relief="flat",
                   font=("Helvetica",9), padx=10, pady=3,
                   cursor="hand2").pack(side="left")
-        _lbl("  Current HOI4 default:  " + _default_hoi4)
+        _lbl(tr("settings.current_hoi4_default", "  Current HOI4 default:  {path}", path=_default_hoi4))
 
         # ── GFX PATHS ─────────────────────────────────────────────────
-        _sec("GFX PATHS  (relative to mod root)")
-        _lbl("  Focus icon GFX  (gfx/interface/goals/):")
-        _path_row("Goals path:", "path_goals")
-        _lbl("  Idea / National Spirit GFX  (gfx/interface/ideas/):")
-        _path_row("Ideas GFX path:", "path_ideas_gfx")
-        _lbl("  Changes take effect when you reload the mod.")
+        _sec(tr("settings.gfx_paths", "GFX PATHS  (relative to mod root)"))
+        _lbl(tr("settings.focus_icon_gfx_hint", "  Focus icon GFX  (gfx/interface/goals/):"))
+        _path_row(tr("settings.goals_path", "Goals path:"), "path_goals")
+        _lbl(tr("settings.idea_gfx_hint", "  Idea / National Spirit GFX  (gfx/interface/ideas/):"))
+        _path_row(tr("settings.ideas_gfx_path", "Ideas GFX path:"), "path_ideas_gfx")
+        _lbl(tr("settings.reload_hint", "  Changes take effect when you reload the mod."))
 
         # Preset buttons
         pre_row = tk.Frame(frm, bg=BG_PANEL); pre_row.pack(fill="x", padx=10, pady=4)
-        tk.Label(pre_row, text="Presets:", bg=BG_PANEL, fg=TEXT_DIM,
+        tk.Label(pre_row, text=tr("settings.presets", "Presets:"), bg=BG_PANEL, fg=TEXT_DIM,
                  font=("Helvetica",8)).pack(side="left", padx=(0,8))
 
         presets = [
@@ -16001,29 +16187,29 @@ class App(tk.Tk):
             def _apply(g=pg, i=pi):
                 MOD.path_goals = g; MOD.path_ideas_gfx = i
                 MOD.save_config()
-                messagebox.showinfo("Preset Applied",
-                    "Paths updated.\nReload mod to apply.", parent=win)
+                messagebox.showinfo(tr("dialog.preset_applied.title", "Preset Applied"),
+                    tr("dialog.preset_applied.body", "Paths updated.\nReload mod to apply."), parent=win)
             tk.Button(pre_row, text=pname, command=_apply,
                       bg=BG_CARD, fg=TEXT_DIM, relief="flat",
                       font=("Helvetica",8), padx=8, pady=3,
                       cursor="hand2").pack(side="left", padx=2)
 
         # ── EVENT PICTURE GFX ────────────────────────────────────────
-        _sec("EVENT PICTURE GFX PATH  (relative to mod root)")
-        _lbl("  Folder containing .dds event pictures (vanilla: gfx/event_pictures/):")
-        _path_row("Event pictures:", "path_event_pictures")
-        _lbl("  Changes take effect immediately in the Event Maker GFX picker.")
+        _sec(tr("settings.event_picture_gfx_path", "EVENT PICTURE GFX PATH  (relative to mod root)"))
+        _lbl(tr("settings.event_picture_gfx_hint", "  Folder containing .dds event pictures (vanilla: gfx/event_pictures/):"))
+        _path_row(tr("settings.event_pictures", "Event pictures:"), "path_event_pictures")
+        _lbl(tr("settings.event_gfx_picker_hint", "  Changes take effect immediately in the Event Maker GFX picker."))
 
         # ── EVENT DIMENSION PROFILES ──────────────────────────────────
-        _sec("EVENT PICTURE DIMENSION PROFILES")
-        _lbl("  Define expected pixel dimensions for each profile.")
-        _lbl("  Vanilla: country_event=210×176 px,  news_event=397×165 px")
-        _lbl("  Add mod profiles below so the Event Maker can validate your custom GFX.")
+        _sec(tr("settings.event_picture_profiles", "EVENT PICTURE DIMENSION PROFILES"))
+        _lbl(tr("settings.event_picture_profiles.hint1", "  Define expected pixel dimensions for each profile."))
+        _lbl(tr("settings.event_picture_profiles.vanilla_hint", "  Vanilla: country_event=210x176 px,  news_event=397x165 px"))
+        _lbl(tr("settings.event_picture_profiles.hint2", "  Add mod profiles below so the Event Maker can validate your custom GFX."))
 
         # Active profile selector
         prof_sel_row = tk.Frame(frm, bg=BG_PANEL)
         prof_sel_row.pack(fill="x", padx=10, pady=4)
-        tk.Label(prof_sel_row, text="Active profile:", bg=BG_PANEL, fg=TEXT_DIM,
+        tk.Label(prof_sel_row, text=tr("settings.active_profile", "Active profile:"), bg=BG_PANEL, fg=TEXT_DIM,
                  font=("Helvetica",9), width=16, anchor="w").pack(side="left")
         _prof_var = tk.StringVar(value=MOD.event_dim_active_profile)
         _prof_cb  = ttk.Combobox(prof_sel_row, textvariable=_prof_var,
@@ -16088,7 +16274,7 @@ class App(tk.Tk):
         _refresh_profiles_box()
 
         # Add new profile
-        _lbl("  Add custom profile:")
+        _lbl(tr("settings.add_custom_profile", "  Add custom profile:"))
         new_prof_row = tk.Frame(frm, bg=BG_PANEL)
         new_prof_row.pack(fill="x", padx=10, pady=4)
 
@@ -16130,15 +16316,15 @@ class App(tk.Tk):
             _refresh_prof_list()
             _refresh_profiles_box()
 
-        tk.Button(frm, text="+ Add Profile", command=_add_profile,
+        tk.Button(frm, text=tr("settings.add_profile", "+ Add Profile"), command=_add_profile,
                   bg=BG_CARD, fg="#4ade80", relief="flat",
                   font=("Helvetica",9,"bold"), padx=12, pady=4,
                   cursor="hand2").pack(anchor="w", padx=10, pady=(0,6))
 
         # ── EXTRA GFX DIRS ────────────────────────────────────────────
-        _sec("EXTRA GFX DIRECTORIES  (absolute paths)")
-        _lbl("  Scanned in addition to the paths above.")
-        _lbl("  Useful for pointing at vanilla HOI4 gfx from within a mod.")
+        _sec(tr("settings.extra_gfx_dirs", "EXTRA GFX DIRECTORIES  (absolute paths)"))
+        _lbl(tr("settings.extra_gfx_dirs.hint1", "  Scanned in addition to the paths above."))
+        _lbl(tr("settings.extra_gfx_dirs.hint2", "  Useful for pointing at vanilla HOI4 gfx from within a mod."))
 
         extra_box = tk.Frame(frm, bg=BG_PANEL)
         extra_box.pack(fill="x", padx=10, pady=4)
@@ -16146,7 +16332,7 @@ class App(tk.Tk):
         def _refresh_extra():
             for w in extra_box.winfo_children(): w.destroy()
             if not MOD.custom_gfx_dirs:
-                tk.Label(extra_box, text="  None added.",
+                tk.Label(extra_box, text=tr("settings.none_added", "  None added."),
                          bg=BG_PANEL, fg=TEXT_DIM,
                          font=("Helvetica",9,"italic")).pack(anchor="w")
                 return
@@ -16168,20 +16354,20 @@ class App(tk.Tk):
         _refresh_extra()
 
         def _add_dir():
-            d = filedialog.askdirectory(title="Select extra GFX folder")
+            d = filedialog.askdirectory(title=tr("filedialog.select_extra_gfx_folder", "Select extra GFX folder"))
             if d and d not in MOD.custom_gfx_dirs:
                 MOD.custom_gfx_dirs.append(d)
                 MOD.save_config()
                 _refresh_extra()
 
-        tk.Button(frm, text="+ Add Extra GFX Folder", command=_add_dir,
+        tk.Button(frm, text=tr("settings.add_extra_gfx_folder", "+ Add Extra GFX Folder"), command=_add_dir,
                   bg=BG_CARD, fg=TEXT, relief="flat",
                   font=("Helvetica",9,"bold"), padx=12, pady=4,
                   cursor="hand2").pack(anchor="w", padx=10, pady=4)
 
         # ── LOGS ──────────────────────────────────────────────────────
-        _sec("SESSION LOG")
-        _lbl("  All errors and warnings captured during this session.")
+        _sec(tr("settings.session_log", "SESSION LOG"))
+        _lbl(tr("settings.session_log.hint", "  All errors and warnings captured during this session."))
 
         log_box_frame = tk.Frame(frm, bg="#0a0f18",
                                  highlightthickness=1,
@@ -16209,7 +16395,7 @@ class App(tk.Tk):
             log_txt.delete("1.0", "end")
             entries = self._error_entries
             if not entries:
-                log_txt.insert("end", "  ✓  No errors recorded — running clean.\n", "ok")
+                log_txt.insert("end", tr("settings.no_errors_recorded", "  No errors recorded - running clean.\n"), "ok")
             else:
                 for ts, msg in entries:
                     log_txt.insert("end", "[%s]  " % ts, "ts")
@@ -16226,12 +16412,12 @@ class App(tk.Tk):
         log_btn_row = tk.Frame(frm, bg=BG_PANEL)
         log_btn_row.pack(fill="x", padx=10, pady=(0,6))
 
-        tk.Button(log_btn_row, text="⟳  Refresh",
+        tk.Button(log_btn_row, text=tr("common.refresh", "Refresh"),
                   command=_refresh_log,
                   bg=BG_CARD, fg=TEXT, relief="flat",
                   font=("Helvetica",9), padx=10, pady=3,
                   cursor="hand2").pack(side="left", padx=(0,4))
-        tk.Button(log_btn_row, text="⊞  Open Full Log Window",
+        tk.Button(log_btn_row, text=tr("settings.open_full_log", "Open Full Log Window"),
                   command=self._show_error_log,
                   bg=BG_CARD, fg=TEXT, relief="flat",
                   font=("Helvetica",9), padx=10, pady=3,
@@ -16240,10 +16426,10 @@ class App(tk.Tk):
         def _clear_log():
             self._error_entries.clear()
             if hasattr(self, "_errlog_btn"):
-                self._errlog_btn.config(text="⚠ Log", fg="#6e7681", bg="#161b22")
+                self._errlog_btn.config(text=tr("menu.error_log", "Log"), fg="#6e7681", bg="#161b22")
             _refresh_log()
 
-        tk.Button(log_btn_row, text="🗑  Clear",
+        tk.Button(log_btn_row, text=tr("common.clear", "Clear"),
                   command=_clear_log,
                   bg="#450a0a", fg="#f87171", relief="flat",
                   font=("Helvetica",9), padx=10, pady=3,
@@ -16251,9 +16437,9 @@ class App(tk.Tk):
 
 
         # ── COUNTRY TAG NAMES ─────────────────────────────────────────
-        _sec("COUNTRY TAG NAMES  (for Decision Maker preview)")
-        _lbl("  Map TAG codes to display names shown in the preview.")
-        _lbl("  e.g.  SOV → Soviet Union,  ERI → Eritrea,  GER → Germany")
+        _sec(tr("settings.country_tag_names", "COUNTRY TAG NAMES  (for Decision Maker preview)"))
+        _lbl(tr("settings.country_tag_names.hint1", "  Map TAG codes to display names shown in the preview."))
+        _lbl(tr("settings.country_tag_names.hint2", "  e.g.  SOV -> Soviet Union,  ERI -> Eritrea,  GER -> Germany"))
 
         tag_table = tk.Frame(frm, bg=BG_PANEL)
         tag_table.pack(fill="x", padx=10, pady=4)
@@ -16281,12 +16467,12 @@ class App(tk.Tk):
             for w in tag_table.winfo_children(): w.destroy()
             tags = dict(MOD.country_tag_names)
             if not tags:
-                tk.Label(tag_table, text="  No tag mappings defined. Add below or load vanilla defaults.",
+                tk.Label(tag_table, text=tr("settings.no_tag_mappings", "  No tag mappings defined. Add below or load vanilla defaults."),
                          bg=BG_PANEL, fg=TEXT_DIM, font=("Helvetica",8,"italic")).pack(anchor="w")
             else:
                 hdr = tk.Frame(tag_table, bg=BG_DARK)
                 hdr.pack(fill="x", pady=(0,2))
-                for txt, w in [("TAG", 6),("→", 3),("Display Name", 22),("", 4)]:
+                for txt, w in [("TAG", 6),("->", 3),(tr("settings.display_name", "Display Name"), 22),("", 4)]:
                     tk.Label(hdr, text=txt, bg=BG_DARK, fg=TEXT_DIM,
                              font=("Courier",8,"bold"), width=w, anchor="w").pack(side="left", padx=2)
                 for tag in sorted(tags.keys()):
@@ -16337,14 +16523,14 @@ class App(tk.Tk):
         add_tag_row.pack(fill="x", padx=10, pady=4)
         new_tag_v  = tk.StringVar()
         new_name_v = tk.StringVar()
-        tk.Label(add_tag_row, text="TAG:", bg=BG_PANEL, fg=TEXT_DIM,
+        tk.Label(add_tag_row, text=tr("settings.tag", "TAG:"), bg=BG_PANEL, fg=TEXT_DIM,
                  font=("Helvetica",9)).pack(side="left")
         tk.Entry(add_tag_row, textvariable=new_tag_v, bg=BG_CARD, fg=GOLD,
                  insertbackground=GOLD, font=("Courier",9,"bold"),
                  relief="flat", width=7,
                  highlightthickness=1, highlightbackground=BORDER_G).pack(
                  side="left", padx=(2,8), ipady=3)
-        tk.Label(add_tag_row, text="Name:", bg=BG_PANEL, fg=TEXT_DIM,
+        tk.Label(add_tag_row, text=tr("settings.name", "Name:"), bg=BG_PANEL, fg=TEXT_DIM,
                  font=("Helvetica",9)).pack(side="left")
         tk.Entry(add_tag_row, textvariable=new_name_v, bg=BG_CARD, fg=TEXT,
                  insertbackground=TEXT, font=("Helvetica",9),
@@ -16355,13 +16541,13 @@ class App(tk.Tk):
             t = new_tag_v.get().strip().upper()
             n = new_name_v.get().strip()
             if not t or not n:
-                messagebox.showwarning("Missing data", "Both TAG and Name are required.", parent=win)
+                messagebox.showwarning(tr("dialog.missing_data.title", "Missing data"), tr("dialog.tag_name_required", "Both TAG and Name are required."), parent=win)
                 return
             MOD.country_tag_names[t] = n
             MOD.save_config()
             new_tag_v.set(""); new_name_v.set("")
             _refresh_tag_table()
-        tk.Button(add_tag_row, text="+ Add", command=_add_tag_entry,
+        tk.Button(add_tag_row, text=tr("common.add", "+ Add"), command=_add_tag_entry,
                   bg=BG_CARD, fg=GREEN, relief="flat",
                   font=("Helvetica",9,"bold"), padx=10, pady=3,
                   cursor="hand2").pack(side="left", padx=(0,6))
@@ -16375,12 +16561,16 @@ class App(tk.Tk):
                     count += 1
             MOD.save_config()
             _refresh_tag_table()
-            messagebox.showinfo("Vanilla Tags", f"Added {count} vanilla TAG mappings.", parent=win)
-        tk.Button(frm, text="⚡ Load Vanilla HOI4 Tags", command=_fill_vanilla,
+            messagebox.showinfo(
+                tr("dialog.vanilla_tags.title", "Vanilla Tags"),
+                tr("dialog.vanilla_tags.body", "Added {count} vanilla TAG mappings.", count=count),
+                parent=win,
+            )
+        tk.Button(frm, text=tr("settings.load_vanilla_tags", "Load Vanilla HOI4 Tags"), command=_fill_vanilla,
                   bg="#1a2c1a", fg="#4ade80", relief="flat",
                   font=("Helvetica",9,"bold"), padx=12, pady=4,
                   cursor="hand2").pack(anchor="w", padx=10, pady=(0,4))
-        tk.Button(frm, text="🗑 Clear All Tags",
+        tk.Button(frm, text=tr("settings.clear_all_tags", "Clear All Tags"),
                   command=lambda: [MOD.country_tag_names.clear(),
                                     MOD.save_config(),
                                     _refresh_tag_table()],
@@ -16389,10 +16579,10 @@ class App(tk.Tk):
                   cursor="hand2").pack(anchor="w", padx=10, pady=(0,8))
 
         # ── LOC TOKEN STYLE ────────────────────────────────────────────
-        _sec("LOCALISATION TOKEN STYLE  (Decision Maker preview)")
-        _lbl("  Tells the preview how to parse scripted loc tokens in decision names.")
-        _lbl("  Colon-style  [SOV:NameWithFlag]  — used by most vanilla decisions.")
-        _lbl("  Dot-style    [SOV.GetName]        — used by some mods.")
+        _sec(tr("settings.loc_token_style", "LOCALISATION TOKEN STYLE  (Decision Maker preview)"))
+        _lbl(tr("settings.loc_token_style.hint1", "  Tells the preview how to parse scripted loc tokens in decision names."))
+        _lbl(tr("settings.loc_token_style.hint2", "  Colon-style  [SOV:NameWithFlag]  - used by most vanilla decisions."))
+        _lbl(tr("settings.loc_token_style.hint3", "  Dot-style    [SOV.GetName]        - used by some mods."))
 
         tok_row = tk.Frame(frm, bg=BG_PANEL)
         tok_row.pack(fill="x", padx=10, pady=6)
@@ -16403,12 +16593,12 @@ class App(tk.Tk):
             MOD.save_config()
 
         for val, label, hint in [
-            ("colon", "Colon-style   [TAG:NameWithFlag]",
-             "Standard HOI4 vanilla format"),
-            ("dot",   "Dot-style     [TAG.GetName]",
-             "Some modded/scripted loc format"),
-            ("both",  "Both styles",
-             "Try colon first, fall back to dot"),
+            ("colon", tr("settings.loc_token_style.colon", "Colon-style   [TAG:NameWithFlag]"),
+             tr("settings.loc_token_style.colon_hint", "Standard HOI4 vanilla format")),
+            ("dot",   tr("settings.loc_token_style.dot", "Dot-style     [TAG.GetName]"),
+             tr("settings.loc_token_style.dot_hint", "Some modded/scripted loc format")),
+            ("both",  tr("settings.loc_token_style.both", "Both styles"),
+             tr("settings.loc_token_style.both_hint", "Try colon first, fall back to dot")),
         ]:
             rb_row = tk.Frame(tok_row, bg=BG_PANEL)
             rb_row.pack(anchor="w", pady=1)
@@ -16425,7 +16615,7 @@ class App(tk.Tk):
         tok_prev = tk.Frame(frm, bg=BG_CARD,
                             highlightthickness=1, highlightbackground=BORDER_G)
         tok_prev.pack(fill="x", padx=10, pady=(0,8))
-        tk.Label(tok_prev, text="  Preview token parsing:", bg=BG_CARD,
+        tk.Label(tok_prev, text=tr("settings.preview_token_parsing", "  Preview token parsing:"), bg=BG_CARD,
                  fg=TEXT_DIM, font=("Helvetica",8)).pack(anchor="w", padx=6, pady=(4,0))
         tok_prev_lbl = tk.Label(tok_prev,
             text="", bg=BG_CARD, fg="#7ec8e3",
@@ -16444,18 +16634,18 @@ class App(tk.Tk):
 
         # ── BOTTOM BAR ────────────────────────────────────────────────
         tk.Frame(frm, bg=BORDER_G, height=1).pack(fill="x", padx=8, pady=(12,2))
-        tk.Label(frm, text="  Settings saved to:  " + CONFIG_PATH,
+        tk.Label(frm, text=tr("settings.saved_to", "  Settings saved to:  {path}", path=CONFIG_PATH),
                  bg=BG_PANEL, fg=TEXT_DIM,
                  font=("Helvetica",7,"italic"), anchor="w",
                  padx=10, pady=4).pack(fill="x")
         tk.Frame(win, bg=BORDER_G, height=1).pack(fill="x")
         bot_bar = tk.Frame(win, bg=BG_DARK); bot_bar.pack(fill="x")
-        tk.Button(bot_bar, text="Save & Close",
+        tk.Button(bot_bar, text=tr("settings.save_and_close", "Save & Close"),
                   command=lambda: [MOD.save_config(), win.destroy()],
                   bg="#14532d", fg="#4ade80", relief="flat",
                   font=("Helvetica",10,"bold"), padx=16, pady=6,
                   cursor="hand2").pack(side="right", padx=12, pady=6)
-        tk.Button(bot_bar, text="Close", command=win.destroy,
+        tk.Button(bot_bar, text=tr("common.close", "Close"), command=win.destroy,
                   bg=BG_CARD, fg=TEXT_DIM, relief="flat",
                   font=("Helvetica",10), padx=16, pady=6,
                   cursor="hand2").pack(side="right", padx=4, pady=6)
@@ -16483,22 +16673,22 @@ class App(tk.Tk):
     def _update_statusbar(self):
         """Refresh all status bar labels."""
         if not hasattr(self, "_sb_focus_lbl"): return
-        tid = self._tree_id.get() or "no tree"
+        tid = self._tree_id.get() or tr("status.no_tree", "no tree")
         fc  = len(self.focuses)
         sel = getattr(self.selected, "name", "—") if self.selected else "—"
         zoom = int(getattr(self, "zoom", 1.0) * 100)
         # mod name from _mod_lbl text (set by _on_mod_loaded)
         try:
-            mod_txt = self._sb_mod_lbl2.cget("text") if hasattr(self,"_sb_mod_lbl2") else "Mod: none"
+            mod_txt = self._sb_mod_lbl2.cget("text") if hasattr(self,"_sb_mod_lbl2") else tr("status.mod_none", "Mod: none")
             # keep whatever was already set unless we can get it from mod_lbl
             if hasattr(self, "_mod_lbl"):
                 raw = self._mod_lbl.cget("text")
-                mod_txt = f"Mod: {raw}" if raw and raw != "No mod loaded" else "Mod: none"
-        except Exception: mod_txt = "Mod: none"
+                mod_txt = tr("status.mod", "Mod: {mod}", mod=raw) if raw and raw != tr("status.no_mod_loaded", "No mod loaded") else tr("status.mod_none", "Mod: none")
+        except Exception: mod_txt = tr("status.mod_none", "Mod: none")
         self._sb_tree_val.config(text=tid)
-        self._sb_focus_lbl.config(text=f"Focuses: {fc}")
-        self._sb_sel_lbl.config(text=f"Selected: {sel}")
-        self._sb_zoom_lbl.config(text=f"Zoom: {zoom}%")
+        self._sb_focus_lbl.config(text=tr("status.focuses", "Focuses: {count}", count=fc))
+        self._sb_sel_lbl.config(text=tr("status.selected", "Selected: {focus}", focus=sel))
+        self._sb_zoom_lbl.config(text=tr("status.zoom", "Zoom: {zoom}%", zoom=zoom))
         self._sb_mod_lbl2.config(text=mod_txt)
 
     # ─────────────────── FOCUS LIST PANEL ────────────────────────
@@ -16756,7 +16946,7 @@ class App(tk.Tk):
     def _duplicate_focus(self):
         """Duplicate the currently selected focus."""
         if not self.selected:
-            messagebox.showinfo("Duplicate", "Select a focus first.")
+            messagebox.showinfo(tr("dialog.duplicate.title", "Duplicate"), tr("dialog.select_focus_first", "Select a focus first."))
             return
         import copy, re as _re
         f = self.selected
@@ -16787,21 +16977,24 @@ class App(tk.Tk):
     def _bulk_rename_dialog(self):
         """Dialog to bulk rename all focus IDs by replacing a prefix."""
         if not self.focuses:
-            messagebox.showinfo("Bulk Rename", "No focuses to rename."); return
+            messagebox.showinfo(tr("bulk_rename.title", "Bulk Rename"), tr("bulk_rename.no_focuses", "No focuses to rename.")); return
 
         win = tk.Toplevel(self)
-        win.title("Bulk Rename Prefix")
+        win.title(tr("bulk_rename.window_title", "Bulk Rename Prefix"))
         win.configure(bg=BG_DARK)
         win.geometry("480x380")
         win.resizable(False, False)
         win.grab_set()
 
-        tk.Label(win, text="BULK RENAME PREFIX", bg=BG_DARK, fg=TEXT,
+        tk.Label(win, text=tr("bulk_rename.header", "BULK RENAME PREFIX"), bg=BG_DARK, fg=TEXT,
                  font=("Helvetica",11,"bold"), pady=12).pack(fill="x", padx=16)
         tk.Frame(win, bg=BORDER_G, height=1).pack(fill="x")
 
-        tk.Label(win, text=f"Replaces prefix across all {len(self.focuses)} focus IDs,\n"
-                           "prerequisite references, and mutex links.",
+        tk.Label(win, text=tr(
+                     "bulk_rename.description",
+                     "Replaces prefix across all {count} focus IDs,\nprerequisite references, and mutex links.",
+                     count=len(self.focuses),
+                 ),
                  bg=BG_DARK, fg=TEXT_DIM, font=("Helvetica",9),
                  justify="left", anchor="w", pady=6).pack(fill="x", padx=16)
 
@@ -16825,12 +17018,12 @@ class App(tk.Tk):
             parts = names[0].split("_")
             if parts: auto_from = parts[0] + "_"
 
-        v_from = _row("From:", auto_from)
-        v_to   = _row("To:",   "")
+        v_from = _row(tr("bulk_rename.from", "From:"), auto_from)
+        v_to   = _row(tr("bulk_rename.to", "To:"),   "")
 
         # Preview
         tk.Frame(win, bg=BORDER_G, height=1).pack(fill="x", padx=16, pady=6)
-        tk.Label(win, text="Preview (first 5):", bg=BG_DARK, fg=TEXT_DIM,
+        tk.Label(win, text=tr("bulk_rename.preview", "Preview (first 5):"), bg=BG_DARK, fg=TEXT_DIM,
                  font=("Helvetica",8,"bold"), anchor="w").pack(fill="x", padx=16)
         prev_txt = tk.Text(win, bg="#050810", fg="#4ade80",
                            font=("Courier",9), relief="flat", height=5,
@@ -16856,7 +17049,7 @@ class App(tk.Tk):
         def _apply():
             fr = v_from.get(); to = v_to.get()
             if not fr:
-                messagebox.showwarning("Rename", "From prefix cannot be empty."); return
+                messagebox.showwarning(tr("bulk_rename.rename_title", "Rename"), tr("bulk_rename.from_empty", "From prefix cannot be empty.")); return
             self._push_undo("bulk_rename")
             # Build mapping old_name → new_name
             mapping = {}
@@ -16873,13 +17066,13 @@ class App(tk.Tk):
             win.destroy()
             self._redraw()
             self._refresh_focus_list()
-            messagebox.showinfo("Renamed", f"Renamed {n} focus IDs.")
+            messagebox.showinfo(tr("bulk_rename.renamed_title", "Renamed"), tr("bulk_rename.renamed_body", "Renamed {count} focus IDs.", count=n))
 
         bf = tk.Frame(win, bg=BG_DARK); bf.pack(fill="x", padx=16, pady=8)
-        tk.Button(bf, text="Cancel", command=win.destroy,
+        tk.Button(bf, text=tr("common.cancel", "Cancel"), command=win.destroy,
                   bg=BG_CARD, fg=TEXT, relief="flat", padx=12, pady=5,
                   cursor="hand2", font=("Helvetica",9,"bold")).pack(side="right", padx=4)
-        tk.Button(bf, text=f"Apply to All {len(self.focuses)}  →",
+        tk.Button(bf, text=tr("bulk_rename.apply_all", "Apply to All {count}", count=len(self.focuses)),
                   command=_apply,
                   bg="#14532d", fg="#4ade80", relief="flat", padx=14, pady=5,
                   cursor="hand2", font=("Helvetica",10,"bold")).pack(side="right")
@@ -16888,7 +17081,7 @@ class App(tk.Tk):
     def _select_all_focuses(self):
         """Select all focuses — enables multi-select with everything selected."""
         if not self.focuses:
-            messagebox.showinfo("Select All", "No focuses to select."); return
+            messagebox.showinfo(tr("menu.select_all", "Select All"), tr("select_all.no_focuses", "No focuses to select.")); return
         if not self._multisel_mode:
             self._toggle_multisel()
         self._multi_sel = set(self.focuses.keys())
@@ -16917,18 +17110,18 @@ class App(tk.Tk):
                 issues.append(f"[{f.name}]  using default/missing icon GFX")
 
         win = tk.Toplevel(self)
-        win.title("Tree Validation")
+        win.title(tr("validation.title", "Tree Validation"))
         win.configure(bg=BG_DARK)
         win.geometry("640x440")
         win.resizable(True, True)
 
         hdr = tk.Frame(win, bg="#080c12"); hdr.pack(fill="x")
         if issues:
-            tk.Label(hdr, text=f"  ⚠  {len(issues)} issues found",
+            tk.Label(hdr, text=tr("validation.issues_found", "  {count} issues found", count=len(issues)),
                      bg="#080c12", fg="#fbbf24",
                      font=("Helvetica",11,"bold"), pady=8).pack(side="left", padx=8)
         else:
-            tk.Label(hdr, text="  ✓  Tree looks clean!",
+            tk.Label(hdr, text=tr("validation.clean", "  Tree looks clean!"),
                      bg="#080c12", fg="#22c55e",
                      font=("Helvetica",11,"bold"), pady=8).pack(side="left", padx=8)
         tk.Button(hdr, text="✕", command=win.destroy,
@@ -16953,9 +17146,10 @@ class App(tk.Tk):
                 else:
                     txt.insert("end", "  🔵  " + issue + "\n")
         else:
-            txt.insert("end", "\n  All prerequisite chains are valid.\n"
-                               "  All mutex references resolve.\n"
-                               "  All focuses have completion_reward effects.\n")
+            txt.insert("end", "\n"
+                               + tr("validation.all_prereqs_valid", "  All prerequisite chains are valid.") + "\n"
+                               + tr("validation.all_mutex_valid", "  All mutex references resolve.") + "\n"
+                               + tr("validation.all_effects_present", "  All focuses have completion_reward effects.") + "\n")
         txt.config(state="disabled")
 
     def _export(self):
@@ -16969,8 +17163,10 @@ class App(tk.Tk):
         main_focuses = {fid: f for fid, f in self.focuses.items()
                         if getattr(f, "tree_idx", 0) == 0}
         if not main_focuses:
-            messagebox.showwarning("Export", "No main-tree focuses to export.\n"
-                "Use 'Save All' or the Loaded Trees panel to export shared/joint trees."); return
+            messagebox.showwarning(
+                tr("dialog.export.title", "Export"),
+                tr("dialog.no_main_focuses_export", "No main-tree focuses to export.\nUse 'Save All' or the Loaded Trees panel to export shared/joint trees."),
+            ); return
         tid = re.sub(r"[^A-Za-z0-9_]","_",self._tree_id.get().strip()) or "TAG_focus_tree"
 
         # ── Detect country TAG from tree id or focus prefix ──────────
@@ -17239,8 +17435,8 @@ class App(tk.Tk):
             path = MOD.edit_focus_file
         else:
             path = filedialog.asksaveasfilename(defaultextension=".txt",
-                filetypes=[("HOI4 Focus Tree","*.txt"),("All","*.*")],
-                initialfile=default_filename, title="Export HOI4 .txt")
+                filetypes=[(tr("filetype.hoi4_focus_tree", "HOI4 Focus Tree"),"*.txt"),(tr("filetype.all", "All"),"*.*")],
+                initialfile=default_filename, title=tr("filedialog.export_hoi4_txt", "Export HOI4 .txt"))
         if not path: return
 
         with open(path,"w",encoding="utf-8") as fp:
@@ -17272,9 +17468,9 @@ class App(tk.Tk):
                 # Last resort: ask the user where to save the loc file
                 loc_path = filedialog.asksaveasfilename(
                     defaultextension=".yml",
-                    filetypes=[("YML localisation","*.yml"),("All","*.*")],
+                    filetypes=[(tr("filetype.yml_localisation", "YML localisation"),"*.yml"),(tr("filetype.all", "All"),"*.*")],
                     initialfile=loc_filename,
-                    title="Save Localisation .yml  (should go in localisation/english/)")
+                    title=tr("filedialog.save_localisation_yml", "Save Localisation .yml  (should go in localisation/english/)"))
                 if not loc_path:
                     loc_path = os.path.join(_saved_dir, loc_filename)  # absolute fallback
 
@@ -17316,18 +17512,20 @@ class App(tk.Tk):
                     fp.write(f"\n ##########Focuses - {country_tag}##########\n")
                 for k,v in to_add.items():
                     fp.write(f' {k}: "{v}"\n')
-            loc_saved = f"\nLocalisation: {os.path.basename(loc_path)}  (+{len(to_add)} new keys)"
+            loc_saved = "\n" + tr("export.localisation_added", "Localisation: {file}  (+{count} new keys)", file=os.path.basename(loc_path), count=len(to_add))
         else:
-            loc_saved = f"\nLocalisation: all keys already present in {os.path.basename(loc_path)} — skipped"
+            loc_saved = "\n" + tr("export.localisation_skipped", "Localisation: all keys already present in {file} - skipped", file=os.path.basename(loc_path))
 
-        messagebox.showinfo("Exported",
-            f"✅  Export complete!\n\n"
-            f"Focus tree: {os.path.basename(path)}{loc_saved}\n\n"
-            f"Install paths:\n"
-            f"  .txt  →  common/national_focus/{default_filename}\n\n"
-            f"Reminders:\n"
-            f"  • Replace placeholder icons with real GFX keys\n"
-            f"  • Add shared_focus lines if using shared trees")
+        messagebox.showinfo(
+            tr("dialog.exported.title", "Exported"),
+            tr(
+                "dialog.exported.body",
+                "Export complete!\n\nFocus tree: {focus_file}{loc_saved}\n\nInstall paths:\n  .txt  ->  common/national_focus/{default_filename}\n\nReminders:\n  - Replace placeholder icons with real GFX keys\n  - Add shared_focus lines if using shared trees",
+                focus_file=os.path.basename(path),
+                loc_saved=loc_saved,
+                default_filename=default_filename,
+            ),
+        )
 
 # ─────────────────────────── ENTRY POINT ────────────────────────
 if __name__=="__main__":
