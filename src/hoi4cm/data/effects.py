@@ -1839,8 +1839,22 @@ EFFECT_CATS = ["Political","Research","Military","Industry","Characters","Ships"
 # fmt: on
 
 
+_EFFECTS_BY_CAT = None
+
+
 def effects_in_cat(cat):
-    return [(k, v["label"]) for k, v in EFFECT_DEFS.items() if v.get("cat") == cat]
+    """Return ``[(key, label), ...]`` for every effect in *cat*.
+
+    Built once into a category index so a dropdown change is an O(1) lookup
+    instead of an O(len(EFFECT_DEFS)) scan over all ~200 effects.
+    """
+    global _EFFECTS_BY_CAT
+    if _EFFECTS_BY_CAT is None:
+        index = {}
+        for k, v in EFFECT_DEFS.items():
+            index.setdefault(v.get("cat"), []).append((k, v["label"]))
+        _EFFECTS_BY_CAT = index
+    return list(_EFFECTS_BY_CAT.get(cat, []))
 
 
 # fmt: off
