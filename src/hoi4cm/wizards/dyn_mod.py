@@ -107,7 +107,7 @@ def open_dyn_mod_wizard(app):
             anchor="w",
         ).pack(fill="x", padx=12, pady=(6, 0))
 
-    def entry(var, placeholder=""):
+    def entry(var):
         e = tk.Entry(
             frm,
             textvariable=var,
@@ -1065,9 +1065,6 @@ def open_dyn_mod_wizard(app):
     _preview()
 
     def _save_file():
-        import os
-        import re as _re
-
         mid = v_id.get().strip() or "TAG_my_dynamic_modifier"
         icon = v_icon.get().strip()
         name = v_loc_name.get().strip()
@@ -1166,8 +1163,8 @@ def open_dyn_mod_wizard(app):
             # Match: mid = { ... } at top level (handles nested braces)
             def replace_or_append(src, block_id, new_block):
                 # Find "block_id = {" and extract to matching "}"
-                pattern = _re.compile(
-                    r"^\s*" + _re.escape(block_id) + r"\s*=\s*\{", _re.MULTILINE
+                pattern = re.compile(
+                    r"^\s*" + re.escape(block_id) + r"\s*=\s*\{", re.MULTILINE
                 )
                 m = pattern.search(src)
                 if not m:
@@ -1211,8 +1208,8 @@ def open_dyn_mod_wizard(app):
                         os.path.join("localisation", "english", fname), "utf-8-sig"
                     )
                     if content:
-                        for m in _re.finditer(
-                            r'^\s+(\S+?)(?::\d+)?\s*[=:]?\s*"', content, _re.MULTILINE
+                        for m in re.finditer(
+                            r'^\s+(\S+?)(?::\d+)?\s*[=:]?\s*"', content, re.MULTILINE
                         ):
                             existing_keys.add(m.group(1))
 
@@ -1352,7 +1349,6 @@ def open_dyn_mod_wizard(app):
 
     def _browse_mod_dynmods():
         import glob as _glob
-        import re as _re2
 
         if not MOD.loaded or not MOD.root:
             messagebox.showinfo(
@@ -1544,8 +1540,8 @@ def open_dyn_mod_wizard(app):
                         continue
                     try:
                         loc_src = read_file(os.path.join(loc_dir, lf))
-                        for m in _re2.finditer(
-                            r'^\s+(\S+?)(?::\d+)?\s+"(.*)"', loc_src, _re2.MULTILINE
+                        for m in re.finditer(
+                            r'^\s+(\S+?)(?::\d+)?\s+"(.*)"', loc_src, re.MULTILINE
                         ):
                             k2, v2 = m.group(1), m.group(2)
                             if k2 == modifier_id and not loc_name:

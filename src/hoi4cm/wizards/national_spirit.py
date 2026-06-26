@@ -1323,8 +1323,6 @@ def open_national_spirit_wizard(app):
     def _save_raw():
         """Save raw preview: parse safe fields back into form, store as override,
         notify user of anything that couldn't be synced to a field."""
-        import re as _re
-
         preview_txt.config(state="normal")
         txt = preview_txt.get("1.0", "end").strip()
         _raw_override[0] = txt
@@ -1345,7 +1343,7 @@ def open_national_spirit_wizard(app):
 
         # Localisation scalars
         for ln in loc_lines:
-            m = _re.match(r'^\s+(\S+?)(?::\d+)?\s+"(.*)"', ln)
+            m = re.match(r'^\s+(\S+?)(?::\d+)?\s+"(.*)"', ln)
             if m:
                 key, val = m.group(1), m.group(2)
                 if key.endswith("_desc"):
@@ -1391,19 +1389,19 @@ def open_national_spirit_wizard(app):
                 continue
 
             if state == "top":
-                if _re.match(r"ideas\s*=\s*\{", s):
+                if re.match(r"ideas\s*=\s*\{", s):
                     state = "in_ideas"
                     depth = 1
                 continue
             if state == "in_ideas":
-                m = _re.match(r"(\w+)\s*=\s*\{", s)
+                m = re.match(r"(\w+)\s*=\s*\{", s)
                 if m:
                     slot_val = m.group(1)
                     state = "in_slot"
                     depth = 2
                 continue
             if state == "in_slot":
-                m = _re.match(r"(\w+)\s*=\s*\{", s)
+                m = re.match(r"(\w+)\s*=\s*\{", s)
                 if m:
                     spirit_id = m.group(1)
                     state = "in_spirit"
@@ -1446,27 +1444,27 @@ def open_national_spirit_wizard(app):
                 continue
 
             # Scalar fields
-            m = _re.match(r"picture\s*=\s*(\S+)", s)
+            m = re.match(r"picture\s*=\s*(\S+)", s)
             if m and m.group(1) != v_picture.get():
                 v_picture.set(m.group(1))
                 changes.append(f"Picture GFX → {m.group(1)!r}")
                 continue
-            m = _re.match(r"^name\s*=\s*(\S+)", s)
+            m = re.match(r"^name\s*=\s*(\S+)", s)
             if m and m.group(1) != v_name_key.get():
                 v_name_key.set(m.group(1))
                 changes.append(f"Name key → {m.group(1)!r}")
                 continue
-            m = _re.match(r"cost\s*=\s*(-?\d+(?:\.\d+)?)", s)
+            m = re.match(r"cost\s*=\s*(-?\d+(?:\.\d+)?)", s)
             if m and m.group(1) != v_cost.get():
                 v_cost.set(m.group(1))
                 changes.append(f"Cost → {m.group(1)}")
                 continue
-            m = _re.match(r"removal_cost\s*=\s*(-?\d+(?:\.\d+)?)", s)
+            m = re.match(r"removal_cost\s*=\s*(-?\d+(?:\.\d+)?)", s)
             if m and m.group(1) != v_removal.get():
                 v_removal.set(m.group(1))
                 changes.append(f"Removal cost → {m.group(1)}")
                 continue
-            m = _re.match(r"ai_will_do\s*=\s*\{\s*factor\s*=\s*(\S+)\s*\}", s)
+            m = re.match(r"ai_will_do\s*=\s*\{\s*factor\s*=\s*(\S+)\s*\}", s)
             if m and m.group(1) != v_ai.get():
                 v_ai.set(m.group(1))
                 changes.append(f"AI will do → {m.group(1)}")
@@ -1492,7 +1490,7 @@ def open_national_spirit_wizard(app):
                 "rule",
                 "modifier",
             ):
-                if _re.match(rf"{bname}\s*=\s*\{{", s):
+                if re.match(rf"{bname}\s*=\s*\{{", s):
                     current_block = bname
                     block_buf = []
                     depth = 4
@@ -1500,7 +1498,7 @@ def open_national_spirit_wizard(app):
                     break
             if not matched_block and s not in ("}", "{{"):
                 # line inside spirit block we didn't handle
-                if not _re.match(r"^(picture|name|cost|removal_cost|ai_will_do)\b", s):
+                if not re.match(r"^(picture|name|cost|removal_cost|ai_will_do)\b", s):
                     warnings.append(f"Unrecognised line kept as-is: {s!r}")
 
         # Apply spirit_id / slot if not caught inside loop
@@ -1745,7 +1743,6 @@ def open_national_spirit_wizard(app):
 
     def _browse_existing_spirits():
         import glob as _glob
-        import re as _re
 
         if not MOD.loaded or not MOD.root:
             messagebox.showinfo(
@@ -2002,8 +1999,8 @@ def open_national_spirit_wizard(app):
                         continue
                     try:
                         loc_src = read_file(os.path.join(loc_dir, lf))
-                        for m in _re.finditer(
-                            r'^\s+(\S+?)(?::\d+)?\s+"(.*)"', loc_src, _re.MULTILINE
+                        for m in re.finditer(
+                            r'^\s+(\S+?)(?::\d+)?\s+"(.*)"', loc_src, re.MULTILINE
                         ):
                             k, v = m.group(1), m.group(2)
                             if k == spirit_id and not loc_name:

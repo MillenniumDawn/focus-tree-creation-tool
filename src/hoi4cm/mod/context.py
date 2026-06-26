@@ -286,6 +286,18 @@ class ModContext:
                 continue
             yield nm.group(1).strip(), tex_raw.replace("/", os.sep)
 
+    def _scan_interface_gfx(self, predicate, target):
+        """Index sprites from interface/*.gfx whose texture matches predicate."""
+        iface = os.path.join(self.root, "interface")
+        if not os.path.isdir(iface):
+            return
+        for fname in os.listdir(iface):
+            if not fname.endswith(".gfx"):
+                continue
+            content = self._read(os.path.join(iface, fname))
+            for name, rel_path in self._parse_sprites_from_gfx(content, predicate):
+                target[name] = os.path.join(self.root, rel_path)
+
     def _scan_gfx(self):
         """Scan ONLY gfx/interface/goals/ — the focus icon folder."""
         goals_dir = os.path.join(self.root, "gfx", "interface", "goals")
@@ -296,17 +308,9 @@ class ModContext:
             return
 
         # Also parse .gfx files in interface/ that reference goals textures
-        iface = os.path.join(self.root, "interface")
-        if os.path.isdir(iface):
-            for fname in os.listdir(iface):
-                if not fname.endswith(".gfx"):
-                    continue
-                content = self._read(os.path.join(iface, fname))
-                for name, rel_path in self._parse_sprites_from_gfx(
-                    content,
-                    lambda tex: "goals" in tex or "focus" in tex,
-                ):
-                    self.sprites[name] = os.path.join(self.root, rel_path)
+        self._scan_interface_gfx(
+            lambda tex: "goals" in tex or "focus" in tex, self.sprites
+        )
 
         # Also directly index every image file in gfx/interface/goals/
         for fname, full in _iter_image_paths(goals_dir):
@@ -318,17 +322,9 @@ class ModContext:
         self.idea_sprites.clear()
         ideas_dir = os.path.join(self.root, self.path_ideas_gfx)
         # Also scan interface/*.gfx for idea-related sprites
-        iface = os.path.join(self.root, "interface")
-        if os.path.isdir(iface):
-            for fname in os.listdir(iface):
-                if not fname.endswith(".gfx"):
-                    continue
-                content = self._read(os.path.join(iface, fname))
-                for name, rel_path in self._parse_sprites_from_gfx(
-                    content,
-                    lambda tex: "ideas" in tex or "idea" in tex,
-                ):
-                    self.idea_sprites[name] = os.path.join(self.root, rel_path)
+        self._scan_interface_gfx(
+            lambda tex: "ideas" in tex or "idea" in tex, self.idea_sprites
+        )
         # Walk the configured ideas dir + custom dirs for raw image files
         if os.path.isdir(ideas_dir):
             _index_image_files(ideas_dir, "GFX_idea_", self.idea_sprites)

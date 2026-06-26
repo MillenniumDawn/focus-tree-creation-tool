@@ -20,7 +20,6 @@ from hoi4cm.core.i18n import tr
 from hoi4cm.core.image import PIL_OK as _PIL_OK
 from hoi4cm.core.image import PILImage as _PILImage
 from hoi4cm.core.image import PILImageTk as _PILImageTk
-from hoi4cm.core.logger import get_logger
 from hoi4cm.ui.theme import (
     BG_CARD,
     BG_DARK,
@@ -36,8 +35,6 @@ from hoi4cm.ui.theme import (
     TEXT_DIM,
 )
 from hoi4cm.ui.widgets import _safe_after, _safe_after_idle
-
-_log = get_logger("gfx_browser")
 
 
 # ─────────────────────────────────────────────────────────────────

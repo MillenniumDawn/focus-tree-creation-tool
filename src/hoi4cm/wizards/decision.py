@@ -12,6 +12,7 @@ import os
 import re
 import tempfile
 import tkinter as tk
+import uuid
 from tkinter import filedialog, messagebox
 
 from hoi4cm.core import (
@@ -320,16 +321,6 @@ def open_decision_wizard(app):
         b.pack(side="left", padx=3, pady=6)
         return b
 
-    def _snap_then(fn):
-        """Take undo snapshot then call fn."""
-
-        def _inner():
-            _collect()
-            _snapshot()
-            fn()
-
-        return _inner
-
     _tbtn(
         tr("decision.new_category", "+ New Category"),
         lambda: (_collect(), _snapshot(), _add_cat()),
@@ -450,13 +441,10 @@ def open_decision_wizard(app):
     )
     filter_entry.pack(side="left", fill="x", expand=True, ipady=3, padx=4)
 
-    def _clear_filter():
-        _tree_filter.set("")
-
     tk.Button(
         search_row,
         text="✕",
-        command=_clear_filter,
+        command=lambda: _tree_filter.set(""),
         bg=C_PANEL,
         fg=C_DIM,
         relief="flat",
@@ -475,16 +463,9 @@ def open_decision_wizard(app):
         font=("Helvetica", 8),
     ).pack(side="left", padx=(2, 4))
 
-    def _show_all_cats():
+    def _set_all_cats_visible(value):
         for c in dm_cats:
-            cat_visible[c["uid"]] = True
-        _rebuild_tree()
-        _rebuild_editor()
-        _rebuild_right()
-
-    def _hide_all_cats():
-        for c in dm_cats:
-            cat_visible[c["uid"]] = False
+            cat_visible[c["uid"]] = value
         _rebuild_tree()
         _rebuild_editor()
         _rebuild_right()
@@ -507,7 +488,7 @@ def open_decision_wizard(app):
     tk.Button(
         vis_row,
         text=tr("decision.show_all", "Show All"),
-        command=_show_all_cats,
+        command=lambda: _set_all_cats_visible(True),
         bg=C_CARD,
         fg=C_TEAL,
         relief="flat",
@@ -519,7 +500,7 @@ def open_decision_wizard(app):
     tk.Button(
         vis_row,
         text=tr("decision.hide_all", "Hide All"),
-        command=_hide_all_cats,
+        command=lambda: _set_all_cats_visible(False),
         bg=C_CARD,
         fg=C_DIM,
         relief="flat",
@@ -896,7 +877,7 @@ def open_decision_wizard(app):
         ).pack(fill="x")
         tk.Frame(mid_frm, bg=color, height=1).pack(fill="x", padx=14, pady=(0, 4))
 
-    def _field(label, var, mono=False, hint="", full=False):
+    def _field(label, var, mono=False, hint=""):
         """Labelled entry — matches Field component."""
         f = tk.Frame(mid_frm, bg=C_PANEL)
         f.pack(fill="x", **PAD)
@@ -1299,21 +1280,18 @@ def open_decision_wizard(app):
 
     def _duplicate_cat(uid):
         """Duplicate a category with all its decisions."""
-        import copy as _cp
-        import uuid as _uv
-
         _collect()
         _snapshot()
         c = _get_cat(uid)
         if not c:
             return
-        nc = _cp.deepcopy(c)
-        nc["uid"] = str(_uv.uuid4())
+        nc = copy.deepcopy(c)
+        nc["uid"] = str(uuid.uuid4())
         nc["cat_id"] = c["cat_id"] + "_copy"
         dm_cats.append(nc)
         for d in _decs_for(uid):
-            nd = _cp.deepcopy(d)
-            nd["uid"] = str(_uv.uuid4())
+            nd = copy.deepcopy(d)
+            nd["uid"] = str(uuid.uuid4())
             nd["cat_uid"] = nc["uid"]
             nd["dec_id"] = d["dec_id"] + "_copy"
             dm_decs.append(nd)
@@ -1351,16 +1329,13 @@ def open_decision_wizard(app):
 
     def _duplicate_dec(uid):
         """Duplicate a decision."""
-        import copy as _cp
-        import uuid as _uv
-
         _collect()
         _snapshot()
         d = _get_dec(uid)
         if not d:
             return
-        nd = _cp.deepcopy(d)
-        nd["uid"] = str(_uv.uuid4())
+        nd = copy.deepcopy(d)
+        nd["uid"] = str(uuid.uuid4())
         nd["dec_id"] = d["dec_id"] + "_copy"
         dm_decs.append(nd)
         sel["uid"] = nd["uid"]

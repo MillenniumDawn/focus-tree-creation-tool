@@ -555,9 +555,7 @@ def open_event_wizard(app):
 
                 win.after(0, _repaint)
 
-            import threading as _thr
-
-            _thr.Thread(target=_load_and_show, daemon=True).start()
+            threading.Thread(target=_load_and_show, daemon=True).start()
 
         if not pic_shown:
             # Placeholder — GFX key + expected dims
