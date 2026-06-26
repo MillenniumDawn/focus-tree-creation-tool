@@ -29,6 +29,26 @@ def test_effects_in_cat_returns_tuples():
     assert "add_political_power" in [k for k, _ in items]
 
 
+def test_effects_in_cat_index_matches_naive_scan():
+    """The cached index must equal a fresh filter over EFFECT_DEFS, per cat."""
+    for cat in EFFECT_CATS:
+        expected = [
+            (k, v["label"]) for k, v in EFFECT_DEFS.items() if v.get("cat") == cat
+        ]
+        assert effects_in_cat(cat) == expected
+
+
+def test_effects_in_cat_unknown_cat_is_empty():
+    assert effects_in_cat("NoSuchCategory") == []
+
+
+def test_effects_in_cat_returns_independent_list():
+    """Mutating a result must not corrupt the cached index."""
+    first = effects_in_cat("Political")
+    first.append(("junk", "junk"))
+    assert ("junk", "junk") not in effects_in_cat("Political")
+
+
 def test_modifier_defs_not_empty():
     assert len(MODIFIER_DEFS) > 100
     assert all("cat" in v and "desc" in v for v in MODIFIER_DEFS.values())

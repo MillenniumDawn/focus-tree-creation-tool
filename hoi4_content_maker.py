@@ -175,6 +175,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 log.info("tkinter imported OK")
+import bisect
 import collections
 import copy
 import json
@@ -1320,7 +1321,9 @@ class App(tk.Tk):
             if not lp_ent.get()
             else None,
         )
-        self._lp_search_var.trace_add("write", lambda *_: self._refresh_focus_list())
+        self._lp_search_var.trace_add(
+            "write", lambda *_: self._refresh_focus_list_debounced()
+        )
         # list
         lp_list_frame = tk.Frame(self._left_panel, bg=BG_PANEL)
         lp_list_frame.pack(fill="both", expand=True)
@@ -5974,6 +5977,17 @@ class App(tk.Tk):
         txt.tag_configure("str_val", foreground="#f97316")
 
 
+        # Precompute line-start offsets once so each match's line/col is an
+        # O(log n) bisect instead of four O(n) string scans.
+        line_starts = [0]
+        for _idx, _ch in enumerate(code):
+            if _ch == "\n":
+                line_starts.append(_idx + 1)
+
+        def _pos(off):
+            ln = bisect.bisect_right(line_starts, off) - 1
+            return ln + 1, off - line_starts[ln]
+
         for tag, pat in [
             ("comment", r"(?m)#.*$"),
             ("kw", r"(?m)^\s{0,8}[a-z_]+ (?==)"),
@@ -5982,11 +5996,8 @@ class App(tk.Tk):
             ("val", r"=\s*\d[\d.]*"),
         ]:
             for m in re.finditer(pat, code):
-                s, e = m.start(), m.end()
-                n0 = code.count("\n", 0, s) + 1
-                c0 = s - (code.rfind("\n", 0, s) + 1)
-                n1 = code.count("\n", 0, e) + 1
-                c1 = e - (code.rfind("\n", 0, e) + 1)
+                n0, c0 = _pos(m.start())
+                n1, c1 = _pos(m.end())
                 txt.tag_add(tag, f"{n0}.{c0}", f"{n1}.{c1}")
 
         txt.config(state="disabled")  # starts read-only; Edit button unlocks
@@ -8000,33 +8011,38 @@ class App(tk.Tk):
         # can choke on. Walk the raw text, brace-match each `focus = { ... }`
         # block, and parse each one independently. If this finds more focuses
         # than the structured pass, prefer it.
-
-        _per_block_focuses = []
-        for _bm in re.finditer(r"\b(?:focus|shared_focus)\s*=\s*\{", txt):
-            _bs = _bm.end() - 1  # position of '{'
-            _bd = 0
-            _bi = _bs
-            while _bi < len(txt):
-                if txt[_bi] == "{":
-                    _bd += 1
-                elif txt[_bi] == "}":
-                    _bd -= 1
-                    if _bd == 0:
-                        break
-                _bi += 1
-            if _bi >= len(txt):
-                continue
-            _btxt = txt[_bs : _bi + 1]
-            _btoks = tokenize(_btxt)
-            if not _btoks or _btoks[0] != "{":
-                continue
-            _bdict, _ = parse_block(_btoks, 0)
-            if isinstance(_bdict, dict) and "id" in _bdict:
-                _per_block_focuses.append(_bdict)
-        if len(_per_block_focuses) > len(focuses_data):
-            focuses_data = _per_block_focuses
-            if tree_name == "imported_focus_tree":
-                tree_name = os.path.splitext(os.path.basename(path))[0]
+        #
+        # The fallback can find at most one focus per `focus = {` block, so when
+        # the structured pass already produced that many it can never win — skip
+        # the brace-walk entirely on well-formed files (the common case).
+        _block_count = len(re.findall(r"\b(?:focus|shared_focus)\s*=\s*\{", txt))
+        if len(focuses_data) < _block_count:
+            _per_block_focuses = []
+            for _bm in re.finditer(r"\b(?:focus|shared_focus)\s*=\s*\{", txt):
+                _bs = _bm.end() - 1  # position of '{'
+                _bd = 0
+                _bi = _bs
+                while _bi < len(txt):
+                    if txt[_bi] == "{":
+                        _bd += 1
+                    elif txt[_bi] == "}":
+                        _bd -= 1
+                        if _bd == 0:
+                            break
+                    _bi += 1
+                if _bi >= len(txt):
+                    continue
+                _btxt = txt[_bs : _bi + 1]
+                _btoks = tokenize(_btxt)
+                if not _btoks or _btoks[0] != "{":
+                    continue
+                _bdict, _ = parse_block(_btoks, 0)
+                if isinstance(_bdict, dict) and "id" in _bdict:
+                    _per_block_focuses.append(_bdict)
+            if len(_per_block_focuses) > len(focuses_data):
+                focuses_data = _per_block_focuses
+                if tree_name == "imported_focus_tree":
+                    tree_name = os.path.splitext(os.path.basename(path))[0]
                 self._tree_id.set(tree_name)
 
         if not focuses_data:
@@ -11447,11 +11463,26 @@ class App(tk.Tk):
         self._sb_mod_lbl2.config(text=mod_txt)
 
     # ─────────────────── FOCUS LIST PANEL ────────────────────────
+    def _refresh_focus_list_debounced(self):
+        """Coalesce rapid search-box keystrokes into a single list rebuild.
+
+        _refresh_focus_list() tears down and recreates every row, so firing it
+        on each keystroke is wasteful on large trees. Schedule one rebuild
+        ~120ms after typing stops instead.
+        """
+        if getattr(self, "_lp_search_job", None):
+            try:
+                self.after_cancel(self._lp_search_job)
+            except Exception:
+                pass
+        self._lp_search_job = self.after(120, self._refresh_focus_list)
+
     def _refresh_focus_list(self):
         """Rebuild the left-panel focus list widgets.
         Called on: add/delete focus, rename, search change, mod load.
         For selection-only changes, _update_focus_list_selection() is cheaper.
         """
+        self._lp_search_job = None
         if not hasattr(self, "_lp_inner"):
             return
         for w in self._lp_inner.winfo_children():
