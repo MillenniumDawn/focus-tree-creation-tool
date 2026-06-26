@@ -175,6 +175,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 log.info("tkinter imported OK")
+import collections
 import copy
 import json
 import re
@@ -257,6 +258,7 @@ class App(tk.Tk):
         self._drag = {}
         self._redraw_pending = False
         self._redraw_job = None
+        self._lines_job = None  # throttle handle for line redraws during drag
         self._grid_img = None
         self._grid_item = None
         self._grid_key = None
@@ -360,8 +362,8 @@ class App(tk.Tk):
     def _build_ui(self):
         """Orchestrate full UI construction."""
         self._init_error_log()
-        self._undo_stack = []
         self._undo_max = 60
+        self._undo_stack = collections.deque(maxlen=self._undo_max)
         self._tree_id = tk.StringVar(value="TAG_focus_tree")
         # Continuous focus position — stored as integers when read from file
         self._cfp_x = None  # None = no value read; use fallback on export
@@ -1532,9 +1534,8 @@ class App(tk.Tk):
     def _push_undo(self, label="action"):
         """Call BEFORE making a change to save current state."""
         snap = self._snapshot()
+        # deque(maxlen) evicts the oldest entry on overflow in O(1).
         self._undo_stack.append((label, snap))
-        if len(self._undo_stack) > self._undo_max:
-            self._undo_stack.pop(0)
 
     def _undo(self):
         """Restore the previous state."""
@@ -2746,6 +2747,20 @@ class App(tk.Tk):
         self._update_statusbar()
         self._update_focus_list_selection()
         self._draw_minimap()
+
+    def _draw_lines_throttled(self):
+        """Coalesce rapid line redraws (during a drag) to ~60fps.
+
+        The dragged focus's box is moved directly via cv.move(); only the
+        connection lines need rebuilding, so this avoids a full _redraw().
+        """
+        if self._lines_job:
+            return
+        self._lines_job = self.cv.after(16, self._do_draw_lines_throttled)
+
+    def _do_draw_lines_throttled(self):
+        self._lines_job = None
+        self._draw_lines()
 
     def _redraw_now(self):
         """Immediate redraw for zoom/resize — skips throttle."""
@@ -4915,6 +4930,11 @@ class App(tk.Tk):
             "cy": e.y,
             "moved": False,
             "last_snap": (f.x, f.y),
+            # Other focuses don't move during a drag, so snapshot their grid
+            # cells once for O(1) collision checks per motion event.
+            "occupied": {
+                (o.x, o.y) for o in self.focuses.values() if o.id != fid
+            },
         }
         self._select(f)
 
@@ -4933,9 +4953,7 @@ class App(tk.Tk):
         ngy = round(d["sy"] + dy / (YGRID * self.zoom))
         if (ngx, ngy) == d["last_snap"]:
             return
-        if any(
-            o.x == ngx and o.y == ngy and o.id != fid for o in self.focuses.values()
-        ):
+        if (ngx, ngy) in d.get("occupied", ()):
             return
         old_cx, old_cy = self.w2c(f.x, f.y)
         f.x, f.y = ngx, ngy
@@ -4947,7 +4965,7 @@ class App(tk.Tk):
         self._fv_x.set(str(ngx))
         self._fv_y.set(str(ngy))
         self._hint(f"Dragging {self.focuses[fid].name}  →  x={ngx}  y={ngy}")
-        self._draw_lines()
+        self._draw_lines_throttled()
 
     def _foc_rl(self, fid):
         if self._drag.get("moved"):
@@ -5254,16 +5272,17 @@ class App(tk.Tk):
             "",
         ]
         rel_id = getattr(f, "relative_position_id", None)
-        if rel_id and any(foc.name == rel_id for foc in self.focuses.values()):
-            parent = next(
-                (foc for foc in self.focuses.values() if foc.name == rel_id), None
-            )
-            if parent:
-                out += [
-                    f"{I}x = {f.x - parent.x}",
-                    f"{I}y = {f.y - parent.y}",
-                    f"{I}relative_position_id = {rel_id}",
-                ]
+        parent = (
+            next((foc for foc in self.focuses.values() if foc.name == rel_id), None)
+            if rel_id
+            else None
+        )
+        if parent:
+            out += [
+                f"{I}x = {f.x - parent.x}",
+                f"{I}y = {f.y - parent.y}",
+                f"{I}relative_position_id = {rel_id}",
+            ]
         else:
             out += [f"{I}x = {f.x}", f"{I}y = {f.y}"]
         for _off in getattr(f, "offsets", []):
@@ -12210,17 +12229,21 @@ class App(tk.Tk):
                 out.append(f"\t\ttext = {_ftext}")
 
             rel_id = getattr(f, "relative_position_id", None)
-            if rel_id and any(foc.name == rel_id for foc in self.focuses.values()):
+            parent = (
+                next(
+                    (foc for foc in self.focuses.values() if foc.name == rel_id),
+                    None,
+                )
+                if rel_id
+                else None
+            )
+            if parent:
                 # Use stored raw delta if available (imported files), else compute
                 dx = getattr(f, "_rel_dx", None)
                 dy = getattr(f, "_rel_dy", None)
                 if dx is None or dy is None:
-                    parent = next(
-                        (foc for foc in self.focuses.values() if foc.name == rel_id),
-                        None,
-                    )
-                    dx = gx - parent.x if parent else gx
-                    dy = gy - parent.y if parent else gy
+                    dx = gx - parent.x
+                    dy = gy - parent.y
                 out.append(f"\t\tx = {dx}")
                 out.append(f"\t\ty = {dy}")
                 out.append(f"\t\trelative_position_id = {rel_id}")
