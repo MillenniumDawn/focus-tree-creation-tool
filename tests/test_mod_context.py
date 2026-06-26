@@ -13,6 +13,15 @@ import pytest
 
 from hoi4cm.mod import MOD
 from hoi4cm.mod import context as ctx_mod
+from hoi4cm.mod import scan_cache as scan_cache_mod
+
+
+@pytest.fixture(autouse=True)
+def isolate_scan_cache(tmp_path_factory, monkeypatch):
+    """Keep the SQLite scan cache out of the real ~/.hoi4cm during tests."""
+    monkeypatch.setattr(
+        scan_cache_mod, "STATE_DIR", str(tmp_path_factory.mktemp("hoi4cm_state"))
+    )
 
 
 @pytest.fixture
@@ -249,3 +258,57 @@ def test_national_focus_read_once_per_file(mod_tree, monkeypatch):
     MOD.scan(str(mod_tree))
     assert counts, "expected at least one national_focus file to be read"
     assert all(n == 1 for n in counts.values()), counts
+
+
+def test_scan_cache_skips_unchanged_files(tmp_path, monkeypatch):
+    """A warm rescan re-reads only files whose (mtime, size) changed."""
+    nf = tmp_path / "common" / "national_focus"
+    nf.mkdir(parents=True)
+    a = nf / "a.txt"
+    b = nf / "b.txt"
+    a.write_text("focus = { id = A1 }\n")
+    b.write_text("focus = { id = B1 }\n")
+    MOD.scan(str(tmp_path))  # cold: both read and cached
+    assert {"A1", "B1"} <= set(MOD.focus_ids)
+
+    reads = []
+    orig = MOD._read
+    monkeypatch.setattr(MOD, "_read", lambda p: (reads.append(p), orig(p))[1])
+    # Change only b.txt — different content (and size) plus a bumped mtime.
+    b.write_text("focus = { id = B2 }\nfocus = { id = B3 }\n")
+    st = b.stat()
+    os.utime(b, (st.st_atime, st.st_mtime + 10))
+    MOD.scan(str(tmp_path))
+
+    assert any(p.endswith("b.txt") for p in reads), reads
+    assert not any(p.endswith("a.txt") for p in reads), reads
+    assert {"A1", "B2", "B3"} <= set(MOD.focus_ids)
+    assert "B1" not in MOD.focus_ids
+
+
+def test_scan_cache_drops_deleted_file_ids(tmp_path):
+    """IDs from a removed file must not linger after a rescan."""
+    nf = tmp_path / "common" / "national_focus"
+    nf.mkdir(parents=True)
+    (nf / "keep.txt").write_text("focus = { id = KEEP }\n")
+    gone = nf / "gone.txt"
+    gone.write_text("focus = { id = GONE }\n")
+    MOD.scan(str(tmp_path))
+    assert "GONE" in MOD.focus_ids
+    gone.unlink()
+    MOD.scan(str(tmp_path))
+    assert "GONE" not in MOD.focus_ids
+    assert "KEEP" in MOD.focus_ids
+
+
+def test_scan_with_cache_disabled_matches(tmp_path):
+    """use_cache=False must produce identical results (no DB written)."""
+    nf = tmp_path / "common" / "national_focus"
+    nf.mkdir(parents=True)
+    (nf / "a.txt").write_text("focus = { id = A1 }\nfocus = { id = A2 }\n")
+    MOD.use_cache = False
+    try:
+        MOD.scan(str(tmp_path))
+    finally:
+        MOD.use_cache = True
+    assert {"A1", "A2"} <= set(MOD.focus_ids)

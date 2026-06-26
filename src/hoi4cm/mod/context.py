@@ -22,6 +22,7 @@ from hoi4cm.core.image import PILImage as _PILImage
 from hoi4cm.core.image import PILImageTk as _PILImageTk
 from hoi4cm.core.logger import get_logger
 from hoi4cm.core.paths import read_file
+from hoi4cm.mod.scan_cache import ScanCache
 
 _log = get_logger("mod")
 
@@ -114,6 +115,8 @@ class ModContext:
         self.country_tags = []  # TAG list
         self.variables = set()  # known variable names from set_variable/add_to_variable
         self.loaded = False
+        self.use_cache = True  # SQLite per-file scan cache (disable in tests)
+        self._cache = None  # active ScanCache during a scan(), else None
         self.is_md = False  # True when Millennium Dawn is detected
         self.mod_name = ""  # basename of mod root
         self._status = ""
@@ -298,12 +301,47 @@ class ModContext:
             if f.endswith(".txt")
         ]
 
-    def _parse_text(self, src):
+    def _scan_files_cached(self, domain, paths, extract_fn):
+        """Read & extract each file, serving unchanged files from the scan cache.
+
+        *extract_fn* maps file text to a JSON-serialisable contribution. Files
+        whose ``(mtime, size)`` matches the cache are not re-read; the rest are
+        read in parallel, extracted, and written back. Returns an ordered
+        ``{path: contribution}`` following *paths*.
+        """
+        results = {}
+        sigs = {}
+        to_read = []
+        for p in paths:
+            try:
+                st = os.stat(p)
+                sig = (st.st_mtime, st.st_size)
+            except OSError:
+                sig = (0.0, 0)
+            sigs[p] = sig
+            cached = self._cache.get(domain, p, *sig) if self._cache else None
+            if cached is not None:
+                results[p] = cached
+            else:
+                to_read.append(p)
+        texts = self._read_files_parallel(to_read)
+        for p in to_read:
+            data = extract_fn(texts[p])
+            results[p] = data
+            if self._cache:
+                self._cache.put(domain, p, sigs[p][0], sigs[p][1], data)
+        if self._cache:
+            self._cache.prune(domain, paths)
+            self._cache.commit()
+        return results
+
+    @staticmethod
+    def _parse_text(src):
         """Parse a HOI4 script string into a dict tree."""
         try:
-            tokens = self._tokenize(src)
+            tokens = ModContext._tokenize(src)
             tokens = ["{"] + tokens + ["}"]
-            result, _ = self._parse_block(tokens, 0)
+            result, _ = ModContext._parse_block(tokens, 0)
             return result
         except Exception:
             return {}
@@ -442,6 +480,52 @@ class ModContext:
         except Exception:
             pass
 
+    # ── Per-file extractors (pure text → JSON-serialisable contribution) ──
+    @staticmethod
+    def _extract_national_focus(src):
+        return {
+            "focus_ids": [m.group(1).strip() for m in _ID_RE.finditer(src)],
+            "variables": [m.group(1) for m in _VARIABLE_RE.finditer(src)],
+        }
+
+    @staticmethod
+    def _extract_events(src):
+        ids = []
+        for m in _ID_RE.finditer(src):
+            eid = m.group(1).strip()
+            if _EVENT_ID_RE.match(eid) or _NUM_ID_RE.match(eid):
+                ids.append(eid)
+        return ids
+
+    @staticmethod
+    def _extract_ideas(src):
+        out = []
+        ideas_block = ModContext._parse_text(src).get("ideas", {})
+        if isinstance(ideas_block, dict):
+            for _cat, cat_block in ideas_block.items():
+                if isinstance(cat_block, dict):
+                    for idea_id in cat_block:
+                        if not idea_id.startswith("_"):
+                            out.append(idea_id)
+        return out
+
+    @staticmethod
+    def _extract_decision_ids(src):
+        return [
+            m.group(1)
+            for m in _BLOCK_RE.finditer(src)
+            if m.group(1) not in _DECISION_KEYWORDS
+        ]
+
+    @staticmethod
+    def _extract_block_names(src):
+        return [m.group(1) for m in _BLOCK_RE.finditer(src)]
+
+    @staticmethod
+    def _extract_tags(src):
+        return [m.group(1) for m in _TAG_RE.finditer(src)]
+
+    # ── Directory scanners (aggregate per-file contributions) ────────────
     def _scan_national_focus(self):
         """Scan common/national_focus/ once for focus IDs *and* variable names.
 
@@ -451,14 +535,13 @@ class ModContext:
         if not os.path.isdir(d):
             return
         paths = self._txt_paths(d)
-        texts = self._read_files_parallel(paths)
+        results = self._scan_files_cached("focus", paths, self._extract_national_focus)
         focus_seen = dict.fromkeys(self.focus_ids)
-        for path in paths:
-            src = texts[path]
-            for m in _ID_RE.finditer(src):
-                focus_seen[m.group(1).strip()] = None
-            for m in _VARIABLE_RE.finditer(src):
-                self.variables.add(m.group(1))
+        for p in paths:
+            contrib = results[p]
+            for fid in contrib["focus_ids"]:
+                focus_seen[fid] = None
+            self.variables.update(contrib["variables"])
         self.focus_ids = list(focus_seen)
 
     def _scan_events(self):
@@ -466,56 +549,51 @@ class ModContext:
         if not os.path.isdir(d):
             return
         paths = self._txt_paths(d)
-        texts = self._read_files_parallel(paths)
-        for path in paths:
-            stem = os.path.basename(path)[:-4]
-            ids = []
-            for m in _ID_RE.finditer(texts[path]):
-                eid = m.group(1).strip()
-                if _EVENT_ID_RE.match(eid) or _NUM_ID_RE.match(eid):
-                    ids.append(eid)
+        results = self._scan_files_cached("events", paths, self._extract_events)
+        for p in paths:
+            ids = results[p]
             if ids:
-                self.event_ids[stem] = ids
+                self.event_ids[os.path.basename(p)[:-4]] = ids
 
     def _scan_ideas(self):
         d = os.path.join(self.root, "common", "ideas")
         if not os.path.isdir(d):
             return
         paths = self._txt_paths(d)
-        texts = self._read_files_parallel(paths)
+        results = self._scan_files_cached("ideas", paths, self._extract_ideas)
         seen = dict.fromkeys(self.idea_ids)
-        for path in paths:
-            data = self._parse_text(texts[path])
-            ideas_block = data.get("ideas", {})
-            if isinstance(ideas_block, dict):
-                for _cat, cat_block in ideas_block.items():
-                    if isinstance(cat_block, dict):
-                        for idea_id in cat_block:
-                            if not idea_id.startswith("_"):
-                                seen[idea_id] = None
+        for p in paths:
+            for idea_id in results[p]:
+                seen[idea_id] = None
         self.idea_ids = list(seen)
 
     def _scan_decisions(self):
-        ids_seen = dict.fromkeys(self.decision_ids)
-        cats_seen = dict.fromkeys(self.decision_cats)
+        # Gather all candidate files per domain first; a single cache call per
+        # domain keeps prune() from dropping the other directory's rows.
+        dec_paths = []
+        cat_paths = []
         for sub in ("decisions", "common/decisions"):
             d = os.path.join(self.root, sub.replace("/", os.sep))
             if not os.path.isdir(d):
                 continue
-            paths = self._txt_paths(d)
-            texts = self._read_files_parallel(paths)
-            for path in paths:
-                for m in _BLOCK_RE.finditer(texts[path]):
-                    did = m.group(1)
-                    if did not in _DECISION_KEYWORDS:
-                        ids_seen[did] = None
+            dec_paths.extend(self._txt_paths(d))
             cats_d = os.path.join(d, "categories")
             if os.path.isdir(cats_d):
-                cpaths = self._txt_paths(cats_d)
-                ctexts = self._read_files_parallel(cpaths)
-                for path in cpaths:
-                    for m in _BLOCK_RE.finditer(ctexts[path]):
-                        cats_seen[m.group(1)] = None
+                cat_paths.extend(self._txt_paths(cats_d))
+        dec_res = self._scan_files_cached(
+            "decisions", dec_paths, self._extract_decision_ids
+        )
+        cat_res = self._scan_files_cached(
+            "decision_cats", cat_paths, self._extract_block_names
+        )
+        ids_seen = dict.fromkeys(self.decision_ids)
+        for p in dec_paths:
+            for did in dec_res[p]:
+                ids_seen[did] = None
+        cats_seen = dict.fromkeys(self.decision_cats)
+        for p in cat_paths:
+            for cid in cat_res[p]:
+                cats_seen[cid] = None
         self.decision_ids = list(ids_seen)
         self.decision_cats = list(cats_seen)
 
@@ -524,11 +602,11 @@ class ModContext:
         if not os.path.isdir(d):
             return
         paths = self._txt_paths(d)
-        texts = self._read_files_parallel(paths)
+        results = self._scan_files_cached("dyn_mods", paths, self._extract_block_names)
         seen = dict.fromkeys(self.dyn_mod_ids)
-        for path in paths:
-            for m in _BLOCK_RE.finditer(texts[path]):
-                seen[m.group(1)] = None
+        for p in paths:
+            for mid in results[p]:
+                seen[mid] = None
         self.dyn_mod_ids = list(seen)
 
     def _scan_tags(self):
@@ -536,11 +614,11 @@ class ModContext:
         if not os.path.isdir(d):
             return
         paths = self._txt_paths(d)
-        texts = self._read_files_parallel(paths)
+        results = self._scan_files_cached("tags", paths, self._extract_tags)
         seen = dict.fromkeys(self.country_tags)
-        for path in paths:
-            for m in _TAG_RE.finditer(texts[path]):
-                seen[m.group(1)] = None
+        for p in paths:
+            for tag in results[p]:
+                seen[tag] = None
         self.country_tags = list(seen)
 
     def _scan_md_money_files(self):
@@ -654,13 +732,19 @@ class ModContext:
             ("Country Tags", self._scan_tags),
             ("MD Money System", self._scan_md_money_files),
         ]
-        for i, (label, fn) in enumerate(steps):
-            if progress_cb:
-                progress_cb(i, len(steps), label)
-            try:
-                fn()
-            except Exception as e:
-                _log.warning("scan step %s failed: %s", label, e)
+        self._cache = ScanCache(root) if self.use_cache else None
+        try:
+            for i, (label, fn) in enumerate(steps):
+                if progress_cb:
+                    progress_cb(i, len(steps), label)
+                try:
+                    fn()
+                except Exception as e:
+                    _log.warning("scan step %s failed: %s", label, e)
+        finally:
+            if self._cache:
+                self._cache.close()
+                self._cache = None
 
         self.loaded = True
         if progress_cb:
