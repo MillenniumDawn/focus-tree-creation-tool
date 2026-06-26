@@ -76,10 +76,12 @@ from hoi4cm.core import (
     Focus,
     add_error,
     build_focuses,
+    default_hoi4_mod_dir,
     dict_to_raw,
     effects_in_cat,
     export_focus_tree,
     get_error_entries,
+    get_language,
     install_excepthook,
     parse_focus_tree,
     read_file,
@@ -88,12 +90,16 @@ from hoi4cm.core import (
     show_splash,
     tr,
 )
+
+# Back-compat alias used in _load_mod and _open_settings
+_default_hoi4_mod_dir = default_hoi4_mod_dir
 from hoi4cm.mod import MOD
 from hoi4cm.ui import (
     BG_CARD,
     BG_DARK,
     BG_PANEL,
     BLUE,
+    BORDER,
     BORDER_G,
     BOX,
     CANVAS_BG,
@@ -1735,6 +1741,9 @@ class App(tk.Tk):
 
         # ── Tab container ─────────────────────────────────────────────
         self._tab_outer = tk.Frame(wrap, bg=BG_PANEL)
+        # Alias used by _show_form/_hide_form. Set it now (not after the
+        # sub-builders below) so the attribute survives a sub-builder failure.
+        self._tab_host = self._tab_outer
 
         # Tab bar
         tab_bar = tk.Frame(self._tab_outer, bg=BG_DARK)
@@ -1831,8 +1840,7 @@ class App(tk.Tk):
         )
         self._build_sidebar_code(self._tab_btns["Code"][1])
         # ── Show tab container (hidden until focus selected) ───────────
-        # _show_form / _hide_form manage this
-        self._tab_host = self._tab_outer  # alias used by show/hide
+        # _show_form / _hide_form manage this; _tab_host alias set above.
 
         # Activate Properties tab by default
         _switch_tab("Properties")
@@ -10362,7 +10370,7 @@ class App(tk.Tk):
             width=18,
             anchor="w",
         ).pack(side="left")
-        lang_var = tk.StringVar(value=I18N_LANG or "en")
+        lang_var = tk.StringVar(value=get_language() or "en")
         lang_combo = ttk.Combobox(
             lang_row,
             textvariable=lang_var,
@@ -10382,7 +10390,7 @@ class App(tk.Tk):
         lang_name.pack(side="left")
 
         def _apply_lang(*_):
-            old = I18N_LANG
+            old = get_language()
             new = lang_var.get()
             set_language(new)
             lang_name.config(text=I18N_LANGS.get(new, ""))

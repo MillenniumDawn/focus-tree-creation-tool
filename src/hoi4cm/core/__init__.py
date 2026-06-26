@@ -28,7 +28,14 @@ from hoi4cm.script import (
 from hoi4cm.ui import show_splash
 
 from .config import CONFIG_PATH, cfg_load, cfg_save
-from .i18n import I18N_LANG, I18N_LANGS, I18N_STRINGS, set_language, tr
+from .i18n import (
+    I18N_LANG,
+    I18N_LANGS,
+    I18N_STRINGS,
+    get_language,
+    set_language,
+    tr,
+)
 from .logger import (
     add_error,
     clear_errors,
@@ -50,6 +57,7 @@ __all__ = [
     "I18N_LANG",
     "I18N_LANGS",
     "I18N_STRINGS",
+    "get_language",
     "MD_BUILDING_COSTS",
     "MD_RESOURCE_COST_PER_UNIT",
     "MODIFIER_CATS",

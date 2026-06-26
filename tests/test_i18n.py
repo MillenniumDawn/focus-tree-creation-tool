@@ -80,3 +80,12 @@ def test_set_language_rejects_unknown(restore_i18n_state, fake_config, monkeypat
     monkeypatch.setattr(i18n_mod, "cfg_save", lambda d: None)
     i18n_mod.set_language("xx_YY")  # not in I18N_LANGS
     assert i18n_mod.I18N_LANG == "en"  # falls back to en
+
+
+def test_get_language_tracks_set_language(restore_i18n_state, fake_config):
+    """get_language() must reflect the live value, not a stale snapshot —
+    the settings dialog relies on this to show the current language."""
+    i18n_mod.set_language("en")
+    assert i18n_mod.get_language() == "en"
+    i18n_mod.set_language("zh_CN")
+    assert i18n_mod.get_language() == "zh_CN"

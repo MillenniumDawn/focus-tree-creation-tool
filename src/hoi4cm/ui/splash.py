@@ -211,7 +211,16 @@ def show_splash(callback, apply_dpi_scaling=None):
                 root.destroy()
                 log.info("Splash: root destroyed, calling app launcher...")
                 state["done"] = True
-                callback()
+                # Tk swallows exceptions raised inside this after-callback, so a
+                # failure during App construction would silently leave a half-built
+                # window. Log it loudly instead of letting it disappear.
+                try:
+                    callback()
+                except Exception:
+                    log.exception(
+                        "Splash: fatal exception during app construction — "
+                        "check log for details"
+                    )
                 return
 
         state["frame"] += 1

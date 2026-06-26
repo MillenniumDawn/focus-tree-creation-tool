@@ -76,6 +76,15 @@ def set_language(lang):
     _load_i18n(lang)
 
 
+def get_language():
+    """Return the currently active language code.
+
+    Use this instead of importing the I18N_LANG name directly: the global is
+    reassigned by set_language(), so an imported name would go stale.
+    """
+    return I18N_LANG
+
+
 def tr(key, default=None, **kwargs):
     """Resolve a translation key. Falls back to *default* then the key itself."""
     text = I18N_STRINGS.get(key, default if default is not None else key)
@@ -94,6 +103,7 @@ __all__ = [
     "I18N_LANGS",
     "I18N_LANG",
     "I18N_STRINGS",
+    "get_language",
     "set_language",
     "tr",
 ]
