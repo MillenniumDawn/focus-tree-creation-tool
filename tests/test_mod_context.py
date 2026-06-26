@@ -6,6 +6,7 @@ subdirectories the scanner walks, then verifies the corresponding
 side-effect-free.
 """
 
+import os
 import textwrap
 
 import pytest
@@ -200,3 +201,51 @@ def test_get_image_returns_none_for_unknown_gfx(mod_tree):
     MOD.scan(str(mod_tree))
     assert MOD.get_image("GFX_does_not_exist") is None
     assert any("NOT IN SPRITES" in e for e in MOD._img_errors)
+
+
+def test_scan_dedups_ids_across_files(tmp_path):
+    """The same focus ID in two files must appear once, in first-seen order."""
+    nf = tmp_path / "common" / "national_focus"
+    nf.mkdir(parents=True)
+    (nf / "a.txt").write_text("focus = { id = SHARED }\nfocus = { id = ONLY_A }\n")
+    (nf / "b.txt").write_text("focus = { id = SHARED }\nfocus = { id = ONLY_B }\n")
+    MOD.scan(str(tmp_path))
+    assert MOD.focus_ids.count("SHARED") == 1
+    assert {"SHARED", "ONLY_A", "ONLY_B"} <= set(MOD.focus_ids)
+
+
+def test_scan_loads_variables(tmp_path):
+    """set_variable / add_to_variable names are captured from national_focus."""
+    nf = tmp_path / "common" / "national_focus"
+    nf.mkdir(parents=True)
+    (nf / "vars.txt").write_text(
+        "focus = {\n"
+        "  id = X\n"
+        "  completion_reward = {\n"
+        "    set_variable = { my_money = 5 }\n"
+        "    add_to_variable = { my_score = 1 }\n"
+        "  }\n"
+        "}\n"
+    )
+    MOD.scan(str(tmp_path))
+    assert {"my_money", "my_score"} <= MOD.variables
+
+
+def test_national_focus_read_once_per_file(mod_tree, monkeypatch):
+    """Focus IDs and variables share a single read of each national_focus file.
+
+    Previously _scan_focuses and _scan_variables each walked the directory,
+    reading every file twice.
+    """
+    counts = {}
+    orig_read = MOD._read
+
+    def counting_read(path):
+        if os.sep + "national_focus" + os.sep in path:
+            counts[path] = counts.get(path, 0) + 1
+        return orig_read(path)
+
+    monkeypatch.setattr(MOD, "_read", counting_read)
+    MOD.scan(str(mod_tree))
+    assert counts, "expected at least one national_focus file to be read"
+    assert all(n == 1 for n in counts.values()), counts

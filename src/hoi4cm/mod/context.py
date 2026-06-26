@@ -13,6 +13,7 @@ app still works.
 import json
 import os
 import re
+from concurrent.futures import ThreadPoolExecutor
 from typing import Callable, Optional
 
 from hoi4cm.core.config import cfg_load, cfg_save
@@ -32,6 +33,21 @@ _SPRITE_TEX_RE = re.compile(r'\btexturefile\s*=\s*"([^"]+)"')
 
 # Image extensions the scanners look for on disk.
 _IMAGE_EXTS = (".dds", ".png", ".tga")
+
+# Pre-compiled regexes used by the ID scanners (compiled once, not per file).
+_ID_RE = re.compile(r"\bid\s*=\s*(\S+)")
+_EVENT_ID_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\.\d+")
+_NUM_ID_RE = re.compile(r"\d+")
+_BLOCK_RE = re.compile(r"^([A-Za-z][A-Za-z0-9_]+)\s*=\s*\{", re.MULTILINE)
+_TAG_RE = re.compile(r"^([A-Z]{2,3})\s*=", re.MULTILINE)
+_VARIABLE_RE = re.compile(
+    r"(?:set_variable|add_to_variable)\s*=\s*\{\s*([A-Za-z][A-Za-z0-9_]*)\s*="
+)
+
+# Block-level keywords that are not decision IDs.
+_DECISION_KEYWORDS = frozenset(
+    {"category", "target_trigger", "available", "visible", "modifier", "cost"}
+)
 
 
 def _iter_sprite_blocks(text):
@@ -257,14 +273,45 @@ class ModContext:
     def _read(self, path):
         return read_file(path)
 
-    def _parse_file(self, path):
-        """Parse a HOI4 script file into a dict tree."""
+    def _read_files_parallel(self, paths):
+        """Read several files concurrently; return ``{path: text}``.
+
+        File reads are I/O-bound and ``read_file`` releases the GIL on disk
+        access, so a small thread pool cuts cold-scan latency on large mods.
+        A single file is read serially to avoid pool overhead.
+        """
+        if not paths:
+            return {}
+        if len(paths) == 1:
+            return {paths[0]: self._read(paths[0])}
+        workers = min(8, (os.cpu_count() or 4), len(paths))
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            texts = list(ex.map(self._read, paths))
+        return dict(zip(paths, texts))
+
+    @staticmethod
+    def _txt_paths(directory):
+        """Sorted absolute paths of ``*.txt`` files directly in *directory*."""
+        return [
+            os.path.join(directory, f)
+            for f in sorted(os.listdir(directory))
+            if f.endswith(".txt")
+        ]
+
+    def _parse_text(self, src):
+        """Parse a HOI4 script string into a dict tree."""
         try:
-            src = self._read(path)
             tokens = self._tokenize(src)
             tokens = ["{"] + tokens + ["}"]
             result, _ = self._parse_block(tokens, 0)
             return result
+        except Exception:
+            return {}
+
+    def _parse_file(self, path):
+        """Parse a HOI4 script file into a dict tree."""
+        try:
+            return self._parse_text(self._read(path))
         except Exception:
             return {}
 
@@ -395,34 +442,37 @@ class ModContext:
         except Exception:
             pass
 
-    def _scan_focuses(self):
+    def _scan_national_focus(self):
+        """Scan common/national_focus/ once for focus IDs *and* variable names.
+
+        Both used to walk this directory separately, reading every file twice.
+        """
         d = os.path.join(self.root, "common", "national_focus")
         if not os.path.isdir(d):
             return
-        for fname in os.listdir(d):
-            if not fname.endswith(".txt"):
-                continue
-            src = self._read(os.path.join(d, fname))
-            for m in re.finditer(r"\bid\s*=\s*(\S+)", src):
-                fid = m.group(1).strip()
-                if fid not in self.focus_ids:
-                    self.focus_ids.append(fid)
+        paths = self._txt_paths(d)
+        texts = self._read_files_parallel(paths)
+        focus_seen = dict.fromkeys(self.focus_ids)
+        for path in paths:
+            src = texts[path]
+            for m in _ID_RE.finditer(src):
+                focus_seen[m.group(1).strip()] = None
+            for m in _VARIABLE_RE.finditer(src):
+                self.variables.add(m.group(1))
+        self.focus_ids = list(focus_seen)
 
     def _scan_events(self):
         d = os.path.join(self.root, "events")
         if not os.path.isdir(d):
             return
-        for fname in os.listdir(d):
-            if not fname.endswith(".txt"):
-                continue
-            stem = fname[:-4]
-            src = self._read(os.path.join(d, fname))
+        paths = self._txt_paths(d)
+        texts = self._read_files_parallel(paths)
+        for path in paths:
+            stem = os.path.basename(path)[:-4]
             ids = []
-            for m in re.finditer(r"\bid\s*=\s*(\S+)", src):
+            for m in _ID_RE.finditer(texts[path]):
                 eid = m.group(1).strip()
-                if re.match(r"[A-Za-z_][A-Za-z0-9_]*\.\d+", eid) or re.match(
-                    r"\d+", eid
-                ):
+                if _EVENT_ID_RE.match(eid) or _NUM_ID_RE.match(eid):
                     ids.append(eid)
             if ids:
                 self.event_ids[stem] = ids
@@ -431,99 +481,67 @@ class ModContext:
         d = os.path.join(self.root, "common", "ideas")
         if not os.path.isdir(d):
             return
-        for fname in os.listdir(d):
-            if not fname.endswith(".txt"):
-                continue
-            data = self._parse_file(os.path.join(d, fname))
+        paths = self._txt_paths(d)
+        texts = self._read_files_parallel(paths)
+        seen = dict.fromkeys(self.idea_ids)
+        for path in paths:
+            data = self._parse_text(texts[path])
             ideas_block = data.get("ideas", {})
             if isinstance(ideas_block, dict):
                 for _cat, cat_block in ideas_block.items():
                     if isinstance(cat_block, dict):
                         for idea_id in cat_block:
-                            if (
-                                not idea_id.startswith("_")
-                                and idea_id not in self.idea_ids
-                            ):
-                                self.idea_ids.append(idea_id)
+                            if not idea_id.startswith("_"):
+                                seen[idea_id] = None
+        self.idea_ids = list(seen)
 
     def _scan_decisions(self):
+        ids_seen = dict.fromkeys(self.decision_ids)
+        cats_seen = dict.fromkeys(self.decision_cats)
         for sub in ("decisions", "common/decisions"):
             d = os.path.join(self.root, sub.replace("/", os.sep))
             if not os.path.isdir(d):
                 continue
-            for fname in os.listdir(d):
-                if not fname.endswith(".txt"):
-                    continue
-                src = self._read(os.path.join(d, fname))
-                for m in re.finditer(
-                    r"^([A-Za-z][A-Za-z0-9_]+)\s*=\s*\{", src, re.MULTILINE
-                ):
+            paths = self._txt_paths(d)
+            texts = self._read_files_parallel(paths)
+            for path in paths:
+                for m in _BLOCK_RE.finditer(texts[path]):
                     did = m.group(1)
-                    if did not in (
-                        "category",
-                        "target_trigger",
-                        "available",
-                        "visible",
-                        "modifier",
-                        "cost",
-                    ):
-                        if did not in self.decision_ids:
-                            self.decision_ids.append(did)
+                    if did not in _DECISION_KEYWORDS:
+                        ids_seen[did] = None
             cats_d = os.path.join(d, "categories")
             if os.path.isdir(cats_d):
-                for fname in os.listdir(cats_d):
-                    if not fname.endswith(".txt"):
-                        continue
-                    src = self._read(os.path.join(cats_d, fname))
-                    for m in re.finditer(
-                        r"^([A-Za-z][A-Za-z0-9_]+)\s*=\s*\{", src, re.MULTILINE
-                    ):
-                        cid = m.group(1)
-                        if cid not in self.decision_cats:
-                            self.decision_cats.append(cid)
+                cpaths = self._txt_paths(cats_d)
+                ctexts = self._read_files_parallel(cpaths)
+                for path in cpaths:
+                    for m in _BLOCK_RE.finditer(ctexts[path]):
+                        cats_seen[m.group(1)] = None
+        self.decision_ids = list(ids_seen)
+        self.decision_cats = list(cats_seen)
 
     def _scan_dyn_mods(self):
         d = os.path.join(self.root, "common", "dynamic_modifiers")
         if not os.path.isdir(d):
             return
-        for fname in os.listdir(d):
-            if not fname.endswith(".txt"):
-                continue
-            src = self._read(os.path.join(d, fname))
-            for m in re.finditer(
-                r"^([A-Za-z][A-Za-z0-9_]+)\s*=\s*\{", src, re.MULTILINE
-            ):
-                mid = m.group(1)
-                if mid not in self.dyn_mod_ids:
-                    self.dyn_mod_ids.append(mid)
+        paths = self._txt_paths(d)
+        texts = self._read_files_parallel(paths)
+        seen = dict.fromkeys(self.dyn_mod_ids)
+        for path in paths:
+            for m in _BLOCK_RE.finditer(texts[path]):
+                seen[m.group(1)] = None
+        self.dyn_mod_ids = list(seen)
 
     def _scan_tags(self):
         d = os.path.join(self.root, "common", "country_tags")
         if not os.path.isdir(d):
             return
-        for fname in os.listdir(d):
-            if not fname.endswith(".txt"):
-                continue
-            src = self._read(os.path.join(d, fname))
-            for m in re.finditer(r"^([A-Z]{2,3})\s*=", src, re.MULTILINE):
-                tag = m.group(1)
-                if tag not in self.country_tags:
-                    self.country_tags.append(tag)
-
-    def _scan_variables(self):
-        """Scan national_focus files for set_variable / add_to_variable names."""
-        d = os.path.join(self.root, "common", "national_focus")
-        if not os.path.isdir(d):
-            return
-        for fname in os.listdir(d):
-            if not fname.endswith(".txt"):
-                continue
-            src = self._read(os.path.join(d, fname))
-            for m in re.finditer(
-                r"(?:set_variable|add_to_variable)\s*=\s*\{\s*([A-Za-z][A-Za-z0-9_]*)\s*=",
-                src,
-            ):
-                self.variables.add(m.group(1))
+        paths = self._txt_paths(d)
+        texts = self._read_files_parallel(paths)
+        seen = dict.fromkeys(self.country_tags)
+        for path in paths:
+            for m in _TAG_RE.finditer(texts[path]):
+                seen[m.group(1)] = None
+        self.country_tags = list(seen)
 
     def _scan_md_money_files(self):
         """Auto-discover the three MD additional income system files."""
@@ -628,13 +646,12 @@ class ModContext:
             ("GFX sprites", self._scan_gfx),
             ("Idea GFX", self._scan_idea_gfx),
             ("Decision GFX", self._scan_decision_gfx),
-            ("Focus IDs", self._scan_focuses),
+            ("Focus IDs", self._scan_national_focus),
             ("Events", self._scan_events),
             ("Ideas/Spirits", self._scan_ideas),
             ("Decisions", self._scan_decisions),
             ("Dynamic Modifiers", self._scan_dyn_mods),
             ("Country Tags", self._scan_tags),
-            ("Variables", self._scan_variables),
             ("MD Money System", self._scan_md_money_files),
         ]
         for i, (label, fn) in enumerate(steps):
