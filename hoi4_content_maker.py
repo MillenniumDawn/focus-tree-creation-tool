@@ -84,7 +84,6 @@ from hoi4cm.core import (
     get_language,
     install_excepthook,
     parse_focus_tree,
-    read_file,
     set_error_callback,
     set_language,
     show_splash,
@@ -132,6 +131,7 @@ from hoi4cm.wizards import (
     open_event_wizard,
     open_national_spirit_wizard,
 )
+from hoi4cm.wizards import _shared as _wiz_shared
 
 log_startup()
 
@@ -181,9 +181,6 @@ import re
 import subprocess
 import threading
 
-# Back-compat shim for code paths that still reference the old underscore name.
-_read_file = read_file
-
 
 def _apply_tk_dpi_scaling(root):
     """Align Tk point-size scaling with the current monitor DPI."""
@@ -228,29 +225,12 @@ except ImportError:
             log.warning("Pillow auto-install failed")
             _PIL_OK = False
 
-# Shared image cache registry — wizards register their caches here for invalidation on mod reload
-_app_img_caches = []
-
-# ── Module-level caches (persist across wizard opens, cleared on mod reload) ─
-_ev_gfx_cache = {}  # event wizard: gfx_name → file path
-_ev_imgsize_cache = {}  # event wizard: file path → (w, h)
-_app_img_caches.extend([_ev_gfx_cache, _ev_imgsize_cache])
-
-# ── Pre-compiled regex constants shared across wizards ────────────────────────
-_LOC_KEY_RE = re.compile(r'\s+(\S+?)(?::\d+)?\s*"')
-
-
-_app_ref = None  # module-level ref so ModContext.save_config can access the window
-
-
 class App(tk.Tk):
     def __init__(self):
-        global _app_ref
         log.info("App.__init__: calling tk.Tk.__init__...")
         super().__init__()
         _apply_tk_dpi_scaling(self)
         log.info("App.__init__: tk.Tk initialized")
-        _app_ref = self
         self.title(
             tr(
                 "app.title.no_tree",
@@ -267,7 +247,6 @@ class App(tk.Tk):
         self._multi_sel = set()  # set of fids in multi-select
         self._multisel_mode = False  # True when multi-select mode active
         self._default_focus_prefix = ""  # set by tag detection
-        self.conn_src = None
         self.mutex_src = None
         self.mutex_mode = False
         self._lines = []
@@ -1579,9 +1558,6 @@ class App(tk.Tk):
         self._redraw()
         self._hint(f"↩ Undid: {label}")
 
-    def _vsep(self, p):
-        tk.Frame(p, bg=BORDER_G, width=1, height=24).pack(side="left", padx=5)
-
     def _hint(self, t):
         self._hint_lbl.config(text=t)
 
@@ -2554,9 +2530,6 @@ class App(tk.Tk):
         if w and isinstance(w, tk.Canvas):
             w.yview_scroll(delta, "units")
 
-    def _hsep(self):
-        tk.Frame(self._sb_frm, bg=BORDER_G, height=1).pack(fill="x", padx=6, pady=6)
-
     def _sb_lbl(self, t):
         tk.Label(
             self._sb_frm,
@@ -3100,7 +3073,6 @@ class App(tk.Tk):
 
         sel = bool(self.selected and self.selected.id == f.id)
         msel = f.id in self._multi_sel
-        con = bool(self.conn_src and self.conn_src.id == f.id)
         mut = bool(self.mutex_mode and self.mutex_src and self.mutex_src.id == f.id)
 
         # Tree-specific border color and badge
@@ -3110,11 +3082,7 @@ class App(tk.Tk):
         border_col = (
             FC_SEL_BD
             if sel
-            else (
-                "#00e5ff"
-                if msel
-                else (BLUE if con else (ORANGE if mut else base_border))
-            )
+            else ("#00e5ff" if msel else (ORANGE if mut else base_border))
         )
         fill_col = FC_SEL if sel else ("#0a2030" if msel else FC_BG)
         bw = 3 if sel else (2 if msel else 1)
@@ -3138,7 +3106,6 @@ class App(tk.Tk):
             round(h, 1),
             sel,
             msel,
-            con,
             mut,
             label_text,
             ico_size,
@@ -3373,7 +3340,7 @@ class App(tk.Tk):
     def _lmb_dn(self, e):
         hits = self.cv.find_overlapping(e.x - 2, e.y - 2, e.x + 2, e.y + 2)
         if not any("focus" in self.cv.gettags(i) for i in hits):
-            if not self.conn_src and not self.mutex_mode:
+            if not self.mutex_mode:
                 self._deselect()
 
     def _lmb_mv(self, e):
@@ -3404,27 +3371,6 @@ class App(tk.Tk):
             f._draw_key = None
         self._grid_key = None
         self._redraw()
-
-    def _redraw_grid_only(self):
-        """During pan: only redraw grid + coord labels. Focus items already moved by cv.move()."""
-        if self._redraw_job:
-            self.cv.after_cancel(self._redraw_job)
-        self._redraw_job = self.cv.after(16, self._do_grid_only)
-
-    def _do_grid_only(self):
-        self._redraw_job = None
-        self._draw_grid()
-        self._draw_coord_labels()
-        # Redraw only newly-visible focuses (those without items or with stale state)
-        cw = max(1, self.cv.winfo_width())
-        ch = max(1, self.cv.winfo_height())
-        mg = XGRID * self.zoom
-        self._vp = (-mg, -mg, cw + mg, ch + mg)
-        for f in self.focuses.values():
-            cx, cy = self.w2c(f.x, f.y)
-            if self._vp[0] <= cx <= self._vp[2] and self._vp[1] <= cy <= self._vp[3]:
-                if not f._items:
-                    self._draw_focus(f)
 
     def _pan_rl(self, e):
         self._pan_start = None
@@ -3567,8 +3513,10 @@ class App(tk.Tk):
             f._items = []
         self.cv.delete("focus")
         self._redraw_now()
-        # Clear all wizard image caches so new mod GFX loads fresh
-        for _c in _app_img_caches:
+        # Clear all wizard image caches so new mod GFX loads fresh. The live
+        # caches live in hoi4cm.wizards._shared (the event and decision wizards
+        # register theirs there), not in this module.
+        for _c in _wiz_shared._app_img_caches:
             _c.clear()
         # Load first sprite as a quick PIL sanity check
         test_names = list(MOD.sprites.keys())[:1]
@@ -4780,105 +4728,6 @@ class App(tk.Tk):
             )
         _safe_after_idle(win, _lazy)
 
-    def _mod_autocomplete(self, parent, var, get_choices, label_text, hint=""):
-        """Entry with live autocomplete dropdown from mod data."""
-        f = tk.Frame(parent, bg=BG_CARD)
-        f.pack(fill="x", padx=4, pady=1)
-        tk.Label(
-            f,
-            text=label_text + ":",
-            bg=BG_CARD,
-            fg=TEXT_DIM,
-            font=("Helvetica", 9),
-            width=10,
-            anchor="w",
-        ).pack(side="left")
-        ent = tk.Entry(
-            f,
-            textvariable=var,
-            bg=BG_CARD,
-            fg=TEXT,
-            insertbackground=BLUE,
-            font=("Helvetica", 10),
-            relief="flat",
-            highlightthickness=1,
-            highlightbackground=BORDER_G,
-        )
-        ent.pack(side="left", fill="x", expand=True, ipady=2, padx=2)
-
-        # Dropdown listbox popup
-        _popup = [None]
-
-        def _show_popup(*_):
-            q = var.get().lower()
-            choices = [c for c in get_choices() if q in c.lower()][:40]
-            if not choices:
-                _hide_popup()
-                return
-            if _popup[0] and _popup[0].winfo_exists():
-                _popup[0].destroy()
-            pw = tk.Toplevel(self)
-            pw.wm_overrideredirect(True)
-            pw.configure(bg=BORDER_G)
-            # Position below entry
-            ent.update_idletasks()
-            x = ent.winfo_rootx()
-            y = ent.winfo_rooty() + ent.winfo_height() + 1
-            w = max(ent.winfo_width(), 240)
-            pw.geometry(f"{w}x{min(len(choices)*22,200)}+{x}+{y}")
-            lb = tk.Listbox(
-                pw,
-                bg=BG_CARD,
-                fg=TEXT,
-                selectbackground=BLUE,
-                font=("Courier", 9),
-                relief="flat",
-                bd=0,
-                activestyle="none",
-                cursor="hand2",
-            )
-            lb.pack(fill="both", expand=True)
-            for c in choices:
-                lb.insert("end", c)
-
-            def _pick(e):
-                sel = lb.curselection()
-                if sel:
-                    var.set(lb.get(sel[0]))
-                _hide_popup()
-
-            lb.bind("<ButtonRelease-1>", _pick)
-            lb.bind("<Return>", _pick)
-            _popup[0] = pw
-
-        def _hide_popup(*_):
-            if _popup[0] and _popup[0].winfo_exists():
-                _popup[0].destroy()
-            _popup[0] = None
-
-        ent.bind("<KeyRelease>", _show_popup)
-        ent.bind("<FocusOut>", lambda e: self.after(150, _hide_popup))
-        ent.bind("<Escape>", _hide_popup)
-
-        if hint:
-            hl = tk.Label(
-                f,
-                text="?",
-                bg=BG_CARD,
-                fg=TEXT_DIM,
-                font=("Helvetica", 8),
-                cursor="question_arrow",
-            )
-            hl.pack(side="right", padx=2)
-            hl.bind("<Enter>", lambda e: self._hint(hint))
-            hl.bind(
-                "<Leave>",
-                lambda e: self._hint(
-                    "Right-click canvas to place focus  •  Ctrl+drag to pan  •  Scroll to zoom"
-                ),
-            )
-        return var
-
     def _attach_autocomplete(self, entry_widget, var, get_choices_fn):
         """Attach a live autocomplete popup to any Entry widget."""
         _popup = [None]
@@ -5045,11 +4894,6 @@ class App(tk.Tk):
 
     def _foc_pr(self, fid, e):
         f = self.focuses[fid]
-        # conn_src is no longer used for prereqs (replaced by _pick_prereq dialog)
-        # kept as no-op guard for safety
-        if self.conn_src:
-            self._end_connect()
-            return
         if self.mutex_mode:
             if self.mutex_src.id != fid:
                 self._make_mutex(self.mutex_src, f)
@@ -5076,7 +4920,7 @@ class App(tk.Tk):
 
     def _foc_mv(self, fid, e):
         d = self._drag
-        if not d or d.get("id") != fid or self.conn_src or self.mutex_mode:
+        if not d or d.get("id") != fid or self.mutex_mode:
             return
         dx = e.x - d["cx"]
         dy = e.y - d["cy"]
@@ -5146,11 +4990,10 @@ class App(tk.Tk):
             f.ai_will_do_raw = raw_ai
             # Extract top-level numeric value — accept either `base` or `factor`
             # (MD uses `base` at the ai_will_do top level, `factor` in modifier sub-blocks).
-            import re as _re
 
-            m = _re.search(r"^\s*base\s*=\s*([\d.]+)", raw_ai, _re.MULTILINE)
+            m = re.search(r"^\s*base\s*=\s*([\d.]+)", raw_ai, re.MULTILINE)
             if not m:
-                m = _re.search(r"^\s*factor\s*=\s*([\d.]+)", raw_ai, _re.MULTILINE)
+                m = re.search(r"^\s*factor\s*=\s*([\d.]+)", raw_ai, re.MULTILINE)
             f.ai_will_do = int(float(m.group(1))) if m else 1
             nx = int(self._fv_x.get())
             ny = int(self._fv_y.get())
@@ -5248,7 +5091,6 @@ class App(tk.Tk):
 
     def _apply_focus_code(self, f, new_code):
         """Parse an edited focus block back into the focus object. Returns True on success."""
-        import re as _re
 
         try:
 
@@ -5266,37 +5108,37 @@ class App(tk.Tk):
                 return text[start + 1 :].strip(), len(text) - 1
 
             def _extract_raw_block(text, key):
-                m = _re.search(rf"\b{_re.escape(key)}\s*=\s*\{{", text)
+                m = re.search(rf"\b{re.escape(key)}\s*=\s*\{{", text)
                 if not m:
                     return ""
                 inner, _ = _extract_block(text, m.end() - 1)
                 return inner.strip()
 
             # ── Simple scalar fields ───────────────────────────────────
-            m = _re.search(r"\bid\s*=\s*(\S+)", new_code)
+            m = re.search(r"\bid\s*=\s*(\S+)", new_code)
             if m:
                 f.name = m.group(1)
 
-            m = _re.search(r"\bicon\s*=\s*(\S+)", new_code)
+            m = re.search(r"\bicon\s*=\s*(\S+)", new_code)
             if m:
                 f.gfx = m.group(1)
 
-            m = _re.search(r"(?<![a-z_])x\s*=\s*(-?\d+)", new_code)
+            m = re.search(r"(?<![a-z_])x\s*=\s*(-?\d+)", new_code)
             if m:
                 f.x = int(m.group(1))
 
-            m = _re.search(r"(?<![a-z_])y\s*=\s*(-?\d+)", new_code)
+            m = re.search(r"(?<![a-z_])y\s*=\s*(-?\d+)", new_code)
             if m:
                 f.y = int(m.group(1))
 
-            m = _re.search(r"\bcost\s*=\s*([\d.]+)", new_code)
+            m = re.search(r"\bcost\s*=\s*([\d.]+)", new_code)
             if m:
                 try:
                     f.cost = int(float(m.group(1)))
                 except Exception:
                     pass
 
-            m = _re.search(r"\brelative_position_id\s*=\s*(\S+)", new_code)
+            m = re.search(r"\brelative_position_id\s*=\s*(\S+)", new_code)
             if m:
                 f.relative_position_id = m.group(1)
 
@@ -5305,11 +5147,11 @@ class App(tk.Tk):
                 ("continue_if_invalid", "continue_if_invalid"),
                 ("available_if_capitulated", "available_if_capitulated"),
             ]:
-                m = _re.search(rf"\b{flag}\s*=\s*(yes|no)", new_code)
+                m = re.search(rf"\b{flag}\s*=\s*(yes|no)", new_code)
                 if m:
                     setattr(f, attr, m.group(1) == "yes")
 
-            m = _re.search(r"\bsearch_filters\s*=\s*\{([^}]*)\}", new_code)
+            m = re.search(r"\bsearch_filters\s*=\s*\{([^}]*)\}", new_code)
             if m:
                 f.search_filters = m.group(1).strip()
 
@@ -5337,7 +5179,7 @@ class App(tk.Tk):
 
             # ── Parse offset blocks ────────────────────────────────────
             _parsed_offsets = []
-            for _om in _re.finditer(r"\boffset\s*=\s*\{", new_code):
+            for _om in re.finditer(r"\boffset\s*=\s*\{", new_code):
                 _os = _om.end() - 1
                 _od = 0
                 _oi = _os
@@ -5350,8 +5192,8 @@ class App(tk.Tk):
                             break
                     _oi += 1
                 _oinner = new_code[_os + 1 : _oi]
-                _oxm = _re.search(r"\bx\s*=\s*(-?\d+)", _oinner)
-                _oym = _re.search(r"\by\s*=\s*(-?\d+)", _oinner)
+                _oxm = re.search(r"\bx\s*=\s*(-?\d+)", _oinner)
+                _oym = re.search(r"\by\s*=\s*(-?\d+)", _oinner)
                 _ox = int(_oxm.group(1)) if _oxm else 0
                 _oy = int(_oym.group(1)) if _oym else 0
                 _otrig = _extract_raw_block(_oinner, "trigger")
@@ -6112,7 +5954,6 @@ class App(tk.Tk):
         )
         txt.tag_configure("str_val", foreground="#f97316")
 
-        import re as _re
 
         for tag, pat in [
             ("comment", r"(?m)#.*$"),
@@ -6121,7 +5962,7 @@ class App(tk.Tk):
             ("str_val", r"=\s*[A-Z_][A-Z0-9_]+"),
             ("val", r"=\s*\d[\d.]*"),
         ]:
-            for m in _re.finditer(pat, code):
+            for m in re.finditer(pat, code):
                 s, e = m.start(), m.end()
                 n0 = code.count("\n", 0, s) + 1
                 c0 = s - (code.rfind("\n", 0, s) + 1)
@@ -6391,12 +6232,11 @@ class App(tk.Tk):
             f.cost = int(self._fv_cost.get())
             raw_ai = self._fv_ai_raw.get("1.0", "end").strip()
             f.ai_will_do_raw = raw_ai
-            import re as _re
 
             # Accept either `base` or `factor` at top level (MD convention uses `base`).
-            m = _re.search(r"^\s*base\s*=\s*([\d.]+)", raw_ai, _re.MULTILINE)
+            m = re.search(r"^\s*base\s*=\s*([\d.]+)", raw_ai, re.MULTILINE)
             if not m:
-                m = _re.search(r"^\s*factor\s*=\s*([\d.]+)", raw_ai, _re.MULTILINE)
+                m = re.search(r"^\s*factor\s*=\s*([\d.]+)", raw_ai, re.MULTILINE)
             f.ai_will_do = int(float(m.group(1))) if m else 1
             nx = int(self._fv_x.get())
             ny = int(self._fv_y.get())
@@ -6876,12 +6716,6 @@ class App(tk.Tk):
         """Legacy stub — no longer used for drag-line connect. Kept for safety."""
         self._pick_prereq()
 
-    def _end_connect(self):
-        self.conn_src = None
-        if self._temp_line:
-            self.cv.delete(self._temp_line)
-            self._temp_line = None
-
     def _make_prereq(self, child, parent):
         for g in child.prereqs:
             if parent.id in g:
@@ -7000,7 +6834,6 @@ class App(tk.Tk):
           6. Commit to canvas with proper HOI4 structure
         """
         import base64
-        import re as _re
         import urllib.parse
         import xml.etree.ElementTree as ET
         import zlib
@@ -7067,7 +6900,7 @@ class App(tk.Tk):
         cells = graph_root.findall(".//mxCell")
 
         def clean_label(raw):
-            s = _re.sub(r"<[^>]+>", "", raw or "")
+            s = re.sub(r"<[^>]+>", "", raw or "")
             for ent, ch in [
                 ("&amp;", "&"),
                 ("&lt;", "<"),
@@ -7077,8 +6910,8 @@ class App(tk.Tk):
             ]:
                 s = s.replace(ent, ch)
             s = s.strip()
-            s = _re.sub(r"[\s\-]+", "_", s)
-            s = _re.sub(r"[^A-Za-z0-9_]", "", s)
+            s = re.sub(r"[\s\-]+", "_", s)
+            s = re.sub(r"[^A-Za-z0-9_]", "", s)
             return s
 
         vertices = {}
@@ -7843,9 +7676,8 @@ class App(tk.Tk):
         # If mod is loaded, also try to auto-detect the matching localisation file
         if MOD.loaded and MOD.root:
             try:
-                import re as _re_tag
 
-                _tag_m = _re_tag.search(r"\b([A-Z]{2,4})_[A-Za-z]", raw)
+                _tag_m = re.search(r"\b([A-Z]{2,4})_[A-Za-z]", raw)
                 if _tag_m:
                     _ctag = _tag_m.group(1)
                     _loc_candidates = [
@@ -7883,17 +7715,15 @@ class App(tk.Tk):
         self._tree_country_raw = ""
 
         # ── Extract shared_focus and joint_focus lines BEFORE tokenising ──────
-        import re as _re2
 
-        self._shared_focuses = _re2.findall(r"\bshared_focus\s*=\s*(\S+)", txt)
-        self._joint_focuses = _re2.findall(r"\bjoint_focus\s*=\s*(\S+)", txt)
+        self._shared_focuses = re.findall(r"\bshared_focus\s*=\s*(\S+)", txt)
+        self._joint_focuses = re.findall(r"\bjoint_focus\s*=\s*(\S+)", txt)
 
         # ── Raw block extractor (preserves exact HOI4 syntax) ─────────────────
         def extract_raw_block_from_text(source, key):
             """Extract the contents of 'key = { ... }' as a raw indented string.
             Handles nested braces. Returns the inner text (without outer braces)."""
             pat = key + r"\s*=\s*\{"
-            import re
 
             m = re.search(pat, source)
             if not m:
@@ -7925,10 +7755,9 @@ class App(tk.Tk):
             return ""
 
         # Build per-focus raw completion_reward map keyed by focus id
-        import re as _re
 
         _raw_rewards = {}  # focus_id_str -> raw inner text
-        for _fm in _re.finditer(r"\b(?:shared_focus|focus)\s*=\s*\{", txt):
+        for _fm in re.finditer(r"\b(?:shared_focus|focus)\s*=\s*\{", txt):
             # find matching close of this focus block
             _fs = _fm.end() - 1
             _d = 0
@@ -7943,7 +7772,7 @@ class App(tk.Tk):
                 _fi += 1
             _fblock = txt[_fs + 1 : _fi]
             # get id
-            _id_m = _re.search(r"\bid\s*=\s*(\S+)", _fblock)
+            _id_m = re.search(r"\bid\s*=\s*(\S+)", _fblock)
             if not _id_m:
                 continue
             _fid = _id_m.group(1)
@@ -7967,7 +7796,7 @@ class App(tk.Tk):
                     _raw_rewards[(_fid, _condkey)] = _cv
             # Extract all offset = { x = N y = M trigger = { ... } } blocks as structured data
             _offsets = []
-            for _om in _re.finditer(r"\boffset\s*=\s*\{", _fblock):
+            for _om in re.finditer(r"\boffset\s*=\s*\{", _fblock):
                 _os = _om.end() - 1
                 _od = 0
                 _oi = _os
@@ -7980,8 +7809,8 @@ class App(tk.Tk):
                             break
                     _oi += 1
                 _oinner = _fblock[_os + 1 : _oi]
-                _oxm = _re.search(r"\bx\s*=\s*(-?\d+)", _oinner)
-                _oym = _re.search(r"\by\s*=\s*(-?\d+)", _oinner)
+                _oxm = re.search(r"\bx\s*=\s*(-?\d+)", _oinner)
+                _oym = re.search(r"\by\s*=\s*(-?\d+)", _oinner)
                 _ox = int(_oxm.group(1)) if _oxm else 0
                 _oy = int(_oym.group(1)) if _oym else 0
                 _otrig = extract_raw_block_from_text(_oinner, "trigger")
@@ -8152,10 +7981,9 @@ class App(tk.Tk):
         # can choke on. Walk the raw text, brace-match each `focus = { ... }`
         # block, and parse each one independently. If this finds more focuses
         # than the structured pass, prefer it.
-        import re as _re_robust
 
         _per_block_focuses = []
-        for _bm in _re_robust.finditer(r"\b(?:focus|shared_focus)\s*=\s*\{", txt):
+        for _bm in re.finditer(r"\b(?:focus|shared_focus)\s*=\s*\{", txt):
             _bs = _bm.end() - 1  # position of '{'
             _bd = 0
             _bi = _bs
@@ -8185,10 +8013,9 @@ class App(tk.Tk):
         if not focuses_data:
             # Build a specific error message describing what the file actually contains
             _found_blocks = []
-            import re as _re_diag
 
             for _kw in ("focus_tree", "focus", "shared_focus", "joint_focus"):
-                if _re_diag.search(rf"\b{_kw}\s*=\s*\{{", txt):
+                if re.search(rf"\b{_kw}\s*=\s*\{{", txt):
                     _found_blocks.append(_kw)
             if _found_blocks:
                 _detail = tr(
@@ -8392,7 +8219,6 @@ class App(tk.Tk):
             self.focuses[fid].y = ay
 
         # second pass: link prerequisites and mutex
-        name_list = list(name_to_id.keys())
         for rf in focuses_data:
             fid_str = rf.get("id", "")
             if fid_str not in name_to_id:
@@ -9926,7 +9752,6 @@ class App(tk.Tk):
             return [f"{T}{k} = {v}"]
 
         if t in _SCOPE_TYPES:
-            import re as _re
 
             out = [f"{I}{t} = {{"]
             limit_raw = str(g("limit", "")).strip()
@@ -9957,7 +9782,7 @@ class App(tk.Tk):
                     continue
                 if vs.startswith("{") and vs.endswith("}"):
                     inner2 = vs[1:-1].replace("'", '"').strip()
-                    pairs = _re.findall(r'"(\w+)"\s*[=:]\s*"([^"]*)"', inner2)
+                    pairs = re.findall(r'"(\w+)"\s*[=:]\s*"([^"]*)"', inner2)
                     if pairs:
                         out.append(f"{I}\t{k} = {{")
                         for pk, pv in pairs:
@@ -10069,10 +9894,9 @@ class App(tk.Tk):
                         f"\t\tadd_to_variable = {{ additional_income_rate = {variable_name} }}\n"
                         f"\t}}"
                     )
-                    import re as _re
 
                     # Find calculate_additional_income_rate block
-                    m = _re.search(
+                    m = re.search(
                         r"calculate_additional_income_rate\s*=\s*\{", sys_text
                     )
                     if m:
@@ -10160,11 +9984,10 @@ class App(tk.Tk):
                 )
             else:
                 # Find ADDITIONAL_INCOME_REVENUES_TOOLTIP and append token before closing quote
-                import re as _re2
 
-                pattern = _re2.compile(
-                    r"(" + _re2.escape(tooltip_loc_key) + r'(?::\d+)?\s*")(.*?)(")',
-                    _re2.DOTALL,
+                pattern = re.compile(
+                    r"(" + re.escape(tooltip_loc_key) + r'(?::\d+)?\s*")(.*?)(")',
+                    re.DOTALL,
                 )
                 m2 = pattern.search(yml_text)
                 if m2:
@@ -11945,13 +11768,12 @@ class App(tk.Tk):
                 tr("dialog.select_focus_first", "Select a focus first."),
             )
             return
-        import re as _re
 
         f = self.selected
         nf = copy.deepcopy(f)
         nf.id = id(nf)
         # Generate new unique name
-        base = _re.sub(r"_copy\d*$", "", f.name) + "_copy"
+        base = re.sub(r"_copy\d*$", "", f.name) + "_copy"
         n = 1
         candidate = base
         while candidate in {foc.name for foc in self.focuses.values()}:
@@ -12663,11 +12485,10 @@ class App(tk.Tk):
         # Read existing keys from file (handles both  key: "val"  and  key:0 "val")
         existing_keys = set()
         if os.path.isfile(loc_path):
-            import re as _re_loc
 
             with open(loc_path, encoding="utf-8-sig", errors="replace") as fp:
                 for line in fp:
-                    m = _re_loc.match(r'\s+(\S+?)(?::\d+)?\s*[=:]?\s*"', line)
+                    m = re.match(r'\s+(\S+?)(?::\d+)?\s*[=:]?\s*"', line)
                     if m:
                         existing_keys.add(m.group(1))
 

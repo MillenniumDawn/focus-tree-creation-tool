@@ -19,7 +19,7 @@ _ev_imgsize_cache: dict = {}  # file path -> (w, h)
 _app_img_caches.extend([_ev_gfx_cache, _ev_imgsize_cache])
 
 
-# ── Pre-compiled regex shared between the spirit and event wizards ─
+# ── Pre-compiled regex used by the additional-income wizard ────────
 # Pulls the localisation-key token out of a quoted HOI4 string.
 _LOC_KEY_RE = re.compile(r'\s+(\S+?)(?::\d+)?\s*"')
 
