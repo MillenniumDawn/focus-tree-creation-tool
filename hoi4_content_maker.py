@@ -96,6 +96,7 @@ from hoi4cm.mod import MOD
 from hoi4cm.ui import (
     BG_CARD,
     BG_DARK,
+    BG_HOVER,
     BG_PANEL,
     BLUE,
     BORDER,
@@ -228,6 +229,9 @@ except ImportError:
             _PIL_OK = False
 
 class App(tk.Tk):
+    CANVAS_MIN_SIZE = 10
+    CANVAS_EXPAND_STEP = 5
+
     def __init__(self):
         log.info("App.__init__: calling tk.Tk.__init__...")
         super().__init__()
@@ -245,6 +249,9 @@ class App(tk.Tk):
         self.configure(bg=BG_DARK)
         self.resizable(True, True)
         self.focuses = {}
+        # Inclusive cell bounds of the usable canvas (grid indices).
+        self._canvas_min = [0, 0]
+        self._canvas_max = [self.CANVAS_MIN_SIZE - 1, self.CANVAS_MIN_SIZE - 1]
         self.selected = None
         self._multi_sel = set()  # set of fids in multi-select
         self._multisel_mode = False  # True when multi-select mode active
@@ -2215,175 +2222,35 @@ class App(tk.Tk):
         eff_frm_outer = _make_scroll_panel(p)
         self._sb_frm_eff = eff_frm_outer
 
-        # 🔍 Effect search bar
-        search_frame = tk.Frame(eff_frm_outer, bg=BG_PANEL)
-        search_frame.pack(fill="x", padx=8, pady=(8, 4))
-        tk.Label(
-            search_frame, text="🔍", bg=BG_PANEL, fg=TEXT_DIM, font=("Helvetica", 11)
-        ).pack(side="left", padx=(0, 4))
-        self._eff_search_var = tk.StringVar()
-        eff_search_entry = tk.Entry(
-            search_frame,
-            textvariable=self._eff_search_var,
-            bg=BG_CARD,
-            fg=TEXT,
-            insertbackground=BLUE,
-            font=("Helvetica", 10),
-            relief="flat",
-            highlightthickness=1,
-            highlightbackground=BORDER_G,
-        )
-
-        # Placeholder hint
-        def _ph_in(e):
-            if self._eff_search_var.get() == tr(
-                "focus.effects.search_placeholder", "Search effects..."
-            ):
-                self._eff_search_var.set("")
-                eff_search_entry.config(fg=TEXT)
-
-        def _ph_out(e):
-            if not self._eff_search_var.get():
-                self._eff_search_var.set(
-                    tr("focus.effects.search_placeholder", "Search effects...")
-                )
-                eff_search_entry.config(fg=TEXT_DIM)
-
-        self._eff_search_var.set(
-            tr("focus.effects.search_placeholder", "Search effects...")
-        )
-        eff_search_entry.config(fg=TEXT_DIM)
-        eff_search_entry.bind("<FocusIn>", _ph_in)
-        eff_search_entry.bind("<FocusOut>", _ph_out)
-        eff_search_entry.pack(fill="x", expand=True, ipady=4)
-        # Category filter
-        cat_row = tk.Frame(eff_frm_outer, bg=BG_PANEL)
-        cat_row.pack(fill="x", padx=8, pady=(0, 4))
-        tk.Label(
-            cat_row,
-            text=tr("common.category", "Category:"),
-            bg=BG_PANEL,
-            fg=TEXT_DIM,
-            font=("Helvetica", 9),
-        ).pack(side="left")
-        self._eff_cat = tk.StringVar(value=EFFECT_CATS[0])
-        self._eff_cat_menu_row = cat_row  # store row for rebuilding
-        cm = tk.OptionMenu(
-            cat_row,
-            self._eff_cat,
-            *EFFECT_CATS,
-            command=lambda _: self._rebuild_eff_dd(),
-        )
-        cm.config(
-            bg=BG_CARD,
-            fg=TEXT,
-            activebackground=BORDER_G,
-            font=("Helvetica", 9),
-            relief="flat",
-            highlightthickness=1,
-            highlightbackground=BORDER_G,
-            width=12,
-            anchor="w",
-        )
-        cm["menu"].config(
-            bg=BG_CARD, fg=TEXT, activebackground=BORDER_G, font=("Helvetica", 9)
-        )
-        cm.pack(side="left", padx=4)
-        self._eff_cat_menu_widget = cm  # keep reference for dynamic rebuild
-
-        # Effect type dropdown
-        dd_row = tk.Frame(eff_frm_outer, bg=BG_PANEL)
-        dd_row.pack(fill="x", padx=8, pady=2)
-        self._eff_type = tk.StringVar()
-        self._eff_dd_frame = tk.Frame(dd_row, bg=BG_PANEL)
-        self._eff_dd_frame.pack(side="left", fill="x", expand=True)
-        self._rebuild_eff_dd()
-
-        # + Add Effect button — prominent, full width, TOP of effects
-        tk.Button(
+        # A single button opens the full effect browser popup; the sidebar
+        # itself stays focused on the effects you've already added.
+        self._mk_btn(
             eff_frm_outer,
-            text=tr("focus.effects.add", "+ Add Effect"),
-            command=self._add_effect,
-            bg="#14532d",
+            tr("focus.effects.add", "＋  Add Effect"),
+            self._open_effect_browser,
             fg="#4ade80",
-            font=("Helvetica", 10, "bold"),
-            relief="flat",
-            pady=7,
-            cursor="hand2",
-            highlightthickness=0,
-        ).pack(fill="x", padx=8, pady=(2, 6))
+            bg="#14532d",
+            font_size=10,
+            pady=8,
+        ).pack(fill="x", padx=10, pady=(10, 6))
 
-        tk.Frame(eff_frm_outer, bg=BORDER_G, height=1).pack(fill="x", padx=6)
+        # ── Added effects ─────────────────────────────────────────────
+        tk.Frame(eff_frm_outer, bg=BORDER_G, height=1).pack(
+            fill="x", padx=10, pady=(2, 0)
+        )
         tk.Label(
             eff_frm_outer,
-            text=tr("focus.effects.added", "  ADDED EFFECTS"),
+            text=tr("focus.effects.added", "ADDED EFFECTS"),
             bg=BG_PANEL,
             fg=TEXT_DIM,
             font=("Helvetica", 8, "bold"),
             anchor="w",
-        ).pack(fill="x", pady=(4, 2))
+            padx=10,
+        ).pack(fill="x", pady=(6, 2))
 
-        # Container for effect cards (same as before, referenced by _add_effect/_render_effects)
+        # Container for effect cards (referenced by _refresh_effects).
         self._eff_box = tk.Frame(eff_frm_outer, bg=BG_PANEL)
-        self._eff_box.pack(fill="x", padx=8)
-
-        # Wire up search filter
-        def _filter_eff_dd(*_):
-            raw = self._eff_search_var.get()
-            if raw == tr("focus.effects.search_placeholder", "Search effects..."):
-                return
-            query = raw.lower().strip()
-            for w in self._eff_dd_frame.winfo_children():
-                w.destroy()
-            if query:
-                # Show filtered results across ALL categories
-                matches = [
-                    (k, v["label"], v["cat"])
-                    for k, v in EFFECT_DEFS.items()
-                    if query in k.lower()
-                    or query in v["label"].lower()
-                    or query in v.get("cat", "").lower()
-                ]
-                if not matches:
-                    tk.Label(
-                        self._eff_dd_frame,
-                        text=tr("focus.effects.none_found", "No effects found"),
-                        bg=BG_PANEL,
-                        fg=TEXT_DIM,
-                        font=("Helvetica", 9),
-                        anchor="w",
-                    ).pack(fill="x")
-                    return
-                self._eff_type.set(matches[0][0])
-                om = tk.OptionMenu(
-                    self._eff_dd_frame, self._eff_type, *[k for k, _, _ in matches]
-                )
-                menu = om["menu"]
-                menu.delete(0, "end")
-                for k, lbl, cat in matches:
-                    menu.add_command(
-                        label=f"[{cat}]  {k}  —  {lbl}",
-                        command=lambda v=k: self._eff_type.set(v),
-                    )
-                om.config(
-                    bg=BG_CARD,
-                    fg=TEXT,
-                    activebackground=SEL_BG,
-                    font=("Georgia", 8),
-                    relief="flat",
-                    highlightthickness=1,
-                    highlightbackground=BORDER,
-                    anchor="w",
-                    width=30,
-                )
-                om["menu"].config(
-                    bg=BG_CARD, fg=TEXT, activebackground=SEL_BG, font=("Georgia", 8)
-                )
-                om.pack(fill="x", expand=True)
-            else:
-                self._rebuild_eff_dd()
-
-        self._eff_search_var.trace_add("write", _filter_eff_dd)
+        self._eff_box.pack(fill="x", padx=10, pady=(0, 8))
 
     def _build_sidebar_conditions(self, p, _make_scroll_panel):
         # ── TAB 3: Conditions ──────────────────────────────────────────
@@ -2661,36 +2528,411 @@ class App(tk.Tk):
         self._tab_host.pack_forget()
         self._sb_none.pack(fill="both", expand=True)
 
-    def _rebuild_eff_dd(self):
-        for w in self._eff_dd_frame.winfo_children():
-            w.destroy()
-        cat = self._eff_cat.get()
-        types = effects_in_cat(cat)
-        if not types:
+    def _center_window(self, win, w=None, h=None, over=None):
+        """Position a Toplevel centered on screen (or centered over `over`)."""
+        win.update_idletasks()
+        if not w:
+            w = win.winfo_width() if win.winfo_width() > 1 else win.winfo_reqwidth()
+        if not h:
+            h = win.winfo_height() if win.winfo_height() > 1 else win.winfo_reqheight()
+        if over is not None and over.winfo_exists() and over.winfo_width() > 1:
+            x = over.winfo_rootx() + (over.winfo_width() - w) // 2
+            y = over.winfo_rooty() + (over.winfo_height() - h) // 2
+        else:
+            x = (win.winfo_screenwidth() - w) // 2
+            y = (win.winfo_screenheight() - h) // 2
+        win.geometry(f"{w}x{h}+{max(0, x)}+{max(0, y)}")
+
+    def _open_effect_browser(self):
+        """Popup browser: categories + searchable effect cards. Picking a card
+        opens a parameter form for that effect."""
+        if not self.selected:
+            self._hint(tr("dialog.select_focus_first", "Select a focus first."))
             return
-        self._eff_type.set(types[0][0])
-        om = tk.OptionMenu(self._eff_dd_frame, self._eff_type, *[k for k, _ in types])
-        menu = om["menu"]
-        menu.delete(0, "end")
-        for k, lbl in types:
-            menu.add_command(
-                label=f"{k}  —  {lbl}", command=lambda v=k: self._eff_type.set(v)
-            )
-        om.config(
+        existing = getattr(self, "_eb_win", None)
+        if existing is not None and existing.winfo_exists():
+            existing.deiconify()
+            existing.lift()
+            existing.focus_force()
+            return
+
+        win = tk.Toplevel(self)
+        self._eb_win = win
+        win.title(tr("focus.effects.browser_title", "Add Effect"))
+        win.configure(bg=BG_DARK)
+        win.geometry("720x560")
+        win.minsize(560, 380)
+        win.transient(self)
+
+        cats = ["All"] + list(EFFECT_CATS)
+
+        # ── Search row ─────────────────────────────────────────────
+        top = tk.Frame(win, bg=BG_DARK)
+        top.pack(fill="x", padx=12, pady=(12, 8))
+        tk.Label(
+            top, text="🔍", bg=BG_DARK, fg=TEXT_DIM, font=("Helvetica", 12)
+        ).pack(side="left", padx=(0, 6))
+        search_var = tk.StringVar()
+        search = tk.Entry(
+            top,
+            textvariable=search_var,
             bg=BG_CARD,
             fg=TEXT,
-            activebackground=SEL_BG,
-            font=("Georgia", 8),
+            insertbackground=BLUE,
+            font=("Helvetica", 11),
             relief="flat",
             highlightthickness=1,
-            highlightbackground=BORDER,
+            highlightbackground=BORDER_G,
+        )
+        search.pack(side="left", fill="x", expand=True, ipady=6)
+
+        # ── Body: categories | effect cards ────────────────────────
+        body = tk.Frame(win, bg=BG_DARK)
+        body.pack(fill="both", expand=True, padx=12)
+
+        cat_lb = tk.Listbox(
+            body,
+            bg=BG_CARD,
+            fg=TEXT,
+            selectbackground=SEL_BG,
+            selectforeground="#ffffff",
+            relief="flat",
+            highlightthickness=1,
+            highlightbackground=BORDER_G,
+            font=("Helvetica", 10),
+            width=18,
+            activestyle="none",
+            exportselection=False,
+        )
+        cat_lb.pack(side="left", fill="y")
+        for c in cats:
+            cat_lb.insert("end", c)
+        cat_lb.selection_set(0)
+
+        card_wrap = tk.Frame(body, bg=BG_DARK)
+        card_wrap.pack(side="left", fill="both", expand=True, padx=(10, 0))
+        card_cv = tk.Canvas(card_wrap, bg=BG_PANEL, highlightthickness=0)
+        card_sb = tk.Scrollbar(card_wrap, orient="vertical", command=card_cv.yview)
+        card_holder = tk.Frame(card_cv, bg=BG_PANEL)
+        card_win = card_cv.create_window((0, 0), window=card_holder, anchor="nw")
+        card_cv.configure(yscrollcommand=card_sb.set)
+        card_holder.bind(
+            "<Configure>", lambda e: card_cv.configure(scrollregion=card_cv.bbox("all"))
+        )
+        card_cv.bind(
+            "<Configure>", lambda e: card_cv.itemconfig(card_win, width=e.width)
+        )
+
+        def _wheel(e):
+            card_cv.yview_scroll(int(-1 * (e.delta / 120)), "units")
+
+        card_cv.bind("<MouseWheel>", _wheel)
+        card_sb.pack(side="right", fill="y")
+        card_cv.pack(side="left", fill="both", expand=True)
+
+        # ── Footer ─────────────────────────────────────────────────
+        foot = tk.Frame(win, bg=BG_DARK)
+        foot.pack(fill="x", padx=12, pady=12)
+        status = tk.Label(
+            foot, text="", bg=BG_DARK, fg=TEXT_DIM, font=("Helvetica", 9)
+        )
+        status.pack(side="left")
+        self._eb_status = status
+        self._mk_btn(foot, tr("common.close", "Close"), win.destroy).pack(side="right")
+
+        def _cur_cat():
+            sel = cat_lb.curselection()
+            return cats[sel[0]] if sel else "All"
+
+        CAP = 60
+
+        def _refill(*_):
+            for w in card_holder.winfo_children():
+                w.destroy()
+            q = search_var.get().lower().strip()
+            cat = _cur_cat()
+            shown = 0
+            total = 0
+            for k, v in EFFECT_DEFS.items():
+                if cat != "All" and v.get("cat") != cat:
+                    continue
+                if q and q not in k.lower() and q not in v["label"].lower():
+                    continue
+                total += 1
+                if shown < CAP:
+                    self._eff_browser_card(card_holder, k, v, _wheel)
+                    shown += 1
+            if total == 0:
+                tk.Label(
+                    card_holder,
+                    text=tr("focus.effects.none_found", "No effects match."),
+                    bg=BG_PANEL,
+                    fg=TEXT_DIM,
+                    font=("Helvetica", 10, "italic"),
+                    anchor="w",
+                ).pack(fill="x", padx=6, pady=8)
+            elif total > CAP:
+                tk.Label(
+                    card_holder,
+                    text=tr(
+                        "focus.effects.more",
+                        "+{n} more — refine your search",
+                        n=total - CAP,
+                    ),
+                    bg=BG_PANEL,
+                    fg=TEXT_DIM,
+                    font=("Helvetica", 9, "italic"),
+                    anchor="w",
+                ).pack(fill="x", padx=6, pady=(4, 8))
+            card_cv.yview_moveto(0)
+            status.config(text=tr("focus.effects.count", "{n} effect(s)", n=total))
+
+        cat_lb.bind("<<ListboxSelect>>", _refill)
+        search_var.trace_add("write", _refill)
+        win.bind("<Escape>", lambda e: win.destroy())
+
+        _refill()
+        self._center_window(win, 720, 560)
+        search.focus_set()
+
+    def _effect_desc(self, defn):
+        """A short human explanation of an effect from its note / field hints."""
+        note = defn.get("_note")
+        if note:
+            return note
+        fields = defn.get("fields", [])
+        if not fields:
+            return tr("focus.effects.no_params", "No parameters.")
+        if len(fields) == 1 and fields[0][3]:
+            return fields[0][3]
+        return tr(
+            "focus.effects.params_list",
+            "Parameters: {p}",
+            p=", ".join(f[0] for f in fields),
+        )
+
+    def _eff_browser_card(self, parent, key, defn, on_wheel=None):
+        """A clickable effect card that opens the parameter form for `key`."""
+        card = tk.Frame(
+            parent, bg=BG_CARD, highlightthickness=1, highlightbackground=BORDER
+        )
+        card.pack(fill="x", padx=4, pady=3)
+        head = tk.Frame(card, bg=BG_CARD)
+        head.pack(fill="x", padx=8, pady=(6, 0))
+        lbl_name = tk.Label(
+            head,
+            text=defn["label"],
+            bg=BG_CARD,
+            fg=TEXT,
+            font=("Helvetica", 10, "bold"),
             anchor="w",
-            width=30,
         )
-        om["menu"].config(
-            bg=BG_CARD, fg=TEXT, activebackground=SEL_BG, font=("Georgia", 8)
+        lbl_name.pack(side="left")
+        lbl_cat = tk.Label(
+            head,
+            text=defn.get("cat", ""),
+            bg=BG_CARD,
+            fg=BLUE,
+            font=("Helvetica", 7, "bold"),
+            anchor="e",
         )
-        om.pack(fill="x", expand=True)
+        lbl_cat.pack(side="right")
+        lbl_code = tk.Label(
+            card, text=key, bg=BG_CARD, fg=TEXT_DIM, font=("Courier", 8), anchor="w"
+        )
+        lbl_code.pack(fill="x", padx=8)
+        lbl_desc = tk.Label(
+            card,
+            text=self._effect_desc(defn),
+            bg=BG_CARD,
+            fg="#94a3b8",
+            font=("Helvetica", 8),
+            anchor="w",
+            justify="left",
+            wraplength=380,
+        )
+        lbl_desc.pack(fill="x", padx=8, pady=(1, 6))
+
+        cells = [card, head, lbl_name, lbl_cat, lbl_code, lbl_desc]
+
+        def _set_bg(color):
+            for w in cells:
+                try:
+                    w.config(bg=color)
+                except tk.TclError:
+                    pass
+
+        def _open(_=None):
+            self._open_effect_params(key)
+
+        for w in cells:
+            w.config(cursor="hand2")
+            w.bind("<Button-1>", _open)
+            w.bind("<Enter>", lambda e: _set_bg(BG_HOVER))
+            w.bind("<Leave>", lambda e: _set_bg(BG_CARD))
+            if on_wheel is not None:
+                w.bind("<MouseWheel>", on_wheel)
+
+    def _open_effect_params(self, key):
+        """Popup form for one effect's parameters; confirms add to the focus."""
+        defn = EFFECT_DEFS.get(key, {})
+        fields = defn.get("fields", [])
+        # No-parameter effects are added straight away.
+        if not fields:
+            self._add_effect_type(key)
+            self._flash_added(defn.get("label", key))
+            return
+
+        pop = tk.Toplevel(self)
+        pop.title(defn.get("label", key))
+        pop.configure(bg=BG_DARK)
+        parent = self._eb_win if (getattr(self, "_eb_win", None) and self._eb_win.winfo_exists()) else self
+        pop.transient(parent)
+        pop.resizable(False, False)
+
+        tk.Label(
+            pop,
+            text=defn.get("label", key),
+            bg=BG_DARK,
+            fg=TEXT,
+            font=("Helvetica", 12, "bold"),
+            anchor="w",
+        ).pack(fill="x", padx=14, pady=(12, 0))
+        tk.Label(
+            pop, text=key, bg=BG_DARK, fg=TEXT_DIM, font=("Courier", 8), anchor="w"
+        ).pack(fill="x", padx=14)
+        note = defn.get("_note")
+        if note:
+            tk.Label(
+                pop,
+                text=note,
+                bg=BG_DARK,
+                fg="#94a3b8",
+                font=("Helvetica", 9),
+                anchor="w",
+                justify="left",
+                wraplength=380,
+            ).pack(fill="x", padx=14, pady=(4, 0))
+        tk.Frame(pop, bg=BORDER_G, height=1).pack(fill="x", padx=14, pady=(8, 4))
+
+        form = tk.Frame(pop, bg=BG_DARK)
+        form.pack(fill="both", expand=True, padx=14, pady=4)
+        getters = {}
+        for fname, wtype, default, hint in fields:
+            row = tk.Frame(form, bg=BG_DARK)
+            row.pack(fill="x", pady=4)
+            tk.Label(
+                row,
+                text=fname,
+                bg=BG_DARK,
+                fg=TEXT,
+                font=("Helvetica", 9, "bold"),
+                anchor="w",
+            ).pack(fill="x")
+            if wtype.startswith("dropdown:"):
+                opts = wtype.split(":", 1)[1].split(",")
+                var = tk.StringVar(value=default if default in opts else opts[0])
+                om = tk.OptionMenu(row, var, *opts)
+                om.config(
+                    bg=BG_CARD,
+                    fg=TEXT,
+                    activebackground=BG_HOVER,
+                    font=("Helvetica", 10),
+                    relief="flat",
+                    highlightthickness=1,
+                    highlightbackground=BORDER_G,
+                    anchor="w",
+                )
+                om["menu"].config(
+                    bg=BG_CARD, fg=TEXT, activebackground=SEL_BG, font=("Helvetica", 10)
+                )
+                om.pack(fill="x", pady=(2, 0))
+                getters[fname] = var.get
+            else:
+                var = tk.StringVar(value=default)
+                ent = tk.Entry(
+                    row,
+                    textvariable=var,
+                    bg=BG_CARD,
+                    fg=TEXT,
+                    insertbackground=BLUE,
+                    font=("Helvetica", 10),
+                    relief="flat",
+                    highlightthickness=1,
+                    highlightbackground=BORDER_G,
+                )
+                ent.pack(fill="x", ipady=3, pady=(2, 0))
+                getters[fname] = var.get
+            if hint:
+                tk.Label(
+                    row,
+                    text=hint,
+                    bg=BG_DARK,
+                    fg=TEXT_DIM,
+                    font=("Helvetica", 8, "italic"),
+                    anchor="w",
+                    justify="left",
+                    wraplength=380,
+                ).pack(fill="x")
+
+        footer = tk.Frame(pop, bg=BG_DARK)
+        footer.pack(fill="x", padx=14, pady=(6, 12))
+
+        def _confirm(_=None):
+            values = {fn: g() for fn, g in getters.items()}
+            self._add_effect_type(key, values)
+            self._flash_added(defn.get("label", key))
+            pop.destroy()
+
+        self._mk_btn(footer, tr("common.cancel", "Cancel"), pop.destroy).pack(
+            side="right"
+        )
+        self._mk_btn(
+            footer,
+            tr("focus.effects.add_this", "＋  Add Effect"),
+            _confirm,
+            fg="#4ade80",
+            bg="#14532d",
+        ).pack(side="right", padx=(0, 8))
+        pop.bind("<Return>", _confirm)
+        pop.bind("<Escape>", lambda e: pop.destroy())
+        self._center_window(pop, over=parent if parent is not self else None)
+
+        def _grab():
+            try:
+                if pop.winfo_exists():
+                    pop.grab_set()
+            except tk.TclError:
+                pass  # window not viewable yet — modality is a nicety, skip
+
+        pop.after(50, _grab)
+
+    def _flash_added(self, label):
+        """Confirm an add in the browser status line and the main hint bar."""
+        msg = tr("focus.effects.added_one", "Added: {name}", name=label)
+        st = getattr(self, "_eb_status", None)
+        try:
+            if st is not None and st.winfo_exists():
+                st.config(text=msg)
+        except tk.TclError:
+            pass
+        self._hint(msg)
+
+    def _add_effect_type(self, etype, fields=None):
+        """Append an effect to the selected focus.
+
+        `fields` (from the parameter form) overrides the per-field defaults when
+        provided; otherwise the effect's defaults are used.
+        """
+        if not self.selected:
+            self._hint(tr("dialog.select_focus_first", "Select a focus first."))
+            return
+        self._push_undo("add effect")
+        defn = EFFECT_DEFS.get(etype, {})
+        if fields is None:
+            fields = {fn: dv for fn, _, dv, _ in defn.get("fields", [])}
+        self.selected.effects.append({"type": etype, "fields": dict(fields)})
+        self._refresh_effects()
 
     # ── CANVAS ──────────────────────────────────────────────────
     def _bind_canvas(self):
@@ -2729,6 +2971,70 @@ class App(tk.Tk):
     def snap(self, gx, gy):
         return int(gx), int(gy)
 
+    # ── CANVAS BOUNDS ───────────────────────────────────────────
+    def _reset_canvas_bounds(self):
+        """Shrink the usable canvas back to the minimum CANVAS_MIN_SIZE square."""
+        self._canvas_min = [0, 0]
+        self._canvas_max = [self.CANVAS_MIN_SIZE - 1, self.CANVAS_MIN_SIZE - 1]
+
+    def _ensure_canvas_contains(self, gx, gy):
+        """Grow the canvas by CANVAS_EXPAND_STEP toward (gx, gy) until it fits.
+
+        A focus placed on an edge cell (e.g. the last column) expands the canvas
+        in that direction too, so there is always a frontier of empty cells
+        ahead. Bounds only ever grow (never shrink), so editing near an edge
+        keeps the room earlier placements created. Returns True if bounds changed.
+        """
+        step = self.CANVAS_EXPAND_STEP
+        changed = False
+        while gx <= self._canvas_min[0]:
+            self._canvas_min[0] -= step
+            changed = True
+        while gx >= self._canvas_max[0]:
+            self._canvas_max[0] += step
+            changed = True
+        while gy <= self._canvas_min[1]:
+            self._canvas_min[1] -= step
+            changed = True
+        while gy >= self._canvas_max[1]:
+            self._canvas_max[1] += step
+            changed = True
+        return changed
+
+    def _grow_canvas_to_focuses(self):
+        """Expand bounds so every existing focus sits inside the usable canvas."""
+        changed = False
+        for f in self.focuses.values():
+            if self._ensure_canvas_contains(f.x, f.y):
+                changed = True
+        return changed
+
+    def _draw_canvas_bounds(self):
+        """Dim everything outside the usable canvas and outline its edge."""
+        self.cv.delete("canvas_mask")
+        W = max(1, self.cv.winfo_width())
+        H = max(1, self.cv.winfo_height())
+        x0, y0 = self.w2c(self._canvas_min[0] - 0.5, self._canvas_min[1] - 0.5)
+        x1, y1 = self.w2c(self._canvas_max[0] + 0.5, self._canvas_max[1] + 0.5)
+        outside = "#080b12"
+
+        def _mask(a, b, c, d):
+            if c > a and d > b:
+                self.cv.create_rectangle(
+                    a, b, c, d, fill=outside, outline="", tags="canvas_mask"
+                )
+
+        _mask(0, 0, x0, H)  # left
+        _mask(x1, 0, W, H)  # right
+        _mask(max(x0, 0), 0, min(x1, W), y0)  # top
+        _mask(max(x0, 0), y1, min(x1, W), H)  # bottom
+        self.cv.create_rectangle(
+            x0, y0, x1, y1, outline=BLUE, width=2, tags="canvas_mask"
+        )
+        self.cv.tag_lower("canvas_mask")
+        if self.cv.find_withtag("grid"):
+            self.cv.tag_lower("grid")
+
     def _redraw(self):
         """Throttled full redraw — cancels any pending and schedules one 16ms out."""
         if self._redraw_job:
@@ -2740,7 +3046,9 @@ class App(tk.Tk):
         self._redraw_pending = False
         cw = max(1, self.cv.winfo_width())
         ch = max(1, self.cv.winfo_height())
+        self._grow_canvas_to_focuses()
         self._draw_grid()
+        self._draw_canvas_bounds()
         self._draw_coord_labels()
         self._draw_lines()
         for f in self.focuses.values():
@@ -2773,7 +3081,9 @@ class App(tk.Tk):
         self._redraw_pending = False
         cw = max(1, self.cv.winfo_width())
         ch = max(1, self.cv.winfo_height())
+        self._grow_canvas_to_focuses()
         self._draw_grid()
+        self._draw_canvas_bounds()
         self._draw_coord_labels()
         self._draw_lines()
         for f in self.focuses.values():
@@ -2783,114 +3093,65 @@ class App(tk.Tk):
         self._draw_minimap()
 
     def _draw_grid(self):
-        """Render grid as a single PhotoImage — O(1) canvas objects regardless of size."""
-        if not getattr(self, "_grid_on", True):
-            if hasattr(self, "_grid_item") and self._grid_item:
-                self.cv.itemconfig(self._grid_item, state="hidden")
-            return
+        """Draw the bounded grid as native canvas lines.
+
+        The canvas is finite (min 10x10, grows by 5), so the grid is only a few
+        dozen line items — far cheaper than the old full-viewport PhotoImage that
+        was rebuilt pixel-by-pixel in Python every frame. Because the lines are
+        real canvas items tagged "grid", panning is a pure ``cv.move`` with no
+        rebuild; we only regenerate on zoom, resize or a bounds change.
+        """
         W = max(1, self.cv.winfo_width())
         H = max(1, self.cv.winfo_height())
-        stepx = XGRID * self.zoom  # horizontal cell size
-        stepy = YGRID * self.zoom  # vertical cell size (130px, taller than wide)
-        step = stepx  # kept for cache key compat
-        step2 = stepx * 2
-        # Skip grid entirely at very low zoom (too dense to see anyway)
-        if XGRID * self.zoom < 4:
-            if self._grid_item:
-                self.cv.itemconfig(self._grid_item, state="hidden")
-            return
-        elif self._grid_item:
-            self.cv.itemconfig(self._grid_item, state="normal")
-        if step < 2:
-            step = 2
-        if step2 < 4:
-            step2 = 4
+        z = self.zoom
+        on = getattr(self, "_grid_on", True)
+        stepx = XGRID * z
 
-        # Build key to detect if we can reuse cached image
+        # Rebuild only when something visible actually changed.
         key = (
-            int(step * 4),
-            int(self.offset[0] * 4) % (int(step2 * 4) + 1),
-            int(self.offset[1] * 4) % (int(step2 * 4) + 1),
+            on,
+            round(z, 4),
+            tuple(self._canvas_min),
+            tuple(self._canvas_max),
+            round(self.offset[0], 1),
+            round(self.offset[1], 1),
             W,
             H,
         )
-        if key == self._grid_key and self._grid_img:
-            return  # nothing changed — skip entirely
-
+        if key == self._grid_key and self.cv.find_withtag("grid"):
+            return
         self._grid_key = key
+        self.cv.delete("grid")
+        self._grid_item = None
+        # Hide when toggled off or so dense the lines would smear together.
+        if not on or stepx < 4:
+            return
 
-        # Draw grid into a raw PPM byte array — much faster than tk line-by-line
-        # Use bytearray for speed; build row by row
-        bg = (17, 24, 39)  # CANVAS_BG dark
-        mn = (30, 41, 59)  # minor grid
-        mj = (45, 58, 78)  # major grid (brighter)
+        minx, miny = self._canvas_min
+        maxx, maxy = self._canvas_max
+        stepy = YGRID * z
+        x0 = minx * XGRID * z + self.offset[0] - stepx / 2
+        x1 = maxx * XGRID * z + self.offset[0] + stepx / 2
+        y0 = miny * YGRID * z + self.offset[1] - stepy / 2
+        y1 = maxy * YGRID * z + self.offset[1] + stepy / 2
+        minor = "#1e293b"  # subtle cell line
+        major = "#2d3a4e"  # brighter line every other column/row
 
-        # Pre-compute which columns are minor/major grid lines
-        stepy2 = stepy * 2
-        ox_minor = self.offset[0] % stepx
-        ox_major = self.offset[0] % step2
-        oy_minor = self.offset[1] % stepy
-        oy_major = self.offset[1] % stepy2
-
-        step_i = max(1, int(stepx))
-        step2_i = max(2, int(step2))
-        stepy_i = max(1, int(stepy))
-        stepy2_i = max(2, int(stepy2))
-
-        # Build column color lookup
-        col_color = [None] * W
-        for x in range(W):
-            rx_major = (x - ox_major) % step2_i
-            rx_minor = (x - ox_minor) % step_i
-            if rx_major == 0 or rx_major == step2_i - 1:
-                col_color[x] = mj
-            elif step_i >= 20 and (rx_minor == 0 or rx_minor == step_i - 1):
-                col_color[x] = mn
-            else:
-                col_color[x] = bg
-
-        # Build row color lookup (uses YGRID spacing)
-        row_color = [None] * H
-        for y in range(H):
-            ry_major = (y - oy_major) % stepy2_i
-            ry_minor = (y - oy_minor) % stepy_i
-            if ry_major == 0 or ry_major == stepy2_i - 1:
-                row_color[y] = mj
-            elif stepy_i >= 20 and (ry_minor == 0 or ry_minor == stepy_i - 1):
-                row_color[y] = mn
-            else:
-                row_color[y] = None  # use col color
-
-        # Build PPM data
-        ppm_header = f"P6\n{W} {H}\n255\n".encode()
-        row_bytes = bytearray(W * 3)
-        rows = []
-        for y in range(H):
-            rc = row_color[y]
-            if rc:
-                # entire row is a grid line
-                for x in range(W):
-                    row_bytes[x * 3] = rc[0]
-                    row_bytes[x * 3 + 1] = rc[1]
-                    row_bytes[x * 3 + 2] = rc[2]
-            else:
-                for x in range(W):
-                    c = col_color[x]
-                    row_bytes[x * 3] = c[0]
-                    row_bytes[x * 3 + 1] = c[1]
-                    row_bytes[x * 3 + 2] = c[2]
-            rows.append(bytes(row_bytes))
-
-        ppm_data = ppm_header + b"".join(rows)
-        self._grid_img = tk.PhotoImage(data=ppm_data)
-
-        # Single canvas item for entire grid
-        if self._grid_item:
-            self.cv.itemconfig(self._grid_item, image=self._grid_img)
-            self.cv.coords(self._grid_item, 0, 0)
-        else:
-            self._grid_item = self.cv.create_image(
-                0, 0, anchor="nw", image=self._grid_img, tags="grid"
+        # Vertical cell boundaries (a boundary sits at each gx - 0.5).
+        for gx in range(minx, maxx + 2):
+            px = gx * XGRID * z + self.offset[0] - stepx / 2
+            self.cv.create_line(
+                px, y0, px, y1,
+                fill=(major if gx % 2 == 0 else minor),
+                tags="grid",
+            )
+        # Horizontal cell boundaries.
+        for gy in range(miny, maxy + 2):
+            py = gy * YGRID * z + self.offset[1] - stepy / 2
+            self.cv.create_line(
+                x0, py, x1, py,
+                fill=(major if gy % 2 == 0 else minor),
+                tags="grid",
             )
         self.cv.tag_lower("grid")
 
@@ -2988,8 +3249,8 @@ class App(tk.Tk):
             tags="coord_lbl",
         )
 
-        # Keep above grid image, below focuses
-        if self._grid_item:
+        # Keep above the grid lines, below focuses
+        if self.cv.find_withtag("grid"):
             try:
                 self.cv.tag_raise("coord_lbl", "grid")
             except Exception:
@@ -3066,7 +3327,9 @@ class App(tk.Tk):
 
         if self._lines:
             cv.tag_lower("line")
-            cv.tag_lower("grid")
+            # Guard: grid may have no items (low zoom / toggled off).
+            if cv.find_withtag("grid"):
+                cv.tag_lower("grid")
             # Labels sit below lines so arrows always draw on top of text
             # Guard: tag_lower("focus_lbl","line") crashes if "line" tag has no items
             if cv.find_withtag("focus_lbl"):
@@ -3355,11 +3618,32 @@ class App(tk.Tk):
             cv.itemconfig(off_ind, state="hidden")
 
     # ── MOUSE EVENTS ────────────────────────────────────────────
+    def _focus_id_at(self, x, y):
+        """Return the id of the topmost focus under a canvas pixel, or None.
+
+        Scans by tag rather than relying on Tk's "current item", so an overlay
+        such as the mutex rubber-band line never blocks the hit.
+        """
+        for item in reversed(self.cv.find_overlapping(x - 2, y - 2, x + 2, y + 2)):
+            for tag in self.cv.gettags(item):
+                if len(tag) > 1 and tag[0] == "F" and tag[1:].isdigit():
+                    fid = int(tag[1:])
+                    if fid in self.focuses:
+                        return fid
+        return None
+
     def _lmb_dn(self, e):
+        if self.mutex_mode:
+            tid = self._focus_id_at(e.x, e.y)
+            if tid is not None:
+                src = self.mutex_src
+                if src and tid != src.id:
+                    self._make_mutex(src, self.focuses[tid])
+                self._end_mutex()
+            return
         hits = self.cv.find_overlapping(e.x - 2, e.y - 2, e.x + 2, e.y + 2)
         if not any("focus" in self.cv.gettags(i) for i in hits):
-            if not self.mutex_mode:
-                self._deselect()
+            self._deselect()
 
     def _lmb_mv(self, e):
         pass
@@ -3379,23 +3663,22 @@ class App(tk.Tk):
         self.offset[0] += dx
         self.offset[1] += dy
         self._pan_start = (e.x, e.y)
-        # Slide all items instantly for smooth pan feel
+        # Pure translate of every world item — no rebuilds, so the pan stays
+        # buttery even with a big tree. Grid/focus/line items just slide.
+        self.cv.move("grid", dx, dy)
         self.cv.move("focus", dx, dy)
         self.cv.move("line", dx, dy)
         self.cv.move("templine", dx, dy)
-        self.cv.move("coord_lbl", dx, dy)
-        # Invalidate draw keys + schedule full redraw so everything is correct
-        for f in self.focuses.values():
-            f._draw_key = None
-        self._grid_key = None
-        self._redraw()
+        self.cv.move("cfp", dx, dy)
+        # The dim mask and coordinate ruler are screen-anchored; a redraw of just
+        # these two is cheap (a handful of items) and keeps them crisp.
+        self._draw_canvas_bounds()
+        self._draw_coord_labels()
 
     def _pan_rl(self, e):
         self._pan_start = None
         self.cv.config(cursor="fleur")
-        # Force a clean full redraw on release to fix any residual positioning
-        for f in self.focuses.values():
-            f._draw_key = None
+        # One clean redraw on release snaps everything to exact positions.
         self._redraw_now()
 
     # ── SIDEBAR RESIZE SASH ─────────────────────────────────────
@@ -4908,15 +5191,21 @@ class App(tk.Tk):
             src = self.mutex_src
             if src:
                 cx, cy = self.w2c(src.x, src.y)
-                self.cv.coords(self._temp_line, cx, cy, e.x, e.y)
+                # Snap the free end to the center of the focus under the cursor
+                # so the target is obvious before clicking.
+                tid = self._focus_id_at(e.x, e.y)
+                if tid is not None and tid != src.id:
+                    tx, ty = self.w2c(self.focuses[tid].x, self.focuses[tid].y)
+                else:
+                    tx, ty = e.x, e.y
+                self.cv.coords(self._temp_line, cx, cy, tx, ty)
 
     def _foc_pr(self, fid, e):
-        f = self.focuses[fid]
         if self.mutex_mode:
-            if self.mutex_src.id != fid:
-                self._make_mutex(self.mutex_src, f)
-            self._end_mutex()
+            # Completion is handled at the canvas level (_lmb_dn); swallow the
+            # click here so it never starts a drag or selection.
             return
+        f = self.focuses[fid]
         # Ctrl+click = toggle multi-select
         if self._multisel_mode or (e.state & 0x0004):  # 0x0004 = Ctrl held
             if fid in self._multi_sel:
@@ -5501,26 +5790,49 @@ class App(tk.Tk):
         ef.pack(fill="x", pady=3)
         hdr = tk.Frame(ef, bg=hdr_bg)
         hdr.pack(fill="x")
+        # Accent strip + order number on the left.
+        tk.Frame(hdr, bg=(BLUE if known else ORANGE), width=3).pack(
+            side="left", fill="y"
+        )
         tk.Label(
             hdr,
-            text=f"[{cat}]  {label}",
+            text=str(i + 1),
             bg=hdr_bg,
-            fg=lbl_fg,
+            fg=TEXT_DIM,
+            font=("Courier", 8, "bold"),
+            padx=6,
+        ).pack(side="left")
+        tk.Label(
+            hdr,
+            text=label,
+            bg=hdr_bg,
+            fg=(TEXT if known else ORANGE),
             font=("Helvetica", 9, "bold"),
             anchor="w",
+        ).pack(side="left", fill="x", expand=True, pady=4)
+        tk.Label(
+            hdr,
+            text=cat,
+            bg=hdr_bg,
+            fg=(BLUE if known else ORANGE),
+            font=("Helvetica", 7, "bold"),
             padx=6,
-        ).pack(side="left", fill="x", expand=True)
+        ).pack(side="left")
         tk.Button(
             hdr,
             text="✕",
             command=lambda idx=i: self._rm_effect(idx),
             bg=hdr_bg,
             fg=RED,
+            activebackground=hdr_bg,
+            activeforeground="#ff8888",
             relief="flat",
-            font=("Georgia", 9),
+            font=("Georgia", 10),
             cursor="hand2",
-            padx=4,
-        ).pack(side="right")
+            padx=6,
+            bd=0,
+            highlightthickness=0,
+        ).pack(side="right", fill="y")
 
         def _entry_row(parent, key, val, idx, fkey):
             """Render an editable key=value row."""
@@ -6415,6 +6727,7 @@ class App(tk.Tk):
             return
         self.cv.delete("all")
         self.focuses.clear()
+        self._reset_canvas_bounds()
         self.selected = None
         self._lines.clear()
         self._grid_item = None
@@ -6825,14 +7138,8 @@ class App(tk.Tk):
 
     # ── EFFECT LIVE UPDATES ─────────────────────────────────────
     def _add_effect(self):
-        self._push_undo("add effect")
-        if not self.selected:
-            return
-        etype = self._eff_type.get()
-        defn = EFFECT_DEFS.get(etype, {})
-        defaults = {fn: dv for fn, _, dv, _ in defn.get("fields", [])}
-        self.selected.effects.append({"type": etype, "fields": defaults})
-        self._refresh_effects()
+        # Legacy entry point — effects are now added via the browser popup.
+        self._open_effect_browser()
 
     def _rm_effect(self, idx):
         if not self.selected:
@@ -7594,6 +7901,7 @@ class App(tk.Tk):
         self._push_undo("draw.io import")
         self.cv.delete("all")
         self.focuses.clear()
+        self._reset_canvas_bounds()
         self.selected = None
         self._lines.clear()
         self._grid_item = None
@@ -8078,6 +8386,7 @@ class App(tk.Tk):
         # Clear canvas; _items refs are gone since we cv.delete('all')
         self.cv.delete("all")
         self.focuses.clear()
+        self._reset_canvas_bounds()
         self.selected = None
         self._lines.clear()
         self._grid_item = None
@@ -9132,6 +9441,7 @@ class App(tk.Tk):
             data = json.load(fp)
         self.cv.delete("all")
         self.focuses.clear()
+        self._reset_canvas_bounds()
         self.selected = None
         self._lines.clear()
         self._grid_item = None
@@ -10068,25 +10378,8 @@ class App(tk.Tk):
             EFFECT_CATS = base_cats + sorted(md_cats)
         else:
             EFFECT_CATS = base_cats
-        if hasattr(self, "_eff_cat"):
-            if self._eff_cat.get() not in EFFECT_CATS:
-                self._eff_cat.set(EFFECT_CATS[0])
-            # Rebuild the category OptionMenu so new MD cats appear
-            if (
-                hasattr(self, "_eff_cat_menu_widget")
-                and self._eff_cat_menu_widget.winfo_exists()
-            ):
-                menu = self._eff_cat_menu_widget["menu"]
-                menu.delete(0, "end")
-                for cat in EFFECT_CATS:
-                    menu.add_command(
-                        label=cat,
-                        command=lambda c=cat: (
-                            self._eff_cat.set(c),
-                            self._rebuild_eff_dd(),
-                        ),
-                    )
-            self._rebuild_eff_dd()
+        # The effect browser reads EFFECT_CATS live each time it opens, so the
+        # new categories appear automatically — nothing else to rebuild here.
 
     def _open_settings(self):
         """Settings panel — GFX paths, MD detection, extra dirs."""
@@ -11576,10 +11869,8 @@ class App(tk.Tk):
     def _toggle_grid(self):
         """Toggle canvas grid visibility."""
         self._grid_on = not getattr(self, "_grid_on", True)
-        # Hide or restore the grid item immediately
-        if hasattr(self, "_grid_item") and self._grid_item:
-            state = "normal" if self._grid_on else "hidden"
-            self.cv.itemconfig(self._grid_item, state=state)
+        # Force _draw_grid to rebuild (it honours _grid_on).
+        self._grid_key = None
         self._redraw()
 
     def _toggle_minimap(self):
