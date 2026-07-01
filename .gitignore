@@ -30,6 +30,9 @@ desktop.ini
 *.swo
 *~
 
+# Claude Code local settings (user-specific, should not be committed)
+.claude/settings.local.json
+
 # Distribution / build output
 dist/
 build_tmp/
