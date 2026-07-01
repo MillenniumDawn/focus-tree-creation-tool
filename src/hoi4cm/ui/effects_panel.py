@@ -708,11 +708,12 @@ class EffectsMixin:
                     hl.bind(
                         "<Leave>",
                         lambda e: self._hint(
-                            "Right-click canvas to place focus  •  Ctrl+drag to pan  •  Scroll to zoom"
+                            "Right-click canvas to place focus  •  "
+                            "Ctrl+drag to pan  •  Scroll to zoom"
                         ),
                     )
         else:
-            # Unknown / imported effect — show all raw key=value fields as editable entries
+            # Unknown / imported effect — show raw key=value fields as editable entries
             fields = eff.get("fields", {})
             # _raw_block: verbatim HOI4 code — show as editable multiline code box
             if etype == "_raw_block":
@@ -805,14 +806,14 @@ class EffectsMixin:
             )
 
     def _render_effect(self, eff):
-        """Render a single effect as HOI4 code (3-tab indent, inside completion_reward)."""
+        """Render a single effect as HOI4 code (3-tab indent, in completion_reward)."""
         t = eff.get("type", "")
         f = eff.get("fields", {})
-        I = "\t\t\t"
+        IND = "\t\t\t"
 
         def block(name, pairs):
-            inner = "\n".join(f"{I}\t{k} = {v}" for k, v in pairs)
-            return f"{I}{name} = {{\n{inner}\n{I}}}"
+            inner = "\n".join(f"{IND}\t{k} = {v}" for k, v in pairs)
+            return f"{IND}{name} = {{\n{inner}\n{IND}}}"
 
         def g(key, default=""):
             return f.get(key, default)
@@ -835,7 +836,7 @@ class EffectsMixin:
                     ("popularity", g("popularity", "0.05")),
                 ],
             )
-            + f"\n{I}recalculate_party = yes",
+            + f"\n{IND}recalculate_party = yes",
             "set_politics": lambda: block(
                 "set_politics",
                 [
@@ -917,14 +918,21 @@ class EffectsMixin:
                 ],
             ),
             "create_unit": lambda: (
-                f"{I}create_unit = {{\n"
-                f"{I}\tdivision = \"name = \\\"{g('division_name','1st Infantry Division')}\\\" "
-                f"division_template = \\\"{g('division_template','Infantry Division')}\\\" "
+                f"{IND}create_unit = {{\n"
+                f'{IND}\tdivision = "name = \\"'
+                f"{g('division_name','1st Infantry Division')}"
+                f'\\" '
+                f'division_template = \\"'
+                f"{g('division_template','Infantry Division')}"
+                f'\\" '
                 f"start_experience_factor = {g('start_experience_factor','0.2')}\"\n"
-                f"{I}\towner = {g('owner','ROOT')}\n"
-                f"{I}}}"
+                f"{IND}\towner = {g('owner','ROOT')}\n"
+                f"{IND}}}"
             ),
-            "set_technology": lambda: f'{I}set_technology = {{ {g("tech_id","infantry_weapons1")} = {"1" if g("researched","yes") == "yes" else "0"} }}',
+            "set_technology": lambda: (
+                f'{IND}set_technology = {{ {g("tech_id","infantry_weapons1")} = '
+                f'{"1" if g("researched","yes") == "yes" else "0"} }}'
+            ),
             "modify_timed_idea": lambda: block(
                 "modify_timed_idea",
                 [("idea", g("idea", "my_spirit")), ("days", g("days", "30"))],
@@ -934,117 +942,152 @@ class EffectsMixin:
                 [("level", g("level", "1")), ("path", g("path", "{ 1 2 3 }"))],
             ),
             "division_template": lambda: (
-                f"{I}division_template = {{\n"
-                f'{I}\tname = "{g("name","Infantry Division")}"\n'
-                f"{I}\tregiments = {{\n"
+                f"{IND}division_template = {{\n"
+                f'{IND}\tname = "{g("name","Infantry Division")}"\n'
+                f"{IND}\tregiments = {{\n"
                 + "\n".join(
-                    f"{I}\t\t{ln.strip()}"
+                    f"{IND}\t\t{ln.strip()}"
                     for ln in g("regiments", "infantry = { x = 0 y = 0 }")
                     .strip()
                     .splitlines()
                     if ln.strip()
                 )
-                + f"\n{I}\t}}\n"
-                f"{I}}}"
+                + f"\n{IND}\t}}\n"
+                f"{IND}}}"
             ),
-            "load_oob": lambda: f'{I}load_oob = "{g("file","TAG_1936")}"',
-            "set_oob": lambda: f'{I}set_oob = "{g("file","TAG_1936")}"',
-            "log": lambda: f'{I}log = "{g("text")}"',
-            "set_variable": lambda: f'{I}set_variable = {{ {g("var","my_var")} = {g("value","0")} }}',
-            "force_update_dynamic_modifier": lambda: f"{I}force_update_dynamic_modifier = yes",
-            "unlock_decision_category_tooltip": lambda: f'{I}unlock_decision_category_tooltip = {g("category","TAG_decisions")}',
-            "unlock_decision_tooltip": lambda: f'{I}unlock_decision_tooltip = {g("decision","TAG_decision")}',
-            "ingame_update_setup": lambda: f"{I}ingame_update_setup = yes",
+            "load_oob": lambda: f'{IND}load_oob = "{g("file","TAG_1936")}"',
+            "set_oob": lambda: f'{IND}set_oob = "{g("file","TAG_1936")}"',
+            "log": lambda: f'{IND}log = "{g("text")}"',
+            "set_variable": lambda: (
+                f'{IND}set_variable = {{ {g("var","my_var")} = {g("value","0")} }}'
+            ),
+            "force_update_dynamic_modifier": lambda: (
+                f"{IND}force_update_dynamic_modifier = yes"
+            ),
+            "unlock_decision_category_tooltip": lambda: (
+                f"{IND}unlock_decision_category_tooltip = "
+                f'{g("category","TAG_decisions")}'
+            ),
+            "unlock_decision_tooltip": lambda: (
+                f'{IND}unlock_decision_tooltip = {g("decision","TAG_decision")}'
+            ),
+            "ingame_update_setup": lambda: f"{IND}ingame_update_setup = yes",
             # MD scripted effects
             "md_modify_treasury": lambda: (
-                f"{I}set_temp_variable = {{ treasury_change = {g('amount','-10.00')} }}\n"
-                f"{I}modify_treasury_effect = yes"
+                f"{IND}set_temp_variable = {{ "
+                f"treasury_change = {g('amount','-10.00')} }}\n"
+                f"{IND}modify_treasury_effect = yes"
             ),
             "md_modify_debt": lambda: (
-                f"{I}set_temp_variable = {{ debt_change = {g('amount','0.1')} }}\n"
-                f"{I}modify_debt_effect = yes"
+                f"{IND}set_temp_variable = {{ debt_change = {g('amount','0.1')} }}\n"
+                f"{IND}modify_debt_effect = yes"
             ),
             "md_modify_international_investment": lambda: (
-                f"{I}set_temp_variable = {{ int_investment_change = {g('amount','0.1')} }}\n"
-                f"{I}modify_international_investment_effect = yes"
+                f"{IND}set_temp_variable = {{ "
+                f"int_investment_change = {g('amount','0.1')} }}\n"
+                f"{IND}modify_international_investment_effect = yes"
             ),
             "md_modify_corporate_tax": lambda: (
-                f"{I}set_temp_variable = {{ corp_change = {g('amount','2')} }}\n"
-                f"{I}modify_corporate_tax_rate_effect = yes"
+                f"{IND}set_temp_variable = {{ corp_change = {g('amount','2')} }}\n"
+                f"{IND}modify_corporate_tax_rate_effect = yes"
             ),
             "md_modify_population_tax": lambda: (
-                f"{I}set_temp_variable = {{ pop_change = {g('amount','2')} }}\n"
-                f"{I}modify_population_tax_rate_effect = yes"
+                f"{IND}set_temp_variable = {{ pop_change = {g('amount','2')} }}\n"
+                f"{IND}modify_population_tax_rate_effect = yes"
             ),
             "md_flat_productivity": lambda: (
-                f"{I}set_temp_variable = {{ temp_productivity_change = {g('amount','0.025')} }}\n"
-                f"{I}flat_productivity_change_effect = yes"
+                f"{IND}set_temp_variable = {{ "
+                f"temp_productivity_change = {g('amount','0.025')} }}\n"
+                f"{IND}flat_productivity_change_effect = yes"
             ),
-            "md_economic_cycle": lambda: f"{I}{g('cycle','stable_growth')} = yes",
-            "md_gov_spending": lambda: f"{I}{g('action','increase_social_spending')} = yes",
+            "md_economic_cycle": lambda: f"{IND}{g('cycle','stable_growth')} = yes",
+            "md_gov_spending": lambda: (
+                f"{IND}{g('action','increase_social_spending')} = yes"
+            ),
             "md_build_random": lambda: (
-                f"{I}set_temp_variable = {{ treasury_change = {g('treasury_change','-7.50')} }}\n"
-                f"{I}modify_treasury_effect = yes\n"
-                f"{I}{g('effect','one_random_industrial_complex')} = yes"
+                f"{IND}set_temp_variable = {{ "
+                f"treasury_change = {g('treasury_change','-7.50')} }}\n"
+                f"{IND}modify_treasury_effect = yes\n"
+                f"{IND}{g('effect','one_random_industrial_complex')} = yes"
             ),
             "md_enrichment_facility": lambda: (
-                f"{I}set_temp_variable = {{ temp_change = {g('count','1')} }}\n"
-                f"{I}build_enrichment_facilities_effect = yes"
+                f"{IND}set_temp_variable = {{ temp_change = {g('count','1')} }}\n"
+                f"{IND}build_enrichment_facilities_effect = yes"
             ),
             "md_battery_park": lambda: (
-                f"{I}set_temp_variable = {{ temp_change = {g('count','1')} }}\n"
-                f"{I}build_battery_park_effect = yes"
+                f"{IND}set_temp_variable = {{ temp_change = {g('count','1')} }}\n"
+                f"{IND}build_battery_park_effect = yes"
             ),
             "md_coalition_add": lambda: (
-                f"{I}set_temp_variable = {{ add_col_one = {g('party_index','5')} }}\n"
-                f"{I}add_coalition_members_effect = yes"
+                f"{IND}set_temp_variable = {{ add_col_one = {g('party_index','5')} }}\n"
+                f"{IND}add_coalition_members_effect = yes"
             ),
             "md_coalition_remove": lambda: (
-                f"{I}set_temp_variable = {{ remove_col_one = {g('party_index','5')} }}\n"
-                f"{I}remove_coalition_members_effect = yes"
+                f"{IND}set_temp_variable = {{ "
+                f"remove_col_one = {g('party_index','5')} }}\n"
+                f"{IND}remove_coalition_members_effect = yes"
             ),
             "md_domestic_influence": lambda: (
-                f"{I}set_temp_variable = {{ percent_change = {g('percent','10')} }}\n"
-                f"{I}change_domestic_influence_percentage = yes"
+                f"{IND}set_temp_variable = {{ percent_change = {g('percent','10')} }}\n"
+                f"{IND}change_domestic_influence_percentage = yes"
             ),
             "md_eurosceptic_all": lambda: (
-                f"{I}set_temp_variable = {{ modify_eurosceptic = {g('amount','-0.05')} }}\n"
-                f"{I}EU_eurosceptic_change = yes"
+                f"{IND}set_temp_variable = {{ "
+                f"modify_eurosceptic = {g('amount','-0.05')} }}\n"
+                f"{IND}EU_eurosceptic_change = yes"
             ),
             # MD Budget — individual yes-call entries
-            "increase_centralization": lambda: f"{I}increase_centralization = yes",
-            "decrease_centralization": lambda: f"{I}decrease_centralization = yes",
-            "increase_social_spending": lambda: f"{I}increase_social_spending = yes",
-            "decrease_social_spending": lambda: f"{I}decrease_social_spending = yes",
-            "increase_education_budget": lambda: f"{I}increase_education_budget = yes",
-            "decrease_education_budget": lambda: f"{I}decrease_education_budget = yes",
-            "increase_healthcare_budget": lambda: f"{I}increase_healthcare_budget = yes",
-            "decrease_healthcare_budget": lambda: f"{I}decrease_healthcare_budget = yes",
-            "increase_policing_budget": lambda: f"{I}increase_policing_budget = yes",
-            "decrease_policing_budget": lambda: f"{I}decrease_policing_budget = yes",
-            "increase_exports": lambda: f"{I}increase_exports = yes",
-            "decrease_exports": lambda: f"{I}decrease_exports = yes",
-            "increase_military_spending": lambda: f"{I}increase_military_spending = yes",
-            "decrease_military_spending": lambda: f"{I}decrease_military_spending = yes",
-            "increase_economic_growth": lambda: f"{I}increase_economic_growth = yes",
-            "decrease_economic_growth": lambda: f"{I}decrease_economic_growth = yes",
-            "increase_corruption": lambda: f"{I}increase_corruption = yes",
-            "decrease_corruption": lambda: f"{I}decrease_corruption = yes",
-            "increase_Free_Market_Economy": lambda: f"{I}increase_Free_Market_Economy = yes",
-            "increase_Planned_Economy": lambda: f"{I}increase_Planned_Economy = yes",
-            "economic_boom": lambda: f"{I}economic_boom = yes",
-            "stable_growth": lambda: f"{I}stable_growth = yes",
-            "fast_growth": lambda: f"{I}fast_growth = yes",
-            "recession": lambda: f"{I}recession = yes",
-            "stagnation": lambda: f"{I}stagnation = yes",
-            "depression": lambda: f"{I}depression = yes",
+            "increase_centralization": lambda: f"{IND}increase_centralization = yes",
+            "decrease_centralization": lambda: f"{IND}decrease_centralization = yes",
+            "increase_social_spending": lambda: f"{IND}increase_social_spending = yes",
+            "decrease_social_spending": lambda: f"{IND}decrease_social_spending = yes",
+            "increase_education_budget": lambda: (
+                f"{IND}increase_education_budget = yes"
+            ),
+            "decrease_education_budget": lambda: (
+                f"{IND}decrease_education_budget = yes"
+            ),
+            "increase_healthcare_budget": lambda: (
+                f"{IND}increase_healthcare_budget = yes"
+            ),
+            "decrease_healthcare_budget": lambda: (
+                f"{IND}decrease_healthcare_budget = yes"
+            ),
+            "increase_policing_budget": lambda: f"{IND}increase_policing_budget = yes",
+            "decrease_policing_budget": lambda: f"{IND}decrease_policing_budget = yes",
+            "increase_exports": lambda: f"{IND}increase_exports = yes",
+            "decrease_exports": lambda: f"{IND}decrease_exports = yes",
+            "increase_military_spending": lambda: (
+                f"{IND}increase_military_spending = yes"
+            ),
+            "decrease_military_spending": lambda: (
+                f"{IND}decrease_military_spending = yes"
+            ),
+            "increase_economic_growth": lambda: f"{IND}increase_economic_growth = yes",
+            "decrease_economic_growth": lambda: f"{IND}decrease_economic_growth = yes",
+            "increase_corruption": lambda: f"{IND}increase_corruption = yes",
+            "decrease_corruption": lambda: f"{IND}decrease_corruption = yes",
+            "increase_Free_Market_Economy": lambda: (
+                f"{IND}increase_Free_Market_Economy = yes"
+            ),
+            "increase_Planned_Economy": lambda: f"{IND}increase_Planned_Economy = yes",
+            "economic_boom": lambda: f"{IND}economic_boom = yes",
+            "stable_growth": lambda: f"{IND}stable_growth = yes",
+            "fast_growth": lambda: f"{IND}fast_growth = yes",
+            "recession": lambda: f"{IND}recession = yes",
+            "stagnation": lambda: f"{IND}stagnation = yes",
+            "depression": lambda: f"{IND}depression = yes",
             # MD Politics
-            "set_party_index_to_ruling_party": lambda: f"{I}set_party_index_to_ruling_party = yes",
-            "recalculate_party": lambda: f"{I}recalculate_party = yes",
-            "add_own_ideology_drift": lambda: f"{I}add_own_ideology_drift = yes",
+            "set_party_index_to_ruling_party": lambda: (
+                f"{IND}set_party_index_to_ruling_party = yes"
+            ),
+            "recalculate_party": lambda: f"{IND}recalculate_party = yes",
+            "add_own_ideology_drift": lambda: f"{IND}add_own_ideology_drift = yes",
             # MD Scripted
-            "cyber_execute_operation": lambda: f"{I}cyber_execute_operation = yes",
-            "modify_reform_expectance_effect": lambda: f"{I}modify_reform_expectance_effect = yes",
+            "cyber_execute_operation": lambda: f"{IND}cyber_execute_operation = yes",
+            "modify_reform_expectance_effect": lambda: (
+                f"{IND}modify_reform_expectance_effect = yes"
+            ),
         }
 
         if t in _DISPATCH:
@@ -1079,8 +1122,8 @@ class EffectsMixin:
         }
         if t in _FACTION_OPINIONS:
             return (
-                f"{I}set_temp_variable = {{ temp_opinion = {g('opinion','5')} }}\n"
-                f"{I}{t} = yes"
+                f"{IND}set_temp_variable = {{ temp_opinion = {g('opinion','5')} }}\n"
+                f"{IND}{t} = yes"
             )
 
         # ── Multi-case handlers ────────────────────────────────────
@@ -1104,24 +1147,24 @@ class EffectsMixin:
             raw = g("raw", "").strip()
             if not raw and "_list" in f:
                 raw = "\n".join(
-                    f"{I}\t{ik} = {iv}"
+                    f"{IND}\t{ik} = {iv}"
                     for item in f["_list"]
                     if isinstance(item, dict)
                     for ik, iv in item.items()
                     if not str(ik).startswith("_")
                 )
-            inner = "\n".join(f"{I}\t{ln}" for ln in raw.splitlines())
-            return f"{I}{t} = {{\n{inner}\n{I}}}"
+            inner = "\n".join(f"{IND}\t{ln}" for ln in raw.splitlines())
+            return f"{IND}{t} = {{\n{inner}\n{IND}}}"
 
         if t == "_raw_block":
             raw = g("raw", "").strip()
-            return "\n".join(f"{I}{ln}" for ln in raw.splitlines()) if raw else ""
+            return "\n".join(f"{IND}{ln}" for ln in raw.splitlines()) if raw else ""
 
         if t == "add_to_variable":
             vn = g("var", "AM_my_stat_var")
             val = g("value", "0.05")
             tt = g("tooltip", "").strip()
-            base = f"{I}add_to_variable = {{ {vn} = {val}"
+            base = f"{IND}add_to_variable = {{ {vn} = {val}"
             return base + (f" tooltip = {tt} }}" if tt else " }")
 
         # ── Variable math — all use { var = value } block form ──────────
@@ -1137,43 +1180,53 @@ class EffectsMixin:
             "modulo_temp_variable",
         }
         if t in _VAR_TWO_FIELD:
-            return f"{I}{t} = {{ {g('var','my_var')} = {g('value','1')} }}"
+            return f"{IND}{t} = {{ {g('var','my_var')} = {g('value','1')} }}"
 
         if t == "set_temp_variable":
-            return f"{I}set_temp_variable = {{ {g('var','my_temp_var')} = {g('value','1')} }}"
+            return (
+                f"{IND}set_temp_variable = {{ "
+                f"{g('var','my_temp_var')} = {g('value','1')} }}"
+            )
 
         # single-arg variable ops (no block needed)
         if t in ("round_variable", "clear_variable"):
-            return f"{I}{t} = {g('var','my_var')}"
+            return f"{IND}{t} = {g('var','my_var')}"
         if t in ("round_temp_variable",):
-            return f"{I}{t} = {g('var','my_temp_var')}"
+            return f"{IND}{t} = {g('var','my_temp_var')}"
 
         # clamp = { var = { min = X max = Y } }
         if t == "clamp_variable":
-            return f"{I}clamp_variable = {{ {g('var','my_var')} = {{ min = {g('min','0')} max = {g('max','100')} }} }}"
+            return (
+                f"{IND}clamp_variable = {{ {g('var','my_var')} = {{ "
+                f"min = {g('min','0')} max = {g('max','100')} }} }}"
+            )
         if t == "clamp_temp_variable":
-            return f"{I}clamp_temp_variable = {{ {g('var','my_temp_var')} = {{ min = {g('min','0')} max = {g('max','100')} }} }}"
+            return (
+                f"{IND}clamp_temp_variable = {{ {g('var','my_temp_var')} = {{ "
+                f"min = {g('min','0')} max = {g('max','100')} }} }}"
+            )
 
         # set_variable_to_random / randomize_variable = { var = { max = X } }
         if t in ("set_variable_to_random", "randomize_variable"):
-            return f"{I}{t} = {{ {g('var','my_var')} = {{ max = {g('max','10')} }} }}"
+            return f"{IND}{t} = {{ {g('var','my_var')} = {{ max = {g('max','10')} }} }}"
         if t in ("set_temp_variable_to_random", "randomize_temp_variable"):
             return (
-                f"{I}{t} = {{ {g('var','my_temp_var')} = {{ max = {g('max','10')} }} }}"
+                f"{IND}{t} = {{ {g('var','my_temp_var')} = {{ "
+                f"max = {g('max','10')} }} }}"
             )
 
         if t == "add_dynamic_modifier":
             out = [
-                f"{I}add_dynamic_modifier = {{",
-                f"{I}\tmodifier = {g('modifier','TAG_modifier')}",
+                f"{IND}add_dynamic_modifier = {{",
+                f"{IND}\tmodifier = {g('modifier','TAG_modifier')}",
             ]
             sc = g("scope", "").strip()
             dy = g("days", "").strip()
             if sc:
-                out.append(f"{I}\tscope = {sc}")
+                out.append(f"{IND}\tscope = {sc}")
             if dy:
-                out.append(f"{I}\tdays = {dy}")
-            out.append(f"{I}}}")
+                out.append(f"{IND}\tdays = {dy}")
+            out.append(f"{IND}}}")
             return "\n".join(out)
 
         if t == "add_dynamic_modifier_with_tt":
@@ -1182,28 +1235,33 @@ class EffectsMixin:
             mod = g("modifier", "TAG_modifier")
             sc = g("scope", "").strip()
             dy = g("days", "").strip()
-            out = [f"{I}add_dynamic_modifier = {{", f"{I}\tmodifier = {mod}"]
+            out = [f"{IND}add_dynamic_modifier = {{", f"{IND}\tmodifier = {mod}"]
             if sc:
-                out.append(f"{I}\tscope = {sc}")
+                out.append(f"{IND}\tscope = {sc}")
             if dy:
-                out.append(f"{I}\tdays = {dy}")
-            out.append(f"{I}}}")
-            out.append(f"{I}custom_effect_tooltip = {{")
-            out.append(f"{I}\tlocalization_key = adds_dynamic_modifier_tt")
-            out.append(f"{I}\tMODIFIER = {mod}")
-            out.append(f"{I}}}")
+                out.append(f"{IND}\tdays = {dy}")
+            out.append(f"{IND}}}")
+            out.append(f"{IND}custom_effect_tooltip = {{")
+            out.append(f"{IND}\tlocalization_key = adds_dynamic_modifier_tt")
+            out.append(f"{IND}\tMODIFIER = {mod}")
+            out.append(f"{IND}}}")
             return "\n".join(out)
 
         if t == "remove_dynamic_modifier":
-            return f"{I}remove_dynamic_modifier = {{\n{I}\tmodifier = {g('modifier','TAG_modifier')}\n{I}}}"
+            return (
+                f"{IND}remove_dynamic_modifier = {{\n"
+                f"{IND}\tmodifier = {g('modifier','TAG_modifier')}\n"
+                f"{IND}}}"
+            )
 
         if t == "dynamic_modifier_tooltip":
             loc_key = g("localization_key", "modifies_dynamic_modifier_tt")
             mod = g("MODIFIER", "TAG_modifier")
             return (
-                f"{I}custom_effect_tooltip = {{\n"
-                f"{I}\tlocalization_key = {loc_key}\n"
-                f"{I}\tMODIFIER = {mod}\n{I}}}"
+                f"{IND}custom_effect_tooltip = {{\n"
+                f"{IND}\tlocalization_key = {loc_key}\n"
+                f"{IND}\tMODIFIER = {mod}\n"
+                f"{IND}}}"
             )
 
         if t in ("custom_effect_tooltip", "custom_effect_tooltip_block"):
@@ -1215,31 +1273,33 @@ class EffectsMixin:
             ):
                 loc_key = g("localization_key", "modifies_dynamic_modifier_tt")
                 # adds_dynamic_modifier_tt: block contains add_dynamic_modifier
-                # modifies_dynamic_modifier_tt: block only changes variables (no add_dynamic_modifier)
+                # modifies_dynamic_modifier_tt: block only changes variables
+                # (no add_dynamic_modifier)
                 return (
-                    f"{I}custom_effect_tooltip = {{\n"
-                    f"{I}\tlocalization_key = {loc_key}\n"
-                    f"{I}\tMODIFIER = {g('MODIFIER','TAG_modifier')}\n{I}}}"
+                    f"{IND}custom_effect_tooltip = {{\n"
+                    f"{IND}\tlocalization_key = {loc_key}\n"
+                    f"{IND}\tMODIFIER = {g('MODIFIER','TAG_modifier')}\n"
+                    f"{IND}}}"
                 )
-            return f"{I}custom_effect_tooltip = {g('tooltip','my_tooltip_key')}"
+            return f"{IND}custom_effect_tooltip = {g('tooltip','my_tooltip_key')}"
 
         if t in (
             "md_small_expenditure",
             "md_medium_expenditure",
             "md_large_expenditure",
         ):
-            return f"{I}{t.replace('md_','')} = yes"
+            return f"{IND}{t.replace('md_','')} = yes"
 
         if t == "md_build_state":
             effect = g("effect", "one_state_industrial_complex")
             state = g("state_id", "117")
             tchange = g("treasury_change", "-7.50")
             return (
-                f"{I}set_temp_variable = {{ treasury_change = {tchange} }}\n"
-                f"{I}modify_treasury_effect = yes\n"
-                f"{I}{state} = {{\n"
-                f"{I}\t{effect} = yes\n"
-                f"{I}}}"
+                f"{IND}set_temp_variable = {{ treasury_change = {tchange} }}\n"
+                f"{IND}modify_treasury_effect = yes\n"
+                f"{IND}{state} = {{\n"
+                f"{IND}\t{effect} = yes\n"
+                f"{IND}}}"
             )
 
         if t == "md_add_resource":
@@ -1247,84 +1307,98 @@ class EffectsMixin:
             amount = g("amount", "4")
             tchange = g("treasury_change", "-3.75")
             return (
-                f"{I}set_temp_variable = {{ treasury_change = {tchange} }}\n"
-                f"{I}modify_treasury_effect = yes\n"
-                f"{I}capital_scope = {{\n"
-                f"{I}\tadd_resource = {{\n"
-                f"{I}\t\ttype = {rtype}\n"
-                f"{I}\t\tamount = {amount}\n"
-                f"{I}\t}}\n"
-                f"{I}}}"
+                f"{IND}set_temp_variable = {{ treasury_change = {tchange} }}\n"
+                f"{IND}modify_treasury_effect = yes\n"
+                f"{IND}capital_scope = {{\n"
+                f"{IND}\tadd_resource = {{\n"
+                f"{IND}\t\ttype = {rtype}\n"
+                f"{IND}\t\tamount = {amount}\n"
+                f"{IND}\t}}\n"
+                f"{IND}}}"
             )
 
         if t == "md_party_popularity":
             return (
-                f"{I}set_temp_variable = {{ party_index = {g('party_index','2')} }}\n"
-                f"{I}set_temp_variable = {{ party_popularity_increase = {g('amount','0.10')} }}\n"
-                f"{I}add_relative_party_popularity = yes"
+                f"{IND}set_temp_variable = {{ party_index = {g('party_index','2')} }}\n"
+                f"{IND}set_temp_variable = {{ "
+                f"party_popularity_increase = {g('amount','0.10')} }}\n"
+                f"{IND}add_relative_party_popularity = yes"
             )
 
         if t == "md_change_ruling_party":
             return (
-                f"{I}set_temp_variable = {{ rul_party_temp = {g('rul_party_temp','2')} }}\n"
-                f"{I}change_ruling_party_effect = yes\n"
-                f"{I}set_politics = {{\n{I}\truling_party = {g('ruling_party','western')}\n"
-                f"{I}\telections_allowed = {g('elections_allowed','no')}\n{I}}}"
+                f"{IND}set_temp_variable = {{ "
+                f"rul_party_temp = {g('rul_party_temp','2')} }}\n"
+                f"{IND}change_ruling_party_effect = yes\n"
+                f"{IND}set_politics = {{\n"
+                f"{IND}\truling_party = {g('ruling_party','western')}\n"
+                f"{IND}\telections_allowed = {g('elections_allowed','no')}\n"
+                f"{IND}}}"
             )
 
         if t == "md_ban_party":
             return (
-                f"{I}set_temp_variable = {{ party_index = {g('party_index','1')} }}\n"
-                f"{I}ban_party_scripted_call = yes"
+                f"{IND}set_temp_variable = {{ party_index = {g('party_index','1')} }}\n"
+                f"{IND}ban_party_scripted_call = yes"
             )
 
         if t == "md_unban_party":
             return (
-                f"{I}set_temp_variable = {{ party_index = {g('party_index','1')} }}\n"
-                f"{I}unban_party_scripted_call = yes"
+                f"{IND}set_temp_variable = {{ party_index = {g('party_index','1')} }}\n"
+                f"{IND}unban_party_scripted_call = yes"
             )
 
         if t == "md_pp_loss":
-            return f"{I}{g('duration','lose_pp_for_month')} = yes"
+            return f"{IND}{g('duration','lose_pp_for_month')} = yes"
 
         if t == "md_faction_opinion":
             return (
-                f"{I}set_temp_variable = {{ temp_opinion = {g('opinion','5')} }}\n"
-                f"{I}{g('faction','change_the_military_opinion')} = yes"
+                f"{IND}set_temp_variable = {{ temp_opinion = {g('opinion','5')} }}\n"
+                f"{IND}{g('faction','change_the_military_opinion')} = yes"
             )
 
         if t == "md_influence_country":
             return (
-                f"{I}set_temp_variable = {{ percent_change = {g('percent','5')} }}\n"
-                f"{I}set_temp_variable = {{ tag_index = ROOT }}\n"
-                f"{I}set_temp_variable = {{ influence_target = {g('target','GER')} }}\n"
-                f"{I}change_influence_percentage = yes"
+                f"{IND}set_temp_variable = {{ percent_change = {g('percent','5')} }}\n"
+                f"{IND}set_temp_variable = {{ tag_index = ROOT }}\n"
+                f"{IND}set_temp_variable = {{ "
+                f"influence_target = {g('target','GER')} }}\n"
+                f"{IND}change_influence_percentage = yes"
             )
 
         if t == "md_eurosceptic_target":
             return (
-                f"{I}set_temp_variable = {{ modify_eurosceptic = {g('amount','0.05')} }}\n"
-                f"{I}set_temp_variable = {{ modify_eurosceptic_target = {g('target','GER')} }}\n"
-                f"{I}eurosceptic_change = yes"
+                f"{IND}set_temp_variable = {{ "
+                f"modify_eurosceptic = {g('amount','0.05')} }}\n"
+                f"{IND}set_temp_variable = {{ "
+                f"modify_eurosceptic_target = {g('target','GER')} }}\n"
+                f"{IND}eurosceptic_change = yes"
             )
 
         if t == "md_cart_strength":
             return (
-                f"{I}set_temp_variable = {{ cart_strength_change = {g('strength','2')} }}\n"
-                f"{I}set_temp_variable = {{ cart_influence_change = {g('influence','2')} }}\n"
-                f"{I}modify_cartel_variables_effect = yes"
+                f"{IND}set_temp_variable = {{ "
+                f"cart_strength_change = {g('strength','2')} }}\n"
+                f"{IND}set_temp_variable = {{ "
+                f"cart_influence_change = {g('influence','2')} }}\n"
+                f"{IND}modify_cartel_variables_effect = yes"
             )
 
         if t == "md_relative_party_popularity":
             return (
-                f"{I}set_temp_variable = {{ party_index = {g('party_index','1')} }}\n"
-                f"{I}set_temp_variable = {{ party_popularity_increase = {g('amount','0.02')} }}\n"
-                f"{I}set_temp_variable = {{ temp_outlook_increase = {g('temp_outlook_increase','0.02')} }}\n"
-                f"{I}add_relative_party_popularity = yes"
+                f"{IND}set_temp_variable = {{ party_index = {g('party_index','1')} }}\n"
+                f"{IND}set_temp_variable = {{ "
+                f"party_popularity_increase = {g('amount','0.02')} }}\n"
+                f"{IND}set_temp_variable = {{ "
+                f"temp_outlook_increase = {g('temp_outlook_increase','0.02')} }}\n"
+                f"{IND}add_relative_party_popularity = yes"
             )
 
         if t.startswith("md_modifier_"):
-            return f"{I}# MD MODIFIER (place inside idea modifier block):\n{I}# {g('modifier','')} = {g('value','0.05')}"
+            return (
+                f"{IND}# MD MODIFIER (place inside idea modifier block):\n"
+                f"{IND}# {g('modifier','')} = {g('value','0.05')}"
+            )
 
         # ── Scope / if / else blocks ───────────────────────────────
         _SCOPE_TYPES = {
@@ -1401,7 +1475,8 @@ class EffectsMixin:
             "for_each_scope_loop",
         }
 
-        # ── Helper: coerce a Python value to a HOI4 scalar (no True/False/list/dict leaks)
+        # ── Helper: coerce a Python value to a HOI4 scalar
+        # (no True/False/list/dict leaks)
         def _hoi4_val(v):
             if isinstance(v, bool):
                 return "yes" if v else "no"
@@ -1409,8 +1484,10 @@ class EffectsMixin:
 
         # ── Helper: recursively render a dict/list value into HOI4 script lines
         def _hoi4_render_value(k, v, indent):
-            """Render a single key->value pair at the given tab indent. Returns list of lines.
-            Handles: scalars, bools → yes/no, lists → repeated keys, dicts → nested block.
+            """Render a single key->value pair at the given tab indent.
+
+            Returns list of lines. Handles: scalars, bools → yes/no,
+            lists → repeated keys, dicts → nested block.
             """
             T = indent
             if isinstance(v, bool):
@@ -1445,29 +1522,29 @@ class EffectsMixin:
 
         if t in _SCOPE_TYPES:
 
-            out = [f"{I}{t} = {{"]
+            out = [f"{IND}{t} = {{"]
             limit_raw = str(g("limit", "")).strip()
             if limit_raw:
-                out.append(f"{I}\tlimit = {{")
+                out.append(f"{IND}\tlimit = {{")
                 inner = limit_raw.strip("{}").replace("'", '"')
                 for ln in inner.splitlines():
                     ln = ln.strip().strip(",").strip()
                     if ln:
-                        out.append(f"{I}\t\t{ln}")
-                out.append(f"{I}\t}}")
+                        out.append(f"{IND}\t\t{ln}")
+                out.append(f"{IND}\t}}")
             effect_raw = str(g("effect", "")).strip()
             if effect_raw:
                 inner = effect_raw.strip("{}[]").replace("'", '"')
                 for ln in inner.splitlines():
                     ln = ln.strip().strip(",")
                     if ln:
-                        out.append(f"{I}\t{ln}")
+                        out.append(f"{IND}\t{ln}")
             for k, v in f.items():
                 if k in ("limit", "effect", "_list") or str(k).startswith("_"):
                     continue
-                # Use the recursive renderer so lists/dicts/bools don't leak Python syntax
+                # Use recursive renderer so lists/dicts/bools don't leak Python syntax
                 if isinstance(v, (list, dict, bool)):
-                    out.extend(_hoi4_render_value(k, v, f"{I}\t"))
+                    out.extend(_hoi4_render_value(k, v, f"{IND}\t"))
                     continue
                 vs = str(v).strip()
                 if not vs:
@@ -1476,15 +1553,15 @@ class EffectsMixin:
                     inner2 = vs[1:-1].replace("'", '"').strip()
                     pairs = re.findall(r'"(\w+)"\s*[=:]\s*"([^"]*)"', inner2)
                     if pairs:
-                        out.append(f"{I}\t{k} = {{")
+                        out.append(f"{IND}\t{k} = {{")
                         for pk, pv in pairs:
-                            out.append(f"{I}\t\t{pk} = {pv}")
-                        out.append(f"{I}\t}}")
+                            out.append(f"{IND}\t\t{pk} = {pv}")
+                        out.append(f"{IND}\t}}")
                     else:
-                        out.append(f"{I}\t{k} = {vs}")
+                        out.append(f"{IND}\t{k} = {vs}")
                 else:
-                    out.append(f"{I}\t{k} = {vs}")
-            out.append(f"{I}}}")
+                    out.append(f"{IND}\t{k} = {vs}")
+            out.append(f"{IND}}}")
             return "\n".join(out)
 
         # ── Generic fallback ───────────────────────────────────────
@@ -1494,32 +1571,32 @@ class EffectsMixin:
         if fname and len(fl) == 1:
             val = g(fname, "")
             if isinstance(val, (list, dict, bool)):
-                rendered = _hoi4_render_value(fname, val, I)
+                rendered = _hoi4_render_value(fname, val, IND)
                 return "\n".join(rendered)
             val = str(val).strip()
             if val:
-                return f"{I}{t} = {val}"
+                return f"{IND}{t} = {val}"
         raw_val = str(g("raw", "")).strip()
         if raw_val:
-            return f"{I}{t} = {raw_val}"
+            return f"{IND}{t} = {raw_val}"
         fields_clean = {
             k: v for k, v in f.items() if not str(k).startswith("_") and k != "raw"
         }
         if not fields_clean:
-            return f"{I}{t} = yes"
+            return f"{IND}{t} = yes"
         if len(fields_clean) == 1:
             k0, v0 = list(fields_clean.items())[0]
             if isinstance(v0, (list, dict, bool)):
-                rendered = _hoi4_render_value(k0, v0, I)
+                rendered = _hoi4_render_value(k0, v0, IND)
                 return "\n".join(rendered)
             if k0 in ("amount", "value", "flag", "tooltip", "category", "decision"):
-                return f"{I}{t} = {v0}"
-            return f"{I}{t} = {{ {k0} = {v0} }}"
+                return f"{IND}{t} = {v0}"
+            return f"{IND}{t} = {{ {k0} = {v0} }}"
         # Multi-field block — render each field recursively to handle nested structures
         inner_blocks = []
         for k, v in fields_clean.items():
             if isinstance(v, (list, dict, bool)):
-                inner_blocks.extend(_hoi4_render_value(k, v, I + "\t"))
+                inner_blocks.extend(_hoi4_render_value(k, v, IND + "\t"))
             else:
-                inner_blocks.append(f"{I}\t{k} = {_hoi4_val(v)}")
-        return f"{I}{t} = {{\n" + "\n".join(inner_blocks) + f"\n{I}}}"
+                inner_blocks.append(f"{IND}\t{k} = {_hoi4_val(v)}")
+        return f"{IND}{t} = {{\n" + "\n".join(inner_blocks) + f"\n{IND}}}"

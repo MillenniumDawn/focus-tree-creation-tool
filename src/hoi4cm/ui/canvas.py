@@ -258,7 +258,7 @@ class CanvasMixin:
         self.cv.tag_lower("grid")
 
     def _draw_coord_labels(self):
-        """Draw HOI4 x/y grid numbers along top and left — so you always know exact position."""
+        """Draw HOI4 x/y grid numbers along top and left so exact position is clear."""
         self.cv.delete("coord_lbl")
         W = max(1, self.cv.winfo_width())
         H = max(1, self.cv.winfo_height())
@@ -359,7 +359,7 @@ class CanvasMixin:
                 pass
 
     def _draw_lines(self):
-        """Draw edges: solid blue elbow+arrowhead for prereqs; dashed orange for mutex."""
+        """Draw edges: solid blue elbow+arrow for prereqs; dashed orange for mutex."""
         cv = self.cv
         half = BOX * self.zoom / 2
         lw = max(1, int(2.0 * self.zoom))  # line width scales with zoom
@@ -438,7 +438,7 @@ class CanvasMixin:
                 cv.tag_lower("focus_lbl", "line")
 
     def _draw_focus(self, f):
-        """Create once; skip update entirely if state unchanged — near-zero cost on idle frames."""
+        """Create once; skip update if state unchanged for near-zero idle cost."""
         cx, cy = self.w2c(f.x, f.y)
         # No viewport culling — _draw_key cache handles performance
         # Culling caused ghost positions when panning back into view
@@ -602,11 +602,13 @@ class CanvasMixin:
                     item,
                     "<Leave>",
                     lambda e: self._hint(
-                        "Right-click canvas to place focus  •  Ctrl+drag to pan  •  Scroll to zoom"
+                        "Right-click canvas to place focus  •  "
+                        "Ctrl+drag to pan  •  Scroll to zoom"
                     ),
                 )
 
-        # Guard: recreate if item count is stale (14 items: shadow,mat,box,rv*4,glow,ico,img,lbl_bg,lbl,badge,off_ind)
+        # Guard: recreate if item count is stale (14 items:
+        # shadow,mat,box,rv*4,glow,ico,img,lbl_bg,lbl,badge,off_ind)
         if len(f._items) < 14:
             for item in f._items:
                 cv.delete(item)
@@ -882,7 +884,10 @@ class CanvasMixin:
 
     def _foc_en(self, fid):
         f = self.focuses[fid]
-        base = f"{f.name}  •  Cost:{f.cost}  •  Effects:{len(f.effects)}  •  Prereqs:{sum(len(g) for g in f.prereqs)}"
+        base = (
+            f"{f.name}  •  Cost:{f.cost}  •  Effects:{len(f.effects)}  •  "
+            f"Prereqs:{sum(len(g) for g in f.prereqs)}"
+        )
         offs = getattr(f, "offsets", [])
         if offs:
             off_strs = [
@@ -893,7 +898,7 @@ class CanvasMixin:
         self._hint(base)
 
     def _draw_canvas_legend(self):
-        """Draw a compact legend in the bottom-left corner when extra trees are loaded."""
+        """Draw a compact legend in the bottom-left when extra trees are loaded."""
         self.cv.delete("legend")
         if not getattr(self, "_extra_trees", []):
             return
@@ -1036,7 +1041,7 @@ class CanvasMixin:
                     pass
 
     def _draw_minimap(self):
-        """Render all focuses as small colored dots plus the current viewport rectangle."""
+        """Render all focuses as small colored dots plus the viewport rectangle."""
         if not getattr(self, "_mm_visible", False):
             return
         if not hasattr(self, "_mm_canvas"):

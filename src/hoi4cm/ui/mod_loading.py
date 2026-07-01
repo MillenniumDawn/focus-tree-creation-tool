@@ -192,7 +192,9 @@ class ModLoadingMixin:
             )
             disk_note = "\n\n" + tr(
                 "mod.loaded.missing_textures",
-                "WARNING: {missing}/{total} sampled textures not on disk{more}\nThis is likely a missing asset in the mod, not a tool error.\nMissing GFX entries:\n{entries}",
+                "WARNING: {missing}/{total} sampled textures not on disk{more}\n"
+                "This is likely a missing asset in the mod, not a tool error.\n"
+                "Missing GFX entries:\n{entries}",
                 missing=len(missing_items),
                 total=len(sampled_items),
                 more=_more,
@@ -212,7 +214,8 @@ class ModLoadingMixin:
             tr("dialog.mod_loaded.title", "Mod Loaded"),
             tr(
                 "dialog.mod_loaded.body",
-                "Mod: {mod}\n\n{summary}\n\nSample GFX names:\n{sample}{disk_note}{err_note}",
+                "Mod: {mod}\n\n{summary}\n\nSample GFX names:\n"
+                "{sample}{disk_note}{err_note}",
                 mod=mod_name,
                 summary=MOD.summary().replace("  •  ", "\n"),
                 sample=sample_txt,
@@ -269,7 +272,9 @@ class ModLoadingMixin:
             dlg,
             text=tr(
                 "edit_targets.description",
-                "  Choose which existing files new content will be appended to.\n  New content is always placed at the END of the file - nothing existing is changed.",
+                "  Choose which existing files new content will be appended to.\n"
+                "  New content is always placed at the END of the file - "
+                "nothing existing is changed.",
             ),
             bg=BG_DARK,
             fg=TEXT_DIM,
@@ -480,7 +485,8 @@ class ModLoadingMixin:
             body,
             tr(
                 "edit_targets.events_file",
-                "Events file  (new events appended at end, existing content untouched):",
+                "Events file  (new events appended at end, existing content "
+                "untouched):",
             ),
             events_path_var,
             event_files,
@@ -681,7 +687,8 @@ class ModLoadingMixin:
         Execute the full 5-step MD Additional Income workflow automatically:
         1. Edit 00_money_system.txt → insert into calculate_additional_income_rate
         2. Edit money_scripted_localization.txt → append defined_text block
-        3. Edit MD_money_l_english.yml → append [additional_income_summary_X] to ADDITIONAL_INCOME_REVENUES_TOOLTIP
+        3. Edit MD_money_l_english.yml → append [additional_income_summary_X]
+           to ADDITIONAL_INCOME_REVENUES_TOOLTIP
         Returns (list_of_saved_paths, list_of_errors)
         """
         saved, errs = [], []
@@ -709,19 +716,23 @@ class ModLoadingMixin:
                     and f"{variable_name}" in sys_text
                 ):
                     saved.append(
-                        f"00_money_system.txt — already contains '{idea_id}' entry (skipped)"
+                        f"00_money_system.txt — already contains "
+                        f"'{idea_id}' entry (skipped)"
                     )
                 else:
                     # Build the inner set/multiply lines based on formula type
                     if formula_type == "gdp_pct":
                         set_lines = (
                             f"\t\tset_variable = {{ {variable_name} = gdp_total }}\n"
-                            f"\t\tmultiply_variable = {{ {variable_name} = {amount} }}\n"
+                            f"\t\tmultiply_variable = "
+                            f"{{ {variable_name} = {amount} }}\n"
                         )
                     elif formula_type == "population":
                         set_lines = (
-                            f"\t\tset_variable = {{ {variable_name} = population_total }}\n"
-                            f"\t\tmultiply_variable = {{ {variable_name} = {amount} }}\n"
+                            f"\t\tset_variable = "
+                            f"{{ {variable_name} = population_total }}\n"
+                            f"\t\tmultiply_variable = "
+                            f"{{ {variable_name} = {amount} }}\n"
                         )
                     else:  # fixed
                         set_lines = (
@@ -731,7 +742,8 @@ class ModLoadingMixin:
                         f"\n\tif = {{\n"
                         f"\t\tlimit = {{ has_idea = {idea_id} }}\n"
                         f"{set_lines}"
-                        f"\t\tadd_to_variable = {{ additional_income_rate = {variable_name} }}\n"
+                        f"\t\tadd_to_variable = "
+                        f"{{ additional_income_rate = {variable_name} }}\n"
                         f"\t}}"
                     )
 
@@ -751,24 +763,28 @@ class ModLoadingMixin:
                                 if depth == 0:
                                     break
                             i += 1
-                        # Insert before the closing brace (no extra tab before closing brace)
+                        # Insert before closing brace (no extra tab before it)
                         sys_text = sys_text[:i] + inject_block + "\n" + sys_text[i:]
                         with open(money_sys, "w", encoding="utf-8") as fp:
                             fp.write(sys_text)
                         rel = os.path.relpath(money_sys, MOD.root)
                         saved.append(
-                            f"✅ {rel}  — injected '{idea_id}' into calculate_additional_income_rate"
+                            f"✅ {rel}  — injected '{idea_id}' into "
+                            f"calculate_additional_income_rate"
                         )
                     else:
                         errs.append(
-                            f"⚠ Could not find 'calculate_additional_income_rate' in {os.path.basename(money_sys)}. Insert manually."
+                            f"⚠ Could not find "
+                            f"'calculate_additional_income_rate' in "
+                            f"{os.path.basename(money_sys)}. Insert manually."
                         )
             except Exception as e:
                 errs.append(f"❌ 00_money_system.txt: {e}")
         else:
             errs.append(
                 "⚠ 00_money_system.txt not found at expected path. Insert manually:\n"
-                "  common/scripted_effects/00_money_system.txt → calculate_additional_income_rate"
+                "  common/scripted_effects/00_money_system.txt → "
+                "calculate_additional_income_rate"
             )
 
         # ── Step 2: money_scripted_localization.txt ───────────────────
@@ -785,7 +801,8 @@ class ModLoadingMixin:
             summary_name = f"additional_income_summary_{idea_id}"
             if summary_name in existing_sloc:
                 saved.append(
-                    f"money_scripted_localization.txt — '{summary_name}' already present (skipped)"
+                    f"money_scripted_localization.txt — "
+                    f"'{summary_name}' already present (skipped)"
                 )
             else:
                 defined_text = (
@@ -819,10 +836,12 @@ class ModLoadingMixin:
                     yml_text = fp.read()
             if summary_token in yml_text:
                 saved.append(
-                    f"MD_money_l_english.yml — '{summary_token}' already present (skipped)"
+                    f"MD_money_l_english.yml — "
+                    f"'{summary_token}' already present (skipped)"
                 )
             else:
-                # Find ADDITIONAL_INCOME_REVENUES_TOOLTIP and append token before closing quote
+                # Find ADDITIONAL_INCOME_REVENUES_TOOLTIP and append token
+                # before the closing quote
 
                 pattern = re.compile(
                     r"(" + re.escape(tooltip_loc_key) + r'(?::\d+)?\s*")(.*?)(")',
@@ -849,7 +868,8 @@ class ModLoadingMixin:
                         fp.write(f' {tooltip_loc_key}: "{summary_token}\\n"\n')
                     rel = os.path.relpath(yml, MOD.root)
                     saved.append(
-                        f"✅ {rel}  — appended new '{tooltip_loc_key}' entry (key not found, added at end)"
+                        f"✅ {rel}  — appended new '{tooltip_loc_key}' entry "
+                        f"(key not found, added at end)"
                     )
         except Exception as e:
             errs.append(f"❌ MD_money_l_english.yml: {e}")
