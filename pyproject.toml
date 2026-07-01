@@ -36,3 +36,8 @@ extend-exclude = ["hoi4_content_maker.py", "build"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B"]
+
+[tool.ruff.lint.per-file-ignores]
+"src/hoi4cm/ui/effects_panel.py" = ["E501", "E741"]
+"src/hoi4cm/ui/mod_loading.py" = ["E501"]
+"src/hoi4cm/ui/canvas.py" = ["E501"]

@@ -54,9 +54,10 @@ class CanvasMixin:
         """HOI4 grid integer coords -> canvas pixel coords.
         xGridSize=96, yGridSize=130 (from hoi4modutilities contentbuilder.ts)
         """
-        return gx * XGRID * self.zoom + self.offset[
-            0
-        ], gy * YGRID * self.zoom + self.offset[1]
+        return (
+            gx * XGRID * self.zoom + self.offset[0],
+            gy * YGRID * self.zoom + self.offset[1],
+        )
 
     def c2w(self, cx, cy):
         """Canvas pixel -> HOI4 grid integer coords (snapped)."""
@@ -139,8 +140,8 @@ class CanvasMixin:
     def _do_redraw(self):
         self._redraw_job = None
         self._redraw_pending = False
-        cw = max(1, self.cv.winfo_width())
-        ch = max(1, self.cv.winfo_height())
+        max(1, self.cv.winfo_width())
+        max(1, self.cv.winfo_height())
         self._grow_canvas_to_focuses()
         self._draw_grid()
         self._draw_canvas_bounds()
@@ -174,8 +175,8 @@ class CanvasMixin:
             self.cv.after_cancel(self._redraw_job)
             self._redraw_job = None
         self._redraw_pending = False
-        cw = max(1, self.cv.winfo_width())
-        ch = max(1, self.cv.winfo_height())
+        max(1, self.cv.winfo_width())
+        max(1, self.cv.winfo_height())
         self._grow_canvas_to_focuses()
         self._draw_grid()
         self._draw_canvas_bounds()
@@ -236,7 +237,10 @@ class CanvasMixin:
         for gx in range(minx, maxx + 2):
             px = gx * XGRID * z + self.offset[0] - stepx / 2
             self.cv.create_line(
-                px, y0, px, y1,
+                px,
+                y0,
+                px,
+                y1,
                 fill=(major if gx % 2 == 0 else minor),
                 tags="grid",
             )
@@ -244,7 +248,10 @@ class CanvasMixin:
         for gy in range(miny, maxy + 2):
             py = gy * YGRID * z + self.offset[1] - stepy / 2
             self.cv.create_line(
-                x0, py, x1, py,
+                x0,
+                py,
+                x1,
+                py,
                 fill=(major if gy % 2 == 0 else minor),
                 tags="grid",
             )
@@ -436,7 +443,7 @@ class CanvasMixin:
         # No viewport culling — _draw_key cache handles performance
         # Culling caused ghost positions when panning back into view
         z = self.zoom
-        slot = XGRID * z  # horizontal slot width
+        XGRID * z  # horizontal slot width
         box = BOX * z
         h = box / 2
         sd = max(1, int(2 * z))
@@ -835,9 +842,7 @@ class CanvasMixin:
             "last_snap": (f.x, f.y),
             # Other focuses don't move during a drag, so snapshot their grid
             # cells once for O(1) collision checks per motion event.
-            "occupied": {
-                (o.x, o.y) for o in self.focuses.values() if o.id != fid
-            },
+            "occupied": {(o.x, o.y) for o in self.focuses.values() if o.id != fid},
         }
         self._select(f)
 

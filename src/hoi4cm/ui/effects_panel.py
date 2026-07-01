@@ -108,9 +108,9 @@ class EffectsMixin:
         # ── Search row ─────────────────────────────────────────────
         top = tk.Frame(win, bg=BG_DARK)
         top.pack(fill="x", padx=12, pady=(12, 8))
-        tk.Label(
-            top, text="🔍", bg=BG_DARK, fg=TEXT_DIM, font=("Helvetica", 12)
-        ).pack(side="left", padx=(0, 6))
+        tk.Label(top, text="🔍", bg=BG_DARK, fg=TEXT_DIM, font=("Helvetica", 12)).pack(
+            side="left", padx=(0, 6)
+        )
         search_var = tk.StringVar()
         search = tk.Entry(
             top,
@@ -172,9 +172,7 @@ class EffectsMixin:
         # ── Footer ─────────────────────────────────────────────────
         foot = tk.Frame(win, bg=BG_DARK)
         foot.pack(fill="x", padx=12, pady=12)
-        status = tk.Label(
-            foot, text="", bg=BG_DARK, fg=TEXT_DIM, font=("Helvetica", 9)
-        )
+        status = tk.Label(foot, text="", bg=BG_DARK, fg=TEXT_DIM, font=("Helvetica", 9))
         status.pack(side="left")
         self._eb_status = status
         self._mk_btn(foot, tr("common.close", "Close"), win.destroy).pack(side="right")
@@ -325,7 +323,11 @@ class EffectsMixin:
         pop = tk.Toplevel(self)
         pop.title(defn.get("label", key))
         pop.configure(bg=BG_DARK)
-        parent = self._eb_win if (getattr(self, "_eb_win", None) and self._eb_win.winfo_exists()) else self
+        parent = (
+            self._eb_win
+            if (getattr(self, "_eb_win", None) and self._eb_win.winfo_exists())
+            else self
+        )
         pop.transient(parent)
         pop.resizable(False, False)
 
@@ -484,7 +486,6 @@ class EffectsMixin:
         label = defn.get("label", etype) if known else etype
         cat = defn.get("cat", "raw") if known else "raw"
         hdr_bg = "#0d1117" if known else "#1a1020"
-        lbl_fg = TEXT_DIM if known else ORANGE
 
         ef = tk.Frame(
             self._eff_box,
@@ -1409,7 +1410,8 @@ class EffectsMixin:
         # ── Helper: recursively render a dict/list value into HOI4 script lines
         def _hoi4_render_value(k, v, indent):
             """Render a single key->value pair at the given tab indent. Returns list of lines.
-            Handles: scalars, bools → yes/no, lists → repeated keys, dicts → nested block."""
+            Handles: scalars, bools → yes/no, lists → repeated keys, dicts → nested block.
+            """
             T = indent
             if isinstance(v, bool):
                 return [f"{T}{k} = {'yes' if v else 'no'}"]

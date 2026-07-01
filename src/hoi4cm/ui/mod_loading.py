@@ -68,9 +68,11 @@ class ModLoadingMixin:
         _init_dir = (
             _custom
             if _custom and os.path.isdir(_custom)
-            else _hoi4_mod_dir
-            if os.path.isdir(_hoi4_mod_dir)
-            else os.path.expanduser("~")
+            else (
+                _hoi4_mod_dir
+                if os.path.isdir(_hoi4_mod_dir)
+                else os.path.expanduser("~")
+            )
         )
         root = filedialog.askdirectory(
             title=tr(
@@ -124,14 +126,14 @@ class ModLoadingMixin:
             _safe_after(
                 pw,
                 0,
-                lambda i=i, t=total, l=label, p=pct: [
+                lambda i=i, t=total, lb=label, p=pct: [
                     prog_lbl.config(
                         text=tr(
                             "mod.loading.step",
                             "Step {step}/{total}: {label}",
                             step=i,
                             total=t,
-                            label=l,
+                            label=lb,
                         )
                     ),
                     bar_fill.place_configure(width=p),
@@ -151,7 +153,7 @@ class ModLoadingMixin:
         mod_name = os.path.basename(root)
         md_badge = "  ⚡MD" if MOD.is_md else ""
         self._mod_lbl.config(
-            text="📂 %s%s  |  %s" % (mod_name, md_badge, MOD.summary()),
+            text=f"📂 {mod_name}{md_badge}  |  {MOD.summary()}",
             fg="#a78bfa" if MOD.is_md else GREEN,
         )
         self._apply_md_visibility()
@@ -184,11 +186,9 @@ class ModLoadingMixin:
         if missing_items:
             _lines = []
             for _k, _p in missing_items[:5]:
-                _lines.append("  %s\n    path: %s" % (_k, _p))
+                _lines.append(f"  {_k}\n    path: {_p}")
             _more = (
-                (" (+ %d more)" % (len(missing_items) - 5))
-                if len(missing_items) > 5
-                else ""
+                f" (+ {len(missing_items) - 5} more)" if len(missing_items) > 5 else ""
             )
             disk_note = "\n\n" + tr(
                 "mod.loaded.missing_textures",
@@ -251,7 +251,7 @@ class ModLoadingMixin:
         dlg.configure(bg=BG_DARK)
         # Cap height to screen height - 80px so the dialog always fits
         _sh = dlg.winfo_screenheight()
-        dlg.geometry("640x%d" % min(700, _sh - 80))
+        dlg.geometry(f"640x{min(700, _sh - 80)}")
         dlg.resizable(True, True)
         dlg.grab_set()
 
@@ -699,7 +699,6 @@ class ModLoadingMixin:
             money_sys = os.path.join(
                 MOD.root, "common", "scripted_effects", "00_money_system.txt"
             )
-        step1_done = False
         if os.path.isfile(money_sys):
             try:
                 with open(money_sys, encoding="utf-8-sig", errors="replace") as fp:
@@ -712,7 +711,6 @@ class ModLoadingMixin:
                     saved.append(
                         f"00_money_system.txt — already contains '{idea_id}' entry (skipped)"
                     )
-                    step1_done = True
                 else:
                     # Build the inner set/multiply lines based on formula type
                     if formula_type == "gdp_pct":
@@ -761,7 +759,6 @@ class ModLoadingMixin:
                         saved.append(
                             f"✅ {rel}  — injected '{idea_id}' into calculate_additional_income_rate"
                         )
-                        step1_done = True
                     else:
                         errs.append(
                             f"⚠ Could not find 'calculate_additional_income_rate' in {os.path.basename(money_sys)}. Insert manually."
