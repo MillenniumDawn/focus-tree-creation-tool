@@ -347,7 +347,14 @@ def open_decision_wizard(app):
         C_TEAL,
     )
     if MOD.loaded:
-        _tbtn(tr("common.browse_mod", "Browse Mod"), _browse_mod_decisions, C_TEAL)
+        # Lazy lambda: _browse_mod_decisions is defined later in this function,
+        # so referencing it directly here raises UnboundLocalError and blanks
+        # the whole window. Resolve the name at click time instead.
+        _tbtn(
+            tr("common.browse_mod", "Browse Mod"),
+            lambda: _browse_mod_decisions(),
+            C_TEAL,
+        )
     _tbtn(tr("common.export_txt", "Export .txt"), lambda: _export_txt(), C_GOLD)
     _tbtn(tr("common.copy_yml", "Copy .yml"), lambda: _copy_yml(), C_GOLD)
     _tbtn(tr("common.save_to_mod", "Save to Mod"), lambda: _save_to_mod(), C_GREEN)
@@ -1146,8 +1153,15 @@ def open_decision_wizard(app):
             return None
 
     def _collect():
-        uid = sel["uid"]
-        if sel["type"] == "cat":
+        # Write back to the object the editor is CURRENTLY showing, tracked by
+        # _editor_state — NOT sel. On a selection change sel already points at
+        # the newly clicked item, so using it here would copy the on-screen
+        # values into the wrong object and make edits "leak" to every decision.
+        uid = _editor_state.get("uid")
+        etype = _editor_state.get("type")
+        if uid is None:
+            return
+        if etype == "cat":
             c = _get_cat(uid)
             if not c:
                 return
@@ -1175,7 +1189,7 @@ def open_decision_wizard(app):
                     val = _safe_evar_get(_evars[k])
                     if val is not None:
                         c[k] = bool(val)
-        elif sel["type"] == "dec":
+        elif etype == "dec":
             d = _get_dec(uid)
             if not d:
                 return
@@ -2608,7 +2622,7 @@ def open_decision_wizard(app):
 
     # ── rebuild_editor  (clears mid_frm and dispatches) ──────────────────────
     # Track what type is currently built so we know when to do a full rebuild
-    _editor_state = {"type": None}  # "cat", "dec", or None
+    _editor_state = {"type": None, "uid": None}  # what the editor currently shows
 
     def _set_var_silent(key, value):
         """Set a tkinter var without firing its write traces."""
@@ -2785,6 +2799,9 @@ def open_decision_wizard(app):
         _set_var_silent("on_map_area", bool(c.get("on_map_area", False)))
 
     def _rebuild_editor():
+        # _collect() here saves the PREVIOUSLY shown object: _editor_state still
+        # holds the old uid because we don't update it until the end of this
+        # function (below), after the new editor is built.
         _collect()  # save current edits before switching
         uid = sel["uid"]
         new_type = sel["type"]
@@ -2816,6 +2833,7 @@ def open_decision_wizard(app):
                 justify="center",
             ).pack(pady=40)
         _editor_state["type"] = new_type
+        _editor_state["uid"] = uid if obj else None
         # Scroll editor back to top on selection change
         try:
             mid_cv.yview_moveto(0)
