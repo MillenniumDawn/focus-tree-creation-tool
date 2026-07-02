@@ -43,3 +43,29 @@ def test_default_mod_dir_windows(monkeypatch):
     assert d.endswith(
         os.path.join("Documents", "Paradox Interactive", "Hearts of Iron IV", "mod")
     )
+
+
+def test_read_file_respects_size_cap(tmp_path):
+    p = tmp_path / "big.txt"
+    p.write_text("x" * 5000, encoding="utf-8")
+    assert paths.read_file(str(p), max_bytes=1000) == ""
+
+
+def test_read_file_reads_within_cap(tmp_path):
+    p = tmp_path / "small.txt"
+    p.write_text("focus = {", encoding="utf-8")
+    assert paths.read_file(str(p), max_bytes=1000) == "focus = {"
+
+
+def test_read_file_cap_disabled(tmp_path):
+    p = tmp_path / "big.txt"
+    p.write_text("x" * 5000, encoding="utf-8")
+    assert paths.read_file(str(p), max_bytes=None) == "x" * 5000
+
+
+def test_autosave_path_under_home(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(os.path, "expanduser", lambda p: p.replace("~", str(tmp_path)))
+    got = paths.autosave_path("decision.json")
+    assert got == os.path.join(str(tmp_path), ".hoi4cm", "autosave", "decision.json")
+    assert os.path.isdir(os.path.dirname(got))
