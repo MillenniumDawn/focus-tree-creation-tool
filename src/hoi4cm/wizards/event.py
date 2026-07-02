@@ -9,7 +9,6 @@
 import json
 import os
 import re
-import tempfile
 import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox
@@ -18,7 +17,9 @@ from hoi4cm.core import (
     EFFECT_CATS,
     EFFECT_DEFS,
     append_scripted_loc,
+    autosave_path,
     effects_in_cat,
+    sanitize_component,
     tr,
 )
 from hoi4cm.core.image import PIL_OK, PILImage, PILImageTk
@@ -205,9 +206,7 @@ def open_event_wizard(app):
     sel = [None]  # sel[0] = active _Ev
 
     # ── Autosave ─────────────────────────────────────────────────────
-    _ev_autosave_path = os.path.join(
-        tempfile.gettempdir(), "hoi4_cm_event_autosave.json"
-    )
+    _ev_autosave_path = autosave_path("event.json")
 
     def _ev_save_state():
         """Persist current event list to autosave file."""
@@ -1607,7 +1606,7 @@ def open_event_wizard(app):
             messagebox.showwarning("Save", "No events to save.", parent=win)
             return
 
-        ns = events[0].eid.split(".")[0]
+        ns = sanitize_component(events[0].eid.split(".")[0], fallback="TAG")
         saved = []
         errs = []
         warnings = []

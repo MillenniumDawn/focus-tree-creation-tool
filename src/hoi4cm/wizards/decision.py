@@ -10,13 +10,14 @@ import copy
 import json
 import os
 import re
-import tempfile
 import tkinter as tk
 import uuid
 from tkinter import filedialog, messagebox
 
 from hoi4cm.core import (
     append_scripted_loc,
+    autosave_path,
+    sanitize_component,
     tr,
 )
 from hoi4cm.core.image import PIL_OK, PILImage, PILImageTk
@@ -55,8 +56,7 @@ def open_decision_wizard(app):
     win.resizable(True, True)
 
     # ── Auto-save / undo infrastructure ─────────────────────────────────────
-    _autosave_dir = tempfile.gettempdir()
-    _autosave_path = os.path.join(_autosave_dir, "hoi4_cm_decision_autosave.json")
+    _autosave_path = autosave_path("decision.json")
     _undo_stack = []  # list of (dm_cats snapshot, dm_decs snapshot)
     _undo_max = 30
 
@@ -5256,7 +5256,9 @@ def open_decision_wizard(app):
             )
             if not mod_root:
                 return
-        ns = dm_cats[0]["cat_id"].split("_")[0] if dm_cats else "TAG"
+        ns = sanitize_component(
+            dm_cats[0]["cat_id"].split("_")[0] if dm_cats else "TAG", fallback="TAG"
+        )
         saved = []
         errs = []
         # Prefer the imported/user-set edit target so we overwrite the source file in place

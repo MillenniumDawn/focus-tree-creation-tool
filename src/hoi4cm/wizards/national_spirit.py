@@ -9,7 +9,6 @@
 import json
 import os
 import re
-import tempfile
 import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox
@@ -18,7 +17,9 @@ from hoi4cm.core import (
     MODIFIER_CATS,
     MODIFIER_DEFS,
     append_scripted_loc,
+    autosave_path,
     modifiers_in_cat,
+    sanitize_component,
     tr,
 )
 from hoi4cm.core.image import PIL_OK, PILImage, PILImageTk
@@ -50,7 +51,7 @@ def open_national_spirit_wizard(app):
     win.grab_set()
 
     # ── Auto-save on close ─────────────────────────────────────────────
-    _sp_autosave = os.path.join(tempfile.gettempdir(), "hoi4_cm_spirit_autosave.json")
+    _sp_autosave = autosave_path("national_spirit.json")
 
     def _spirit_autosave():
         try:
@@ -1567,7 +1568,9 @@ def open_national_spirit_wizard(app):
         app._hint("National Spirit code copied to clipboard!")
 
     def _save_to_mod():
-        sid = v_id.get().strip() or "TAG_my_spirit"
+        sid = sanitize_component(
+            v_id.get().strip() or "TAG_my_spirit", fallback="TAG_my_spirit"
+        )
         slot = v_slot.get().strip() or "country"
         loc_n = v_loc_name.get().strip()
         loc_d = v_loc_desc.get().strip()
