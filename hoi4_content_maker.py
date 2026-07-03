@@ -75,6 +75,7 @@ from hoi4cm.core import (
     EmptyFocusTreeError,
     Focus,
     add_error,
+    bounded_inflate,
     build_focuses,
     default_hoi4_mod_dir,
     dict_to_raw,
@@ -84,6 +85,8 @@ from hoi4cm.core import (
     get_language,
     install_excepthook,
     parse_focus_tree,
+    safe_fromstring,
+    sanitize_component,
     set_error_callback,
     set_language,
     show_splash,
@@ -4956,7 +4959,6 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
         import base64
         import urllib.parse
         import xml.etree.ElementTree as ET
-        import zlib
 
         # ── Step 1: File picker ───────────────────────────────────────
         path = filedialog.askopenfilename(
@@ -4970,6 +4972,10 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
             return
 
         try:
+            # Untrusted file: cap the raw read so a giant .drawio can't
+            # exhaust memory before parsing.
+            if os.path.getsize(path) > 64 * 1024 * 1024:
+                raise ValueError("file exceeds 64 MB")
             with open(path, encoding="utf-8", errors="replace") as fp:
                 raw_file = fp.read()
         except Exception as e:
@@ -4982,12 +4988,14 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
             return
 
         # ── Step 2: Parse XML ─────────────────────────────────────────
+        # bounded_inflate / safe_fromstring guard against decompression bombs
+        # and XML entity-expansion (billion laughs) in shared .drawio files.
         def decompress_drawio(b64str):
             data = base64.b64decode(b64str)
-            return urllib.parse.unquote(zlib.decompress(data, -15).decode("utf-8"))
+            return urllib.parse.unquote(bounded_inflate(data).decode("utf-8"))
 
         def get_graph_root(xml_str):
-            root = ET.fromstring(xml_str)
+            root = safe_fromstring(xml_str)
             if root.tag == "mxGraphModel":
                 return root
             for diag in root.iter("diagram"):
@@ -4995,18 +5003,18 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
                 if not text:
                     return diag
                 try:
-                    return ET.fromstring(decompress_drawio(text))
+                    return safe_fromstring(decompress_drawio(text))
                 except Exception:
                     pass
                 try:
-                    return ET.fromstring(text)
+                    return safe_fromstring(text)
                 except Exception:
                     pass
             return root
 
         try:
             graph_root = get_graph_root(raw_file)
-        except ET.ParseError as e:
+        except (ET.ParseError, ValueError) as e:
             messagebox.showerror(
                 tr("dialog.drawio_import.title", "Draw.io Import"),
                 tr(
@@ -8669,9 +8677,10 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
         nf.id = id(nf)
         # Generate new unique name
         base = re.sub(r"_copy\d*$", "", f.name) + "_copy"
+        existing_names = {foc.name for foc in self.focuses.values()}
         n = 1
         candidate = base
-        while candidate in {foc.name for foc in self.focuses.values()}:
+        while candidate in existing_names:
             candidate = f"{base}{n}"
             n += 1
         nf.name = candidate
@@ -9024,7 +9033,9 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
             if tag_match
             else getattr(self, "_tree_country_tag", "TAG")
         )
-        country_tag = country_tag.upper()
+        # Sanitize: the fallback tag comes from parsed (untrusted) mod content
+        # and is used to build the loc filename below.
+        country_tag = sanitize_component(country_tag.upper(), fallback="TAG")
 
         out = []
         out.append("focus_tree = {")

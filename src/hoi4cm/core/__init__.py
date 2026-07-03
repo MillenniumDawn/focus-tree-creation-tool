@@ -46,7 +46,9 @@ from .logger import (
     log_startup,
     set_error_callback,
 )
-from .paths import default_hoi4_mod_dir, read_file
+from .paths import autosave_path, default_hoi4_mod_dir, read_file
+from .safe_path import safe_join, sanitize_component
+from .safe_xml import bounded_inflate, safe_fromstring
 
 __all__ = [
     "CONFIG_PATH",
@@ -65,6 +67,8 @@ __all__ = [
     "ParsedFocusTree",
     "add_error",
     "append_scripted_loc",
+    "autosave_path",
+    "bounded_inflate",
     "build_focuses",
     "cfg_load",
     "cfg_save",
@@ -84,6 +88,9 @@ __all__ = [
     "normalize_effect_fields",
     "parse_focus_tree",
     "read_file",
+    "safe_join",
+    "safe_fromstring",
+    "sanitize_component",
     "set_error_callback",
     "set_language",
     "show_splash",

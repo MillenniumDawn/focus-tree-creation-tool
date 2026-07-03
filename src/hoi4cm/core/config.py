@@ -24,11 +24,26 @@ def cfg_load():
 
 
 def cfg_save(data):
-    """Merge data into existing config and write to disk."""
+    """Merge data into existing config and write it atomically."""
     try:
         existing = cfg_load()
         existing.update(data)
-        with open(CONFIG_PATH, "w", encoding="utf-8") as f:
-            json.dump(existing, f, indent=2)
+        tmp = CONFIG_PATH + ".tmp"
+        try:
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(existing, f, indent=2)
+                f.flush()
+                os.fsync(f.fileno())
+            try:
+                os.chmod(tmp, 0o600)
+            except OSError:
+                pass
+            os.replace(tmp, CONFIG_PATH)
+        except Exception:
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+            raise
     except Exception as e:
         _log.error(f"save failed: {e}")

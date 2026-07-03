@@ -42,6 +42,12 @@ def export_focus_tree(focuses_in_tree, info, *, focus_lookup, effect_renderer):
     cfp_y = info.get("cfp_y")
     is_joint = info.get("type") == "joint"
 
+    # name → focus, built once (keep first match) so relative_position_id
+    # resolution below is O(1) per focus instead of scanning all focuses.
+    name_to_focus = {}
+    for foc in focus_lookup.values():
+        name_to_focus.setdefault(foc.name, foc)
+
     def write_focus_body(f, out, indent, strip_effect_tab=False):
         """Write the body of a focus block (fields after id/icon).
 
@@ -54,14 +60,11 @@ def export_focus_tree(focuses_in_tree, info, *, focus_lookup, effect_renderer):
         gx = getattr(f, "_raw_gx", f.x)
         gy = getattr(f, "_raw_gy", f.y)
         rel_id = getattr(f, "relative_position_id", None)
-        if rel_id and any(foc.name == rel_id for foc in focus_lookup.values()):
+        if rel_id and rel_id in name_to_focus:
             dx = getattr(f, "_rel_dx", None)
             dy = getattr(f, "_rel_dy", None)
             if dx is None or dy is None:
-                parent = next(
-                    (foc for foc in focus_lookup.values() if foc.name == rel_id),
-                    None,
-                )
+                parent = name_to_focus.get(rel_id)
                 dx = gx - parent.x if parent else gx
                 dy = gy - parent.y if parent else gy
             out.append(f"{t1}x = {dx}")

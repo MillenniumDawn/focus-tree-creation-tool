@@ -11,6 +11,7 @@ import tkinter as tk
 from tkinter import messagebox
 
 from hoi4cm.core import (
+    sanitize_component,
     tr,
 )
 from hoi4cm.mod import MOD
@@ -468,6 +469,9 @@ def open_additional_income_wizard(app):
                 parent=win,
             )
             return
+
+        # idea_id becomes an output filename below — keep it a safe segment.
+        idea_id = sanitize_component(idea_id, fallback="new_idea")
 
         if not MOD.loaded or not MOD.root:
             messagebox.showwarning(

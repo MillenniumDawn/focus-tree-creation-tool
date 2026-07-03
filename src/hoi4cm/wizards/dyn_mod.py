@@ -9,12 +9,13 @@
 import json
 import os
 import re
-import tempfile
 import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox
 
 from hoi4cm.core import (
+    autosave_path,
+    sanitize_component,
     tr,
 )
 from hoi4cm.core.image import PIL_OK, PILImage, PILImageTk
@@ -43,7 +44,7 @@ def open_dyn_mod_wizard(app):
     win.geometry("640x720")
     win.resizable(True, True)
     win.grab_set()
-    _dm_autosave_p = tempfile.gettempdir() + "/hoi4_cm_dynmod_autosave.json"
+    _dm_autosave_p = autosave_path("dyn_mod.json")
 
     def _dynmod_close():
         try:
@@ -1065,7 +1066,10 @@ def open_dyn_mod_wizard(app):
     _preview()
 
     def _save_file():
-        mid = v_id.get().strip() or "TAG_my_dynamic_modifier"
+        mid = sanitize_component(
+            v_id.get().strip() or "TAG_my_dynamic_modifier",
+            fallback="TAG_my_dynamic_modifier",
+        )
         icon = v_icon.get().strip()
         name = v_loc_name.get().strip()
         desc = v_loc_desc.get().strip()

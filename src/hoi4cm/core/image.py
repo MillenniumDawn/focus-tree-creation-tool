@@ -1,14 +1,16 @@
 """Pillow import helper.
 
-Tries to import Pillow; if missing and not running from a frozen bundle,
-attempts a one-shot ``pip install Pillow`` so the user's first launch works
-without a manual install step. In a frozen (PyInstaller) binary the install
-is skipped and the wizards fall back to placeholder text.
+Tries to import Pillow. If it is missing, the wizards fall back to placeholder
+text; the app does not shell out to ``pip`` unless the user opts in by setting
+``HOI4CM_AUTO_INSTALL_PILLOW`` (a network install at import time is a supply-
+chain surface, so it is off by default). Frozen (PyInstaller) binaries never
+attempt an install.
 
 Exposes :data:`PIL_OK`, :data:`PILImage`, :data:`PILImageTk` for code that
 wants to check availability before calling Pillow.
 """
 
+import os
 import subprocess
 import sys
 
@@ -42,6 +44,11 @@ def _import_pillow():
         pass
     if getattr(sys, "frozen", False):
         _log.warning("Pillow not available in frozen binary — image previews disabled")
+        return None, None, False
+    if not os.environ.get("HOI4CM_AUTO_INSTALL_PILLOW"):
+        _log.info(
+            "Pillow not installed — run `pip install Pillow` to enable image previews"
+        )
         return None, None, False
     if not _try_install_pillow():
         return None, None, False
