@@ -189,6 +189,7 @@ import json
 import re
 import subprocess
 import threading
+import time
 
 
 def _apply_tk_dpi_scaling(root):
@@ -6442,13 +6443,17 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
 
 
 
-    def _install_extra_tree(self, raw, path, tree_type):
+    def _install_extra_tree(self, raw, path, tree_type, defer_redraw=False):
         """Parse raw focus-tree text, register the tree, and build its focuses.
 
         Shared core behind both the shared/joint loaders. Returns
         (focus_count, tree_id). Raises EmptyFocusTreeError when the file holds
-        no focus data."""
+        no focus data. When ``defer_redraw`` is True, the panel refreshes and
+        canvas redraw/fit are skipped — for batch loads, the caller does each
+        once after the whole batch instead of once per file."""
+        t0 = time.perf_counter()
         parsed = parse_focus_tree(raw, path)
+        t1 = time.perf_counter()
         tree_idx = len(self._extra_trees) + 1
         tree_info = {
             "type": tree_type,
@@ -6467,21 +6472,32 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
             self._shared_focuses.append(parsed.tree_id)
         elif tree_type == "joint" and parsed.tree_id not in self._joint_focuses:
             self._joint_focuses.append(parsed.tree_id)
-        self._refresh_tree_meta_panel()
+        if not defer_redraw:
+            self._refresh_tree_meta_panel()
         # Snapshot existing focuses BEFORE inserting the new ones so cross-tree
         # position/prereq resolution sees only already-loaded trees.
+        t2 = time.perf_counter()
         new_focuses = build_focuses(
             parsed,
             tree_idx,
             country_tag=getattr(self, "_tree_country_tag", ""),
             existing_focuses=list(self.focuses.values()),
         )
+        t3 = time.perf_counter()
         for f in new_focuses:
             self.focuses[f.id] = f
             tree_info["focus_ids"].add(f.id)
-        self._refresh_loaded_trees_panel()
-        self._redraw()
-        self._fit_all()
+        if not defer_redraw:
+            self._refresh_loaded_trees_panel()
+            self._redraw()
+            self._fit_all()
+        log.debug(
+            "install tree %s: parse %.1fms build %.1fms (%d focuses)",
+            path,
+            (t1 - t0) * 1000,
+            (t3 - t2) * 1000,
+            len(new_focuses),
+        )
         return len(new_focuses), parsed.tree_id
 
     def _load_extra_tree(self, tree_type):
@@ -6977,12 +6993,19 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
             win.destroy()
             ok, fail = [], []
             for fp, ttype in to_load:
-                # Reuse _load_extra_tree logic but skip the file dialog
+                # Reuse _load_extra_tree logic but skip the file dialog. Defer
+                # panel refresh/redraw/fit-all to once after the whole batch
+                # instead of once per file.
                 try:
-                    self._load_extra_tree_from_path(fp, ttype)
+                    self._load_extra_tree_from_path(fp, ttype, defer_redraw=True)
                     ok.append(os.path.basename(fp))
                 except Exception as e:
                     fail.append(f"{os.path.basename(fp)}: {e}")
+
+            if ok:
+                self._refresh_tree_meta_panel()
+                self._refresh_loaded_trees_panel()
+                self._redraw()
 
             msg = (
                 tr("load_all.loaded_count", "Loaded {count} file(s).", count=len(ok))
@@ -7032,7 +7055,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
             cursor="hand2",
         ).pack(side="left", expand=True, fill="x")
 
-    def _load_extra_tree_from_path(self, path, tree_type):
+    def _load_extra_tree_from_path(self, path, tree_type, defer_redraw=False):
         """Internal: load a shared/joint tree from a known path (no file dialog)."""
         # Duplicate check
         for et in self._extra_trees:
@@ -7041,7 +7064,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
         with open(path, encoding="utf-8-sig", errors="replace") as fp:
             raw = fp.read()
         # EmptyFocusTreeError (rich diagnostic) propagates to the batch caller.
-        self._install_extra_tree(raw, path, tree_type)
+        self._install_extra_tree(raw, path, tree_type, defer_redraw=defer_redraw)
 
     def _save_all_trees(self):
         """Export all loaded trees (main + extra) with one click."""

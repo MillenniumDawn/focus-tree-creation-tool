@@ -13,6 +13,7 @@ app still works.
 import json
 import os
 import re
+import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Callable, Optional
 
@@ -737,10 +738,14 @@ class ModContext:
             for i, (label, fn) in enumerate(steps):
                 if progress_cb:
                     progress_cb(i, len(steps), label)
+                t0 = time.perf_counter()
                 try:
                     fn()
                 except Exception as e:
                     _log.warning("scan step %s failed: %s", label, e)
+                _log.debug(
+                    "scan step %s: %.1fms", label, (time.perf_counter() - t0) * 1000
+                )
         finally:
             if self._cache:
                 self._cache.close()
