@@ -6,6 +6,12 @@ parse_focus_tree (text -> ParsedFocusTree) -> build_focuses (-> Focus objects)
 """
 
 from .build import build_focuses
+from .drawio import (
+    EmptyDrawioGraphError,
+    build_drawio_focuses,
+    drawio_to_focus_data,
+    parse_drawio_graph,
+)
 from .export import export_focus_tree
 from .parse import EmptyFocusTreeError, ParsedFocusTree, parse_focus_tree
 
@@ -15,4 +21,8 @@ __all__ = [
     "EmptyFocusTreeError",
     "build_focuses",
     "export_focus_tree",
+    "EmptyDrawioGraphError",
+    "parse_drawio_graph",
+    "drawio_to_focus_data",
+    "build_drawio_focuses",
 ]

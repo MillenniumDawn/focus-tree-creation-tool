@@ -3,7 +3,7 @@
 ## The story so far
 
 `hoi4_content_maker.py` started as a single ~21k-line file. It's down to
-8,963 lines. What moved, and when:
+8,754 lines. What moved, and when:
 
 - **#8**: logging pulled into `hoi4cm.core.logger`, plus the packaging/tooling
   setup (`pyproject.toml`, ruff/black scoping, pytest config) that made an
@@ -27,11 +27,19 @@
   and fallback behavior it was missing (`country_raw`, `allow_branch`,
   `text`, the per-focus brace-walk fallback); `hoi4cm.mod` picked up
   `detect_loc_file`. `_import_txt` is now an ~80-line Tk shell.
+- `_import_drawio` extracted to `focus_tree/drawio.py` (phase 3): the mxGraph
+  XML walk, label/coordinate cleanup, row/column clustering, and HOI4-grid
+  collision resolution are now pure functions (`parse_drawio_graph`,
+  `drawio_to_focus_data`, `build_drawio_focuses`). Unlike `_import_txt`, this
+  wasn't a convergence — draw.io's format doesn't overlap with the HOI4
+  script parser, so it got its own module. `_import_drawio` is now an
+  ~615-line Tk shell (dialogs + wiring); most of that is still the two
+  Toplevel dialogs (tree setup, preview), which are Tk-only and stay put.
 
 What's left in `hoi4_content_maker.py` today is essentially: the `sys.path`
 shim and import block (lines ~62-148), two Windows-DPI helpers (~151-235),
 and `class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk)`
-(~240-8944, around 110 methods), plus the `__main__` entry point that calls
+(~240-8754, around 110 methods), plus the `__main__` entry point that calls
 `show_splash(_launch)`.
 
 ## Wiring convention
@@ -47,7 +55,7 @@ needs it via `hoi4cm.core`.
 | Monolith function | Lines | Destination | Status |
 |---|---|---|---|
 | `_open_settings` | ~7179-8494 (~1,316) | `ui/settings_dialog.py` | in monolith (phase 9) |
-| `_import_drawio` | ~4948-5773 (~826) | `focus_tree/drawio.py` | in monolith (phase 3) |
+| `_import_drawio` | ~4952-5567 (~616) | `focus_tree/drawio.py` | **done** (phase 3) |
 | `_import_txt` | ~5777-5899 (~123) | converged onto `focus_tree/parse.py` + `build.py` | **done** (phase 3) |
 | `_build_menubar` | ~399-934 | `ui/menubar.py` | in monolith (phase 10) |
 | `_build_toolbar_row2` | ~935-1193 | `ui/toolbar.py` | in monolith (phase 10) |
@@ -63,8 +71,9 @@ Phase 3 wasn't a straight cut-and-paste for it, it was converging three
 implementations into one. `parse.py` and `build.py` picked up the handful
 of behaviors the monolith copy had that they didn't (see the comparison
 harness in `testing.md`), and only then did the monolith copy get deleted.
-`_import_drawio` still has its own separate parser and hasn't gone through
-this yet.
+`_import_drawio`'s parser turned out not to need that treatment: it's the
+only thing in the codebase that reads mxGraph XML, so there was nothing to
+converge it with, just a straight lift into its own module.
 
 `_open_gfx_browser`/`_gfx_browse_files` likely duplicate the already-extracted
 `ui/gfx_browser.py` (`open_universal_gfx_browser`, `open_gfx_placement_editor`).
@@ -90,10 +99,6 @@ Phase 10 needs to confirm the overlap and delete whichever copy loses.
   selected `Focus`, the current sidebar widgets, in-place mutation on
   every keystroke). Extracting them cleanly needs a form-state redesign
   first, not just a lift-and-shift.
-- **`_import_drawio`**: has its own separate parser, same shape as
-  `_import_txt` before its phase-3 convergence. Wants the same treatment
-  (audit -> converge parse.py/build.py -> comparison harness -> swap) rather
-  than a straight lift-and-shift.
 - **`_open_settings`**: the single largest remaining chunk (~1,316 lines).
   Deferred to phase 9 simply because of size and because it touches almost
   every config key the app has; wants its own careful pass rather than

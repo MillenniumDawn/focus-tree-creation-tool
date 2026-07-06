@@ -72,20 +72,22 @@ from hoi4cm.core import (
     EFFECT_CATS,
     EFFECT_DEFS,
     I18N_LANGS,
+    EmptyDrawioGraphError,
     EmptyFocusTreeError,
     Focus,
     add_error,
-    bounded_inflate,
+    build_drawio_focuses,
     build_focuses,
     default_hoi4_mod_dir,
     dict_to_raw,
+    drawio_to_focus_data,
     effects_in_cat,
     export_focus_tree,
     get_error_entries,
     get_language,
     install_excepthook,
+    parse_drawio_graph,
     parse_focus_tree,
-    safe_fromstring,
     sanitize_component,
     set_error_callback,
     set_language,
@@ -4957,9 +4959,12 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
           4. Apply tag prefix to every focus name
           5. Preview dialog
           6. Commit to canvas with proper HOI4 structure
+
+        The graph parsing and grid mapping (steps 2 and 4-5's coordinate
+        work) are pure functions in ``hoi4cm.focus_tree.drawio`` — this
+        method is the Tk shell around them: file I/O, dialogs, and wiring the
+        result into ``self.focuses``.
         """
-        import base64
-        import urllib.parse
         import xml.etree.ElementTree as ET
 
         # ── Step 1: File picker ───────────────────────────────────────
@@ -4990,32 +4995,21 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
             return
 
         # ── Step 2: Parse XML ─────────────────────────────────────────
-        # bounded_inflate / safe_fromstring guard against decompression bombs
-        # and XML entity-expansion (billion laughs) in shared .drawio files.
-        def decompress_drawio(b64str):
-            data = base64.b64decode(b64str)
-            return urllib.parse.unquote(bounded_inflate(data).decode("utf-8"))
-
-        def get_graph_root(xml_str):
-            root = safe_fromstring(xml_str)
-            if root.tag == "mxGraphModel":
-                return root
-            for diag in root.iter("diagram"):
-                text = (diag.text or "").strip()
-                if not text:
-                    return diag
-                try:
-                    return safe_fromstring(decompress_drawio(text))
-                except Exception:
-                    pass
-                try:
-                    return safe_fromstring(text)
-                except Exception:
-                    pass
-            return root
-
+        # parse_drawio_graph guards against decompression bombs and XML
+        # entity-expansion (billion laughs) in shared .drawio files via
+        # bounded_inflate/safe_fromstring, and raises EmptyDrawioGraphError
+        # when the diagram has no usable shapes.
         try:
-            graph_root = get_graph_root(raw_file)
+            graph = parse_drawio_graph(raw_file)
+        except EmptyDrawioGraphError:
+            messagebox.showwarning(
+                tr("dialog.drawio_import.title", "Draw.io Import"),
+                tr(
+                    "dialog.drawio_no_shapes",
+                    "No shapes found in the diagram.\n\nMake sure your shapes have labels and are saved as XML.",
+                ),
+            )
+            return
         except (ET.ParseError, ValueError) as e:
             messagebox.showerror(
                 tr("dialog.drawio_import.title", "Draw.io Import"),
@@ -5026,93 +5020,6 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
                 ),
             )
             return
-
-        cells = graph_root.findall(".//mxCell")
-
-        def clean_label(raw):
-            s = re.sub(r"<[^>]+>", "", raw or "")
-            for ent, ch in [
-                ("&amp;", "&"),
-                ("&lt;", "<"),
-                ("&gt;", ">"),
-                ("&nbsp;", " "),
-                ("&#xa;", ""),
-            ]:
-                s = s.replace(ent, ch)
-            s = s.strip()
-            s = re.sub(r"[\s\-]+", "_", s)
-            s = re.sub(r"[^A-Za-z0-9_]", "", s)
-            return s
-
-        vertices = {}
-        for c in cells:
-            cid = c.get("id", "")
-            if c.get("vertex") != "1" or cid in ("0", "1", ""):
-                continue
-            geo = c.find("mxGeometry")
-            if geo is None:
-                continue
-            label = clean_label(c.get("value", ""))
-            if not label:
-                label = f"focus_{cid}"
-            try:
-                x = float(geo.get("x", 0) or 0)
-                y = float(geo.get("y", 0) or 0)
-                w = float(geo.get("width", 120) or 120)
-                h = float(geo.get("height", 60) or 60)
-            except Exception:
-                x = y = 0
-                w = 120
-                h = 60
-            vertices[cid] = {"label": label, "x": x, "y": y, "w": w, "h": h}
-
-        # UserObject / object wrappers
-        for obj in graph_root.findall(".//UserObject") + graph_root.findall(
-            ".//object"
-        ):
-            inner = obj.find("mxCell")
-            if inner is None or inner.get("vertex") != "1":
-                continue
-            cid = obj.get("id") or inner.get("id", "")
-            if not cid or cid in ("0", "1"):
-                continue
-            geo = inner.find("mxGeometry")
-            if geo is None:
-                continue
-            label = clean_label(
-                obj.get("label") or obj.get("value") or obj.get("name") or ""
-            )
-            if not label:
-                label = f"focus_{cid}"
-            try:
-                x = float(geo.get("x", 0) or 0)
-                y = float(geo.get("y", 0) or 0)
-                w = float(geo.get("width", 120) or 120)
-                h = float(geo.get("height", 60) or 60)
-            except Exception:
-                x = y = 0
-                w = 120
-                h = 60
-            vertices[cid] = {"label": label, "x": x, "y": y, "w": w, "h": h}
-
-        if not vertices:
-            messagebox.showwarning(
-                tr("dialog.drawio_import.title", "Draw.io Import"),
-                tr(
-                    "dialog.drawio_no_shapes",
-                    "No shapes found in the diagram.\n\nMake sure your shapes have labels and are saved as XML.",
-                ),
-            )
-            return
-
-        edges = []
-        for c in cells:
-            if c.get("edge") != "1":
-                continue
-            src = c.get("source", "")
-            tgt = c.get("target", "")
-            if src in vertices and tgt in vertices:
-                edges.append((src, tgt))
 
         # ── Step 3: Tree-setup dialog (tag, name, tree ID) ───────────
         result = {}  # filled by dialog
@@ -5141,8 +5048,8 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
             text=tr(
                 "drawio.setup.found",
                 "  Found {focuses} focuses  -  {arrows} prerequisite arrows",
-                focuses=len(vertices),
-                arrows=len(edges),
+                focuses=len(graph.vertices),
+                arrows=len(graph.edges),
             ),
             bg=BG_DARK,
             fg="#58a6ff",
@@ -5228,7 +5135,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
                     f"\t\t\toriginal_tag = {tag}\n"
                     f"\t\t}}\n"
                     f"\t}}\n"
-                    f"\n\t# {len(vertices)} focuses imported from Draw.io\n}}"
+                    f"\n\t# {len(graph.vertices)} focuses imported from Draw.io\n}}"
                 )
                 prev_txt.config(state="normal")
                 prev_txt.delete("1.0", "end")
@@ -5300,106 +5207,13 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
         prefix = result["prefix"]  # e.g. "JAP_"
         tree_id = result["tree_id"]
 
-        # ── Step 4: Apply tag prefix to all focus labels ──────────────
-        # If label already starts with the prefix, don't double-add it
-        for v in vertices.values():
-            lbl = v["label"]
-            if not lbl.upper().startswith(prefix.upper()):
-                v["label"] = prefix + lbl
-
-        # ── Step 5: Map pixel coords → HOI4 grid (compact clustering) ──
-        #
-        # Strategy: cluster focuses into rows by proximity, then within each
-        # row assign columns by X order. This keeps the tree tight like the
-        # HOI4 in-game view instead of stretching the raw pixel distances.
-
-        def cluster_axis(values, tolerance_ratio=0.55):
-            """Group pixel coords into discrete slots using centroid clustering.
-            tolerance_ratio: fraction of median gap to use as merge threshold."""
-            vals = sorted(set(round(v) for v in values))
-            if not vals:
-                return {}
-            # Find median gap between distinct positions
-            gaps = [b - a for a, b in zip(vals, vals[1:]) if b - a > 2]
-            median_gap = sorted(gaps)[len(gaps) // 2] if gaps else 80
-            tol = max(10, median_gap * tolerance_ratio)
-            # Merge close values into clusters
-            clusters = []
-            for v in vals:
-                if clusters and v - clusters[-1][-1] <= tol:
-                    clusters[-1].append(v)
-                else:
-                    clusters.append([v])
-            # Map each raw value → cluster index
-            mapping = {}
-            for idx, cluster in enumerate(clusters):
-                for v in cluster:
-                    mapping[v] = idx
-            return mapping
-
-        all_px = [v["x"] for v in vertices.values()]
-        all_py = [v["y"] for v in vertices.values()]
-
-        x_cluster = cluster_axis(all_px, tolerance_ratio=0.60)
-        y_cluster = cluster_axis(all_py, tolerance_ratio=0.60)
-
-        def snap(val, mapping):
-            """Find nearest key in mapping dict."""
-            rounded = round(val)
-            if rounded in mapping:
-                return mapping[rounded]
-            # nearest
-            return mapping[min(mapping.keys(), key=lambda k: abs(k - val))]
-
-        # Assign raw cluster indices
-        raw_grid = {}
-        for cid, v in vertices.items():
-            col = snap(v["x"], x_cluster)
-            row = snap(v["y"], y_cluster)
-            raw_grid[cid] = (col, row)
-
-        # HOI4 uses even columns (0,2,4,...) and integer rows (0,1,2,...)
-        # Remap col index → HOI4 x, row index → HOI4 y
-        # Option A collision resolution: nudge right first, then wrap to next row
-        used = {}  # (gx, gy) -> cid
-        grid_positions = {}
-        auto_shifted = []  # track which focuses were moved for the hint
-
-        # Find max column in use per row (to know how far right things go)
-        def _find_free(gx_start, gy, max_right_search=30):
-            """Try nudging right up to max_right_search slots, then drop to next row."""
-            gx = gx_start
-            for _ in range(max_right_search):
-                if (gx, gy) not in used:
-                    return gx, gy
-                gx += 2
-            # Column search exhausted — try next row at original column
-            gy_try = gy + 1
-            gx_try = gx_start
-            while (gx_try, gy_try) in used:
-                gx_try += 2
-            return gx_try, gy_try
-
-        for cid in sorted(
-            raw_grid.keys(), key=lambda c: (raw_grid[c][1], raw_grid[c][0])
-        ):
-            col_idx, row_idx = raw_grid[cid]
-            gx_orig = col_idx * 2  # even columns
-            gy_orig = row_idx
-
-            if (gx_orig, gy_orig) not in used:
-                # No collision — place directly
-                gx, gy = gx_orig, gy_orig
-            else:
-                # Collision detected — find nearest free slot
-                gx, gy = _find_free(gx_orig, gy_orig)
-                auto_shifted.append((vertices[cid]["label"], gx_orig, gy_orig, gx, gy))
-
-            used[(gx, gy)] = cid
-            grid_positions[cid] = (gx, gy)
-
-        # Log shifts to hint bar after import completes
-        _auto_shift_log = auto_shifted
+        # ── Steps 4-5: tag prefix + pixel-coords → HOI4 grid mapping ───
+        # drawio_to_focus_data clusters focuses into rows/columns by pixel
+        # proximity and snaps them onto HOI4's even-column grid, nudging
+        # right then wrapping to the next row to resolve collisions. See
+        # hoi4cm.focus_tree.drawio for the algorithm.
+        drawio_result = drawio_to_focus_data(graph, prefix)
+        label_by_cid = {df.cid: df.label for df in drawio_result.focuses}
 
         # ── Step 6: Preview dialog ────────────────────────────────────
         prev_win = tk.Toplevel(self)
@@ -5417,7 +5231,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
                 "drawio.preview.header",
                 "  Preview - {tag} Focus Tree  ({count} focuses)",
                 tag=tag,
-                count=len(vertices),
+                count=len(drawio_result.focuses),
             ),
             bg="#161b22",
             fg="#a78bfa",
@@ -5478,23 +5292,19 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
         lst.tag_configure("arrow", foreground="#22c55e")
         lst.tag_configure("dim", foreground="#374151")
 
-        lst.insert("end", f"FOCUSES  ({len(vertices)})\n", "hdr")
+        lst.insert("end", f"FOCUSES  ({len(drawio_result.focuses)})\n", "hdr")
         lst.insert("end", "─" * 64 + "\n", "dim")
-        for cid in sorted(
-            vertices.keys(), key=lambda c: (grid_positions[c][1], grid_positions[c][0])
-        ):
-            v = vertices[cid]
-            gx, gy = grid_positions[cid]
-            lst.insert("end", f"  {v['label']:<36}", "focus")
-            lst.insert("end", f"  x={gx:2d}  y={gy:2d}\n", "dim")
+        for df in drawio_result.focuses:
+            lst.insert("end", f"  {df.label:<36}", "focus")
+            lst.insert("end", f"  x={df.x:2d}  y={df.y:2d}\n", "dim")
 
-        if edges:
-            lst.insert("end", f"\nPREREQUISITES  ({len(edges)})\n", "hdr")
+        if drawio_result.edges:
+            lst.insert("end", f"\nPREREQUISITES  ({len(drawio_result.edges)})\n", "hdr")
             lst.insert("end", "─" * 64 + "\n", "dim")
-            for src, tgt in edges:
-                lst.insert("end", f"  {vertices[src]['label']}", "focus")
+            for src, tgt in drawio_result.edges:
+                lst.insert("end", f"  {label_by_cid[src]}", "focus")
                 lst.insert("end", "  ──►  ", "dim")
-                lst.insert("end", f"{vertices[tgt]['label']}\n", "arrow")
+                lst.insert("end", f"{label_by_cid[tgt]}\n", "arrow")
         lst.config(state="disabled")
 
         # ── Code preview pane ──
@@ -5540,21 +5350,18 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
         code_lines.append("\tcontinuous_focus_position = { x = 0 y = 1700 }")
         code_lines.append("")
 
-        # Sort focuses top-to-bottom, left-to-right (visual reading order)
-        sorted_cids = sorted(
-            vertices.keys(), key=lambda c: (grid_positions[c][1], grid_positions[c][0])
-        )
+        # drawio_result.focuses is already sorted top-to-bottom, left-to-right
+        # (visual reading order) by drawio_to_focus_data.
 
         # Build prereq map: tgt_cid -> [src_cid, ...]
         prereq_map = {}
-        for src_cid, tgt_cid in edges:
+        for src_cid, tgt_cid in drawio_result.edges:
             prereq_map.setdefault(tgt_cid, []).append(src_cid)
 
-        for cid in sorted_cids:
-            v = vertices[cid]
-            gx, gy = grid_positions[cid]
-            fid = v["label"]
-            prereqs = prereq_map.get(cid, [])
+        for df in drawio_result.focuses:
+            gx, gy = df.x, df.y
+            fid = df.label
+            prereqs = prereq_map.get(df.cid, [])
             is_root = not prereqs  # root focus = no prerequisites
 
             # ── Property order per skill rules ───────────────────────
@@ -5575,7 +5382,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
             if prereqs:
                 for src_cid in prereqs:
                     code_lines.append(
-                        f"\t\tprerequisite = {{ focus = {vertices[src_cid]['label']} }}"
+                        f"\t\tprerequisite = {{ focus = {label_by_cid[src_cid]} }}"
                     )
                 code_lines.append("")
             # commented optional blocks — uncomment as needed
@@ -5710,35 +5517,20 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
         self._tree_focus_prefix = prefix
         self._default_focus_prefix = prefix
 
-        # Create Focus objects sorted by visual order
-        cid_to_fid = {}
-        for cid in sorted_cids:
-            v = vertices[cid]
-            gx, gy = grid_positions[cid]
-            f = Focus(gx, gy)
-            f.name = v["label"]
-            f.gfx = "GFX_goal_generic_political_pressure"
-            f.cost = 10
-            f.cancel_if_invalid = True
-            f.continue_if_invalid = False
-            f.available_if_capitulated = False
-            f.search_filters = "FOCUS_FILTER_POLITICAL"
+        # Build Focus objects (sorted by visual order) and wire prerequisites.
+        new_focuses = build_drawio_focuses(drawio_result)
+        for f in new_focuses:
             self.focuses[f.id] = f
-            cid_to_fid[cid] = f.id
-
-        # Wire prerequisites
-        for src_cid, tgt_cid in edges:
-            if src_cid in cid_to_fid and tgt_cid in cid_to_fid:
-                self.focuses[cid_to_fid[tgt_cid]].prereqs.append([cid_to_fid[src_cid]])
 
         self._redraw()
+        auto_shifted = drawio_result.auto_shifted
         shift_note = (
             tr(
                 "drawio.imported.auto_shift_note",
                 "  -  {count} auto-shifted to avoid overlap",
-                count=len(_auto_shift_log),
+                count=len(auto_shifted),
             )
-            if _auto_shift_log
+            if auto_shifted
             else ""
         )
         self._hint(
@@ -5751,23 +5543,23 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
                 shift_note=shift_note,
             )
         )
-        if _auto_shift_log:
+        if auto_shifted:
             detail = "\n".join(
                 f"  • {lbl}  ({ox},{oy}) → ({nx},{ny})"
-                for lbl, ox, oy, nx, ny in _auto_shift_log[:12]
+                for lbl, ox, oy, nx, ny in auto_shifted[:12]
             )
-            if len(_auto_shift_log) > 12:
+            if len(auto_shifted) > 12:
                 detail += "\n" + tr(
                     "drawio.auto_shift.more",
                     "  ... and {count} more",
-                    count=len(_auto_shift_log) - 12,
+                    count=len(auto_shifted) - 12,
                 )
             messagebox.showinfo(
                 tr("drawio.auto_shift.title", "Auto-Shift Notice"),
                 tr(
                     "drawio.auto_shift.body",
                     "{count} focus(es) were automatically moved to\navoid overlapping another focus:\n\n{detail}\n\nYou can drag them to better positions on the canvas.",
-                    count=len(_auto_shift_log),
+                    count=len(auto_shifted),
                     detail=detail,
                 ),
                 parent=self,
