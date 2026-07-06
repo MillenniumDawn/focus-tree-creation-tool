@@ -10,7 +10,7 @@ A standalone Python/Tkinter desktop app for authoring Hearts of Iron IV mod cont
 
 **New code goes in `src/hoi4cm/`. Do not grow the monolith.**
 
-`hoi4_content_maker.py` (~21k lines) is a legacy single file being migrated into the `hoi4cm` package one module at a time. When adding or refactoring, extract into a `src/hoi4cm/` module and pair it with a test — don't add features to the monolith. Edits to the monolith should be confined to bug fixes and the wiring needed to call into newly-extracted modules.
+`hoi4_content_maker.py` is down to ~9.5k lines from its original ~21k. What's left is essentially `class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk)` plus the importers, exporters, and settings dialog that haven't been extracted yet (see `docs/dev/monolith-migration.md` for the full status table). When adding or refactoring, extract into a `src/hoi4cm/` module and pair it with a test — don't add features to the monolith. Edits to the monolith should be confined to bug fixes and the wiring needed to call into newly-extracted modules.
 
 ## Commands
 
@@ -30,11 +30,12 @@ CI runs ruff + black on 3.12 and pytest on 3.9 and 3.13.
 
 ## Layout
 
-- **`hoi4_content_maker.py`** — the launch point and (still) most of the app: every `open_*_wizard(app)` function, the parser/`ModContext`, `Focus`, and `App(tk.Tk)`. Entry point at the bottom calls `show_splash(_launch)`.
+- **`hoi4_content_maker.py`** — the launch point and (still) most of the app: `App(tk.Tk)` and its remaining importers/exporters/settings. Entry point at the bottom calls `show_splash(_launch)`.
 - **`src/hoi4cm/core/`** — the extracted package: `logger.py`, `config.py`, `paths.py`, re-exported flat from `hoi4cm.core`. This is where new modules land.
 - **`hoi4_logger.py`** — back-compat shim re-exporting from `hoi4cm.core.logger`. No logic here.
+- **`docs/dev/`**: developer docs, architecture, migration status, performance, testing, wizards. Start at `docs/dev/README.md`.
 
-The monolith inserts `src/` onto `sys.path` at startup, imports from `hoi4cm.core`, and aliases names to their old underscore forms (`_cfg_load`, `_read_file`, …). Keep that aliasing pattern when extracting more, so the rest of the monolith keeps working unchanged.
+The monolith inserts `src/` onto `sys.path` at startup and imports canonical names straight from the `hoi4cm.core` facade (`from hoi4cm.core import (...)`). There's no more underscore-aliasing layer; the one survivor is `_default_hoi4_mod_dir = default_hoi4_mod_dir`, kept because a couple of call sites still use the old name. When you extract a new module, add the public name to the owning subpackage's `__all__`, and to `core/__init__.py`'s import and `__all__` if the monolith needs it from there. Details in `docs/dev/architecture.md`.
 
 ## Conventions
 
@@ -47,4 +48,4 @@ The monolith inserts `src/` onto `sys.path` at startup, imports from `hoi4cm.cor
 
 ## Releases
 
-Pushing to `main` with a changed `hoi4_content_maker.py` triggers `release.yml`: it reads the version from the source header (`Version 2.0`), tags, builds Win/macOS/Linux executables, and publishes a Release. Executables are never committed.
+Pushing a tag matching `v*` triggers `release.yml`: the version is the tag name (`github.ref_name`), it builds Win/macOS/Linux executables, and publishes a Release with them attached. Executables are never committed.
