@@ -1,0 +1,94 @@
+{
+  "focuses": {
+    "OFS_anchor": {
+      "ai_will_do": 1,
+      "ai_will_do_raw": "",
+      "allow_branch": "",
+      "available_cond": "",
+      "available_if_capitulated": false,
+      "bypass_cond": "",
+      "bypass_effect": "",
+      "cancel_cond": "",
+      "cancel_if_invalid": true,
+      "complete_tooltip": "",
+      "continue_if_invalid": false,
+      "cost": 10,
+      "desc": "",
+      "effects": [
+        {
+          "fields": {
+            "raw": "add_political_power = 20\n\t\t"
+          },
+          "type": "_raw_block"
+        }
+      ],
+      "gfx": "GFX_goal_generic_political_pressure",
+      "icon": "\u2694",
+      "mutex": [],
+      "name": "OFS_anchor",
+      "offsets": [],
+      "prereqs": [],
+      "relative_position_id": null,
+      "search_filters": "FOCUS_FILTER_POLITICAL",
+      "select_effect": "",
+      "text": "",
+      "tree_idx": 0,
+      "will_lead_to_war_with": "",
+      "x": 10,
+      "y": 10
+    },
+    "OFS_shifted": {
+      "ai_will_do": 1,
+      "ai_will_do_raw": "",
+      "allow_branch": "",
+      "available_cond": "",
+      "available_if_capitulated": false,
+      "bypass_cond": "",
+      "bypass_effect": "",
+      "cancel_cond": "",
+      "cancel_if_invalid": true,
+      "complete_tooltip": "",
+      "continue_if_invalid": false,
+      "cost": 10,
+      "desc": "",
+      "effects": [
+        {
+          "fields": {
+            "raw": "add_stability = 0.01\n\t\t"
+          },
+          "type": "_raw_block"
+        }
+      ],
+      "gfx": "GFX_goal_generic_political_pressure",
+      "icon": "\u2694",
+      "mutex": [],
+      "name": "OFS_shifted",
+      "offsets": [
+        {
+          "trigger": "original_tag = OFS\n\t\t\t",
+          "x": 5,
+          "y": -2
+        }
+      ],
+      "prereqs": [],
+      "relative_position_id": "OFS_anchor",
+      "search_filters": "FOCUS_FILTER_POLITICAL",
+      "select_effect": "",
+      "text": "",
+      "tree_idx": 0,
+      "will_lead_to_war_with": "",
+      "x": 16,
+      "y": 9
+    }
+  },
+  "meta": {
+    "cfp_x": 0,
+    "cfp_y": 0,
+    "country_raw": "factor = 0\nmodifier = {\n\tadd = 10\n\toriginal_tag = OFS\n}\n\t",
+    "country_tag": "OFS",
+    "had_wrapper": true,
+    "joint_refs": [],
+    "shared_refs": [],
+    "tree_id": "OFS_shared_tree"
+  }
+}

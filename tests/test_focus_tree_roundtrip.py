@@ -6,13 +6,18 @@ the second export equals the first. We also check that the structural fields
 survive and that key content actually made it into the exported text.
 """
 
+import os
+
 import pytest
 from test_focus_tree_parse import NO_WRAPPER, WRAPPED
 
+from hoi4cm.core import read_file
 from hoi4cm.focus_tree.build import build_focuses
 from hoi4cm.focus_tree.export import export_focus_tree
 from hoi4cm.focus_tree.parse import parse_focus_tree
 from hoi4cm.models import Focus
+
+FIX_DIR = os.path.join(os.path.dirname(__file__), "fixtures", "focus_trees")
 
 
 @pytest.fixture(autouse=True)
@@ -130,3 +135,40 @@ def test_joint_content_present():
         "add_political_power = 50",
     ):
         assert needle in t1, needle
+
+
+# ── Fixture-file round-trips (see tests/fixtures/focus_trees/) ────────────
+#
+# country_raw is NOT covered here: export_focus_tree always emits a canned
+# country block (factor/add/original_tag) rather than info["country_raw"]
+# verbatim. Wiring the verbatim block into export.py is the next phase (see
+# docs/dev/monolith-migration.md); until then this stays out of round-trip
+# scope. country_raw's own capture-at-parse-time is covered directly in
+# tests/test_focus_tree_fixtures.py.
+
+FIXTURE_FILES = [
+    ("wrapper_basic.txt", "shared"),
+    ("offset_original_tag.txt", "shared"),
+    ("bare_focus.txt", "shared"),
+    ("bare_shared_focus.txt", "shared"),
+]
+
+
+def _load_and_export_fixture(fname, tree_type):
+    path = os.path.join(FIX_DIR, fname)
+    raw = read_file(path)
+    return _load_and_export(raw, tree_type, path=path)
+
+
+@pytest.mark.parametrize("fname,tree_type", FIXTURE_FILES)
+def test_fixture_export_is_idempotent(fname, tree_type):
+    _f1, t1 = _load_and_export_fixture(fname, tree_type)
+    _f2, t2 = _load_and_export(t1, tree_type)
+    assert t1 == t2
+
+
+@pytest.mark.parametrize("fname,tree_type", FIXTURE_FILES)
+def test_fixture_structural_fields_survive(fname, tree_type):
+    f1, t1 = _load_and_export_fixture(fname, tree_type)
+    f2, _t2 = _load_and_export(t1, tree_type)
+    assert _summary(f1) == _summary(f2)

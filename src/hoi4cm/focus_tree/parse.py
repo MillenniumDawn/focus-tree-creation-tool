@@ -21,6 +21,7 @@ _COND_KEYS = (
     "complete_tooltip",
     "select_effect",
     "bypass_effect",
+    "allow_branch",
 )
 
 
@@ -46,6 +47,7 @@ class ParsedFocusTree:
     had_wrapper: bool
     focuses_data: list
     raw_rewards: dict
+    country_raw: str = ""
 
 
 def strip_comments(s):
@@ -255,6 +257,7 @@ def parse_focus_tree(raw, path):
     tree_name = os.path.splitext(os.path.basename(path))[0]
     cfp_x = cfp_y = None
     country_tag = "TAG"
+    country_raw = ""
     i = 0
     while i < len(tokens):
         if tokens[i] == "focus_tree" and i + 1 < len(tokens) and tokens[i + 1] == "=":
@@ -279,8 +282,11 @@ def parse_focus_tree(raw, path):
                         .upper()
                         .strip()
                     )
-                    if tag:
+                    if tag and len(tag) >= 2:
                         country_tag = tag
+            # Preserve the full country block verbatim so it can be written
+            # back unchanged on export.
+            country_raw = extract_raw_block(txt, "country")
             raw_focuses = block.get("focus", [])
             if isinstance(raw_focuses, dict):
                 raw_focuses = [raw_focuses]
@@ -309,6 +315,34 @@ def parse_focus_tree(raw, path):
             else:
                 i += 1
 
+    # Robust per-focus fallback: HOI4's own parser tolerates structural quirks
+    # (an unbalanced brace, malformed `key=val={...}` patterns, etc.) that the
+    # structured/bare passes above can choke on. Walk the raw text, brace-match
+    # each `focus = { ... }` / `shared_focus = { ... }` block, and parse each
+    # one independently. If this finds more focuses than already collected,
+    # prefer it.
+    #
+    # The fallback can find at most one focus per `focus = {` block, so when
+    # the passes above already produced that many it can never win — skip the
+    # brace-walk entirely on well-formed files (the common case).
+    block_count = len(re.findall(r"\b(?:focus|shared_focus)\s*=\s*\{", txt))
+    if len(focuses_data) < block_count:
+        per_block_focuses = []
+        for bm in re.finditer(r"\b(?:focus|shared_focus)\s*=\s*\{", txt):
+            bs = bm.end() - 1  # position of '{'
+            bi = match_brace(txt, bs)
+            if bi >= len(txt):
+                continue
+            btxt = txt[bs : bi + 1]
+            btoks = tokenize(btxt)
+            if not btoks or btoks[0] != "{":
+                continue
+            bdict, _ = parse_block(btoks, 0)
+            if isinstance(bdict, dict) and "id" in bdict:
+                per_block_focuses.append(bdict)
+        if len(per_block_focuses) > len(focuses_data):
+            focuses_data = per_block_focuses
+
     if not focuses_data:
         found = [
             kw
@@ -334,4 +368,5 @@ def parse_focus_tree(raw, path):
         had_wrapper=had_wrapper,
         focuses_data=focuses_data,
         raw_rewards=raw_rewards,
+        country_raw=country_raw,
     )

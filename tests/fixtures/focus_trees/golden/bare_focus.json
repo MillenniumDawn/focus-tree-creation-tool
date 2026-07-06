@@ -1,0 +1,92 @@
+{
+  "focuses": {
+    "BAR_alpha": {
+      "ai_will_do": 1,
+      "ai_will_do_raw": "",
+      "allow_branch": "",
+      "available_cond": "",
+      "available_if_capitulated": false,
+      "bypass_cond": "",
+      "bypass_effect": "",
+      "cancel_cond": "",
+      "cancel_if_invalid": true,
+      "complete_tooltip": "",
+      "continue_if_invalid": false,
+      "cost": 8,
+      "desc": "",
+      "effects": [
+        {
+          "fields": {
+            "raw": "add_political_power = 25\n\t"
+          },
+          "type": "_raw_block"
+        }
+      ],
+      "gfx": "GFX_goal_generic_political_pressure",
+      "icon": "\u2694",
+      "mutex": [],
+      "name": "BAR_alpha",
+      "offsets": [],
+      "prereqs": [],
+      "relative_position_id": null,
+      "search_filters": "FOCUS_FILTER_POLITICAL",
+      "select_effect": "",
+      "text": "",
+      "tree_idx": 0,
+      "will_lead_to_war_with": "",
+      "x": 0,
+      "y": 0
+    },
+    "BAR_beta": {
+      "ai_will_do": 1,
+      "ai_will_do_raw": "",
+      "allow_branch": "",
+      "available_cond": "",
+      "available_if_capitulated": false,
+      "bypass_cond": "",
+      "bypass_effect": "",
+      "cancel_cond": "",
+      "cancel_if_invalid": true,
+      "complete_tooltip": "",
+      "continue_if_invalid": false,
+      "cost": 10,
+      "desc": "",
+      "effects": [
+        {
+          "fields": {
+            "raw": "add_stability = 0.03\n\t"
+          },
+          "type": "_raw_block"
+        }
+      ],
+      "gfx": "GFX_goal_generic_political_pressure",
+      "icon": "\u2694",
+      "mutex": [],
+      "name": "BAR_beta",
+      "offsets": [],
+      "prereqs": [
+        [
+          "BAR_alpha"
+        ]
+      ],
+      "relative_position_id": null,
+      "search_filters": "FOCUS_FILTER_POLITICAL",
+      "select_effect": "",
+      "text": "",
+      "tree_idx": 0,
+      "will_lead_to_war_with": "",
+      "x": 1,
+      "y": 0
+    }
+  },
+  "meta": {
+    "cfp_x": null,
+    "cfp_y": null,
+    "country_raw": "",
+    "country_tag": "TAG",
+    "had_wrapper": false,
+    "joint_refs": [],
+    "shared_refs": [],
+    "tree_id": "bare_focus"
+  }
+}

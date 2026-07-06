@@ -5,11 +5,11 @@ The :class:`~hoi4cm.mod.context.ModContext` instance lives at module level as
 ``MOD.sprites``, ``MOD.idea_ids``, etc. just like it did in the monolith.
 """
 
-from hoi4cm.mod.context import ModContext
+from hoi4cm.mod.context import ModContext, detect_loc_file
 
 # Module-level singleton. Lazily constructed on first import so any code that
 # does ``from hoi4cm.mod import MOD`` gets the same instance.
 MOD = ModContext()
 
 
-__all__ = ["ModContext", "MOD"]
+__all__ = ["ModContext", "MOD", "detect_loc_file"]

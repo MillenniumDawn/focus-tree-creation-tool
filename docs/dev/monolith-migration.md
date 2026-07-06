@@ -3,7 +3,7 @@
 ## The story so far
 
 `hoi4_content_maker.py` started as a single ~21k-line file. It's down to
-9,462 lines. What moved, and when:
+8,963 lines. What moved, and when:
 
 - **#8**: logging pulled into `hoi4cm.core.logger`, plus the packaging/tooling
   setup (`pyproject.toml`, ruff/black scoping, pytest config) that made an
@@ -22,11 +22,16 @@
 - **#17**: security hardening pass: `core/safe_path.py`, `core/safe_xml.py`,
   read/write caps on `core/paths.py` and `core/config.py`, and the O(F^2)
   fixes in `focus_tree/export.py` and the monolith's duplicate-name check.
+- `_import_txt` converged onto `focus_tree/parse.py` + `build.py` (phase 3):
+  the third tokenizer/parser copy is gone. `parse.py` picked up the fields
+  and fallback behavior it was missing (`country_raw`, `allow_branch`,
+  `text`, the per-focus brace-walk fallback); `hoi4cm.mod` picked up
+  `detect_loc_file`. `_import_txt` is now an ~80-line Tk shell.
 
 What's left in `hoi4_content_maker.py` today is essentially: the `sys.path`
 shim and import block (lines ~62-148), two Windows-DPI helpers (~151-235),
 and `class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk)`
-(~237-9443, around 110 methods), plus the `__main__` entry point that calls
+(~240-8944, around 110 methods), plus the `__main__` entry point that calls
 `show_splash(_launch)`.
 
 ## Wiring convention
@@ -43,7 +48,7 @@ needs it via `hoi4cm.core`.
 |---|---|---|---|
 | `_open_settings` | ~7179-8494 (~1,316) | `ui/settings_dialog.py` | in monolith (phase 9) |
 | `_import_drawio` | ~4948-5773 (~826) | `focus_tree/drawio.py` | in monolith (phase 3) |
-| `_import_txt` | ~5774-6423 (~650) | converge onto `focus_tree/parse.py` + `build.py` | in monolith (phase 3) |
+| `_import_txt` | ~5777-5899 (~123) | converged onto `focus_tree/parse.py` + `build.py` | **done** (phase 3) |
 | `_build_menubar` | ~399-934 | `ui/menubar.py` | in monolith (phase 10) |
 | `_build_toolbar_row2` | ~935-1193 | `ui/toolbar.py` | in monolith (phase 10) |
 | `_export` | ~9003-9443 | unify with `focus_tree/export.py` + new `focus_tree/loc.py` | in monolith (phase 4) |
@@ -52,10 +57,14 @@ needs it via `hoi4cm.core`.
 | Sidebar builders (`_build_sidebar`, `_build_sidebar_props`, `_build_sidebar_conditions`, `_build_sidebar_code`, `_sb_*` helpers) | ~1629-2362 (~640) | n/a | deferred |
 | Undo (`_snapshot`/`_push_undo`/`_undo`) | ~1546-1577 | `core/undo.py` (redesigned, see `performance.md`) | in monolith (phase 7) |
 
-`_import_txt` is worth calling out: it's a third, independent copy of the
-tokenizer/parser logic that already exists in `focus_tree/parse.py`. Phase 3
-isn't a straight cut-and-paste, it's converging three implementations into
-one.
+`_import_txt` was worth calling out: it had been a third, independent copy of
+the tokenizer/parser logic that already existed in `focus_tree/parse.py`.
+Phase 3 wasn't a straight cut-and-paste for it, it was converging three
+implementations into one. `parse.py` and `build.py` picked up the handful
+of behaviors the monolith copy had that they didn't (see the comparison
+harness in `testing.md`), and only then did the monolith copy get deleted.
+`_import_drawio` still has its own separate parser and hasn't gone through
+this yet.
 
 `_open_gfx_browser`/`_gfx_browse_files` likely duplicate the already-extracted
 `ui/gfx_browser.py` (`open_universal_gfx_browser`, `open_gfx_placement_editor`).
@@ -81,8 +90,10 @@ Phase 10 needs to confirm the overlap and delete whichever copy loses.
   selected `Focus`, the current sidebar widgets, in-place mutation on
   every keystroke). Extracting them cleanly needs a form-state redesign
   first, not just a lift-and-shift.
-- **`_import_txt` / `_import_drawio`**: both wait on the parse/build
-  convergence (phase 3) so there's one tokenizer to extract into, not three.
+- **`_import_drawio`**: has its own separate parser, same shape as
+  `_import_txt` before its phase-3 convergence. Wants the same treatment
+  (audit -> converge parse.py/build.py -> comparison harness -> swap) rather
+  than a straight lift-and-shift.
 - **`_open_settings`**: the single largest remaining chunk (~1,316 lines).
   Deferred to phase 9 simply because of size and because it touches almost
   every config key the app has; wants its own careful pass rather than

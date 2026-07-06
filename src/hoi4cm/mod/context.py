@@ -86,6 +86,35 @@ def _index_image_files(root_dir, prefix, target):
         target.setdefault(prefix + stem, full)
 
 
+def detect_loc_file(mod_root, raw_text):
+    """Guess the localisation .yml matching an imported focus-tree file.
+
+    Looks for a country tag in ``raw_text`` (the first ``TAG_something``
+    identifier) and checks a few conventional filenames under
+    ``mod_root/localisation/english/``. Returns the matched path, or ``""``
+    if no mod root, no tag, or no matching file was found.
+    """
+    if not mod_root:
+        return ""
+    tag_m = re.search(r"\b([A-Z]{2,4})_[A-Za-z]", raw_text)
+    if not tag_m:
+        return ""
+    tag = tag_m.group(1)
+    candidates = (
+        f"MD_focus_{tag}_l_english.yml",
+        f"{tag}_focus_l_english.yml",
+        f"{tag}_focuses_l_english.yml",
+    )
+    loc_dir = os.path.join(mod_root, "localisation", "english")
+    if not os.path.isdir(loc_dir):
+        return ""
+    for cand in candidates:
+        cand_path = os.path.join(loc_dir, cand)
+        if os.path.isfile(cand_path):
+            return cand_path
+    return ""
+
+
 def _iface_dir_mtime(root):
     """Max mtime of files in ``root/interface/`` (0 if missing)."""
     iface = os.path.join(root, "interface")
@@ -772,4 +801,4 @@ class ModContext:
         )
 
 
-__all__ = ["ModContext"]
+__all__ = ["ModContext", "detect_loc_file"]

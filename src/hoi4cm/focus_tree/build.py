@@ -108,6 +108,13 @@ def build_focuses(parsed, tree_idx, *, country_tag="", existing_focuses=()):
         f.bypass_effect = raw_rewards.get(
             (fid_str, "bypass_effect"), block_to_str(rf.get("bypass_effect", {}))
         )
+        f.allow_branch = raw_rewards.get(
+            (fid_str, "allow_branch"), block_to_str(rf.get("allow_branch", {}))
+        )
+        text_val = rf.get("text", "")
+        f.text = (
+            str(text_val).strip() if text_val and not isinstance(text_val, dict) else ""
+        )
         f._joint_extra = raw_rewards.get((fid_str, "_joint_extra"), "")
         f.offsets = raw_rewards.get((fid_str, "_offsets"), [])
         raw_rw = raw_rewards.get(fid_str, "")
