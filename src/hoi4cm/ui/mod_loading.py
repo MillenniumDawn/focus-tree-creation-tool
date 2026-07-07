@@ -164,6 +164,7 @@ class ModLoadingMixin:
         for f in self.focuses.values():
             f._draw_key = None
             f._items = []
+            f._culled = False
         self.cv.delete("focus")
         self._redraw_now()
         # Clear all wizard image caches so new mod GFX loads fresh. The live

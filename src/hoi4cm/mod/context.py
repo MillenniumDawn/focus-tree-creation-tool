@@ -22,10 +22,16 @@ from hoi4cm.core.image import PIL_OK as _PIL_OK
 from hoi4cm.core.image import PILImage as _PILImage
 from hoi4cm.core.image import PILImageTk as _PILImageTk
 from hoi4cm.core.logger import get_logger
+from hoi4cm.core.lru import LRUCache
 from hoi4cm.core.paths import read_file
 from hoi4cm.mod.scan_cache import ScanCache
 
 _log = get_logger("mod")
+
+# Bound on the in-memory PhotoImage cache (mirrors the GFX browser's own
+# cache). Each drawn focus pins its own image via Focus._canvas_img, so
+# evicting a cold entry here never blanks something on screen.
+_SPRITE_IMG_CACHE_SIZE = 512
 
 
 # Pre-compiled regexes used by the .gfx-file scanners.
@@ -158,7 +164,7 @@ class ModContext:
     def __init__(self):
         self.root = None  # mod root path
         self.sprites = {}  # gfx_name -> abs_path  (all spriteTypes)
-        self.sprite_imgs = {}  # gfx_name -> PhotoImage (loaded on demand)
+        self.sprite_imgs = LRUCache(_SPRITE_IMG_CACHE_SIZE)  # gfx_name -> PhotoImage
         self.focus_ids = []  # all focus IDs across national_focus/
         self.event_ids = {}  # file_stem -> [id, ...]
         self.idea_ids = []  # all idea/spirit IDs

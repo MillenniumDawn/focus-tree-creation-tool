@@ -29,7 +29,12 @@
 - **`ui/`**: Tk-facing code: `CanvasMixin`, `EffectsMixin`,
   `ModLoadingMixin` (the three mixins `App` is built from), the GFX
   browser/placement editor, theme constants, and small shared widgets
-  (`Tooltip`, `_safe_after`).
+  (`Tooltip`, `_safe_after`). One exception to "Tk-facing": `viewport.py`
+  is pure, no-tkinter viewport-culling math (`visible_world_rect`,
+  `focus_visible`, `edge_visible`) that `CanvasMixin` calls into — kept
+  separate so it has real headless test coverage like `focus_tree/`,
+  instead of joining the rest of `ui/`'s manual-only surface (see
+  `testing.md`).
 
 ## Dataflow
 

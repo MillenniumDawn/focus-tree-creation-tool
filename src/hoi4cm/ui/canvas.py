@@ -26,10 +26,20 @@ from hoi4cm.ui import (
     XGRID,
     YGRID,
 )
+from hoi4cm.ui.viewport import edge_visible, focus_visible, visible_world_rect
+
+# Margin (canvas pixels, scaled by zoom) added around the viewport before
+# culling: covers the card's shadow/glow overhang and the label drawn below
+# it, so nothing pops in/out right at the screen edge.
+_CULL_MARGIN_BOXES = 2
 
 
 class CanvasMixin:
     """Canvas rendering + interaction methods for :class:`App`."""
+
+    # Above this many loaded focuses, the minimap buckets dots to one per
+    # occupied pixel cell and skips prereq lines (see _draw_minimap).
+    _MM_DOWNSAMPLE_THRESHOLD = 2000
 
     def _bind_canvas(self):
         c = self.cv
@@ -131,6 +141,23 @@ class CanvasMixin:
         if self.cv.find_withtag("grid"):
             self.cv.tag_lower("grid")
 
+    def _visible_rect(self):
+        """World-coord viewport rect (plus card margin), or None to cull nothing.
+
+        Returns None before the window has mapped (``winfo_width/height``
+        report 1 pre-map), and while zoomed out enough that BOX*zoom rounds
+        to 0 (division-by-zero territory in ``visible_world_rect`` — treat
+        it the same as "not mapped yet": don't cull anything).
+        """
+        W = self.cv.winfo_width()
+        H = self.cv.winfo_height()
+        if W <= 1 or H <= 1:
+            return None
+        margin = _CULL_MARGIN_BOXES * BOX * self.zoom
+        return visible_world_rect(
+            self.offset[0], self.offset[1], self.zoom, W, H, margin
+        )
+
     def _redraw(self):
         """Throttled full redraw — cancels any pending and schedules one 16ms out."""
         if self._redraw_job:
@@ -146,9 +173,10 @@ class CanvasMixin:
         self._draw_grid()
         self._draw_canvas_bounds()
         self._draw_coord_labels()
-        self._draw_lines()
+        vis_rect = self._visible_rect()
+        self._draw_lines(vis_rect)
         for f in self.focuses.values():
-            self._draw_focus(f)
+            self._draw_focus(f, vis_rect)
         self._draw_cfp_markers()
         self._draw_canvas_legend()
         self._update_statusbar()
@@ -181,9 +209,10 @@ class CanvasMixin:
         self._draw_grid()
         self._draw_canvas_bounds()
         self._draw_coord_labels()
-        self._draw_lines()
+        vis_rect = self._visible_rect()
+        self._draw_lines(vis_rect)
         for f in self.focuses.values():
-            self._draw_focus(f)
+            self._draw_focus(f, vis_rect)
         self._draw_cfp_markers()
         self._draw_canvas_legend()
         self._draw_minimap()
@@ -358,9 +387,11 @@ class CanvasMixin:
             except Exception:
                 pass
 
-    def _draw_lines(self):
+    def _draw_lines(self, vis_rect=None):
         """Draw edges: solid blue elbow+arrow for prereqs; dashed orange for mutex."""
         cv = self.cv
+        if vis_rect is None:
+            vis_rect = self._visible_rect()
         half = BOX * self.zoom / 2
         lw = max(1, int(2.0 * self.zoom))  # line width scales with zoom
         asz = max(4, int(10 * self.zoom))  # arrowhead half-width
@@ -377,6 +408,19 @@ class CanvasMixin:
             for mid in f.mutex:
                 if mid in self.focuses and mid > f.id:
                     edges.append(("mut", f.id, mid, False))
+
+        if vis_rect is not None:
+            edges = [
+                e
+                for e in edges
+                if edge_visible(
+                    self.focuses[e[1]].x,
+                    self.focuses[e[1]].y,
+                    self.focuses[e[2]].x,
+                    self.focuses[e[2]].y,
+                    vis_rect,
+                )
+            ]
 
         need = len(edges) * 2  # 1 line + 1 arrowhead polygon per edge
         while len(self._lines) < need:
@@ -437,11 +481,29 @@ class CanvasMixin:
             if cv.find_withtag("focus_lbl"):
                 cv.tag_lower("focus_lbl", "line")
 
-    def _draw_focus(self, f):
+    def _draw_focus(self, f, vis_rect=None):
         """Create once; skip update if state unchanged for near-zero idle cost."""
+        if vis_rect is None:
+            vis_rect = self._visible_rect()
         cx, cy = self.w2c(f.x, f.y)
-        # No viewport culling — _draw_key cache handles performance
-        # Culling caused ghost positions when panning back into view
+
+        if vis_rect is not None and not focus_visible(f.x, f.y, vis_rect):
+            # Offscreen: hide any existing items (cheap, one tag-wide call) and
+            # bail out before creating anything — the real memory win for a
+            # huge load is that offscreen focuses with no items never get any.
+            if f._items:
+                self.cv.itemconfig("F" + str(f.id), state="hidden")
+            f._culled = True
+            # Force a full recompute on the frame this focus becomes visible
+            # again, so coords/labels aren't stale ("ghost position" bug).
+            f._draw_key = None
+            return
+        if getattr(f, "_culled", False):
+            f._culled = False
+            if f._items:
+                self.cv.itemconfig("F" + str(f.id), state="normal")
+            f._draw_key = None
+
         z = self.zoom
         XGRID * z  # horizontal slot width
         box = BOX * z
@@ -614,7 +676,7 @@ class CanvasMixin:
                 cv.delete(item)
             f._items = []
             f._draw_key = None
-            self._draw_focus(f)
+            self._draw_focus(f, vis_rect)
             return
         (
             shadow,
@@ -1041,7 +1103,27 @@ class CanvasMixin:
                     pass
 
     def _draw_minimap(self):
-        """Render all focuses as small colored dots plus the viewport rectangle."""
+        """Render all focuses as small colored dots plus the viewport rectangle.
+
+        Dots and prereq lines come from a pooled item list (like
+        ``_draw_lines``'s ``self._lines``): reused and re-coordinated across
+        calls instead of deleted and recreated, since a >2k-focus load makes
+        "delete everything, redraw everything" the expensive part of this
+        method. CFP markers / viewport rect / label are a handful of items
+        regardless of tree size, so they stay delete+recreate for simplicity,
+        under their own ``mm_overlay`` tag so clearing them never touches the
+        pooled dots/lines.
+
+        Above ``_MM_DOWNSAMPLE_THRESHOLD`` focuses, dots are bucketed to one
+        per occupied minimap-pixel cell and prereq lines are skipped — at
+        that density individual lines/dots aren't legible anyway, and
+        drawing one edge/focus is no longer cheap enough to do 20k+ times
+        per minimap refresh.
+        """
+        if not hasattr(self, "_mm_line_pool"):
+            self._mm_line_pool = []
+        if not hasattr(self, "_mm_dot_pool"):
+            self._mm_dot_pool = []
         if not getattr(self, "_mm_visible", False):
             return
         if not hasattr(self, "_mm_canvas"):
@@ -1053,8 +1135,12 @@ class CanvasMixin:
         except Exception:
             return
 
-        mm.delete("mm_content")
         if not self.focuses:
+            for item in self._mm_line_pool:
+                mm.itemconfig(item, state="hidden")
+            for item in self._mm_dot_pool:
+                mm.itemconfig(item, state="hidden")
+            mm.delete("mm_overlay")
             return
 
         MM_W = mm.winfo_width() or 220
@@ -1102,37 +1188,85 @@ class CanvasMixin:
         def g2mm(gx, gy):
             return ox + (gx - min_x) * scale, oy + (gy - min_y) * scale
 
-        # Draw prereq lines first (underneath focuses)
-        for f in self.focuses.values():
-            fx, fy = g2mm(f.x, f.y)
-            for grp in f.prereqs:
-                for pid in grp:
-                    if pid in self.focuses:
-                        pf = self.focuses[pid]
-                        px, py = g2mm(pf.x, pf.y)
-                        mm.create_line(
-                            fx, fy, px, py, fill="#1e3048", width=1, tags="mm_content"
-                        )
+        downsample = len(self.focuses) > self._MM_DOWNSAMPLE_THRESHOLD
 
-        # Draw focuses as small colored rectangles
+        # Draw prereq lines first (underneath focuses) — skipped once
+        # downsampled, since at that density individual edges aren't
+        # legible and drawing tens of thousands of them isn't cheap.
+        line_idx = 0
+        if not downsample:
+            for f in self.focuses.values():
+                fx, fy = g2mm(f.x, f.y)
+                for grp in f.prereqs:
+                    for pid in grp:
+                        if pid in self.focuses:
+                            pf = self.focuses[pid]
+                            px, py = g2mm(pf.x, pf.y)
+                            if line_idx < len(self._mm_line_pool):
+                                item = self._mm_line_pool[line_idx]
+                                mm.coords(item, fx, fy, px, py)
+                                mm.itemconfig(item, state="normal")
+                            else:
+                                item = mm.create_line(
+                                    fx,
+                                    fy,
+                                    px,
+                                    py,
+                                    fill="#1e3048",
+                                    width=1,
+                                    tags="mm_content",
+                                )
+                                self._mm_line_pool.append(item)
+                            line_idx += 1
+        for idx in range(line_idx, len(self._mm_line_pool)):
+            mm.itemconfig(self._mm_line_pool[idx], state="hidden")
+
+        # Draw focuses as small colored rectangles — one dot per focus, or
+        # (above the downsample threshold) one dot per occupied minimap
+        # pixel cell, first-focus-in-bucket wins the color.
         dot = max(2, int(scale * 0.45))
-        for f in self.focuses.values():
-            mx, my = g2mm(f.x, f.y)
-            t_idx = getattr(f, "tree_idx", 0)
+        if downsample:
+            buckets = {}
+            for f in self.focuses.values():
+                mx, my = g2mm(f.x, f.y)
+                key = (int(mx), int(my))
+                if key not in buckets:
+                    t_idx = getattr(f, "tree_idx", 0)
+                    buckets[key] = (mx, my, t_idx)
+            dot_positions = buckets.values()
+        else:
+            dot_positions = (
+                (*g2mm(f.x, f.y), getattr(f, "tree_idx", 0))
+                for f in self.focuses.values()
+            )
+        dot_idx = 0
+        for mx, my, t_idx in dot_positions:
             _, col = self._get_tree_badge(t_idx)
             if t_idx == 0:
                 col = "#475569"
-            mm.create_rectangle(
-                mx - dot,
-                my - dot,
-                mx + dot,
-                my + dot,
-                fill=col,
-                outline="",
-                tags="mm_content",
-            )
+            if dot_idx < len(self._mm_dot_pool):
+                item = self._mm_dot_pool[dot_idx]
+                mm.coords(item, mx - dot, my - dot, mx + dot, my + dot)
+                mm.itemconfig(item, fill=col, state="normal")
+            else:
+                item = mm.create_rectangle(
+                    mx - dot,
+                    my - dot,
+                    mx + dot,
+                    my + dot,
+                    fill=col,
+                    outline="",
+                    tags="mm_content",
+                )
+                self._mm_dot_pool.append(item)
+            dot_idx += 1
+        for idx in range(dot_idx, len(self._mm_dot_pool)):
+            mm.itemconfig(self._mm_dot_pool[idx], state="hidden")
 
-        # Draw CFP markers as tiny outlined squares
+        # CFP markers, viewport rectangle, label: a handful of items
+        # regardless of tree size, so plain delete+recreate is fine.
+        mm.delete("mm_overlay")
+
         def _mm_cfp(gx, gy, col):
             mx, my = g2mm(gx, gy)
             s = max(3, int(scale * 0.6))
@@ -1145,7 +1279,7 @@ class CanvasMixin:
                 fill="",
                 width=1,
                 dash=(2, 2),
-                tags="mm_content",
+                tags="mm_overlay",
             )
 
         if (
@@ -1176,7 +1310,7 @@ class CanvasMixin:
                 outline="#60a5fa",
                 fill="#60a5fa18",
                 width=1,
-                tags="mm_content",
+                tags="mm_overlay",
             )
         except Exception:
             pass
@@ -1189,7 +1323,7 @@ class CanvasMixin:
             fill="#1e3048",
             anchor="sw",
             font=("Helvetica", 7),
-            tags="mm_content",
+            tags="mm_overlay",
         )
 
     def _mm_click(self, e):

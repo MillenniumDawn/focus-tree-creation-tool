@@ -1,6 +1,6 @@
 # Testing
 
-168 tests across 17 files under `tests/` (`pytest --collect-only -q`).
+269 tests across 26 files under `tests/` (`pytest --collect-only -q`).
 `pyproject.toml`'s `[tool.pytest.ini_options]` puts `src/` on `pythonpath`
 and scopes `testpaths` to `tests/`, so `pytest` from the repo root just
 works. No `conftest.py`; fixtures live in the file that uses them.
@@ -8,7 +8,7 @@ works. No `conftest.py`; fixtures live in the file that uses them.
 ## Fixture / isolation patterns
 
 Every module with import-time or process-lifetime state needs a fixture
-that resets it, or state leaks between tests. Four patterns cover what's
+that resets it, or state leaks between tests. Five patterns cover what's
 here today:
 
 - **Module-state snapshot/restore.** `tests/test_logger.py`'s `log_state`
@@ -33,6 +33,14 @@ here today:
   first, plus that structural fields and known content survive. Its
   `reset_counter` fixture saves and restores `Focus._next` around each test
   so ID assignment doesn't depend on test order.
+- **Skip if no display.** `tests/test_canvas_tk.py`'s `tk_root` fixture
+  tries `tk.Tk()` and calls `pytest.skip("no display")` on `tk.TclError`,
+  so it runs for real on a dev machine but skips cleanly in CI (see "The
+  headless constraint" below). It drives `CanvasMixin` directly against a
+  bare `tk.Canvas`, through a minimal fake host exposing only the
+  attributes `_draw_focus` touches (`cv`, `focuses`, `offset`, `zoom`,
+  `selected`, `_multi_sel`, `mutex_mode`, `mutex_src`, `_get_tree_badge`),
+  instead of constructing a real `App`.
 
 ## Golden-fixture tests for the focus-tree pipeline
 
@@ -111,13 +119,17 @@ with no `python3-tk` install and no Xvfb, so it has neither a display nor a
 guaranteed-working `tkinter` import. Nothing that opens a real Tk window
 can run there. In practice: every pure
 module (`focus_tree/`, `models/`, `script/`, `mod/`, `data/`, all of
-`core/`) has real test coverage, and every wizard in `wizards/` plus most
-of `ui/` has none. `tests/test_ui_smoke.py` is the exception that proves
-the rule: it imports `hoi4cm.ui`/`hoi4cm.ui.theme` and asserts on plain
-data (theme constants are hex strings, `BORDER` is exported) without ever
-instantiating a `Tk()` root or starting a mainloop. That's the ceiling for
-what a headless test can check on the UI side today. Anything that needs
-a real widget, geometry, or event binding is manual-only.
+`core/`, plus `ui/viewport.py`) has real test coverage, and every wizard in
+`wizards/` plus most of `ui/` has none. `tests/test_ui_smoke.py` is one
+exception that proves the rule: it imports `hoi4cm.ui`/`hoi4cm.ui.theme`
+and asserts on plain data (theme constants are hex strings, `BORDER` is
+exported) without ever instantiating a `Tk()` root or starting a mainloop.
+`tests/test_canvas_tk.py` is the other: it does instantiate a real `Tk()`
+and drive real canvas items, but skips itself in CI via the `tk_root`
+fixture above rather than pretending to be headless-safe. That's the
+ceiling for what a headless test can check on the UI side today. Anything
+that needs a real widget, geometry, or event binding beyond what
+`test_canvas_tk.py` covers is manual-only.
 
 ## Manual verification
 
@@ -134,3 +146,25 @@ targets in `performance.md` only show up at MD's size:
   watching for undo-stack correctness and canvas redraw glitches.
 - Export to a scratch copy of a file and diff it against the original to
   confirm the round-trip didn't drop or reorder fields.
+
+### Phase 8: viewport culling checklist
+
+`test_canvas_tk.py` covers the culling logic itself against a bare canvas;
+these need the real `App` and a loaded tree to catch anything the fake host
+doesn't reproduce (event bindings, undo, mod reload, the minimap widget):
+
+- Pan a focus off screen and back. No ghost position (it should redraw at
+  its real coordinates, not a stale one), and its selection ring (if
+  selected) is correct immediately, not one frame late.
+- Drag a focus that's half on/half off screen across the edge.
+- Create a mutex line to a partner that's off screen; confirm it draws (or
+  correctly doesn't) as the partner crosses in and out of view.
+- Right-click near each of the four viewport edges to place a new focus;
+  confirm placement lands where clicked, not offset by a culling artifact.
+- Cycle fit-all -> zoom in -> pan -> fit-all a few times.
+- Load a >2,000-focus tree (or "Load All Trees" on Millennium Dawn) and
+  check the minimap: dot positions still line up with the real canvas at
+  that density, and the viewport rectangle tracks pan/zoom correctly.
+- Reload the mod (File -> Load Mod again) while some focuses are panned
+  off screen (culled), then pan back and confirm they redraw correctly
+  with no stale `_culled`/`_items` state left over from before the reload.

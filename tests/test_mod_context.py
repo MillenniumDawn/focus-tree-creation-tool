@@ -214,6 +214,57 @@ def test_get_image_returns_none_for_unknown_gfx(mod_tree):
     assert any("NOT IN SPRITES" in e for e in MOD._img_errors)
 
 
+# ── sprite_imgs bounded LRU (phase 8) ───────────────────────────────────────
+#
+# get_image() memoizes a miss as None keyed by (gfx_name, size) before ever
+# touching Pillow, so these can drive the LRU with plain unknown gfx names —
+# no real image files or Pillow install needed. Each test restores maxsize
+# in a finally so it can't leak into later tests sharing the MOD singleton.
+
+
+def test_sprite_imgs_is_a_bounded_lru(mod_tree):
+    MOD.scan(str(mod_tree))
+    orig_maxsize = MOD.sprite_imgs.maxsize
+    MOD.sprite_imgs.maxsize = 3
+    try:
+        for i in range(5):
+            MOD.get_image(f"GFX_missing_{i}")
+        assert len(MOD.sprite_imgs) == 3
+        assert ("GFX_missing_0", (64, 64)) not in MOD.sprite_imgs
+        assert ("GFX_missing_1", (64, 64)) not in MOD.sprite_imgs
+        assert ("GFX_missing_2", (64, 64)) in MOD.sprite_imgs
+        assert ("GFX_missing_3", (64, 64)) in MOD.sprite_imgs
+        assert ("GFX_missing_4", (64, 64)) in MOD.sprite_imgs
+    finally:
+        MOD.sprite_imgs.maxsize = orig_maxsize
+
+
+def test_get_image_hit_refreshes_lru_recency(mod_tree):
+    """Re-requesting an entry protects it from the next eviction."""
+    MOD.scan(str(mod_tree))
+    orig_maxsize = MOD.sprite_imgs.maxsize
+    MOD.sprite_imgs.maxsize = 2
+    try:
+        MOD.get_image("GFX_missing_a")
+        MOD.get_image("GFX_missing_b")
+        MOD.get_image("GFX_missing_a")  # touch "a" again; "b" is now oldest
+        MOD.get_image("GFX_missing_c")  # over capacity: evicts "b", not "a"
+        assert ("GFX_missing_a", (64, 64)) in MOD.sprite_imgs
+        assert ("GFX_missing_b", (64, 64)) not in MOD.sprite_imgs
+        assert ("GFX_missing_c", (64, 64)) in MOD.sprite_imgs
+    finally:
+        MOD.sprite_imgs.maxsize = orig_maxsize
+
+
+def test_get_image_failure_is_memoized_not_retried(mod_tree):
+    """A missing gfx name stays memoized as None, not evicted as if unseen."""
+    MOD.scan(str(mod_tree))
+    assert MOD.get_image("GFX_missing_retry_check") is None
+    key = ("GFX_missing_retry_check", (64, 64))
+    assert key in MOD.sprite_imgs
+    assert MOD.sprite_imgs[key] is None
+
+
 def test_scan_dedups_ids_across_files(tmp_path):
     """The same focus ID in two files must appear once, in first-seen order."""
     nf = tmp_path / "common" / "national_focus"

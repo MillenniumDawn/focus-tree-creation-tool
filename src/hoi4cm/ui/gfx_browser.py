@@ -20,6 +20,7 @@ from hoi4cm.core.i18n import tr
 from hoi4cm.core.image import PIL_OK as _PIL_OK
 from hoi4cm.core.image import PILImage as _PILImage
 from hoi4cm.core.image import PILImageTk as _PILImageTk
+from hoi4cm.core.lru import LRUCache
 from hoi4cm.ui.theme import (
     BG_CARD,
     BG_DARK,
@@ -277,7 +278,12 @@ def open_universal_gfx_browser(
     PAD_G = 6
     _st = {
         "pairs": [],
-        "img_cache": {},
+        "img_cache": LRUCache(512),
+        # Strong refs for every path with a live canvas image right now — a
+        # PhotoImage that drops out of the bounded img_cache above would
+        # otherwise get garbage-collected while still on screen, blanking
+        # the tile (Tk itself only holds a C-level handle, not a Python ref).
+        "pinned_imgs": {},
         "drawn": set(),
         "canvas_ids": {},
         "sel_idx": None,
@@ -364,6 +370,7 @@ def open_universal_gfx_browser(
                 image=img,
                 tags=("t", f"t{idx}"),
             )
+            _st["pinned_imgs"][path] = img
         else:
             new_iid = cv.create_text(
                 x + TILE_W // 2,
@@ -439,7 +446,15 @@ def open_universal_gfx_browser(
 
     def _rebuild_grid(pairs):
         cv.delete("all")
-        _st.update({"pairs": pairs, "drawn": set(), "canvas_ids": {}, "sel_idx": None})
+        _st.update(
+            {
+                "pairs": pairs,
+                "drawn": set(),
+                "canvas_ids": {},
+                "sel_idx": None,
+                "pinned_imgs": {},
+            }
+        )
         sel_var.set("")
         sel_path[0] = None
         if not pairs:
