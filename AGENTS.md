@@ -10,7 +10,7 @@ A standalone Python/Tkinter desktop app for authoring Hearts of Iron IV mod cont
 
 **New code goes in `src/hoi4cm/`. Do not grow the monolith.**
 
-`hoi4_content_maker.py` is down to ~9.5k lines from its original ~21k. What's left is essentially `class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk)` plus the importers, exporters, and settings dialog that haven't been extracted yet (see `docs/dev/monolith-migration.md` for the full status table). When adding or refactoring, extract into a `src/hoi4cm/` module and pair it with a test — don't add features to the monolith. Edits to the monolith should be confined to bug fixes and the wiring needed to call into newly-extracted modules.
+`hoi4_content_maker.py` is down to ~6k lines from its original ~21k. What's left is essentially `class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk)` plus the importers, exporters, and settings dialog that haven't been extracted yet (see `docs/dev/monolith-migration.md` for the full status table). When adding or refactoring, extract into a `src/hoi4cm/` module and pair it with a test — don't add features to the monolith. Edits to the monolith should be confined to bug fixes and the wiring needed to call into newly-extracted modules.
 
 ## Commands
 

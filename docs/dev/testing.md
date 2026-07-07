@@ -168,3 +168,37 @@ doesn't reproduce (event bindings, undo, mod reload, the minimap widget):
 - Reload the mod (File -> Load Mod again) while some focuses are panned
   off screen (culled), then pan back and confirm they redraw correctly
   with no stale `_culled`/`_items` state left over from before the reload.
+
+### Phases 9-10: settings, menu sweep, GFX browser parity
+
+None of `ui/settings_dialog.py`, `ui/menubar.py`, `ui/toolbar.py`, or
+`ui/gfx_browser.py` can run in CI (all Tk-only, see "The headless
+constraint" above). These need a live `App` against a loaded mod:
+
+- **Settings walkthrough**: open Settings from the Tools menu, change the
+  mod path, a GFX directory, MD detection, and a locale, then close and
+  reopen the dialog to confirm every field reloads with what was just set.
+  Confirm `relativize_to_mod_root` still normalizes an absolute GFX path
+  typed into a browse field down to a mod-relative one.
+- **Menu sweep**: click every File/Edit/View/Tools item at least once
+  (including the "Recent" submenu with zero and with several mods loaded)
+  and confirm each does what its tooltip says, the dropdown closes on
+  outside click, and the accelerator shown next to each item still matches
+  its bound keybind (`_build_keybinds`). Confirm the error-log button still
+  turns red after a deliberately triggered error and the mod label updates
+  on load/unload.
+- **Toolbar sweep**: click every toolbar row 2 button (Prereq, Mutex,
+  wizard shortcuts, Multi, Del Selected, Clear All, +Shared, +Joint, Load
+  All, Save All) and confirm each still opens the right dialog or performs
+  the right canvas action. Type into the Continuous Focus Position x/y
+  fields, tab out, and confirm the value commits (`_cfp_commit`).
+- **GFX browser parity**: from the sidebar's Icon GFX field, open the
+  browser with a mod loaded (should show only `gfx/interface/goals/` and
+  its subfolders) and with no mod loaded (should fall back to a folder
+  picker, non-recursive listing). Confirm the Select button's dimmer
+  highlight when re-picking the field's current value versus its brighter
+  highlight on a new value. Separately, open the universal GFX browser from
+  a wizard (e.g. the decision maker's icon browse button) and confirm its
+  full folder list (decisions, ideas, goals, event pictures, flags,
+  interface, custom) still all show up, unaffected by the sidebar picker's
+  narrower scope.

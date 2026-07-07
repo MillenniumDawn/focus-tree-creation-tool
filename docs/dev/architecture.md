@@ -5,10 +5,11 @@
 `src/hoi4cm/`, one bullet per subpackage:
 
 - **`core/`**: logging, config, paths, i18n, image gating, path/XML
-  sanitizing, and the sparse undo stack (`undo.py`, `UndoStack`). Re-exported
-  flat through `core/__init__.py` (the "facade", see below). Everything else
-  in the package can depend on `core`; `core` depends on nothing else in
-  `hoi4cm`.
+  sanitizing, the sparse undo stack (`undo.py`, `UndoStack`), and a bounded
+  LRU mapping (`lru.py`, `LRUCache`) backing the in-memory `PhotoImage`
+  caches. Re-exported flat through `core/__init__.py` (the "facade", see
+  below). Everything else in the package can depend on `core`; `core`
+  depends on nothing else in `hoi4cm`.
 - **`data/`**: static tables: `EFFECT_DEFS`/`MODIFIER_DEFS` and the MD
   building/resource cost tables. No logic beyond lookup helpers.
 - **`models/`**: `Focus`, the plain-data class behind every canvas item.
@@ -18,7 +19,11 @@
 - **`focus_tree/`**: the parse/build/export pipeline for focus-tree script
   text. Pure, no tkinter: `parse.py` tokenizes and parses, `build.py` turns
   a `ParsedFocusTree` into `Focus` objects, `export.py` renders focuses back
-  to script text given a caller-supplied effect renderer.
+  to script text given a caller-supplied effect renderer, `loc.py` builds
+  the matching `l_english.yml` localisation text (`build_loc_yml`), and
+  `drawio.py` walks a draw.io mxGraph XML export into the same `Focus`
+  shape (`parse_drawio_graph`, `drawio_to_focus_data`,
+  `build_drawio_focuses`).
 - **`mod/`**: `ModContext` (the `MOD` singleton): walks a mod's directory
   tree once and indexes sprites, focus/event/idea/decision/dyn-mod IDs,
   country tags, and MD money-system paths. `scan_cache.py` is the SQLite
@@ -27,11 +32,17 @@
   event, national spirit, dynamic modifier, additional income) plus
   `_shared.py` for cross-wizard state. See `wizards.md`.
 - **`ui/`**: Tk-facing code: `CanvasMixin`, `EffectsMixin`,
-  `ModLoadingMixin` (the three mixins `App` is built from), the GFX
-  browser/placement editor, theme constants, and small shared widgets
+  `ModLoadingMixin` (the three mixins `App` is built from), `gfx_browser.py`
+  (the universal GFX picker, the drag-to-place GFX editor, and the
+  sidebar's narrower focus-icon picker, see `monolith-migration.md` for why
+  there are two GFX browsers instead of one), `settings_dialog.py`
+  (`open_settings`), `menubar.py`/`toolbar.py` (`build_menubar`/
+  `build_toolbar_row2`, the one-shot builders behind `App`'s top bar),
+  `tasks.py` (the `run_bg`/`progress_modal` background-worker plumbing, see
+  "Threading model" below), theme constants, and small shared widgets
   (`Tooltip`, `_safe_after`). One exception to "Tk-facing": `viewport.py`
   is pure, no-tkinter viewport-culling math (`visible_world_rect`,
-  `focus_visible`, `edge_visible`) that `CanvasMixin` calls into — kept
+  `focus_visible`, `edge_visible`) that `CanvasMixin` calls into, kept
   separate so it has real headless test coverage like `focus_tree/`,
   instead of joining the rest of `ui/`'s manual-only surface (see
   `testing.md`).
@@ -72,10 +83,12 @@ extract a new module, add the public name to the owning subpackage's
 `__all__`, then add it to `core/__init__.py`'s import and `__all__` if the
 monolith (or a wizard) needs it from there.
 
-The old underscore-aliasing story (`_cfg_load = cfg_load`, etc.) is gone.
-The one survivor is `_default_hoi4_mod_dir = default_hoi4_mod_dir` at
-`hoi4_content_maker.py:97`, kept because `_load_mod` and `_open_settings`
-still reference the underscore name.
+The old underscore-aliasing story (`_cfg_load = cfg_load`, etc.) is gone
+from the monolith. One survivor remains, but it moved with its only caller:
+`_default_hoi4_mod_dir = default_hoi4_mod_dir` now lives in
+`hoi4cm/ui/mod_loading.py`, kept because `_load_mod` (same module) still
+references the underscore name. `settings_dialog.py`'s `open_settings`
+calls `default_hoi4_mod_dir()` directly and never needed the alias.
 
 ## Module-level singletons
 
