@@ -55,6 +55,7 @@ from .logger import (
 from .paths import autosave_path, default_hoi4_mod_dir, read_file
 from .safe_path import safe_join, sanitize_component
 from .safe_xml import bounded_inflate, safe_fromstring
+from .undo import UndoStack
 
 __all__ = [
     "CONFIG_PATH",
@@ -72,6 +73,7 @@ __all__ = [
     "MODIFIER_CATS",
     "MODIFIER_DEFS",
     "ParsedFocusTree",
+    "UndoStack",
     "add_error",
     "append_scripted_loc",
     "autosave_path",

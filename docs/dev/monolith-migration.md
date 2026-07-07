@@ -43,6 +43,13 @@
   calls, file writes, and messageboxes. The e693a19 O(F^2) fix (a
   `name -> Focus` map built once instead of a `next()` scan per focus) is now
   also applied to `_build_focus_code`, the Code-tab preview.
+- Undo (phase 7): `_push_undo`/`_undo` redesigned around `core/undo.py`'s
+  `UndoStack`, a pure module with no tkinter import. Each call site now
+  says which focus ids it's about to touch instead of the old
+  `_snapshot` deep-copying every loaded focus on every push. `_undo` deletes
+  canvas items only for the ids that came back changed or removed and does
+  one `_redraw()`, replacing the old `cv.delete("all")` + full rebuild. See
+  `performance.md`'s undo row for the design.
 
 What's left in `hoi4_content_maker.py` today is essentially: the `sys.path`
 shim and import block (lines ~62-148), two Windows-DPI helpers (~151-235),
@@ -71,7 +78,7 @@ needs it via `hoi4cm.core`.
 | `_open_gfx_browser` | ~2614-3048 | dedup with `ui/gfx_browser.py` | in monolith (phase 10) |
 | `_gfx_browse_files` | ~3049-3258 | dedup with `ui/gfx_browser.py` | in monolith (phase 10) |
 | Sidebar builders (`_build_sidebar`, `_build_sidebar_props`, `_build_sidebar_conditions`, `_build_sidebar_code`, `_sb_*` helpers) | ~1629-2362 (~640) | n/a | deferred |
-| Undo (`_snapshot`/`_push_undo`/`_undo`) | ~1546-1577 | `core/undo.py` (redesigned, see `performance.md`) | in monolith (phase 7) |
+| Undo (`_push_undo`/`_undo`) | ~1561-1588 | `core/undo.py` (`UndoStack`, redesigned, see `performance.md`) | **done** (phase 7) |
 
 `_import_txt` was worth calling out: it had been a third, independent copy of
 the tokenizer/parser logic that already existed in `focus_tree/parse.py`.

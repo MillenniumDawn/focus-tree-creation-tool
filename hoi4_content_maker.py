@@ -75,6 +75,7 @@ from hoi4cm.core import (
     EmptyDrawioGraphError,
     EmptyFocusTreeError,
     Focus,
+    UndoStack,
     add_error,
     build_drawio_focuses,
     build_focuses,
@@ -192,7 +193,6 @@ from tkinter import filedialog, messagebox, ttk
 
 log.info("tkinter imported OK")
 import bisect
-import collections
 import copy
 import json
 import re
@@ -392,7 +392,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
         """Orchestrate full UI construction."""
         self._init_error_log()
         self._undo_max = 60
-        self._undo_stack = collections.deque(maxlen=self._undo_max)
+        self._undo_stack = UndoStack(maxlen=self._undo_max)
         self._tree_id = tk.StringVar(value="TAG_focus_tree")
         # Continuous focus position — stored as integers when read from file
         self._cfp_x = None  # None = no value read; use fallback on export
@@ -1558,35 +1558,36 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
         _refresh()
 
     # ── UNDO ────────────────────────────────────────────────────
-    def _snapshot(self):
-        """Return a deep snapshot of all focuses (for undo)."""
-        return copy.deepcopy({fid: f.to_dict() for fid, f in self.focuses.items()})
+    def _push_undo(self, label="action", touched_ids=None):
+        """Call BEFORE making a change to save enough state to undo it.
 
-    def _push_undo(self, label="action"):
-        """Call BEFORE making a change to save current state."""
-        snap = self._snapshot()
-        # deque(maxlen) evicts the oldest entry on overflow in O(1).
-        self._undo_stack.append((label, snap))
+        `touched_ids` lists the focus ids the caller is about to mutate or
+        delete; leave it as `()` for an action that only creates new
+        focuses (undo deletes those via an id-set diff, no snapshot needed).
+        Pass `None` (the default) when the touched set isn't known or is
+        most of the tree anyway (bulk import/clear) — that takes a full
+        compressed snapshot instead, same as the old behavior.
+        """
+        self._undo_stack.push(label, self.focuses, touched_ids)
 
     def _undo(self):
-        """Restore the previous state."""
-        if not self._undo_stack:
+        """Restore the previous state, touching only what it changed."""
+        result = self._undo_stack.undo(self.focuses, Focus.from_dict)
+        if result is None:
             self._hint("Nothing to undo.")
             return
-        label, snap = self._undo_stack.pop()
-        # Rebuild focuses from snapshot
-        self.cv.delete("all")
-        self.focuses.clear()
-        self._lines.clear()
-        self._grid_item = None
-        self._grid_key = None
-        self._grid_img = None
-        self.selected = None
-        for fd in snap.values():
-            f = Focus.from_dict(fd)
-            f._draw_key = None
-            self.focuses[f.id] = f
-        self._hide_form()
+        label, changed_ids, removed_ids = result
+        for fid in changed_ids | removed_ids:
+            self.cv.delete("F" + str(fid))
+        if self.selected and self.selected.id in removed_ids:
+            self.selected = None
+            self._hide_form()
+        elif self.selected and self.selected.id in changed_ids:
+            self.selected = self.focuses[self.selected.id]
+            self._populate(self.selected)
+            self._refresh_prereqs()
+            self._refresh_mutex()
+            self._refresh_effects()
         self._redraw()
         self._hint(f"↩ Undid: {label}")
 
@@ -4359,7 +4360,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
         self._new_focus_at(gx, gy)
 
     def _new_focus_at(self, wx, wy):
-        self._push_undo("add focus")
+        self._push_undo("add focus", touched_ids=())
         f = Focus(wx, wy)
         pfx = self._default_focus_prefix
         if pfx:
@@ -4371,7 +4372,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
     def _apply(self):
         if not self.selected:
             return
-        self._push_undo("edit focus")
+        self._push_undo("edit focus", touched_ids=(self.selected.id,))
         f = self.selected
         raw = self._fv_name.get().strip()
         if not raw:
@@ -4485,7 +4486,16 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
             parent=self,
         ):
             return
-        self._push_undo("delete selected")
+        del_ids = {fid for fid in self._multi_sel if fid in self.focuses}
+        touched_ids = set(del_ids)
+        for o in self.focuses.values():
+            if o.id in del_ids:
+                continue
+            if any(p in del_ids for g in o.prereqs for p in g) or any(
+                m in del_ids for m in o.mutex
+            ):
+                touched_ids.add(o.id)
+        self._push_undo("delete selected", touched_ids=touched_ids)
         for fid in list(self._multi_sel):
             if fid not in self.focuses:
                 continue
@@ -4519,8 +4529,14 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
     def _delete_focus(self):
         if not self.selected:
             return
-        self._push_undo("delete focus")
         fid = self.selected.id
+        touched_ids = {fid}
+        for o in self.focuses.values():
+            if o.id == fid:
+                continue
+            if any(fid in g for g in o.prereqs) or fid in o.mutex:
+                touched_ids.add(o.id)
+        self._push_undo("delete focus", touched_ids=touched_ids)
         for o in self.focuses.values():
             o.prereqs = [[p for p in g if p != fid] for g in o.prereqs]
             o.prereqs = [g for g in o.prereqs if g]
@@ -4791,7 +4807,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
             group = [_id_map[i] for i in sel if i in _id_map]
             if not group:
                 return
-            self._push_undo("add prerequisite OR group")
+            self._push_undo("add prerequisite OR group", touched_ids=(child.id,))
             child.prereqs.append(group)
             self._refresh_prereqs()
             self._draw_lines()
@@ -4811,7 +4827,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
             fids = [_id_map[i] for i in sel if i in _id_map]
             if not fids:
                 return
-            self._push_undo("add prerequisite AND group")
+            self._push_undo("add prerequisite AND group", touched_ids=(child.id,))
             for fid in fids:
                 child.prereqs.append([fid])
             self._refresh_prereqs()
@@ -5523,6 +5539,8 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
             return
 
         # ── Step 7: Commit to canvas ──────────────────────────────────
+        # Whole tree is replaced — full snapshot, not worth bounding the
+        # touched set for a rare bulk import.
         self._push_undo("draw.io import")
         self.cv.delete("all")
         self.focuses.clear()
@@ -8180,8 +8198,8 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
         # Clear draw cache so new focus renders immediately
         nf._draw_key = None
         nf._items = []
+        self._push_undo("duplicate", touched_ids=())
         self.focuses[nf.id] = nf
-        self._push_undo("duplicate")
         self._redraw_now()  # force immediate, bypass throttle
         self._select(nf)
         self._refresh_focus_list()
@@ -8317,7 +8335,10 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
                     tr("bulk_rename.from_empty", "From prefix cannot be empty."),
                 )
                 return
-            self._push_undo("bulk_rename")
+            renamed_ids = {
+                f.id for f in self.focuses.values() if f.name.startswith(fr)
+            }
+            self._push_undo("bulk_rename", touched_ids=renamed_ids)
             # Build mapping old_name → new_name
             mapping = {}
             for f in self.focuses.values():

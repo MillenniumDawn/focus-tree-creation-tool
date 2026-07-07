@@ -5,9 +5,10 @@
 `src/hoi4cm/`, one bullet per subpackage:
 
 - **`core/`**: logging, config, paths, i18n, image gating, path/XML
-  sanitizing. Re-exported flat through `core/__init__.py` (the "facade",
-  see below). Everything else in the package can depend on `core`; `core`
-  depends on nothing else in `hoi4cm`.
+  sanitizing, and the sparse undo stack (`undo.py`, `UndoStack`). Re-exported
+  flat through `core/__init__.py` (the "facade", see below). Everything else
+  in the package can depend on `core`; `core` depends on nothing else in
+  `hoi4cm`.
 - **`data/`**: static tables: `EFFECT_DEFS`/`MODIFIER_DEFS` and the MD
   building/resource cost tables. No logic beyond lookup helpers.
 - **`models/`**: `Focus`, the plain-data class behind every canvas item.
