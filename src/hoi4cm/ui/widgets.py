@@ -6,23 +6,26 @@ functions here so the App and every wizard can share them.
 
 import tkinter as tk
 
-
 # ── Safe after() wrappers ────────────────────────────────────────
-# Guard against the Python 3.14 _tclCommands bug where scheduling a callback
-# after a widget has been destroyed raises AttributeError.
+# Guard only a destroyed widget (TclError, or AttributeError from the
+# Python 3.14 _tclCommands bug) -- not exceptions from *fn* itself.
+_DESTROYED_WIDGET_ERRORS = (AttributeError, tk.TclError)
+
+
 def _safe_after(widget, ms, fn):
     """Schedule *fn* after *ms* milliseconds, only if *widget* still exists."""
 
     def guarded():
         try:
-            if widget.winfo_exists():
-                fn()
-        except Exception:
-            pass
+            exists = widget.winfo_exists()
+        except _DESTROYED_WIDGET_ERRORS:
+            return
+        if exists:
+            fn()
 
     try:
         widget.after(ms, guarded)
-    except Exception:
+    except _DESTROYED_WIDGET_ERRORS:
         pass
 
 
@@ -31,14 +34,15 @@ def _safe_after_idle(widget, fn):
 
     def guarded():
         try:
-            if widget.winfo_exists():
-                fn()
-        except Exception:
-            pass
+            exists = widget.winfo_exists()
+        except _DESTROYED_WIDGET_ERRORS:
+            return
+        if exists:
+            fn()
 
     try:
         widget.after_idle(guarded)
-    except Exception:
+    except _DESTROYED_WIDGET_ERRORS:
         pass
 
 

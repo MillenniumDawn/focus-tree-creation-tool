@@ -95,14 +95,76 @@ or state leaks across tests:
   freshly created focuses never collide with imported ones. Tests that
   create focuses reset it in a fixture (see `test_focus_tree_roundtrip.py`).
 
-## Threading model (stub, expanded in phase 5)
+## Threading model (phase 5)
 
-Today only two things run off the Tk main thread: the mod scan
-(`ui/mod_loading.py`, a daemon `threading.Thread` running `MOD.scan`) and
-image loads that go through the same worker. Both marshal results back to
-the Tk thread via `_safe_after`/`_safe_after_idle` (`ui/widgets.py`), which
-guard against scheduling a callback on a destroyed widget. Nothing else in
-`hoi4cm` is thread-aware: parsing, building, and export all run
-synchronously on whichever thread calls them (currently always the Tk
-thread). Import parsing moving off the Tk thread, and the concurrency
-rules for it, are `performance.md`'s phase 5 item, not implemented yet.
+Two things run off the Tk main thread on their own bespoke plumbing: the mod
+scan (`ui/mod_loading.py`, a daemon `threading.Thread` running `MOD.scan`)
+and image loads that go through the same worker. Everything else that needs
+a background thread (batch tree loading, `.txt`/`.drawio` import parsing)
+goes through `ui/tasks.py`, which generalizes that same
+worker-thread-plus-`_safe_after` shape into `run_bg`.
+
+### The `run_bg` contract
+
+`run_bg(widget, work, on_done, on_error=None, progress_cb=None)` submits
+`work` (a zero-arg callable) to a shared `ThreadPoolExecutor`
+(`get_executor()`, lazily created, `max_workers=2`,
+`thread_name_prefix="hoi4cm-bg"`). On success, `on_done(result)` runs on the
+Tk thread via `_safe_after`. On any exception from `work`, it's logged
+(`log.exception`) and recorded via `add_error` so it reaches the in-app
+error log, then `on_error(exc)` runs on the Tk thread if given.
+
+The hard rule for anything inside `work`: **never touch Tk** (widgets,
+`StringVar`/`BooleanVar`, canvas items, dialogs; Tkinter isn't
+thread-safe), **never call `MOD.get_image`** (`PhotoImage` construction is
+Tk-thread-only), and **never mutate `App` state** (`self.focuses`,
+`self._extra_trees`, ...). The pattern every call site follows: take a
+snapshot of whatever `self` state the computation needs *on the Tk thread*
+before calling `run_bg`, compute against that snapshot inside `work`, and
+apply the result to `self` inside `on_done`, which always runs on the Tk
+thread, so it's the only place mutation happens. A worker is free to
+construct plain-data results (`Focus` instances, `ParsedFocusTree`s) since
+`App` doesn't adopt them until `on_done` inserts them into its own
+dicts/lists.
+
+`make_progress(widget, fn)` returns a callable safe to invoke from a worker;
+calling it marshals `fn(*args, **kwargs)` onto the Tk thread via
+`_safe_after`, in call order. `progress_modal(parent, title)` opens a small
+`Toplevel` with a status label and a bar, `grab_set()`, and
+`WM_DELETE_WINDOW` blocked: the same shape as the inline dialog in
+`_load_mod`, factored out.
+
+`_safe_after`/`_safe_after_idle` (`ui/widgets.py`) only swallow
+`AttributeError` (the documented Python 3.14 `_tclCommands` destroyed-widget
+bug), not arbitrary exceptions from the scheduled callback. A bare
+`except Exception` there would silently eat bugs inside `on_done`/`on_error`
+instead of surfacing them.
+
+### The modal-grab invariant
+
+`progress_modal`'s `grab_set()` isn't just UX polish: it's what makes it
+safe for a worker to read a snapshot of `self.focuses` (or build `Focus`
+objects) without the user mutating the live dict concurrently on the Tk
+thread. Every `run_bg` call site that reads or builds against `self.focuses`
+holds a `progress_modal` (or an equivalent grab) for the duration.
+
+That grab is also why building `Focus` objects on a worker thread is safe
+despite `Focus.__init__` bumping the shared `Focus._next` class counter:
+there's only ever one thread creating focuses at a time, because the modal
+grab blocks the user from triggering focus creation on the Tk thread while
+the worker runs.
+
+### Executor lifecycle
+
+`get_executor()` creates the pool on first use and returns the same
+instance after that. `shutdown_executor()` (`wait=False,
+cancel_futures=True`; `cancel_futures` needs Python 3.9+, this project's
+floor) is wired into `_on_app_close` so pending background work doesn't
+block process exit; it's idempotent and safe to call from tests.
+
+Parsing, building, and export remain thread-agnostic pure functions with no
+opinion on which thread calls them. `run_bg` is what decides that they run
+off the Tk thread for `_load_all_trees`, `_import_txt`, and `_import_drawio`
+today. `performance.md`'s GIL guidance still applies: threads here buy UI
+responsiveness, not parse concurrency, which is why multi-file batch loads
+process files sequentially rather than fanning out across workers.

@@ -2,6 +2,13 @@
 
 from hoi4cm.ui.gfx_browser import open_gfx_placement_editor, open_universal_gfx_browser
 from hoi4cm.ui.splash import show_splash
+from hoi4cm.ui.tasks import (
+    get_executor,
+    make_progress,
+    progress_modal,
+    run_bg,
+    shutdown_executor,
+)
 from hoi4cm.ui.theme import (
     BG_CARD,
     BG_DARK,
@@ -70,7 +77,12 @@ __all__ = [
     "YGRID",
     "_safe_after",
     "_safe_after_idle",
+    "get_executor",
+    "make_progress",
     "open_gfx_placement_editor",
     "open_universal_gfx_browser",
+    "progress_modal",
+    "run_bg",
     "show_splash",
+    "shutdown_executor",
 ]

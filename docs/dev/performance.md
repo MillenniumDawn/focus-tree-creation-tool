@@ -19,7 +19,7 @@ the target.
 | Cross-tree `relative_position_id` resolution in `build_focuses` scanned the whole `existing_focuses` list per focus, O(T*F) across a batch load. Import-side twin of the e693a19 export fix | `focus_tree/build.py` (`resolve_abs`) | `existing_by_name` map built once, first-match-wins preserved | fixed in phase 2 | TBD |
 | The single end-of-batch redraw still walks every loaded focus with no viewport culling | `ui/canvas.py:150` (`_do_redraw`) | Viewport culling | tied to phase 8 | TBD |
 | Main-tree export and the Code-tab preview resolve each focus's `relative_position_id` parent with `next(foc for foc in self.focuses.values() if foc.name == rel_id)`, an O(F) scan per focus, so O(F^2) overall. This is the same shape of bug e693a19 already fixed in `focus_tree/export.py` (used only for extra shared/joint trees) with a name-to-focus map built once; the fix was never ported to the monolith's own main-tree path | `focus_tree/export.py` (`export_main_tree`, the main-tree path `_export` now delegates to), `hoi4_content_maker.py:3686` (`_build_focus_code`) | Build a `name -> Focus` map once per call, same pattern as `focus_tree/export.py` | fixed in phase 4 | TBD |
-| `_import_txt`/`_import_drawio` parse synchronously on the Tk thread; a large import blocks the UI for the parse duration | `hoi4_content_maker.py:5774`, `hoi4_content_maker.py:4948` | Move parse off the Tk thread, marshal the result back via `_safe_after` | identified, fix planned in phase 5 | TBD |
+| `_import_txt`/`_import_drawio` parse synchronously on the Tk thread; a large import blocks the UI for the parse duration | `hoi4_content_maker.py:_import_txt`, `hoi4_content_maker.py:_import_drawio` | Move parse (and, for the batch loader, parse+build) off the Tk thread via `ui/tasks.py`'s `run_bg`, marshal the result back via `on_done` | fixed in phase 5 | TBD |
 | GFX interface tree walked 3x per mod scan (`_scan_gfx` and `_scan_idea_gfx` each call `_scan_interface_gfx`, a top-level `os.listdir` over `interface/`; `_scan_decision_gfx` does its own recursive `os.walk`). Only the decision walk is cached | `mod/context.py:552` (`_scan_gfx_unified`) | One recursive `interface/` walk (`_index_interface_gfx`) and one `gfx/` walk feed all three dicts (`_derive_sprites`, `_derive_idea_sprites_core`, `_derive_decision_sprites`); same merge order/precedence as the three original scanners, pinned down by a characterization test before the rewrite | fixed in phase 6 | TBD |
 | `_scan_files_cached` reads cache-miss files in parallel, then extracts them serially in a follow-up loop | `mod/context.py:341` | Read+extract submitted together per file to one `ThreadPoolExecutor`, so a file's read (GIL released) overlaps another file's extraction; cache put/prune/commit stay on the calling thread since the sqlite connection isn't thread-safe | fixed in phase 6 | TBD |
 | Undo deep-copies every loaded focus (`copy.deepcopy` of the whole `self.focuses` dict) on every `_push_undo`, 60 entries retained (`deque(maxlen=60)`) | `hoi4_content_maker.py:1547` (`_snapshot`), `hoi4_content_maker.py:380` (`_undo_max`) | Redesign around per-edit diffs instead of full snapshots | identified, fix planned in phase 7 | TBD |
@@ -43,9 +43,14 @@ overlap win between files, not parse concurrency within one file. Parsing
 itself is still pure Python (tokenizing, building `ParsedFocusTree`,
 walking dict trees) and does not release the GIL, so N threads all doing
 extraction at once still serializes on the GIL; the win is entirely from
-interleaving with I/O waits. The identified fix for import-blocking-the-UI
-(phase 5) is to move work off the Tk thread for responsiveness, not to
-parallelize the parse itself.
+interleaving with I/O waits. The phase 5 fix for import-blocking-the-UI
+(`ui/tasks.py`'s `run_bg`) moves work off the Tk thread for responsiveness,
+not to parallelize the parse itself: `_load_all_trees`' batch loader parses
+and builds each file's focuses sequentially on one worker thread, not
+fanned out across the pool, since later files' cross-tree relative
+positions/prerequisites need to resolve against earlier files' newly-built
+focuses, and parallelizing pure-Python parsing wouldn't help anyway per the
+GIL point above.
 
 Multiprocessing was considered and rejected: pickling `MOD` and parsed
 focus trees across process boundaries costs more than the parse itself at
@@ -53,6 +58,31 @@ this scale, PyInstaller-frozen builds have their own multiprocessing
 quirks per platform, and `MOD` is a shared singleton that every wizard
 reads from. Splitting it across processes would need a much bigger
 redesign than the performance problem justifies.
+
+### Cross-step scan parallelism: considered and skipped
+
+Phase 5 also asked whether the mod scan's steps (per-domain extraction,
+GFX indexing, cache read/write) could overlap across steps, not just within
+a step's file loop. Decided against it, for now:
+
+- `ScanCache` opens its SQLite connection inside `scan()` and that
+  connection is thread-affine; handing it to more than one worker thread
+  would need its own lock or a connection-per-thread scheme.
+- The extract functions are pure Python and GIL-bound (same reasoning as
+  above), so running two of them concurrently on separate threads doesn't
+  buy real parallelism, only interleaving.
+- Read/extract overlap *within* a step already exists (phase 6): the
+  cache-miss read and its extraction are submitted together per file, so
+  I/O waits on one file already overlap another file's extraction.
+- The dominant cold-scan cost was fixed algorithmically in phase 6 (the
+  unified GFX walk and the read+extract pairing above), not by adding more
+  concurrency.
+
+If this is ever revisited, the right shape is a single `ScanCache`
+connection serialized behind a lock, not one connection per thread: the
+cache is small and fast enough that lock contention wouldn't be the
+bottleneck, and it avoids SQLite's own cross-connection consistency
+concerns on a single file.
 
 ## Cache inventory
 

@@ -135,6 +135,10 @@ from hoi4cm.ui import (
     Tooltip,
     _safe_after,
     _safe_after_idle,
+    make_progress,
+    progress_modal,
+    run_bg,
+    shutdown_executor,
 )
 from hoi4cm.wizards import (
     open_additional_income_wizard,
@@ -291,6 +295,10 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
     def _on_app_close(self):
         try:
             MOD.save_config()
+        except Exception:
+            pass
+        try:
+            shutdown_executor()
         except Exception:
             pass
         self.destroy()
@@ -5000,29 +5008,44 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
         # parse_drawio_graph guards against decompression bombs and XML
         # entity-expansion (billion laughs) in shared .drawio files via
         # bounded_inflate/safe_fromstring, and raises EmptyDrawioGraphError
-        # when the diagram has no usable shapes.
-        try:
-            graph = parse_drawio_graph(raw_file)
-        except EmptyDrawioGraphError:
-            messagebox.showwarning(
-                tr("dialog.drawio_import.title", "Draw.io Import"),
-                tr(
-                    "dialog.drawio_no_shapes",
-                    "No shapes found in the diagram.\n\nMake sure your shapes have labels and are saved as XML.",
-                ),
-            )
-            return
-        except (ET.ParseError, ValueError) as e:
-            messagebox.showerror(
-                tr("dialog.drawio_import.title", "Draw.io Import"),
-                tr(
-                    "dialog.drawio_parse_error",
-                    "Could not parse XML:\n{error}\n\nExport as Editable Vector XML from Draw.io.",
-                    error=e,
-                ),
-            )
-            return
+        # when the diagram has no usable shapes. It's the one potentially
+        # slow step (decompress + XML walk + clustering), so it runs on a
+        # worker thread; steps 3+ (all dialogs) continue in on_done.
+        def work():
+            return parse_drawio_graph(raw_file)
 
+        def on_error(exc):
+            if isinstance(exc, EmptyDrawioGraphError):
+                messagebox.showwarning(
+                    tr("dialog.drawio_import.title", "Draw.io Import"),
+                    tr(
+                        "dialog.drawio_no_shapes",
+                        "No shapes found in the diagram.\n\nMake sure your shapes have labels and are saved as XML.",
+                    ),
+                )
+            elif isinstance(exc, (ET.ParseError, ValueError)):
+                messagebox.showerror(
+                    tr("dialog.drawio_import.title", "Draw.io Import"),
+                    tr(
+                        "dialog.drawio_parse_error",
+                        "Could not parse XML:\n{error}\n\nExport as Editable Vector XML from Draw.io.",
+                        error=exc,
+                    ),
+                )
+            # else: unexpected error, already recorded in the in-app error
+            # log by run_bg.
+
+        def on_done(graph):
+            self._import_drawio_continue(graph, path)
+
+        run_bg(self, work, on_done, on_error=on_error)
+
+    def _import_drawio_continue(self, graph, path):
+        """Steps 3-7 of ``_import_drawio``: dialogs + committing to canvas.
+
+        Runs on the Tk thread as ``_import_drawio``'s ``on_done``, once the
+        worker thread has finished ``parse_drawio_graph``.
+        """
         # ── Step 3: Tree-setup dialog (tag, name, tree ID) ───────────
         result = {}  # filled by dialog
 
@@ -5604,92 +5627,109 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
             if _loc_path:
                 MOD.edit_loc_file = _loc_path
 
-        t0 = time.perf_counter()
-        try:
+        # Parse + build are the expensive, pure-CPU steps (no Tk, no self) —
+        # they run on a worker thread; everything that touches MOD/toolbar
+        # vars/panels/canvas below stays in on_done, on the Tk thread.
+        def work():
+            t0 = time.perf_counter()
             parsed = parse_focus_tree(raw, path)
-        except EmptyFocusTreeError as e:
-            messagebox.showwarning(tr("dialog.import.title", "Import"), str(e))
-            return
-        t1 = time.perf_counter()
+            t1 = time.perf_counter()
+            # country_tag intentionally omitted: applying original_tag-matching
+            # offsets would shift the main tree's x/y, but the monolith's own
+            # _export writes f.x/f.y (not _raw_gx/_raw_gy) as the base position
+            # and also re-emits the offset block, so the shift would double up
+            # on export. Extra (shared/joint) trees go through
+            # focus_tree/export.py, which does use _raw_gx/_raw_gy, so offsets
+            # stay safe there.
+            new_focuses = build_focuses(parsed, 0)
+            t2 = time.perf_counter()
+            log.debug(
+                "import main tree %s: parse %.1fms build %.1fms (%d focuses)",
+                path,
+                (t1 - t0) * 1000,
+                (t2 - t1) * 1000,
+                len(new_focuses),
+            )
+            return parsed, new_focuses
 
-        # clear existing
-        # Clear canvas; _items refs are gone since we cv.delete('all')
-        self.cv.delete("all")
-        self.focuses.clear()
-        self._reset_canvas_bounds()
-        self.selected = None
-        self._lines.clear()
-        self._grid_item = None
-        self._grid_key = None
-        self._grid_img = None
-        self._extra_trees.clear()
-        self._refresh_loaded_trees_panel()
-        self._hide_form()
-        self._tree_id.set(parsed.tree_id)
-        self._update_title()
-        # tag detection happens AFTER all focuses are loaded (see end of method)
+        def on_done(result):
+            parsed, new_focuses = result
 
-        # Reset per-import metadata so values don't carry over from a prior load
-        self._cfp_x = parsed.cfp_x
-        self._cfp_y = parsed.cfp_y
-        self._cfp_x_var.set("" if self._cfp_x is None else str(self._cfp_x))
-        self._cfp_y_var.set("" if self._cfp_y is None else str(self._cfp_y))
-        self._tree_country_raw = parsed.country_raw
-        self._shared_focuses = parsed.shared_refs
-        self._joint_focuses = parsed.joint_refs
-        # Only overwrite the country tag when one was actually detected in the
-        # country block, matching the old behaviour of leaving a prior tag alone.
-        if parsed.country_tag and parsed.country_tag != "TAG":
-            self._tree_country_tag = parsed.country_tag
+            # clear existing
+            # Clear canvas; _items refs are gone since we cv.delete('all')
+            self.cv.delete("all")
+            self.focuses.clear()
+            self._reset_canvas_bounds()
+            self.selected = None
+            self._lines.clear()
+            self._grid_item = None
+            self._grid_key = None
+            self._grid_img = None
+            self._extra_trees.clear()
+            self._refresh_loaded_trees_panel()
+            self._hide_form()
+            self._tree_id.set(parsed.tree_id)
+            self._update_title()
+            # tag detection happens AFTER all focuses are loaded (see below)
 
-        t2 = time.perf_counter()
-        # country_tag intentionally omitted: applying original_tag-matching
-        # offsets would shift the main tree's x/y, but the monolith's own
-        # _export writes f.x/f.y (not _raw_gx/_raw_gy) as the base position
-        # and also re-emits the offset block, so the shift would double up
-        # on export. Extra (shared/joint) trees go through focus_tree/export.py,
-        # which does use _raw_gx/_raw_gy, so offsets stay safe there.
-        new_focuses = build_focuses(parsed, 0)
-        t3 = time.perf_counter()
-        for f in new_focuses:
-            self.focuses[f.id] = f
+            # Reset per-import metadata so values don't carry over from a
+            # prior load
+            self._cfp_x = parsed.cfp_x
+            self._cfp_y = parsed.cfp_y
+            self._cfp_x_var.set("" if self._cfp_x is None else str(self._cfp_x))
+            self._cfp_y_var.set("" if self._cfp_y is None else str(self._cfp_y))
+            self._tree_country_raw = parsed.country_raw
+            self._shared_focuses = parsed.shared_refs
+            self._joint_focuses = parsed.joint_refs
+            # Only overwrite the country tag when one was actually detected in
+            # the country block, matching the old behaviour of leaving a
+            # prior tag alone.
+            if parsed.country_tag and parsed.country_tag != "TAG":
+                self._tree_country_tag = parsed.country_tag
 
-        self._detect_and_apply_tag()  # scan focus IDs now that all focuses are loaded
-        # If explicit tag was read from original_tag, ensure prefix is set correctly
-        if not self._default_focus_prefix and getattr(self, "_tree_country_tag", ""):
-            self._default_focus_prefix = self._tree_country_tag + "_"
-        self._refresh_tree_meta_panel()
-        self._redraw()
-        self._fit_all()
-        log.debug(
-            "import main tree %s: parse %.1fms build %.1fms (%d focuses)",
-            path,
-            (t1 - t0) * 1000,
-            (t3 - t2) * 1000,
-            len(new_focuses),
-        )
-        _sf_info = (
-            f"\nshared_focus: {len(self._shared_focuses)} ref(s)"
-            if self._shared_focuses
-            else ""
-        )
-        _jf_info = (
-            f"\njoint_focus:  {len(self._joint_focuses)} ref(s)"
-            if self._joint_focuses
-            else ""
-        )
-        messagebox.showinfo(
-            tr("dialog.import_complete.title", "Import Complete"),
-            tr(
-                "dialog.import_complete.body",
-                "Imported {count} focuses from:\n{file}\n\nTree ID: {tree}{shared}{joint}\n\nNote: available/bypass conditions and complex effects\nmay need manual review.",
-                count=len(self.focuses),
-                file=os.path.basename(path),
-                tree=parsed.tree_id,
-                shared=_sf_info,
-                joint=_jf_info,
-            ),
-        )
+            for f in new_focuses:
+                self.focuses[f.id] = f
+
+            self._detect_and_apply_tag()  # scan IDs now all focuses are loaded
+            # If explicit tag was read from original_tag, ensure prefix is
+            # set correctly
+            if not self._default_focus_prefix and getattr(
+                self, "_tree_country_tag", ""
+            ):
+                self._default_focus_prefix = self._tree_country_tag + "_"
+            self._refresh_tree_meta_panel()
+            self._redraw()
+            self._fit_all()
+            _sf_info = (
+                f"\nshared_focus: {len(self._shared_focuses)} ref(s)"
+                if self._shared_focuses
+                else ""
+            )
+            _jf_info = (
+                f"\njoint_focus:  {len(self._joint_focuses)} ref(s)"
+                if self._joint_focuses
+                else ""
+            )
+            messagebox.showinfo(
+                tr("dialog.import_complete.title", "Import Complete"),
+                tr(
+                    "dialog.import_complete.body",
+                    "Imported {count} focuses from:\n{file}\n\nTree ID: {tree}{shared}{joint}\n\nNote: available/bypass conditions and complex effects\nmay need manual review.",
+                    count=len(self.focuses),
+                    file=os.path.basename(path),
+                    tree=parsed.tree_id,
+                    shared=_sf_info,
+                    joint=_jf_info,
+                ),
+            )
+
+        def on_error(exc):
+            if isinstance(exc, EmptyFocusTreeError):
+                messagebox.showwarning(tr("dialog.import.title", "Import"), str(exc))
+            # else: unexpected error, already recorded in the in-app error
+            # log by run_bg.
+
+        run_bg(self, work, on_done, on_error=on_error)
 
     # ── MULTI-TREE HELPERS ───────────────────────────────────────
 
@@ -6002,6 +6042,90 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
             ),
         )
 
+    def _batch_load_trees_worker(
+        self,
+        to_load,
+        existing_seed,
+        extra_trees_start_idx,
+        loaded_paths,
+        country_tag,
+        progress,
+    ):
+        """Worker body for "Load All Trees" (runs on a background thread).
+
+        Everything it needs is a snapshot taken on the Tk thread before
+        submission (``existing_seed``, ``extra_trees_start_idx``,
+        ``loaded_paths``, ``country_tag``); it reads no other ``self``
+        state and mutates none -- the caller's ``on_done`` applies the
+        returned per-file results to ``self`` back on the Tk thread. See
+        ui/tasks.py's module docstring for the rules this follows.
+
+        Files are parsed and built SEQUENTIALLY, not in parallel: a later
+        file's cross-tree relative positions/prerequisites need to resolve
+        against earlier files' newly-built focuses, exactly like
+        ``_install_extra_tree``'s ``existing_focuses`` -- each file in the
+        batch sees the main tree plus every previously-installed extra tree,
+        including ones installed earlier in this same batch. Parallel
+        parsing would also buy nothing here: it's pure Python and GIL-bound
+        (see performance.md's GIL guidance).
+
+        Building ``Focus`` objects here bumps the shared ``Focus._next``
+        class counter; that's safe only because the caller holds a
+        progress_modal grab, so the user can't create a focus (and bump the
+        same counter) concurrently on the Tk thread.
+        """
+        total = len(to_load)
+        existing = list(existing_seed)
+        seen = set(loaded_paths)
+        tree_idx = extra_trees_start_idx
+        results = []
+        for i, (path, ttype) in enumerate(to_load, start=1):
+            progress(i, total, os.path.basename(path))
+            norm = os.path.normpath(path)
+            if norm in seen:
+                # Silently-skipped duplicate, matching the old
+                # _load_extra_tree_from_path behaviour: it still counts as
+                # "loaded" in the summary, it just contributes nothing.
+                results.append(
+                    {"path": path, "type": ttype, "ok": True, "skipped": True}
+                )
+                continue
+            try:
+                raw = read_file(path)
+                t0 = time.perf_counter()
+                parsed = parse_focus_tree(raw, path)
+                t1 = time.perf_counter()
+                tree_idx += 1
+                new_focuses = build_focuses(
+                    parsed,
+                    tree_idx,
+                    country_tag=country_tag,
+                    existing_focuses=existing,
+                )
+                t2 = time.perf_counter()
+                log.debug(
+                    "install tree %s: parse %.1fms build %.1fms (%d focuses)",
+                    path,
+                    (t1 - t0) * 1000,
+                    (t2 - t1) * 1000,
+                    len(new_focuses),
+                )
+                existing = existing + new_focuses
+                seen.add(norm)
+                results.append(
+                    {
+                        "path": path,
+                        "type": ttype,
+                        "ok": True,
+                        "skipped": False,
+                        "parsed": parsed,
+                        "new_focuses": new_focuses,
+                    }
+                )
+            except Exception as e:
+                results.append({"path": path, "type": ttype, "ok": False, "error": e})
+        return results
+
     def _load_all_trees(self):
         """Scan national_focus directory and show a checklist so the user can batch-load trees."""
         # Determine scan directory
@@ -6262,44 +6386,125 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
                 )
                 return
             win.destroy()
-            ok, fail = [], []
-            for fp, ttype in to_load:
-                # Reuse _load_extra_tree logic but skip the file dialog. Defer
-                # panel refresh/redraw/fit-all to once after the whole batch
-                # instead of once per file.
-                try:
-                    self._load_extra_tree_from_path(fp, ttype, defer_redraw=True)
-                    ok.append(os.path.basename(fp))
-                except Exception as e:
-                    fail.append(f"{os.path.basename(fp)}: {e}")
 
-            if ok:
-                self._refresh_tree_meta_panel()
-                self._refresh_loaded_trees_panel()
-                self._redraw()
+            # Snapshot the Tk-thread state the worker needs to resolve
+            # cross-tree relative positions/prereqs. The worker must not
+            # touch self.focuses/self._extra_trees directly (ui/tasks.py).
+            existing_seed = list(self.focuses.values())
+            extra_trees_start_idx = len(self._extra_trees)
+            country_tag = getattr(self, "_tree_country_tag", "")
 
-            msg = (
-                tr("load_all.loaded_count", "Loaded {count} file(s).", count=len(ok))
-                + "\n"
-            )
-            if ok:
-                msg += (
-                    "\n"
-                    + tr("load_all.loaded_header", "Loaded:")
-                    + "\n"
-                    + "\n".join(f"  ✓ {n}" for n in ok)
+            modal = progress_modal(self, tr("load_all.title", "Load All Trees"))
+
+            def _update_progress(i, total, label):
+                modal.set_text(
+                    tr(
+                        "mod.loading.step",
+                        "Step {step}/{total}: {label}",
+                        step=i,
+                        total=total,
+                        label=label,
+                    )
                 )
-            if fail:
-                msg += (
-                    "\n\n"
-                    + tr("load_all.failed_header", "Failed:")
-                    + "\n"
-                    + "\n".join(f"  ✕ {e}" for e in fail)
+                modal.set_fraction(i / total if total else 1.0)
+
+            progress = make_progress(self, _update_progress)
+
+            def work():
+                return self._batch_load_trees_worker(
+                    to_load,
+                    existing_seed,
+                    extra_trees_start_idx,
+                    loaded_paths,
+                    country_tag,
+                    progress,
                 )
-            messagebox.showinfo(tr("load_all.title", "Load All Trees"), msg)
-            # Zoom to fit all focuses
-            if ok:
-                self._fit_all()
+
+            def on_done(results):
+                modal.close()
+                ok, fail = [], []
+                for r in results:
+                    fname = os.path.basename(r["path"])
+                    if not r["ok"]:
+                        fail.append(f"{fname}: {r['error']}")
+                        continue
+                    ok.append(fname)
+                    if r.get("skipped"):
+                        continue  # already-loaded file; counts as ok, nothing to install
+                    parsed = r["parsed"]
+                    tree_info = {
+                        "type": r["type"],
+                        "file_path": r["path"],
+                        "tree_id": parsed.tree_id,
+                        "cfp_x": parsed.cfp_x,
+                        "cfp_y": parsed.cfp_y,
+                        "shared_focuses": parsed.shared_refs,
+                        "joint_focuses": parsed.joint_refs,
+                        "country_tag": parsed.country_tag,
+                        "had_wrapper": parsed.had_wrapper,
+                        "focus_ids": set(),
+                    }
+                    self._extra_trees.append(tree_info)
+                    if (
+                        r["type"] == "shared"
+                        and parsed.tree_id not in self._shared_focuses
+                    ):
+                        self._shared_focuses.append(parsed.tree_id)
+                    elif (
+                        r["type"] == "joint"
+                        and parsed.tree_id not in self._joint_focuses
+                    ):
+                        self._joint_focuses.append(parsed.tree_id)
+                    for f in r["new_focuses"]:
+                        self.focuses[f.id] = f
+                        tree_info["focus_ids"].add(f.id)
+
+                if ok:
+                    self._refresh_tree_meta_panel()
+                    self._refresh_loaded_trees_panel()
+                    self._redraw()
+
+                msg = (
+                    tr(
+                        "load_all.loaded_count",
+                        "Loaded {count} file(s).",
+                        count=len(ok),
+                    )
+                    + "\n"
+                )
+                if ok:
+                    msg += (
+                        "\n"
+                        + tr("load_all.loaded_header", "Loaded:")
+                        + "\n"
+                        + "\n".join(f"  ✓ {n}" for n in ok)
+                    )
+                if fail:
+                    msg += (
+                        "\n\n"
+                        + tr("load_all.failed_header", "Failed:")
+                        + "\n"
+                        + "\n".join(f"  ✕ {e}" for e in fail)
+                    )
+                messagebox.showinfo(tr("load_all.title", "Load All Trees"), msg)
+                # Zoom to fit all focuses
+                if ok:
+                    self._fit_all()
+
+            def on_error(exc):
+                # _batch_load_trees_worker catches per-file errors internally,
+                # so reaching here means something outside that loop broke.
+                modal.close()
+                messagebox.showerror(
+                    tr("load_all.title", "Load All Trees"),
+                    tr(
+                        "load_all.batch_error",
+                        "Loading failed unexpectedly:\n{error}",
+                        error=exc,
+                    ),
+                )
+
+            run_bg(self, work, on_done, on_error=on_error)
 
         tk.Button(
             btn_row,
@@ -6325,17 +6530,6 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
             pady=6,
             cursor="hand2",
         ).pack(side="left", expand=True, fill="x")
-
-    def _load_extra_tree_from_path(self, path, tree_type, defer_redraw=False):
-        """Internal: load a shared/joint tree from a known path (no file dialog)."""
-        # Duplicate check
-        for et in self._extra_trees:
-            if os.path.normpath(et["file_path"]) == os.path.normpath(path):
-                return  # silently skip already-loaded files
-        with open(path, encoding="utf-8-sig", errors="replace") as fp:
-            raw = fp.read()
-        # EmptyFocusTreeError (rich diagnostic) propagates to the batch caller.
-        self._install_extra_tree(raw, path, tree_type, defer_redraw=defer_redraw)
 
     def _save_all_trees(self):
         """Export all loaded trees (main + extra) with one click."""
