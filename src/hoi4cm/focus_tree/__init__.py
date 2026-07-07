@@ -12,7 +12,8 @@ from .drawio import (
     drawio_to_focus_data,
     parse_drawio_graph,
 )
-from .export import export_focus_tree
+from .export import export_focus_tree, export_main_tree
+from .loc import build_loc_yml
 from .parse import EmptyFocusTreeError, ParsedFocusTree, parse_focus_tree
 
 __all__ = [
@@ -21,6 +22,8 @@ __all__ = [
     "EmptyFocusTreeError",
     "build_focuses",
     "export_focus_tree",
+    "export_main_tree",
+    "build_loc_yml",
     "EmptyDrawioGraphError",
     "parse_drawio_graph",
     "drawio_to_focus_data",

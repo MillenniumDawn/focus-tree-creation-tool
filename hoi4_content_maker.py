@@ -78,16 +78,19 @@ from hoi4cm.core import (
     add_error,
     build_drawio_focuses,
     build_focuses,
+    build_loc_yml,
     default_hoi4_mod_dir,
     dict_to_raw,
     drawio_to_focus_data,
     effects_in_cat,
     export_focus_tree,
+    export_main_tree,
     get_error_entries,
     get_language,
     install_excepthook,
     parse_drawio_graph,
     parse_focus_tree,
+    read_file,
     sanitize_component,
     set_error_callback,
     set_language,
@@ -3690,11 +3693,10 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
             "",
         ]
         rel_id = getattr(f, "relative_position_id", None)
-        parent = (
-            next((foc for foc in self.focuses.values() if foc.name == rel_id), None)
-            if rel_id
-            else None
-        )
+        name_to_focus = {}
+        for foc in self.focuses.values():
+            name_to_focus.setdefault(foc.name, foc)
+        parent = name_to_focus.get(rel_id) if rel_id else None
         if parent:
             out += [
                 f"{I}x = {f.x - parent.x}",
@@ -8329,286 +8331,35 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
         # and is used to build the loc filename below.
         country_tag = sanitize_component(country_tag.upper(), fallback="TAG")
 
-        out = []
-        out.append("focus_tree = {")
-        out.append(f"\tid = {tid}")
-        out.append("")
-        # Prefer the verbatim country block captured from import; fall back to a
-        # default that follows MD convention (base/add/original_tag) if none was
-        # imported (e.g., tree created from scratch).
-        _country_raw = getattr(self, "_tree_country_raw", "").strip()
-        if _country_raw:
-            out.append("\tcountry = {")
-            for ln in _country_raw.splitlines():
-                if ln.strip():
-                    out.append(f"\t\t{ln}")
-            out.append("\t}")
-        else:
-            out.append("\tcountry = {")
-            out.append("\t\tbase = 0")
-            out.append("\t\tmodifier = {")
-            out.append("\t\t\tadd = 100")
-            out.append(f"\t\t\toriginal_tag = {country_tag}")
-            out.append("\t\t}")
-            out.append("\t}")
-        out.append("")
-
-        # Write shared_focus and joint_focus lines (preserved from import, never stripped)
-        for sf in getattr(self, "_shared_focuses", []):
-            out.append(f"\tshared_focus = {sf}")
-        for jf in getattr(self, "_joint_focuses", []):
-            out.append(f"\tjoint_focus = {jf}")
-        if getattr(self, "_shared_focuses", []) or getattr(self, "_joint_focuses", []):
-            out.append("")
-
         # continuous_focus_position: use stored value from import, never recalculate
         cfp_x = getattr(self, "_cfp_x", None)
         cfp_y = getattr(self, "_cfp_y", None)
         # Also check if user edited the toolbar fields
         try:
-            _tx = int(self._cfp_x_var.get())
-            cfp_x = _tx
+            cfp_x = int(self._cfp_x_var.get())
         except Exception:
             pass
         try:
-            _ty = int(self._cfp_y_var.get())
-            cfp_y = _ty
+            cfp_y = int(self._cfp_y_var.get())
         except Exception:
             pass
-        if cfp_x is None or cfp_y is None:
-            # Fallback for trees created from scratch (no imported value)
-            if main_focuses:
-                cfp_x = min(f.x for f in main_focuses.values()) * 100
-                cfp_y = max(f.y for f in main_focuses.values()) * 100
-            else:
-                cfp_x, cfp_y = 0, 0
-        out.append(f"\tcontinuous_focus_position = {{ x = {cfp_x} y = {cfp_y} }}")
-        out.append("")
 
-        for f in main_focuses.values():
-            gx = f.x
-            gy = f.y
-            out.append("\tfocus = {")
-
-            # ── Property order per skill rules ───────────────────────
-            # id, icon, x/y, relative_position_id, cost,
-            # prerequisite, mutually_exclusive, search_filters,
-            # available, bypass, cancel,
-            # will_lead_to_war_with, complete_tooltip,
-            # select_effect, completion_reward, bypass_effect, ai_will_do
-
-            out.append(f"\t\tid = {f.name}")
-            _focus_gfx = getattr(f, "gfx", "generic_political_pressure")
-            if _focus_gfx.startswith("GFX_goal_"):
-                _focus_gfx = _focus_gfx[len("GFX_goal_") :]
-            out.append(f"\t\ticon = {_focus_gfx}")
-            # Custom localisation key override (preserved from import)
-            _ftext = getattr(f, "text", "").strip()
-            if _ftext:
-                out.append(f"\t\ttext = {_ftext}")
-
-            rel_id = getattr(f, "relative_position_id", None)
-            parent = (
-                next(
-                    (foc for foc in self.focuses.values() if foc.name == rel_id),
-                    None,
-                )
-                if rel_id
-                else None
-            )
-            if parent:
-                # Use stored raw delta if available (imported files), else compute
-                dx = getattr(f, "_rel_dx", None)
-                dy = getattr(f, "_rel_dy", None)
-                if dx is None or dy is None:
-                    dx = gx - parent.x
-                    dy = gy - parent.y
-                out.append(f"\t\tx = {dx}")
-                out.append(f"\t\ty = {dy}")
-                out.append(f"\t\trelative_position_id = {rel_id}")
-            else:
-                out.append(f"\t\tx = {gx}")
-                out.append(f"\t\ty = {gy}")
-            for _off in getattr(f, "offsets", []):
-                out.append("\t\toffset = {")
-                out.append(f"\t\t\tx = {_off['x']}")
-                out.append(f"\t\t\ty = {_off['y']}")
-                if _off.get("trigger", "").strip():
-                    out.append("\t\t\ttrigger = {")
-                    for _ln in _off["trigger"].strip().splitlines():
-                        out.append(f"\t\t\t\t{_ln.strip()}")
-                    out.append("\t\t\t}")
-                out.append("\t\t}")
-
-            out.append(f"\t\tcost = {f.cost}")
-
-            # prerequisites
-            if f.prereqs:
-                for grp in f.prereqs:
-                    valid = [p for p in grp if p in self.focuses]
-                    if not valid:
-                        continue
-                    inner = " ".join(f"focus = {self.focuses[p].name}" for p in valid)
-                    out.append(f"\t\tprerequisite = {{ {inner} }}")
-
-            # mutually exclusive
-            if f.mutex:
-                for mid in f.mutex:
-                    if mid in self.focuses:
-                        out.append(
-                            f"\t\tmutually_exclusive = {{ focus = {self.focuses[mid].name} }}"
-                        )
-
-            sf = getattr(f, "search_filters", "").strip()
-            if sf:
-                out.append(f"\t\tsearch_filters = {{ {sf} }}")
-
-            # allow_branch (gates focus visibility — preserved from import)
-            allow_br = getattr(f, "allow_branch", "").strip()
-            if allow_br:
-                out.append("\t\tallow_branch = {")
-                lines = allow_br.splitlines()
-                non_empty = [l for l in lines if l.strip()]
-                min_ind = (
-                    min((len(l) - len(l.lstrip("\t"))) for l in non_empty)
-                    if non_empty
-                    else 0
-                )
-                for ln in lines:
-                    stripped = ln[min_ind:] if len(ln) >= min_ind else ln.lstrip("\t")
-                    out.append(f"\t\t\t{stripped}")
-                out.append("\t\t}")
-
-            # available
-            avail = getattr(f, "available_cond", "").strip()
-            if avail:
-                out.append("\t\tavailable = {")
-                # Preserve relative indentation from raw block
-                lines = avail.splitlines()
-                non_empty = [l for l in lines if l.strip()]
-                min_ind = (
-                    min((len(l) - len(l.lstrip("\t"))) for l in non_empty)
-                    if non_empty
-                    else 0
-                )
-                for ln in lines:
-                    stripped = ln[min_ind:] if len(ln) >= min_ind else ln.lstrip("\t")
-                    out.append(f"\t\t\t{stripped}")
-                out.append("\t\t}")
-
-            # bypass
-            bypass = getattr(f, "bypass_cond", "").strip()
-            if bypass:
-                out.append("\t\tbypass = {")
-                lines = bypass.splitlines()
-                non_empty = [l for l in lines if l.strip()]
-                min_ind = (
-                    min((len(l) - len(l.lstrip("\t"))) for l in non_empty)
-                    if non_empty
-                    else 0
-                )
-                for ln in lines:
-                    stripped = ln[min_ind:] if len(ln) >= min_ind else ln.lstrip("\t")
-                    out.append(f"\t\t\t{stripped}")
-                out.append("\t\t}")
-
-            # cancel
-            cancelc = getattr(f, "cancel_cond", "").strip()
-            if cancelc:
-                out.append("\t\tcancel = {")
-                lines = cancelc.splitlines()
-                non_empty = [l for l in lines if l.strip()]
-                min_ind = (
-                    min((len(l) - len(l.lstrip("\t"))) for l in non_empty)
-                    if non_empty
-                    else 0
-                )
-                for ln in lines:
-                    stripped = ln[min_ind:] if len(ln) >= min_ind else ln.lstrip("\t")
-                    out.append(f"\t\t\t{stripped}")
-                out.append("\t\t}")
-
-            # will_lead_to_war_with (raw block — can contain multiple tags)
-            wltww = getattr(f, "will_lead_to_war_with", "").strip()
-            if wltww:
-                if wltww.startswith("{") and wltww.endswith("}"):
-                    inner = wltww[1:-1].strip()
-                else:
-                    inner = wltww
-                out.append("\t\twill_lead_to_war_with = {")
-                for ln in inner.splitlines():
-                    if ln.strip():
-                        out.append(f"\t\t\t{ln.strip()}")
-                out.append("\t\t}")
-
-            # complete_tooltip (raw block of effects)
-            ctip = getattr(f, "complete_tooltip", "").strip()
-            if ctip:
-                out.append("\t\tcomplete_tooltip = {")
-                for ln in ctip.splitlines():
-                    if ln.strip():
-                        out.append(f"\t\t\t{ln.strip()}")
-                out.append("\t\t}")
-
-            # select_effect (raw block — runs when focus is selected)
-            sel_eff = getattr(f, "select_effect", "").strip()
-            if sel_eff:
-                out.append("\t\tselect_effect = {")
-                for ln in sel_eff.splitlines():
-                    if ln.strip():
-                        out.append(f"\t\t\t{ln.strip()}")
-                out.append("\t\t}")
-
-            # boolean flags — only emit when they differ from defaults
-            if not f.cancel_if_invalid:
-                out.append("\t\tcancel_if_invalid = no")
-            if f.continue_if_invalid:
-                out.append("\t\tcontinue_if_invalid = yes")
-            if f.available_if_capitulated:
-                out.append("\t\tavailable_if_capitulated = yes")
-
-            # completion_reward — preserve imported raw block verbatim;
-            # only inject the hardcoded log line for newly created focuses
-            # (whose raw block is empty) to avoid duplicating it on every save.
-            _has_raw_reward = bool(
-                f.effects and any(e.get("type") == "_raw_block" for e in f.effects)
-            )
-            out.append("")
-            out.append("\t\tcompletion_reward = {")
-            if not _has_raw_reward:
-                out.append(
-                    f'\t\t\tlog = "[GetDateText]: [Root.GetName]: Focus {f.name}"'
-                )
-            if f.effects:
-                for eff in f.effects:
-                    out.append(self._render_effect(eff))
-            else:
-                out.append("\t\t\t# TODO: add effects")
-            out.append("\t\t}")
-
-            # bypass_effect (raw block — runs when focus is bypassed)
-            bp_eff = getattr(f, "bypass_effect", "").strip()
-            if bp_eff:
-                out.append("\t\tbypass_effect = {")
-                for ln in bp_eff.splitlines():
-                    if ln.strip():
-                        out.append(f"\t\t\t{ln.strip()}")
-                out.append("\t\t}")
-
-            out.append("")
-            out.append("\t\tai_will_do = {")
-            raw_ai = getattr(f, "ai_will_do_raw", "").strip()
-            if raw_ai:
-                for ln in raw_ai.splitlines():
-                    out.append(f"\t\t\t{ln.strip()}")
-            else:
-                # MD convention: ai_will_do uses `base = X` at top level, `factor = X` only in modifier sub-blocks
-                out.append(f"\t\t\tbase = {f.ai_will_do}")
-            out.append("\t\t}")
-            out.append("\t}")
-            out.append("")
-
-        out.append("}")
+        t0 = time.perf_counter()
+        out_text = export_main_tree(
+            list(main_focuses.values()),
+            {
+                "tree_id": self._tree_id.get(),
+                "country_tag": country_tag,
+                "cfp_x": cfp_x,
+                "cfp_y": cfp_y,
+                "country_raw": getattr(self, "_tree_country_raw", ""),
+                "shared_focuses": getattr(self, "_shared_focuses", []),
+                "joint_focuses": getattr(self, "_joint_focuses", []),
+            },
+            focus_lookup=self.focuses,
+            effect_renderer=self._render_effect,
+        )
+        t1 = time.perf_counter()
 
         # ── File naming: 05_TAG.txt per skill rules ───────────────────
         default_filename = f"05_{country_tag}.txt"
@@ -8630,7 +8381,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
             return
 
         with open(path, "w", encoding="utf-8") as fp:
-            fp.write("\n".join(out))
+            fp.write(out_text)
 
         if MOD.edit_loc_file and os.path.isfile(MOD.edit_loc_file):
             loc_path = MOD.edit_loc_file
@@ -8670,50 +8421,28 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
                         _saved_dir, loc_filename
                     )  # absolute fallback
 
-        # Build map of keys this (main) tree needs — skip extra tree focuses
-        new_loc = {}
-        for f in main_focuses.values():
-            title = f.name.replace("_", " ").title()
-            desc = f.desc if f.desc else f"Complete the {title} national focus."
-            new_loc[f.name] = title
-            new_loc[f"{f.name}_desc"] = desc
+        existing_loc_text = read_file(loc_path) if os.path.isfile(loc_path) else None
+        new_loc_text, added_count = build_loc_yml(
+            existing_loc_text, main_focuses.values(), country_tag
+        )
+        t2 = time.perf_counter()
+        log.debug(
+            "export main tree %s: build %.1fms loc %.1fms (%d focuses)",
+            path,
+            (t1 - t0) * 1000,
+            (t2 - t1) * 1000,
+            len(main_focuses),
+        )
 
-        # Read existing keys from file (handles both  key: "val"  and  key:0 "val")
-        existing_keys = set()
-        if os.path.isfile(loc_path):
-
-            with open(loc_path, encoding="utf-8-sig", errors="replace") as fp:
-                for line in fp:
-                    m = re.match(r'\s+(\S+?)(?::\d+)?\s*[=:]?\s*"', line)
-                    if m:
-                        existing_keys.add(m.group(1))
-
-        to_add = {k: v for k, v in new_loc.items() if k not in existing_keys}
-        loc_saved = ""
-        if to_add:
+        if new_loc_text is not None:
             os.makedirs(os.path.dirname(loc_path) or ".", exist_ok=True)
-            if not os.path.isfile(loc_path):
-                with open(loc_path, "w", encoding="utf-8-sig") as fp:
-                    fp.write("l_english:\n")
-            # Only write a section header if one doesn't already exist
-            needs_header = True
-            try:
-                with open(loc_path, encoding="utf-8-sig", errors="replace") as _fp:
-                    _existing = _fp.read()
-                if f"##########Focuses - {country_tag}##########" in _existing:
-                    needs_header = False
-            except Exception:
-                pass
-            with open(loc_path, "a", encoding="utf-8-sig") as fp:
-                if needs_header:
-                    fp.write(f"\n ##########Focuses - {country_tag}##########\n")
-                for k, v in to_add.items():
-                    fp.write(f' {k}: "{v}"\n')
+            with open(loc_path, "w", encoding="utf-8-sig") as fp:
+                fp.write(new_loc_text)
             loc_saved = "\n" + tr(
                 "export.localisation_added",
                 "Localisation: {file}  (+{count} new keys)",
                 file=os.path.basename(loc_path),
-                count=len(to_add),
+                count=added_count,
             )
         else:
             loc_saved = "\n" + tr(

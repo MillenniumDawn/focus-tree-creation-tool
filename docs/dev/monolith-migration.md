@@ -3,7 +3,7 @@
 ## The story so far
 
 `hoi4_content_maker.py` started as a single ~21k-line file. It's down to
-8,754 lines. What moved, and when:
+8,483 lines. What moved, and when:
 
 - **#8**: logging pulled into `hoi4cm.core.logger`, plus the packaging/tooling
   setup (`pyproject.toml`, ruff/black scoping, pytest config) that made an
@@ -35,11 +35,19 @@
   script parser, so it got its own module. `_import_drawio` is now an
   ~615-line Tk shell (dialogs + wiring); most of that is still the two
   Toplevel dialogs (tree setup, preview), which are Tk-only and stay put.
+- `_export` (phase 4): the main tree's export unified onto
+  `focus_tree/export.py` (`export_main_tree`, alongside the existing
+  `export_focus_tree` for shared/joint trees), and the loc-file writer
+  extracted to a new `focus_tree/loc.py` (`build_loc_yml`). `_export` is now
+  an ~167-line Tk shell: autosave flush, path/dialog resolution, the two pure
+  calls, file writes, and messageboxes. The e693a19 O(F^2) fix (a
+  `name -> Focus` map built once instead of a `next()` scan per focus) is now
+  also applied to `_build_focus_code`, the Code-tab preview.
 
 What's left in `hoi4_content_maker.py` today is essentially: the `sys.path`
 shim and import block (lines ~62-148), two Windows-DPI helpers (~151-235),
 and `class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk)`
-(~240-8754, around 110 methods), plus the `__main__` entry point that calls
+(~240-8483, around 110 methods), plus the `__main__` entry point that calls
 `show_splash(_launch)`.
 
 ## Wiring convention
@@ -59,7 +67,7 @@ needs it via `hoi4cm.core`.
 | `_import_txt` | ~5777-5899 (~123) | converged onto `focus_tree/parse.py` + `build.py` | **done** (phase 3) |
 | `_build_menubar` | ~399-934 | `ui/menubar.py` | in monolith (phase 10) |
 | `_build_toolbar_row2` | ~935-1193 | `ui/toolbar.py` | in monolith (phase 10) |
-| `_export` | ~9003-9443 | unify with `focus_tree/export.py` + new `focus_tree/loc.py` | in monolith (phase 4) |
+| `_export` | ~8297-8463 (~167, was ~9003-9443/440) | `focus_tree/export.py` (`export_main_tree`) + `focus_tree/loc.py` (`build_loc_yml`) | **done** (phase 4) |
 | `_open_gfx_browser` | ~2614-3048 | dedup with `ui/gfx_browser.py` | in monolith (phase 10) |
 | `_gfx_browse_files` | ~3049-3258 | dedup with `ui/gfx_browser.py` | in monolith (phase 10) |
 | Sidebar builders (`_build_sidebar`, `_build_sidebar_props`, `_build_sidebar_conditions`, `_build_sidebar_code`, `_sb_*` helpers) | ~1629-2362 (~640) | n/a | deferred |
