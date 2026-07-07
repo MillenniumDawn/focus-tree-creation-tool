@@ -6,8 +6,10 @@ subdirectories the scanner walks, then verifies the corresponding
 side-effect-free.
 """
 
+import json
 import os
 import textwrap
+import threading
 
 import pytest
 
@@ -312,3 +314,269 @@ def test_scan_with_cache_disabled_matches(tmp_path):
     finally:
         MOD.use_cache = True
     assert {"A1", "A2"} <= set(MOD.focus_ids)
+
+
+# ── GFX unification characterization ──────────────────────────────────────
+#
+# These pin down the exact merge/precedence rules of the three gfx scanners
+# (sprites / idea_sprites / decision_sprites) before they're rebuilt on top
+# of one shared interface+gfx walk. Every branch below was chosen to nail
+# down one specific rule:
+#   - interface/*.gfx entries take precedence over a same-named disk image
+#     (last-write in the interface pass, then setdefault for disk images).
+#   - only TOP-LEVEL interface/*.gfx files feed sprites/idea_sprites; nested
+#     ones (interface/sub/*.gfx) are only visible to decision_sprites, which
+#     walks interface/ recursively.
+#   - custom_gfx_dirs are indexed after the mod's own ideas dir, so they only
+#     fill in names the ideas dir didn't already provide.
+#   - the decision-gfx image walk classifies gfx/ images by substring
+#     ("decisions", "ideas", "goals"/"focus" => skipped, else).
+@pytest.fixture
+def gfx_mod_tree(tmp_path):
+    """A mod tree exercising every branch of the gfx scanners."""
+
+    def write(rel, content):
+        path = tmp_path / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(textwrap.dedent(content).lstrip("\n"))
+        return path
+
+    def touch(rel):
+        path = tmp_path / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"")
+        return path
+
+    # Top-level interface/*.gfx — read by all three scanners.
+    write(
+        "interface/goals.gfx",
+        """
+        spriteTypes = {
+            spriteType = {
+                name = "GFX_focus_USA_first_focus"
+                texturefile = "gfx/interface/goals/iface_first_focus.dds"
+            }
+            spriteType = {
+                name = "GFX_focus_extra_from_iface"
+                texturefile = "gfx/interface/goals/extra.dds"
+            }
+        }
+        """,
+    )
+    write(
+        "interface/ideas.gfx",
+        """
+        spriteTypes = {
+            spriteType = {
+                name = "GFX_idea_from_iface"
+                texturefile = "gfx/interface/ideas/iface_idea.dds"
+            }
+        }
+        """,
+    )
+    # Nested interface/*.gfx — only the (recursive) decision scan sees this.
+    write(
+        "interface/sub/nested.gfx",
+        """
+        spriteTypes = {
+            spriteType = {
+                name = "GFX_nested_only"
+                texturefile = "gfx/misc/nested.dds"
+            }
+        }
+        """,
+    )
+
+    # Disk images.
+    touch("gfx/interface/goals/USA_first_focus.dds")
+    touch("gfx/interface/ideas/some_idea.dds")
+    touch("gfx/decisions/dec1.dds")
+    touch("gfx/ideas_extra/somepic.dds")
+    touch("gfx/misc/other_pic.dds")
+
+    return tmp_path
+
+
+def test_gfx_scan_sprites_prefers_interface_over_disk(gfx_mod_tree):
+    """interface/*.gfx wins; the disk goals/ walk only fills setdefault gaps."""
+    root = str(gfx_mod_tree)
+    MOD.scan(root)
+    assert MOD.sprites == {
+        "GFX_focus_USA_first_focus": os.path.join(
+            root, "gfx", "interface", "goals", "iface_first_focus.dds"
+        ),
+        "GFX_focus_extra_from_iface": os.path.join(
+            root, "gfx", "interface", "goals", "extra.dds"
+        ),
+    }
+
+
+def test_gfx_scan_idea_sprites_interface_disk_and_custom_dir(gfx_mod_tree):
+    """idea_sprites merges interface/*.gfx, the ideas dir, then custom dirs."""
+    root = str(gfx_mod_tree)
+    custom_dir = gfx_mod_tree / "custom_ideas"
+    custom_dir.mkdir()
+    (custom_dir / "some_idea.dds").write_bytes(b"")  # collides with ideas dir
+    (custom_dir / "custom_only.dds").write_bytes(b"")
+    MOD.custom_gfx_dirs = [str(custom_dir)]
+    try:
+        MOD.scan(root)
+    finally:
+        MOD.custom_gfx_dirs = []
+    assert MOD.idea_sprites == {
+        "GFX_idea_from_iface": os.path.join(
+            root, "gfx", "interface", "ideas", "iface_idea.dds"
+        ),
+        "GFX_idea_some_idea": os.path.join(
+            root, "gfx", "interface", "ideas", "some_idea.dds"
+        ),
+        "GFX_idea_custom_only": str(custom_dir / "custom_only.dds"),
+    }
+
+
+def test_gfx_scan_decision_sprites_all_branches(gfx_mod_tree):
+    """decision_sprites: recursive interface walk + classified gfx/ image walk."""
+    root = str(gfx_mod_tree)
+    MOD.scan(root)
+    assert MOD.decision_sprites == {
+        "GFX_focus_USA_first_focus": os.path.join(
+            root, "gfx", "interface", "goals", "iface_first_focus.dds"
+        ),
+        "GFX_focus_extra_from_iface": os.path.join(
+            root, "gfx", "interface", "goals", "extra.dds"
+        ),
+        "GFX_idea_from_iface": os.path.join(
+            root, "gfx", "interface", "ideas", "iface_idea.dds"
+        ),
+        "GFX_nested_only": os.path.join(root, "gfx", "misc", "nested.dds"),
+        "GFX_idea_some_idea": os.path.join(
+            root, "gfx", "interface", "ideas", "some_idea.dds"
+        ),
+        "GFX_decision_dec1": os.path.join(root, "gfx", "decisions", "dec1.dds"),
+        "GFX_decision_category_dec1": os.path.join(
+            root, "gfx", "decisions", "dec1.dds"
+        ),
+        "GFX_idea_somepic": os.path.join(root, "gfx", "ideas_extra", "somepic.dds"),
+        "GFX_other_pic": os.path.join(root, "gfx", "misc", "other_pic.dds"),
+    }
+
+
+def test_gfx_cache_skips_walk_when_interface_unchanged(gfx_mod_tree, monkeypatch):
+    """A warm rescan with interface/ untouched must not re-read any .gfx file."""
+    root = str(gfx_mod_tree)
+    MOD.scan(root)  # cold: builds the unified index, writes the sidecar
+    first_sprites = dict(MOD.sprites)
+    first_idea_sprites = dict(MOD.idea_sprites)
+    first_decision_sprites = dict(MOD.decision_sprites)
+
+    reads = []
+    orig = MOD._read
+    monkeypatch.setattr(MOD, "_read", lambda p: (reads.append(p), orig(p))[1])
+    MOD.scan(root)  # warm: sidecar hit should skip both walks entirely
+
+    assert not any(p.endswith(".gfx") for p in reads), reads
+    assert MOD.sprites == first_sprites
+    assert MOD.idea_sprites == first_idea_sprites
+    assert MOD.decision_sprites == first_decision_sprites
+
+
+def test_gfx_cache_invalidates_on_interface_mtime_change(gfx_mod_tree):
+    """Editing an interface/*.gfx file must invalidate the sidecar."""
+    root = str(gfx_mod_tree)
+    MOD.scan(root)
+    assert "GFX_focus_extra_from_iface" in MOD.sprites
+
+    goals_gfx = gfx_mod_tree / "interface" / "goals.gfx"
+    goals_gfx.write_text(textwrap.dedent("""
+            spriteTypes = {
+                spriteType = {
+                    name = "GFX_focus_added_later"
+                    texturefile = "gfx/interface/goals/added_later.dds"
+                }
+            }
+            """).lstrip("\n"))
+    st = goals_gfx.stat()
+    os.utime(goals_gfx, (st.st_atime, st.st_mtime + 10))
+
+    MOD.scan(root)
+    assert "GFX_focus_added_later" in MOD.sprites
+    assert "GFX_focus_extra_from_iface" not in MOD.sprites
+
+
+def test_gfx_cache_version_mismatch_forces_rescan(gfx_mod_tree):
+    """An old-schema (or otherwise mismatched) sidecar is discarded, not misread."""
+    root = str(gfx_mod_tree)
+    MOD.scan(root)
+    cache_file = os.path.join(root, ".hoi4cm_gfx_cache.json")
+    assert os.path.isfile(cache_file)
+    expected_sprites = dict(MOD.sprites)
+
+    with open(cache_file, encoding="utf-8") as f:
+        data = json.load(f)
+    data["version"] = 1  # simulate a pre-unification / stale-schema sidecar
+    data["sprites"]["GFX_focus_bogus"] = "should not survive a version mismatch"
+    with open(cache_file, "w", encoding="utf-8") as f:
+        json.dump(data, f)
+
+    MOD.scan(root)
+    assert MOD.sprites == expected_sprites
+    assert "GFX_focus_bogus" not in MOD.sprites
+
+
+# ── Read/extract overlap in _scan_files_cached ─────────────────────────────
+
+
+def test_scan_files_cached_preserves_order_with_mixed_hits_and_misses(tmp_path):
+    """Result order always follows the input paths list, regardless of which
+    entries are cache hits vs. misses (locks down the ordering contract
+    across the read/extract-overlap refactor)."""
+    names = ["c", "a", "b", "e", "d"]
+    paths = []
+    for i, name in enumerate(names):
+        p = tmp_path / f"{name}.txt"
+        p.write_text(f"{name}{i}")
+        paths.append(str(p))
+
+    def extract(text):
+        return text.strip()
+
+    cache = scan_cache_mod.ScanCache(str(tmp_path))
+    MOD._cache = cache
+    try:
+        # Prime the cache for two files at non-edge positions, so hits and
+        # misses are interleaved rather than a clean prefix/suffix split.
+        for p in (paths[1], paths[3]):
+            st = os.stat(p)
+            cache.put("t", p, st.st_mtime, st.st_size, extract(MOD._read(p)))
+        cache.commit()
+
+        result = MOD._scan_files_cached("t", paths, extract)
+        assert list(result.keys()) == paths
+        for p in paths:
+            assert result[p] == extract(MOD._read(p))
+    finally:
+        cache.close()
+        MOD._cache = None
+
+
+def test_scan_files_cached_extracts_off_the_calling_thread(tmp_path):
+    """Cache-miss files are read+extracted together on the pool, not read in
+    one pass and extracted in a separate serial pass on the caller."""
+    names = ("alpha", "bravo", "charlie", "delta")
+    paths = {}
+    for name in names:
+        p = tmp_path / f"{name}.txt"
+        p.write_text(name)
+        paths[str(p)] = name
+
+    seen_threads = set()
+
+    def extract(text):
+        seen_threads.add(threading.current_thread())
+        return text.upper()
+
+    assert MOD._cache is None
+    result = MOD._scan_files_cached("t2", list(paths), extract)
+
+    assert result == {p: name.upper() for p, name in paths.items()}
+    assert seen_threads - {threading.current_thread()}
