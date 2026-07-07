@@ -3,7 +3,7 @@
 ## The story so far
 
 `hoi4_content_maker.py` started as a single ~21k-line file. It's down to
-8,483 lines. What moved, and when:
+7,379 lines. What moved, and when:
 
 - **#8**: logging pulled into `hoi4cm.core.logger`, plus the packaging/tooling
   setup (`pyproject.toml`, ruff/black scoping, pytest config) that made an
@@ -50,12 +50,26 @@
   canvas items only for the ids that came back changed or removed and does
   one `_redraw()`, replacing the old `cv.delete("all")` + full rebuild. See
   `performance.md`'s undo row for the design.
+- Settings dialog (phase 9): `_open_settings`'s ~1,315-line body moved to
+  `ui/settings_dialog.py` as `open_settings(app)`, the same one-line-delegate
+  pattern the five wizards use. Lifted out along with it: `relativize_to_mod_root`
+  (the mod-relative-path normalization every GFX-path browse button used
+  inline), `loc_token_preview_text`, `parse_event_dim_profile`, and two data
+  constants that used to get rebuilt on every dialog open,
+  `VANILLA_COUNTRY_TAGS` and `GFX_PATH_PRESETS`. The dead
+  `_default_hoi4_mod_dir` alias is gone too: its only remaining call site was
+  inside the method that just moved out, so it and four other now-unused
+  `hoi4cm.core` imports (`CONFIG_PATH`, `I18N_LANGS`, `get_language`,
+  `set_language`) came out with it. `ui/settings_dialog.py` is wired in with a
+  direct `from hoi4cm.ui.settings_dialog import open_settings`, not through
+  the `hoi4cm.ui` facade; that file is mid-edit elsewhere on this branch, so
+  adding the facade re-export is left for later.
 
 What's left in `hoi4_content_maker.py` today is essentially: the `sys.path`
-shim and import block (lines ~62-148), two Windows-DPI helpers (~151-235),
+shim and import block (lines ~62-153), two Windows-DPI helpers (~154-240),
 and `class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk)`
-(~240-8483, around 110 methods), plus the `__main__` entry point that calls
-`show_splash(_launch)`.
+(~241-7362, still around 110 methods, most bodies much smaller now), plus
+the `__main__` entry point that calls `show_splash(_launch)`.
 
 ## Wiring convention
 
@@ -69,7 +83,7 @@ needs it via `hoi4cm.core`.
 
 | Monolith function | Lines | Destination | Status |
 |---|---|---|---|
-| `_open_settings` | ~7179-8494 (~1,316) | `ui/settings_dialog.py` | in monolith (phase 9) |
+| `_open_settings` | was ~6685-7999 (~1,315) | `ui/settings_dialog.py` (`open_settings`) | **done** (phase 9) |
 | `_import_drawio` | ~4952-5567 (~616) | `focus_tree/drawio.py` | **done** (phase 3) |
 | `_import_txt` | ~5777-5899 (~123) | converged onto `focus_tree/parse.py` + `build.py` | **done** (phase 3) |
 | `_build_menubar` | ~399-934 | `ui/menubar.py` | in monolith (phase 10) |
@@ -114,7 +128,3 @@ Phase 10 needs to confirm the overlap and delete whichever copy loses.
   selected `Focus`, the current sidebar widgets, in-place mutation on
   every keystroke). Extracting them cleanly needs a form-state redesign
   first, not just a lift-and-shift.
-- **`_open_settings`**: the single largest remaining chunk (~1,316 lines).
-  Deferred to phase 9 simply because of size and because it touches almost
-  every config key the app has; wants its own careful pass rather than
-  being folded into an earlier phase.
