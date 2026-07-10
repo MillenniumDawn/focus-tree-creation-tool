@@ -29,6 +29,7 @@ desktop.ini
 *.swp
 *.swo
 *~
+.opencode/
 
 # Claude Code local settings (user-specific, should not be committed)
 .claude/settings.local.json

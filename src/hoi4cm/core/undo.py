@@ -16,6 +16,24 @@ from collections import deque
 
 _FULL = "full"
 _SPARSE = "sparse"
+_FOCUS_SEMANTIC_METADATA = (
+    "_raw_gx",
+    "_raw_gy",
+    "_rel_dx",
+    "_rel_dy",
+    "_joint_extra",
+)
+
+
+def _snapshot_focus(focus):
+    """Return serializable focus state needed to restore an undo entry."""
+    snapshot = copy.deepcopy(focus.to_dict())
+    for attr in _FOCUS_SEMANTIC_METADATA:
+        try:
+            snapshot[attr] = copy.deepcopy(getattr(focus, attr))
+        except AttributeError:
+            continue
+    return snapshot
 
 
 class UndoStack:
@@ -56,15 +74,13 @@ class UndoStack:
         if touched_ids is None:
             blob = zlib.compress(
                 json.dumps(
-                    {str(fid): f.to_dict() for fid, f in focuses.items()}
+                    {str(fid): _snapshot_focus(f) for fid, f in focuses.items()}
                 ).encode("utf-8")
             )
             self._stack.append((label, _FULL, blob, id_set))
             return
         touched = {
-            fid: copy.deepcopy(focuses[fid].to_dict())
-            for fid in touched_ids
-            if fid in focuses
+            fid: _snapshot_focus(focuses[fid]) for fid in touched_ids if fid in focuses
         }
         self._stack.append((label, _SPARSE, touched, id_set))
 

@@ -80,6 +80,9 @@ def export_focus_tree(focuses_in_tree, info, *, focus_lookup, effect_renderer):
         """
         t1 = indent
         t2 = indent + "\t"
+        ftext = getattr(f, "text", "").strip()
+        if ftext:
+            out.append(f"{t1}text = {ftext}")
         # Use original file coords (not offset-applied canvas coords) for export.
         gx = getattr(f, "_raw_gx", f.x)
         gy = getattr(f, "_raw_gy", f.y)
@@ -130,6 +133,9 @@ def export_focus_tree(focuses_in_tree, info, *, focus_lookup, effect_renderer):
         sf = getattr(f, "search_filters", "").strip()
         if sf:
             out.append(f"{t1}search_filters = {{ {sf} }}")
+        _emit_preserved_block(
+            out, "allow_branch", getattr(f, "allow_branch", ""), t1, t2
+        )
         for cond_key, cond_attr in [
             ("available", "available_cond"),
             ("bypass", "bypass_cond"),
@@ -156,6 +162,12 @@ def export_focus_tree(focuses_in_tree, info, *, focus_lookup, effect_renderer):
         _emit_block(out, "will_lead_to_war_with", wltww, t1)
         _emit_block(out, "complete_tooltip", getattr(f, "complete_tooltip", ""), t1)
         _emit_block(out, "select_effect", getattr(f, "select_effect", ""), t1)
+        if not f.cancel_if_invalid:
+            out.append(f"{t1}cancel_if_invalid = no")
+        if f.continue_if_invalid:
+            out.append(f"{t1}continue_if_invalid = yes")
+        if f.available_if_capitulated:
+            out.append(f"{t1}available_if_capitulated = yes")
         out.append("")
         out.append(f"{t1}completion_reward = {{")
         if f.effects:

@@ -512,7 +512,7 @@ def test_gfx_scan_decision_sprites_all_branches(gfx_mod_tree):
     }
 
 
-def test_gfx_cache_skips_walk_when_interface_unchanged(gfx_mod_tree, monkeypatch):
+def test_gfx_cache_skips_interface_gfx_reads_when_unchanged(gfx_mod_tree, monkeypatch):
     """A warm rescan with interface/ untouched must not re-read any .gfx file."""
     root = str(gfx_mod_tree)
     MOD.scan(root)  # cold: builds the unified index, writes the sidecar
@@ -523,7 +523,7 @@ def test_gfx_cache_skips_walk_when_interface_unchanged(gfx_mod_tree, monkeypatch
     reads = []
     orig = MOD._read
     monkeypatch.setattr(MOD, "_read", lambda p: (reads.append(p), orig(p))[1])
-    MOD.scan(root)  # warm: sidecar hit should skip both walks entirely
+    MOD.scan(root)  # warm: sidecar hit should skip parsing interface definitions
 
     assert not any(p.endswith(".gfx") for p in reads), reads
     assert MOD.sprites == first_sprites
@@ -552,6 +552,20 @@ def test_gfx_cache_invalidates_on_interface_mtime_change(gfx_mod_tree):
     MOD.scan(root)
     assert "GFX_focus_added_later" in MOD.sprites
     assert "GFX_focus_extra_from_iface" not in MOD.sprites
+
+
+def test_gfx_cache_invalidates_on_image_tree_change(gfx_mod_tree):
+    """Adding a gfx image rebuilds the cache without an interface change."""
+    root = str(gfx_mod_tree)
+    MOD.scan(root)
+    iface_mtime = ctx_mod._iface_dir_mtime(root)
+
+    added_image = gfx_mod_tree / "gfx" / "interface" / "goals" / "added_later.dds"
+    added_image.write_bytes(b"")
+
+    assert ctx_mod._iface_dir_mtime(root) == iface_mtime
+    MOD.scan(root)
+    assert MOD.sprites["GFX_focus_added_later"] == str(added_image)
 
 
 def test_gfx_cache_version_mismatch_forces_rescan(gfx_mod_tree):

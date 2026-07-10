@@ -10,6 +10,7 @@ available; without it ``get_image`` returns ``None`` and the rest of the
 app still works.
 """
 
+import hashlib
 import json
 import os
 import re
@@ -44,7 +45,7 @@ _IMAGE_EXTS = (".dds", ".png", ".tga")
 
 # Bump when the on-disk shape of .hoi4cm_gfx_cache.json changes, so an old
 # sidecar from a previous app version is discarded instead of misread.
-_GFX_CACHE_VERSION = 2
+_GFX_CACHE_VERSION = 3
 
 # Pre-compiled regexes used by the ID scanners (compiled once, not per file).
 _ID_RE = re.compile(r"\bid\s*=\s*(\S+)")
@@ -137,13 +138,10 @@ def _iface_dir_mtime(root):
 
     Returns 0 if missing.
 
-    Used as the gfx-cache invalidation signal: a modder adding a new sprite
-    always touches an ``interface/*.gfx`` file, so an unchanged interface/
-    tree stands in for an unchanged gfx/ tree, letting a cache hit skip
-    re-walking gfx/ entirely (up to ~64k files on a large mod). Walked
-    recursively — not just the top-level dir — since decision_sprites
-    parses nested interface/*.gfx too and the sidecar now covers all three
-    derived dicts, not just decision_sprites.
+    Used with the gfx image signature as the unified gfx-cache invalidation
+    signal. Walked recursively — not just the top-level dir — since
+    decision_sprites parses nested interface/*.gfx too and the sidecar now
+    covers all three derived dicts, not just decision_sprites.
     """
     iface = os.path.join(root, "interface")
     if not os.path.isdir(iface):
@@ -156,6 +154,30 @@ def _iface_dir_mtime(root):
             except OSError:
                 pass
     return latest
+
+
+def _gfx_image_tree_signature(gfx_root):
+    """Return a stable signature for every supported image below ``gfx_root``."""
+    digest = hashlib.sha256()
+    if not os.path.isdir(gfx_root):
+        digest.update(b"missing")
+        return digest.hexdigest()
+
+    digest.update(b"present\0")
+    for dirpath, dirs, files in os.walk(gfx_root):
+        dirs.sort()
+        for fname in sorted(files):
+            if not fname.lower().endswith(_IMAGE_EXTS):
+                continue
+            path = os.path.join(dirpath, fname)
+            rel_path = os.path.relpath(path, gfx_root).replace(os.sep, "/")
+            try:
+                stat = os.stat(path)
+                signature = f"{rel_path}\0{stat.st_mtime_ns}\0{stat.st_size}\n"
+            except OSError:
+                signature = f"{rel_path}\0unavailable\n"
+            digest.update(signature.encode())
+    return digest.hexdigest()
 
 
 class ModContext:
@@ -526,7 +548,7 @@ class ModContext:
             else:
                 self.decision_sprites.setdefault(f"GFX_{stem}", full)
 
-    def _read_gfx_cache(self, cache_file, iface_mtime):
+    def _read_gfx_cache(self, cache_file, iface_mtime, gfx_signature):
         """Return the cached {sprites, idea_sprites, decision_sprites} or None."""
         if not os.path.isfile(cache_file):
             return None
@@ -537,15 +559,18 @@ class ModContext:
                 return None
             if abs(cached.get("iface_mtime", 0) - iface_mtime) >= 2:
                 return None
+            if cached.get("gfx_signature") != gfx_signature:
+                return None
             return cached
         except Exception:
             return None
 
-    def _write_gfx_cache(self, cache_file, iface_mtime):
+    def _write_gfx_cache(self, cache_file, iface_mtime, gfx_signature):
         try:
             cache_data = {
                 "version": _GFX_CACHE_VERSION,
                 "iface_mtime": iface_mtime,
+                "gfx_signature": gfx_signature,
                 "sprites": dict(self.sprites),
                 "idea_sprites": dict(self.idea_sprites),
                 "decision_sprites": dict(self.decision_sprites),
@@ -568,9 +593,9 @@ class ModContext:
         feed sprites/idea_sprites, every one feeds decision_sprites).
 
         Cached in ``.hoi4cm_gfx_cache.json``, keyed by interface/'s
-        (recursive) mtime — the heuristic the old decision-only cache
-        already used, now covering the whole index so a cache hit skips
-        both walks entirely instead of just the decision one.
+        recursive mtime and a signature of every supported image under gfx/.
+        A cache hit skips parsing interface definitions and rebuilding the
+        derived dicts.
         """
         self.decision_sprites.clear()
         self.idea_sprites.clear()
@@ -578,14 +603,15 @@ class ModContext:
 
         cache_file = os.path.join(self.root, ".hoi4cm_gfx_cache.json")
         iface_mtime = _iface_dir_mtime(self.root)
-        cached = self._read_gfx_cache(cache_file, iface_mtime)
+        gfx_root = os.path.join(self.root, "gfx")
+        gfx_signature = _gfx_image_tree_signature(gfx_root)
+        cached = self._read_gfx_cache(cache_file, iface_mtime, gfx_signature)
         if cached is not None:
             self.sprites.update(cached.get("sprites", {}))
             self.idea_sprites.update(cached.get("idea_sprites", {}))
             self.decision_sprites.update(cached.get("decision_sprites", {}))
         else:
             entries = self._index_interface_gfx()
-            gfx_root = os.path.join(self.root, "gfx")
             all_images = (
                 list(_iter_image_paths(gfx_root)) if os.path.isdir(gfx_root) else []
             )
@@ -603,10 +629,10 @@ class ModContext:
 
             self._derive_decision_sprites(entries, all_images)
 
-            self._write_gfx_cache(cache_file, iface_mtime)
+            self._write_gfx_cache(cache_file, iface_mtime, gfx_signature)
 
         # custom_gfx_dirs are user-added at any time and aren't covered by
-        # the interface/ mtime signature, so index them fresh every scan.
+        # the unified cache signature, so index them fresh every scan.
         for cdir in self.custom_gfx_dirs:
             if os.path.isdir(cdir):
                 _index_image_files(cdir, "GFX_idea_", self.idea_sprites)

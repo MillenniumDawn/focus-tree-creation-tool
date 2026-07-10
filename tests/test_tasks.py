@@ -138,6 +138,31 @@ def test_worker_exception_without_on_error_still_logs(log_state):
     assert any("ZeroDivisionError" in msg for _, msg in entries)
 
 
+def test_worker_exception_marshals_error_logging_to_widget(monkeypatch, log_state):
+    widget = FakeWidget()
+    scheduled = []
+    logged = []
+
+    def work():
+        raise ValueError("kaboom")
+
+    monkeypatch.setattr(
+        tasks,
+        "_safe_after",
+        lambda _widget, _delay, callback: scheduled.append(callback),
+    )
+    monkeypatch.setattr(tasks, "add_error", logged.append)
+
+    future = tasks.run_bg(widget, work, lambda _result: None)
+    future.result(timeout=2)
+
+    assert logged == []
+    for callback in scheduled:
+        callback()
+    assert len(logged) == 1
+    assert "ValueError: kaboom" in logged[0]
+
+
 # ── progress ──────────────────────────────────────────────────────────
 
 

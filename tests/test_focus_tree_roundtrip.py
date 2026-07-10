@@ -137,6 +137,63 @@ def test_joint_content_present():
         assert needle in t1, needle
 
 
+@pytest.mark.parametrize(
+    "tree_type,had_wrapper,block_keyword",
+    [
+        ("shared", True, "focus"),
+        ("shared", False, "shared_focus"),
+        ("joint", False, "joint_focus"),
+    ],
+)
+def test_extra_tree_export_preserves_main_tree_only_focus_fields(
+    tree_type, had_wrapper, block_keyword
+):
+    focus = Focus(3, 4)
+    focus.name = "TST_extra"
+    focus.text = "TST_extra_custom_text"
+    focus.allow_branch = "OR = {\n\thas_government = democratic\n}"
+    focus.cancel_if_invalid = False
+    focus.continue_if_invalid = True
+    focus.available_if_capitulated = True
+    info = {
+        "tree_id": "TST_extra_tree",
+        "country_tag": "TST",
+        "cfp_x": 0,
+        "cfp_y": 0,
+        "type": tree_type,
+        "had_wrapper": had_wrapper,
+        "shared_focuses": [],
+        "joint_focuses": [],
+    }
+
+    text = export_focus_tree(
+        [focus],
+        info,
+        focus_lookup={focus.id: focus},
+        effect_renderer=raw_block_renderer,
+    )
+    parsed = parse_focus_tree(text, "/tmp/x.txt")
+    restored = build_focuses(parsed, tree_idx=1)[0]
+
+    assert f"{block_keyword} = {{" in text
+    assert "text = TST_extra_custom_text" in text
+    focus_indent = "\t\t" if tree_type == "shared" and had_wrapper else "\t"
+    assert (
+        "allow_branch = {\n"
+        f"{focus_indent}\tOR = {{\n"
+        f"{focus_indent}\t\thas_government = democratic\n"
+        f"{focus_indent}\t}}"
+    ) in text
+    assert "cancel_if_invalid = no" in text
+    assert "continue_if_invalid = yes" in text
+    assert "available_if_capitulated = yes" in text
+    assert restored.text == focus.text
+    assert "has_government = democratic" in restored.allow_branch
+    assert restored.cancel_if_invalid is False
+    assert restored.continue_if_invalid is True
+    assert restored.available_if_capitulated is True
+
+
 # ── Fixture-file round-trips (see tests/fixtures/focus_trees/) ────────────
 #
 # country_raw is NOT covered here: export_focus_tree always emits a canned

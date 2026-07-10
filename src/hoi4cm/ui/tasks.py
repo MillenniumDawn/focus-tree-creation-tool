@@ -95,7 +95,12 @@ def run_bg(widget, work, on_done, on_error=None, progress_cb=None):
                 result = work()
         except Exception as exc:
             log.exception("background task failed")
-            add_error(traceback.format_exc())
+            error_trace = traceback.format_exc()
+            _safe_after(
+                widget,
+                0,
+                lambda error_trace=error_trace: add_error(error_trace),
+            )
             if on_error is not None:
                 _safe_after(widget, 0, lambda exc=exc: on_error(exc))
             return

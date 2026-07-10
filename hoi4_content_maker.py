@@ -4207,6 +4207,10 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
             if _loc_path:
                 MOD.edit_loc_file = _loc_path
 
+        import_generation = getattr(self, "_import_generation", 0) + 1
+        self._import_generation = import_generation
+        modal = progress_modal(self, tr("dialog.import.title", "Import"), determinate=False)
+
         # Parse + build are the expensive, pure-CPU steps (no Tk, no self) —
         # they run on a worker thread; everything that touches MOD/toolbar
         # vars/panels/canvas below stays in on_done, on the Tk thread.
@@ -4233,6 +4237,9 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
             return parsed, new_focuses
 
         def on_done(result):
+            modal.close()
+            if import_generation != self._import_generation:
+                return
             parsed, new_focuses = result
 
             # clear existing
@@ -4304,6 +4311,9 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
             )
 
         def on_error(exc):
+            modal.close()
+            if import_generation != self._import_generation:
+                return
             if isinstance(exc, EmptyFocusTreeError):
                 messagebox.showwarning(tr("dialog.import.title", "Import"), str(exc))
             # else: unexpected error, already recorded in the in-app error

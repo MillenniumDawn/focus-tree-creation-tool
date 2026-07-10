@@ -45,6 +45,27 @@ from hoi4cm.ui.theme import (
 from hoi4cm.ui.widgets import _safe_after, _safe_after_idle
 
 
+def _load_thumbnail(path, width, height, *, preserve_aspect=False):
+    if not _PIL_OK or not os.path.exists(path):
+        return None
+    try:
+        with _PILImage.open(path) as source:
+            pil = source.convert("RGBA")
+    except OSError:
+        return None
+    resample = getattr(_PILImage, "LANCZOS", getattr(_PILImage, "ANTIALIAS", 1))
+    if preserve_aspect:
+        source_width, source_height = pil.size
+        ratio = min(width / max(source_width, 1), height / max(source_height, 1))
+        size = (
+            max(1, int(source_width * ratio)),
+            max(1, int(source_height * ratio)),
+        )
+    else:
+        size = (width, height)
+    return pil.resize(size, resample)
+
+
 # ─────────────────────────────────────────────────────────────────
 # Universal browser
 # ─────────────────────────────────────────────────────────────────
@@ -401,9 +422,7 @@ def open_universal_gfx_browser(
             if i >= len(snap):
                 break
             _, path = snap[i]
-            if path in _st["img_cache"]:
-                continue
-            img = None
+            pil = None
             alts = [path] + [
                 os.path.splitext(path)[0] + ext
                 for ext in (".png", ".tga", ".dds")
@@ -411,24 +430,26 @@ def open_universal_gfx_browser(
                 and os.path.splitext(path)[0] + ext != path
             ]
             for tp in alts:
-                try:
-                    if _PIL_OK and os.path.exists(tp):
-                        pil = _PILImage.open(tp).convert("RGBA")
-                        rs = getattr(
-                            _PILImage, "LANCZOS", getattr(_PILImage, "ANTIALIAS", 1)
-                        )
-                        pw, ph = pil.size
-                        ratio = min(80 / max(pw, 1), 70 / max(ph, 1))
-                        pil = pil.resize(
-                            (max(1, int(pw * ratio)), max(1, int(ph * ratio))),
-                            rs,
-                        )
-                        img = _PILImageTk.PhotoImage(pil)
-                        break
-                except Exception:
-                    pass
-            _st["img_cache"][path] = img
-            _safe_after(bwin, 0, lambda i2=i: _fill_image(i2))
+                pil = _load_thumbnail(tp, 80, 70, preserve_aspect=True)
+                if pil is not None:
+                    break
+            _safe_after(
+                bwin,
+                0,
+                lambda i2=i, path2=path, pil2=pil: _store_image(i2, path2, pil2),
+            )
+
+    def _store_image(idx, path, pil):
+        if (
+            idx >= len(_st["pairs"])
+            or _st["pairs"][idx][1] != path
+            or path in _st["img_cache"]
+        ):
+            return
+        _st["img_cache"][path] = (
+            _PILImageTk.PhotoImage(pil) if pil is not None else None
+        )
+        _fill_image(idx)
 
     def _lazy_fill(*_):
         if not _st["pairs"]:
@@ -1294,21 +1315,20 @@ def _browse_flat_folder(win, folder, on_select, current_gfx):
             if i >= len(snap):
                 break
             _, path = snap[i]
-            if path in _cache:
-                continue
-            img = None
-            try:
-                if _PIL_OK and os.path.exists(path):
-                    pil = _PILImage.open(path).convert("RGBA")
-                    rs = getattr(
-                        _PILImage, "LANCZOS", getattr(_PILImage, "ANTIALIAS", 1)
-                    )
-                    pil = pil.resize((72, 72), rs)
-                    img = _PILImageTk.PhotoImage(pil)
-            except Exception:
-                pass
-            _cache[path] = img
-            _safe_after(fwin, 0, lambda x=i: _fill(x))
+            pil = _load_thumbnail(path, 72, 72)
+            _safe_after(
+                fwin,
+                0,
+                lambda idx=i, image_path=path, image=pil: _store_image(
+                    idx, image_path, image
+                ),
+            )
+
+    def _store_image(idx, path, pil):
+        if idx >= len(pairs) or pairs[idx][1] != path or path in _cache:
+            return
+        _cache[path] = _PILImageTk.PhotoImage(pil) if pil is not None else None
+        _fill(idx)
 
     def _lazy(*_):
         top = cv.canvasy(0)
@@ -1662,21 +1682,26 @@ def open_focus_icon_browser(win, on_select, current_gfx="", mod=None):
             if idx >= len(pairs_snapshot):
                 break
             gfx_key, path = pairs_snapshot[idx]
-            if path in _st["img_cache"]:
-                continue
-            img = None
-            try:
-                if _PIL_OK and os.path.exists(path):
-                    pil = _PILImage.open(path).convert("RGBA")
-                    rs = getattr(
-                        _PILImage, "LANCZOS", getattr(_PILImage, "ANTIALIAS", 1)
-                    )
-                    pil = pil.resize((72, 72), rs)
-                    img = _PILImageTk.PhotoImage(pil)
-            except Exception:
-                pass
-            _st["img_cache"][path] = img
-            _safe_after(gwin, 0, lambda i=idx: _fill_image(i))
+            pil = _load_thumbnail(path, 72, 72)
+            _safe_after(
+                gwin,
+                0,
+                lambda i=idx, image_path=path, image=pil: _store_image(
+                    i, image_path, image
+                ),
+            )
+
+    def _store_image(idx, path, pil):
+        if (
+            idx >= len(_st["pairs"])
+            or _st["pairs"][idx][1] != path
+            or path in _st["img_cache"]
+        ):
+            return
+        _st["img_cache"][path] = (
+            _PILImageTk.PhotoImage(pil) if pil is not None else None
+        )
+        _fill_image(idx)
 
     def _lazy_fill(*_):
         """Draw placeholders for visible tiles; kick off background image load."""
