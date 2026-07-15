@@ -1,0 +1,118 @@
+# Performance
+
+## Scale targets
+
+The reference mod is Millennium Dawn: ~790 `.txt` files scanned under
+`common/national_focus`, 1.05M total lines across them, the largest single
+tree (`usa.txt`) at 40,790 lines / 776 focus blocks, 23,524 focus blocks
+across all trees, and ~64k GFX image files under `gfx/`. Anything added
+here should be checked against this scale, not a small test mod: a fix
+that helps a 50-focus tree and does nothing for a 23,524-focus load is not
+the target.
+
+## Hot-path ledger
+
+| Finding | Location | Fix | Status | Measured delta |
+|---|---|---|---|---|
+| Checklist dialog for "Load All Trees" builds one Tk widget row per file before it can show; on ~790 files that's ~790 synchronous widget constructions | `hoi4_content_maker.py:6856` (`_load_all_trees`) | Virtualize the row list or paginate | identified, unscheduled | not yet measured, needs a display session against the real mod |
+| Batch load ran a full panel refresh + `_redraw()` + `_fit_all()` per file, N times for N trees, all on the Tk thread | `hoi4_content_maker.py:6490` (`_install_extra_tree`), `_do_load` in `_load_all_trees` | `defer_redraw=True` per file; one refresh + redraw + fit-all after the whole batch | fixed in phase 2 | not yet measured, needs a display session against the real mod |
+| Cross-tree `relative_position_id` resolution in `build_focuses` scanned the whole `existing_focuses` list per focus, O(T*F) across a batch load. Import-side twin of the e693a19 export fix | `focus_tree/build.py` (`resolve_abs`) | `existing_by_name` map built once, first-match-wins preserved | fixed in phase 2 | not yet measured, needs a display session against the real mod |
+| The single end-of-batch redraw still walks every loaded focus with no viewport culling | `ui/canvas.py:150` (`_do_redraw`) | Viewport culling | fixed in phase 8 (see the viewport-culling row below for what is/isn't fixed) | not yet measured, needs a display session against the real mod |
+| Main-tree export and the Code-tab preview resolve each focus's `relative_position_id` parent with `next(foc for foc in self.focuses.values() if foc.name == rel_id)`, an O(F) scan per focus, so O(F^2) overall. This is the same shape of bug e693a19 already fixed in `focus_tree/export.py` (used only for extra shared/joint trees) with a name-to-focus map built once; the fix was never ported to the monolith's own main-tree path | `focus_tree/export.py` (`export_main_tree`, the main-tree path `_export` now delegates to), `hoi4_content_maker.py:3686` (`_build_focus_code`) | Build a `name -> Focus` map once per call, same pattern as `focus_tree/export.py` | fixed in phase 4 | not yet measured, needs a display session against the real mod |
+| `_import_txt`/`_import_drawio` parse synchronously on the Tk thread; a large import blocks the UI for the parse duration | `hoi4_content_maker.py:_import_txt`, `hoi4_content_maker.py:_import_drawio` | Move parse (and, for the batch loader, parse+build) off the Tk thread via `ui/tasks.py`'s `run_bg`, marshal the result back via `on_done` | fixed in phase 5 | not yet measured, needs a display session against the real mod |
+| GFX interface tree walked 3x per mod scan (`_scan_gfx` and `_scan_idea_gfx` each call `_scan_interface_gfx`, a top-level `os.listdir` over `interface/`; `_scan_decision_gfx` does its own recursive `os.walk`). Only the decision walk is cached | `mod/context.py:552` (`_scan_gfx_unified`) | One recursive `interface/` walk (`_index_interface_gfx`) and one `gfx/` walk feed all three dicts (`_derive_sprites`, `_derive_idea_sprites_core`, `_derive_decision_sprites`); same merge order/precedence as the three original scanners, pinned down by a characterization test before the rewrite | fixed in phase 6 | cold scan 2128.5ms -> 1051.1ms, warm scan 1425.3ms -> 78.2ms (fixture-replica benchmark, 66k-file synthetic GFX tree, not the real mod; see phase 6 notes) |
+| `_scan_files_cached` reads cache-miss files in parallel, then extracts them serially in a follow-up loop | `mod/context.py:341` | Read+extract submitted together per file to one `ThreadPoolExecutor`, so a file's read (GIL released) overlaps another file's extraction; cache put/prune/commit stay on the calling thread since the sqlite connection isn't thread-safe | fixed in phase 6 | not yet measured, needs a display session against the real mod |
+| Undo deep-copied every loaded focus (`copy.deepcopy` of the whole `self.focuses` dict) on every `_push_undo`, 60 entries retained (`deque(maxlen=60)`), then `_undo` did `cv.delete("all")` and rebuilt every focus | `hoi4_content_maker.py:1561` (`_push_undo`/`_undo`) | `core/undo.py`'s `UndoStack`: each push snapshots only the focus ids the caller says it's about to mutate/delete (`touched_ids`), plus a `frozenset` of every id at push time so undo can spot and delete ids the action created without ever snapshotting them. The few call sites that touch most of the tree anyway (draw.io import) fall back to one zlib-compressed full snapshot instead of bounding the set. `_undo` now deletes canvas items only for the ids that came back changed/removed and does one `_redraw()`, no more `cv.delete("all")` | fixed in phase 7 | not yet measured, needs a display session against the real mod |
+| No canvas viewport culling: `_do_redraw` iterates every loaded `Focus` regardless of what's on screen; loading all trees puts ~329k items on the canvas | `ui/canvas.py` (`_do_redraw`, `_draw_focus`, `_draw_lines`) | Viewport rect computed once per redraw (`ui/viewport.py`'s pure `visible_world_rect`/`focus_visible`/`edge_visible`); offscreen focuses never get canvas items (lazy creation), and an already-drawn focus that pans offscreen gets one `itemconfig(state="hidden")` per redraw instead of a full coord/style recompute | fixed in phase 8 | not yet measured, needs a display session against the real mod |
+
+The `_draw_key`/state-key check in `_draw_focus` (`ui/canvas.py:486`) already
+makes an unchanged focus close to free to redraw, but every `_redraw()` call
+still iterates the full focus dict to find that out. That per-redraw
+**iteration** is still O(total loaded focuses) after phase 8 — culling
+changes the *cost per offscreen focus* (a bbox check instead of ~14
+create/coords/itemconfig calls), not the loop count. What actually caps
+memory on a huge load is **item count**: before phase 8 every loaded focus
+had 14 canvas items whether on screen or not (776 focuses = ~10.9k items,
+23,524 focuses = ~329k items, which Tk cannot handle); after phase 8 a
+focus that has never been on screen has zero items, so item count scales
+with what's visible, not with what's loaded. That cap doesn't apply at
+fit-all zoom on a huge load, since fit-all sizes the zoom so every focus is
+simultaneously in-viewport — culling has nothing to cull there, and the
+329k-item case at fit-all is unchanged. It's normal (zoomed-in) work on a
+huge load — the common case, and the one that used to allocate all 329k
+items up front regardless of zoom — that phase 8 fixes. Minimap dots/edges
+are pooled the same way `_draw_lines`' line pool already was (reuse +
+hide-surplus instead of delete-and-recreate every call), and above 2,000
+focuses the minimap buckets to one dot per occupied pixel cell and skips
+prereq lines, since individual dots/edges aren't legible at that density
+anyway. A low-zoom level-of-detail pass (one pooled rectangle per focus
+below some zoom threshold, instead of the full multi-item card) was
+scoped for phase 8 but not implemented — noted here as future work, since
+lazy item creation already removes the up-front item explosion for the
+zoomed-in case, which was the more common one.
+
+## GIL guidance
+
+Threads in this codebase buy UI responsiveness and I/O overlap, not
+parse concurrency. `read_file` releases the GIL during actual disk access
+(`hoi4cm/core/paths.py`), so `_scan_files_cached`'s thread pool
+(`min(8, cpu_count, len(paths))` workers) genuinely speeds up a cold scan.
+Since phase 6, that pool runs each cache-miss file's read *and* extract
+together, not read-all-then-extract-all: while one file is blocked on disk
+I/O with the GIL released, another file's extraction can run. That's an
+overlap win between files, not parse concurrency within one file. Parsing
+itself is still pure Python (tokenizing, building `ParsedFocusTree`,
+walking dict trees) and does not release the GIL, so N threads all doing
+extraction at once still serializes on the GIL; the win is entirely from
+interleaving with I/O waits. The phase 5 fix for import-blocking-the-UI
+(`ui/tasks.py`'s `run_bg`) moves work off the Tk thread for responsiveness,
+not to parallelize the parse itself: `_load_all_trees`' batch loader parses
+and builds each file's focuses sequentially on one worker thread, not
+fanned out across the pool, since later files' cross-tree relative
+positions/prerequisites need to resolve against earlier files' newly-built
+focuses, and parallelizing pure-Python parsing wouldn't help anyway per the
+GIL point above.
+
+Multiprocessing was considered and rejected: pickling `MOD` and parsed
+focus trees across process boundaries costs more than the parse itself at
+this scale, PyInstaller-frozen builds have their own multiprocessing
+quirks per platform, and `MOD` is a shared singleton that every wizard
+reads from. Splitting it across processes would need a much bigger
+redesign than the performance problem justifies.
+
+### Cross-step scan parallelism: considered and skipped
+
+Phase 5 also asked whether the mod scan's steps (per-domain extraction,
+GFX indexing, cache read/write) could overlap across steps, not just within
+a step's file loop. Decided against it, for now:
+
+- `ScanCache` opens its SQLite connection inside `scan()` and that
+  connection is thread-affine; handing it to more than one worker thread
+  would need its own lock or a connection-per-thread scheme.
+- The extract functions are pure Python and GIL-bound (same reasoning as
+  above), so running two of them concurrently on separate threads doesn't
+  buy real parallelism, only interleaving.
+- Read/extract overlap *within* a step already exists (phase 6): the
+  cache-miss read and its extraction are submitted together per file, so
+  I/O waits on one file already overlap another file's extraction.
+- The dominant cold-scan cost was fixed algorithmically in phase 6 (the
+  unified GFX walk and the read+extract pairing above), not by adding more
+  concurrency.
+
+If this is ever revisited, the right shape is a single `ScanCache`
+connection serialized behind a lock, not one connection per thread: the
+cache is small and fast enough that lock contention wouldn't be the
+bottleneck, and it avoids SQLite's own cross-connection consistency
+concerns on a single file.
+
+## Cache inventory
+
+| Cache | Scope | Keyed by | Eviction |
+|---|---|---|---|
+| `ScanCache` (SQLite, `~/.hoi4cm/scan_cache/<hash>.db`) | per-file scan contribution, per domain | `(mtime, size)` | none, though `prune()` drops rows for paths no longer in the mod (no size/age cap) |
+| `.hoi4cm_gfx_cache.json` (sidecar in the mod root) | unified GFX index: `sprites`, `idea_sprites`, and `decision_sprites` together (since phase 6, was decision-only before); schema-versioned (`"version"` key) so an old sidecar is discarded instead of misread | `interface/` directory mtime, recursive (within 2s) | none |
+| `MOD.sprite_imgs` (in-memory `PhotoImage` cache) | one process's lifetime | `(gfx_name, size)` | bounded LRU, 512 entries (`core/lru.py`'s `LRUCache`), still memoizes `None` on load failure so a failed load isn't retried; safe to evict since each drawn focus pins its own image via `Focus._canvas_img` (`ui/canvas.py`), independent of this cache |
+| GFX browser `_st["img_cache"]` (`ui/gfx_browser.py`) | one browser dialog's lifetime | file path | bounded LRU, 512 entries (same `LRUCache`); currently-gridded thumbnails are additionally pinned in `_st["pinned_imgs"]` so an LRU eviction can't blank a tile still on screen — Tk's `image=` option only holds a C-level handle, not a Python reference, so the browser itself has to keep one alive |
+
+`ScanCache.prune`'s stale-path removal remains its only eviction. Both
+in-memory `PhotoImage` caches were unbounded before phase 8.

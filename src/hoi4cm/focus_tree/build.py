@@ -108,6 +108,13 @@ def build_focuses(parsed, tree_idx, *, country_tag="", existing_focuses=()):
         f.bypass_effect = raw_rewards.get(
             (fid_str, "bypass_effect"), block_to_str(rf.get("bypass_effect", {}))
         )
+        f.allow_branch = raw_rewards.get(
+            (fid_str, "allow_branch"), block_to_str(rf.get("allow_branch", {}))
+        )
+        text_val = rf.get("text", "")
+        f.text = (
+            str(text_val).strip() if text_val and not isinstance(text_val, dict) else ""
+        )
         f._joint_extra = raw_rewards.get((fid_str, "_joint_extra"), "")
         f.offsets = raw_rewards.get((fid_str, "_offsets"), [])
         raw_rw = raw_rewards.get(fid_str, "")
@@ -134,6 +141,13 @@ def build_focuses(parsed, tree_idx, *, country_tag="", existing_focuses=()):
                     raw_pos[fid_s] = (rx + off["x"], ry + off["y"], rel)
                     break  # apply only the first matching offset per focus
 
+    # Cross-tree name lookup, built once — first match wins (mirrors the old
+    # linear scan's semantics) so batch-loading T trees stays O(T+F) here
+    # instead of O(T*F).
+    existing_by_name = {}
+    for cf in existing_focuses:
+        existing_by_name.setdefault(cf.name, cf)
+
     # Resolve relative positions — within this tree first, then cross-tree.
     def resolve_abs(name, visited=None):
         if visited is None:
@@ -150,9 +164,9 @@ def build_focuses(parsed, tree_idx, *, country_tag="", existing_focuses=()):
             bx, by = resolve_abs(rel, visited)
             return (bx + rx, by + ry)
         # Cross-tree: anchor is in a different loaded tree (e.g. main tree focus)
-        for cf in existing_focuses:
-            if cf.name == rel:
-                return (cf.x + rx, cf.y + ry)
+        cf = existing_by_name.get(rel)
+        if cf is not None:
+            return (cf.x + rx, cf.y + ry)
         return (rx, ry)
 
     for fid_str, fid in name_to_id.items():

@@ -102,3 +102,58 @@ def test_build_cross_tree_relative_and_prereq():
     # resolved against the cross-tree anchor: (10,10) + (3,2)
     assert (child.x, child.y) == (13, 12)
     assert child.prereqs == [[anchor.id]]
+
+
+def test_build_name_collision_semantics():
+    # Two existing focuses share a name at different coords — resolve_abs's
+    # cross-tree fallback must use the FIRST one in list order (setdefault
+    # semantics), matching the old linear scan.
+    dup_first = Focus(1, 1)
+    dup_first.name = "DUP_name"
+    dup_second = Focus(5, 5)
+    dup_second.name = "DUP_name"
+    shared_existing = Focus(0, 0)
+    shared_existing.name = "SHARED_name"
+    src = (
+        "focus_tree = {\n"
+        "\tid = Y_tree\n"
+        "\tfocus = {\n"
+        "\t\tid = Y_new_rel\n"
+        "\t\tx = 2\n"
+        "\t\ty = 2\n"
+        "\t\trelative_position_id = DUP_name\n"
+        '\t\tcompletion_reward = { log = "a" }\n'
+        "\t}\n"
+        "\tfocus = {\n"
+        "\t\tid = SHARED_name\n"
+        "\t\tx = 0\n"
+        "\t\ty = 0\n"
+        '\t\tcompletion_reward = { log = "b" }\n'
+        "\t}\n"
+        "\tfocus = {\n"
+        "\t\tid = Y_dependent\n"
+        "\t\tx = 1\n"
+        "\t\ty = 0\n"
+        "\t\tprerequisite = { focus = SHARED_name }\n"
+        '\t\tcompletion_reward = { log = "c" }\n'
+        "\t}\n"
+        "}\n"
+    )
+    parsed = parse_focus_tree(src, "/tmp/y.txt")
+    focuses = build_focuses(
+        parsed,
+        tree_idx=3,
+        existing_focuses=[dup_first, dup_second, shared_existing],
+    )
+    by_name = _by_name(focuses)
+
+    # Cross-tree position resolution: first DUP_name in list order wins.
+    new_rel = by_name["Y_new_rel"]
+    assert (new_rel.x, new_rel.y) == (3, 3)
+
+    # Pass 2 name collision: the NEW "SHARED_name" focus wins over the
+    # existing one of the same name (current, pre-existing behavior).
+    new_shared = by_name["SHARED_name"]
+    dependent = by_name["Y_dependent"]
+    assert dependent.prereqs == [[new_shared.id]]
+    assert new_shared.id != shared_existing.id

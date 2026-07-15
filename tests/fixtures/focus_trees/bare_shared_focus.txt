@@ -1,0 +1,23 @@
+### Two bare top-level shared_focus blocks, no focus_tree wrapper ###
+
+shared_focus = {
+	id = SHR_one
+	icon = GFX_goal_generic_political_pressure
+	x = 0
+	y = 0
+	cost = 6
+	completion_reward = {
+		add_political_power = 30
+	}
+}
+
+shared_focus = {
+	id = SHR_two
+	icon = GFX_goal_generic_political_pressure
+	x = 1
+	y = 1
+	relative_position_id = SHR_one
+	completion_reward = {
+		add_stability = 0.02
+	}
+}

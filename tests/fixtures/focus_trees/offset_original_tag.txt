@@ -1,0 +1,42 @@
+focus_tree = {
+	id = OFS_shared_tree
+
+	country = {
+		factor = 0
+		modifier = {
+			add = 10
+			original_tag = OFS
+		}
+	}
+
+	continuous_focus_position = { x = 0 y = 0 }
+
+	focus = {
+		id = OFS_anchor
+		icon = GFX_goal_generic_political_pressure
+		x = 10
+		y = 10
+		cost = 10
+		completion_reward = {
+			add_political_power = 20
+		}
+	}
+
+	focus = {
+		id = OFS_shifted
+		icon = GFX_goal_generic_political_pressure
+		x = 1
+		y = 1
+		relative_position_id = OFS_anchor
+		offset = {
+			x = 5
+			y = -2
+			trigger = {
+				original_tag = OFS
+			}
+		}
+		completion_reward = {
+			add_stability = 0.01
+		}
+	}
+}

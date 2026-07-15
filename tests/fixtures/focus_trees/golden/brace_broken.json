@@ -1,0 +1,125 @@
+{
+  "focuses": {
+    "BRK_alpha": {
+      "ai_will_do": 1,
+      "ai_will_do_raw": "",
+      "allow_branch": "",
+      "available_cond": "",
+      "available_if_capitulated": false,
+      "bypass_cond": "",
+      "bypass_effect": "",
+      "cancel_cond": "",
+      "cancel_if_invalid": true,
+      "complete_tooltip": "",
+      "continue_if_invalid": false,
+      "cost": 5,
+      "desc": "",
+      "effects": [
+        {
+          "fields": {
+            "raw": "add_political_power = 10\n\t\t"
+          },
+          "type": "_raw_block"
+        }
+      ],
+      "gfx": "GFX_goal_generic_political_pressure",
+      "icon": "\u2694",
+      "mutex": [],
+      "name": "BRK_alpha",
+      "offsets": [],
+      "prereqs": [],
+      "relative_position_id": null,
+      "search_filters": "FOCUS_FILTER_POLITICAL",
+      "select_effect": "",
+      "text": "",
+      "tree_idx": 0,
+      "will_lead_to_war_with": "",
+      "x": 0,
+      "y": 0
+    },
+    "BRK_beta": {
+      "ai_will_do": 1,
+      "ai_will_do_raw": "",
+      "allow_branch": "",
+      "available_cond": "",
+      "available_if_capitulated": false,
+      "bypass_cond": "",
+      "bypass_effect": "",
+      "cancel_cond": "",
+      "cancel_if_invalid": true,
+      "complete_tooltip": "",
+      "continue_if_invalid": false,
+      "cost": 5,
+      "desc": "",
+      "effects": [
+        {
+          "fields": {
+            "raw": "\tif = {\n\t\tlimit = { has_war = yes }\n\t\tadd_political_power = 5\n}\n\t"
+          },
+          "type": "_raw_block"
+        }
+      ],
+      "gfx": "GFX_goal_generic_political_pressure",
+      "icon": "\u2694",
+      "mutex": [],
+      "name": "BRK_beta",
+      "offsets": [],
+      "prereqs": [],
+      "relative_position_id": null,
+      "search_filters": "FOCUS_FILTER_POLITICAL",
+      "select_effect": "",
+      "text": "",
+      "tree_idx": 0,
+      "will_lead_to_war_with": "",
+      "x": 1,
+      "y": 0
+    },
+    "BRK_gamma": {
+      "ai_will_do": 1,
+      "ai_will_do_raw": "",
+      "allow_branch": "",
+      "available_cond": "",
+      "available_if_capitulated": false,
+      "bypass_cond": "",
+      "bypass_effect": "",
+      "cancel_cond": "",
+      "cancel_if_invalid": true,
+      "complete_tooltip": "",
+      "continue_if_invalid": false,
+      "cost": 5,
+      "desc": "",
+      "effects": [
+        {
+          "fields": {
+            "raw": "add_political_power = 15\n\t\t"
+          },
+          "type": "_raw_block"
+        }
+      ],
+      "gfx": "GFX_goal_generic_political_pressure",
+      "icon": "\u2694",
+      "mutex": [],
+      "name": "BRK_gamma",
+      "offsets": [],
+      "prereqs": [],
+      "relative_position_id": null,
+      "search_filters": "FOCUS_FILTER_POLITICAL",
+      "select_effect": "",
+      "text": "",
+      "tree_idx": 0,
+      "will_lead_to_war_with": "",
+      "x": 2,
+      "y": 0
+    }
+  },
+  "meta": {
+    "cfp_x": null,
+    "cfp_y": null,
+    "country_raw": "",
+    "country_tag": "TAG",
+    "had_wrapper": true,
+    "joint_refs": [],
+    "shared_refs": [],
+    "tree_id": "BRK_tree"
+  }
+}

@@ -1,0 +1,23 @@
+### Two bare top-level focus blocks, no focus_tree wrapper ###
+
+focus = {
+	id = BAR_alpha
+	icon = GFX_goal_generic_political_pressure
+	x = 0
+	y = 0
+	cost = 8
+	completion_reward = {
+		add_political_power = 25
+	}
+}
+
+focus = {
+	id = BAR_beta
+	icon = GFX_goal_generic_political_pressure
+	x = 1
+	y = 0
+	prerequisite = { focus = BAR_alpha }
+	completion_reward = {
+		add_stability = 0.03
+	}
+}

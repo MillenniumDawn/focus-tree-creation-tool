@@ -1,11 +1,18 @@
 """Universal GFX browser and drag-to-place GFX editor.
 
-Two dialogs the decision / event / dyn-mod / spirit wizards all share:
+Three dialogs, two shared across wizards and one owned by the main app:
 
 * :func:`open_universal_gfx_browser` — pick any sprite from any mod GFX
-  folder (decisions, ideas, goals, events, flags, interface, custom).
+  folder (decisions, ideas, goals, events, flags, interface, custom). Used
+  by the decision / event / dyn-mod / spirit wizards.
 * :func:`open_gfx_placement_editor` — drag-drop a few sprites on a mock
   decision panel and emit the matching ``interface/*.gfx`` code.
+* :func:`open_focus_icon_browser` — the sidebar's Focus icon picker.
+  Deliberately narrower than the universal browser: it only ever looks in
+  ``gfx/interface/goals/`` and always emits a ``GFX_focus_``-prefixed key,
+  matching what the sidebar's Icon GFX field expects. Kept separate rather
+  than folded into the universal browser (see the class docstring there for
+  why); see ``docs/dev/monolith-migration.md`` for the fuller rationale.
 
 Pillow is optional. If it's missing the tiles render with placeholder text
 and the rest of the dialog still works.
@@ -14,12 +21,13 @@ and the rest of the dialog still works.
 import os
 import threading
 import tkinter as tk
-from tkinter import filedialog
+from tkinter import filedialog, messagebox
 
 from hoi4cm.core.i18n import tr
 from hoi4cm.core.image import PIL_OK as _PIL_OK
 from hoi4cm.core.image import PILImage as _PILImage
 from hoi4cm.core.image import PILImageTk as _PILImageTk
+from hoi4cm.core.lru import LRUCache
 from hoi4cm.ui.theme import (
     BG_CARD,
     BG_DARK,
@@ -35,6 +43,27 @@ from hoi4cm.ui.theme import (
     TEXT_DIM,
 )
 from hoi4cm.ui.widgets import _safe_after, _safe_after_idle
+
+
+def _load_thumbnail(path, width, height, *, preserve_aspect=False):
+    if not _PIL_OK or not os.path.exists(path):
+        return None
+    try:
+        with _PILImage.open(path) as source:
+            pil = source.convert("RGBA")
+        resample = getattr(_PILImage, "LANCZOS", getattr(_PILImage, "ANTIALIAS", 1))
+        if preserve_aspect:
+            source_width, source_height = pil.size
+            ratio = min(width / max(source_width, 1), height / max(source_height, 1))
+            size = (
+                max(1, int(source_width * ratio)),
+                max(1, int(source_height * ratio)),
+            )
+        else:
+            size = (width, height)
+        return pil.resize(size, resample)
+    except (OSError, ValueError):
+        return None
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -277,7 +306,12 @@ def open_universal_gfx_browser(
     PAD_G = 6
     _st = {
         "pairs": [],
-        "img_cache": {},
+        "img_cache": LRUCache(512),
+        # Strong refs for every path with a live canvas image right now — a
+        # PhotoImage that drops out of the bounded img_cache above would
+        # otherwise get garbage-collected while still on screen, blanking
+        # the tile (Tk itself only holds a C-level handle, not a Python ref).
+        "pinned_imgs": {},
         "drawn": set(),
         "canvas_ids": {},
         "sel_idx": None,
@@ -364,6 +398,7 @@ def open_universal_gfx_browser(
                 image=img,
                 tags=("t", f"t{idx}"),
             )
+            _st["pinned_imgs"][path] = img
         else:
             new_iid = cv.create_text(
                 x + TILE_W // 2,
@@ -387,9 +422,7 @@ def open_universal_gfx_browser(
             if i >= len(snap):
                 break
             _, path = snap[i]
-            if path in _st["img_cache"]:
-                continue
-            img = None
+            pil = None
             alts = [path] + [
                 os.path.splitext(path)[0] + ext
                 for ext in (".png", ".tga", ".dds")
@@ -397,24 +430,26 @@ def open_universal_gfx_browser(
                 and os.path.splitext(path)[0] + ext != path
             ]
             for tp in alts:
-                try:
-                    if _PIL_OK and os.path.exists(tp):
-                        pil = _PILImage.open(tp).convert("RGBA")
-                        rs = getattr(
-                            _PILImage, "LANCZOS", getattr(_PILImage, "ANTIALIAS", 1)
-                        )
-                        pw, ph = pil.size
-                        ratio = min(80 / max(pw, 1), 70 / max(ph, 1))
-                        pil = pil.resize(
-                            (max(1, int(pw * ratio)), max(1, int(ph * ratio))),
-                            rs,
-                        )
-                        img = _PILImageTk.PhotoImage(pil)
-                        break
-                except Exception:
-                    pass
-            _st["img_cache"][path] = img
-            _safe_after(bwin, 0, lambda i2=i: _fill_image(i2))
+                pil = _load_thumbnail(tp, 80, 70, preserve_aspect=True)
+                if pil is not None:
+                    break
+            _safe_after(
+                bwin,
+                0,
+                lambda i2=i, path2=path, pil2=pil: _store_image(i2, path2, pil2),
+            )
+
+    def _store_image(idx, path, pil):
+        if (
+            idx >= len(_st["pairs"])
+            or _st["pairs"][idx][1] != path
+            or path in _st["img_cache"]
+        ):
+            return
+        _st["img_cache"][path] = (
+            _PILImageTk.PhotoImage(pil) if pil is not None else None
+        )
+        _fill_image(idx)
 
     def _lazy_fill(*_):
         if not _st["pairs"]:
@@ -439,7 +474,15 @@ def open_universal_gfx_browser(
 
     def _rebuild_grid(pairs):
         cv.delete("all")
-        _st.update({"pairs": pairs, "drawn": set(), "canvas_ids": {}, "sel_idx": None})
+        _st.update(
+            {
+                "pairs": pairs,
+                "drawn": set(),
+                "canvas_ids": {},
+                "sel_idx": None,
+                "pinned_imgs": {},
+            }
+        )
         sel_var.set("")
         sel_path[0] = None
         if not pairs:
@@ -1104,4 +1147,667 @@ def open_gfx_placement_editor(win, initial_items=None, on_confirm=None):
     ).pack(side="left", padx=4)
 
 
-__all__ = ["open_universal_gfx_browser", "open_gfx_placement_editor"]
+def _browse_flat_folder(win, folder, on_select, current_gfx):
+    """Fallback lazy browser for :func:`open_focus_icon_browser`.
+
+    Used when no mod is loaded: one already-chosen folder, no recursion into
+    subfolders, always ``GFX_focus_``-prefixed keys.
+    """
+    all_files = sorted(
+        (f, os.path.join(folder, f))
+        for f in os.listdir(folder)
+        if f.lower().endswith((".dds", ".png", ".tga"))
+    )
+    if not all_files:
+        messagebox.showinfo(
+            tr("dialog.no_files.title", "No Files"),
+            tr("dialog.no_gfx_files", "No .dds/.png/.tga files found."),
+        )
+        return
+    pairs = [("GFX_focus_" + os.path.splitext(f)[0], p) for f, p in all_files]
+    COLS = 5
+    TILE_W = 110
+    TILE_H = 100
+    PAD = 6
+    fwin = tk.Toplevel(win)
+    fwin.title(tr("gfx.browser.title", "GFX Browser"))
+    fwin.configure(bg=BG_DARK)
+    fwin.geometry("700x480")
+    cvf = tk.Frame(fwin, bg=BG_PANEL)
+    cvf.pack(fill="both", expand=True, padx=8, pady=8)
+    cv = tk.Canvas(cvf, bg=BG_PANEL, highlightthickness=0)
+    vsb = tk.Scrollbar(cvf, orient="vertical", command=cv.yview)
+    cv.configure(yscrollcommand=vsb.set)
+    vsb.pack(side="right", fill="y")
+    cv.pack(fill="both", expand=True)
+    rows = (len(pairs) + COLS - 1) // COLS
+    cv.configure(
+        scrollregion=(
+            0,
+            0,
+            PAD + COLS * (TILE_W + PAD),
+            PAD + rows * (TILE_H + PAD),
+        )
+    )
+    selected_var = tk.StringVar(value=current_gfx)
+    bot = tk.Frame(fwin, bg=BG_DARK)
+    bot.pack(fill="x", padx=8, pady=6)
+    tk.Label(
+        bot, textvariable=selected_var, bg=BG_DARK, fg=BLUE, font=("Helvetica", 9)
+    ).pack(side="left")
+    tk.Button(
+        bot,
+        text=tr("common.cancel", "Cancel"),
+        command=fwin.destroy,
+        bg=BG_CARD,
+        fg=TEXT,
+        relief="flat",
+        font=("Helvetica", 9),
+        padx=10,
+        pady=4,
+        cursor="hand2",
+    ).pack(side="right", padx=4)
+
+    def _apply():
+        on_select(selected_var.get())
+        fwin.destroy()
+
+    tk.Button(
+        bot,
+        text=tr("common.select", "Select"),
+        command=_apply,
+        bg="#14532d",
+        fg="#0a0a0a",
+        relief="flat",
+        font=("Helvetica", 10, "bold"),
+        padx=14,
+        pady=5,
+        cursor="hand2",
+    ).pack(side="right")
+
+    _cache = LRUCache(512)
+    _pinned = {}
+    _drawn = set()
+    _ids = {}
+
+    def _txy(i):
+        return PAD + (i % COLS) * (TILE_W + PAD), PAD + (i // COLS) * (TILE_H + PAD)
+
+    def _fill(idx):
+        if idx not in _ids:
+            return
+        rid, iid, lid = _ids[idx]
+        gfx_key, path = pairs[idx]
+        img = _cache.get(path)
+        cv.delete(iid)
+        x, y = _txy(idx)
+        if img:
+            n = cv.create_image(
+                x + TILE_W // 2, y + 44, anchor="center", image=img, tags="tile"
+            )
+            _pinned[path] = img
+        else:
+            n = cv.create_text(
+                x + TILE_W // 2,
+                y + 30,
+                text="?",
+                fill=TEXT_DIM,
+                font=("Helvetica", 20),
+                tags="tile",
+            )
+        _ids[idx] = (rid, n, lid)
+        for item in (rid, n, lid):
+            cv.tag_bind(item, "<Button-1>", lambda e, k=gfx_key: selected_var.set(k))
+            cv.tag_bind(
+                item,
+                "<Double-Button-1>",
+                lambda e, k=gfx_key: [selected_var.set(k), _apply()],
+            )
+
+    def _draw(idx):
+        if idx in _drawn:
+            return
+        _drawn.add(idx)
+        gfx_key, path = pairs[idx]
+        x, y = _txy(idx)
+        rid = cv.create_rectangle(
+            x,
+            y,
+            x + TILE_W,
+            y + TILE_H,
+            fill=BG_CARD,
+            outline=BORDER_G,
+            width=2,
+            tags="tile",
+        )
+        iid = cv.create_text(
+            x + TILE_W // 2,
+            y + 44,
+            text="...",
+            fill=TEXT_DIM,
+            font=("Helvetica", 14),
+            tags="tile",
+        )
+        short = gfx_key.replace("GFX_focus_", "")
+        short = (short[:16] + "...") if len(short) > 16 else short
+        lid = cv.create_text(
+            x + TILE_W // 2,
+            y + TILE_H - 14,
+            text=short,
+            fill=TEXT_DIM,
+            font=("Helvetica", 7),
+            width=TILE_W - 8,
+            tags="tile",
+        )
+        _ids[idx] = (rid, iid, lid)
+        if path in _cache:
+            _fill(idx)
+        for item in (rid, iid, lid):
+            cv.tag_bind(item, "<Button-1>", lambda e, k=gfx_key: selected_var.set(k))
+            cv.tag_bind(
+                item,
+                "<Double-Button-1>",
+                lambda e, k=gfx_key: [selected_var.set(k), _apply()],
+            )
+
+    def _bg(snap, idxs):
+        for i in idxs:
+            if i >= len(snap):
+                break
+            _, path = snap[i]
+            pil = _load_thumbnail(path, 72, 72)
+            _safe_after(
+                fwin,
+                0,
+                lambda idx=i, image_path=path, image=pil: _store_image(
+                    idx, image_path, image
+                ),
+            )
+
+    def _store_image(idx, path, pil):
+        if idx >= len(pairs) or pairs[idx][1] != path or path in _cache:
+            return
+        _cache[path] = _PILImageTk.PhotoImage(pil) if pil is not None else None
+        _fill(idx)
+
+    def _lazy(*_):
+        top = cv.canvasy(0)
+        bot_y = cv.canvasy(cv.winfo_height())
+        vis = []
+        for i in range(len(pairs)):
+            _, ty = _txy(i)
+            if ty + TILE_H >= top and ty <= bot_y:
+                _draw(i)
+                vis.append(i)
+        last = max(vis) if vis else 0
+        ahead = list(range(last + 1, min(last + 41, len(pairs))))
+        to_load = [i for i in vis + ahead if pairs[i][1] not in _cache]
+        if to_load:
+            t = threading.Thread(target=_bg, args=(list(pairs), to_load), daemon=True)
+            t.start()
+
+    cv.bind("<Configure>", lambda e: _safe_after_idle(fwin, _lazy))
+    for ev in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+        cv.bind(
+            ev,
+            lambda e: [
+                cv.yview_scroll(-1 if (e.delta > 0 or e.num == 4) else 1, "units"),
+                _safe_after_idle(fwin, _lazy),
+            ],
+        )
+    _safe_after_idle(fwin, _lazy)
+
+
+# ─────────────────────────────────────────────────────────────────
+# Focus icon browser (sidebar "Icon GFX name" field)
+# ─────────────────────────────────────────────────────────────────
+def open_focus_icon_browser(win, on_select, current_gfx="", mod=None):
+    """Open the focus-goal icon picker for the sidebar's Icon GFX field.
+
+    Narrower than :func:`open_universal_gfx_browser`: this dialog only ever
+    browses ``gfx/interface/goals/`` (plus its subfolders), and every key it
+    hands back is prefixed ``GFX_focus_``, the naming convention focus icons
+    need. ``on_select(gfx_key)`` is called on Confirm (no path — this
+    callsite only ever wants the name). ``current_gfx`` is the field's
+    existing value: picking the same value back still enables Select, just
+    with a dimmer highlight than picking something new.
+
+    Falls back to a flat, non-recursive folder browse (``askdirectory``) via
+    :func:`_browse_flat_folder` if no mod is loaded, or if the mod has no
+    ``gfx/interface/goals/`` folder.
+    """
+    if mod is None:
+        from hoi4cm.mod import MOD
+
+        mod = MOD
+
+    if not mod.loaded:
+        folder = filedialog.askdirectory(
+            title=tr("filedialog.select_icon_folder", "Select folder with icon files")
+        )
+        if folder:
+            _browse_flat_folder(win, folder, on_select, current_gfx)
+        return
+
+    goals_root = os.path.join(mod.root, "gfx", "interface", "goals")
+    if not os.path.isdir(goals_root):
+        messagebox.showinfo(
+            tr("dialog.not_found.title", "Not Found"),
+            tr(
+                "dialog.gfx_goals_not_found",
+                "Could not find gfx/interface/goals/ in mod.",
+            ),
+        )
+        return
+
+    # ── Instant: just list directory names, no file counting ──
+    folders = []
+    loose = [
+        f
+        for f in os.listdir(goals_root)
+        if f.lower().endswith((".dds", ".png", ".tga"))
+    ]
+    if loose:
+        folders.append(("[goals root]", goals_root))
+    for entry in sorted(os.listdir(goals_root)):
+        full = os.path.join(goals_root, entry)
+        if os.path.isdir(full):
+            folders.append((entry, full))
+    if not folders:
+        messagebox.showinfo(
+            tr("dialog.no_folders.title", "No Folders"),
+            tr(
+                "dialog.no_goal_subfolders",
+                "No subfolders found in gfx/interface/goals/",
+            ),
+        )
+        return
+
+    gwin = tk.Toplevel(win)
+    gwin.title(tr("gfx.browser.title", "GFX Browser"))
+    gwin.configure(bg=BG_DARK)
+    gwin.geometry("900x580")
+    gwin.resizable(True, True)
+
+    panes = tk.Frame(gwin, bg=BG_DARK)
+    panes.pack(fill="both", expand=True, padx=8, pady=8)
+
+    lf = tk.Frame(panes, bg=BG_PANEL, width=200)
+    lf.pack(side="left", fill="y", padx=(0, 6))
+    lf.pack_propagate(False)
+    tk.Label(
+        lf,
+        text=tr("gfx.folders", "  FOLDERS"),
+        bg=BG_PANEL,
+        fg=TEXT_DIM,
+        font=("Helvetica", 9, "bold"),
+        anchor="w",
+        pady=6,
+    ).pack(fill="x")
+    tk.Frame(lf, bg=BORDER_G, height=1).pack(fill="x")
+    folder_lb = tk.Listbox(
+        lf,
+        bg=BG_CARD,
+        fg=TEXT,
+        selectbackground=BLUE,
+        selectforeground=TEXT,
+        font=("Courier", 9),
+        relief="flat",
+        bd=0,
+        activestyle="none",
+        highlightthickness=0,
+    )
+    fsb = tk.Scrollbar(lf, orient="vertical", command=folder_lb.yview)
+    folder_lb.configure(yscrollcommand=fsb.set)
+    fsb.pack(side="right", fill="y")
+    folder_lb.pack(fill="both", expand=True, padx=2, pady=4)
+    for display, _ in folders:
+        folder_lb.insert("end", "  " + display)
+
+    rf = tk.Frame(panes, bg=BG_DARK)
+    rf.pack(side="left", fill="both", expand=True)
+
+    top_r = tk.Frame(rf, bg=BG_DARK)
+    top_r.pack(fill="x", pady=(0, 6))
+    tk.Label(
+        top_r,
+        text=tr("gfx.filter", "Filter:"),
+        bg=BG_DARK,
+        fg=TEXT_DIM,
+        font=("Helvetica", 9),
+    ).pack(side="left")
+    search_var = tk.StringVar()
+    tk.Entry(
+        top_r,
+        textvariable=search_var,
+        bg=BG_CARD,
+        fg=TEXT,
+        insertbackground=BLUE,
+        font=("Helvetica", 10),
+        relief="flat",
+        highlightthickness=1,
+        highlightbackground=BORDER_G,
+    ).pack(side="left", padx=6, fill="x", expand=True, ipady=3)
+    status_lbl = tk.Label(
+        top_r,
+        text=tr("gfx.select_folder", "select a folder"),
+        bg=BG_DARK,
+        fg=TEXT_DIM,
+        font=("Helvetica", 9),
+    )
+    status_lbl.pack(side="right", padx=6)
+
+    cv_frame = tk.Frame(rf, bg=BG_PANEL)
+    cv_frame.pack(fill="both", expand=True)
+    cv = tk.Canvas(cv_frame, bg=BG_PANEL, highlightthickness=0)
+    vsb = tk.Scrollbar(cv_frame, orient="vertical", command=cv.yview)
+    cv.configure(yscrollcommand=vsb.set)
+    vsb.pack(side="right", fill="y")
+    cv.pack(side="left", fill="both", expand=True)
+
+    bot = tk.Frame(gwin, bg=BG_DARK)
+    bot.pack(fill="x", padx=10, pady=6)
+    selected_var = tk.StringVar(value="")
+    _initial_gfx = current_gfx
+    tk.Label(
+        bot, textvariable=selected_var, bg=BG_DARK, fg=BLUE, font=("Helvetica", 9)
+    ).pack(side="left", padx=4)
+    tk.Button(
+        bot,
+        text=tr("common.cancel", "Cancel"),
+        command=gwin.destroy,
+        bg=BG_CARD,
+        fg=TEXT,
+        relief="flat",
+        font=("Helvetica", 9),
+        padx=10,
+        pady=4,
+        cursor="hand2",
+    ).pack(side="right", padx=4)
+
+    def _apply():
+        on_select(selected_var.get())
+        gwin.destroy()
+
+    _sel_btn = tk.Button(
+        bot,
+        text=tr("common.select", "Select"),
+        command=_apply,
+        bg="#1a3322",
+        fg="#4b7a5e",
+        relief="flat",
+        font=("Helvetica", 10, "bold"),
+        padx=14,
+        pady=5,
+        cursor="arrow",
+        state="disabled",
+    )
+    _sel_btn.pack(side="right")
+
+    def _on_sel_change(*_):
+        v = selected_var.get()
+        if v and v != _initial_gfx:
+            _sel_btn.config(bg="#14532d", fg="#0a0a0a", cursor="hand2", state="normal")
+        elif v:
+            _sel_btn.config(bg="#1e6b3a", fg="#c8f0d8", cursor="hand2", state="normal")
+        else:
+            _sel_btn.config(
+                bg="#1a3322", fg="#4b7a5e", cursor="arrow", state="disabled"
+            )
+
+    selected_var.trace_add("write", _on_sel_change)
+
+    # ── Grid constants ────────────────────────────────────────
+    COLS = 5
+    TILE_W = 110
+    TILE_H = 100
+    PAD = 6
+
+    # ── State ─────────────────────────────────────────────────
+    _st = {
+        "pairs": [],  # [(gfx_key, path), ...]
+        "img_cache": LRUCache(512),
+        # Strong refs for every path with a live canvas image right now, see
+        # open_universal_gfx_browser's identical comment for why this exists.
+        "pinned_imgs": {},
+        "drawn": set(),  # indices already rendered
+        "canvas_ids": {},  # idx -> (rect_id, img_id or txt_id, lbl_id)
+        "sel_idx": None,
+    }
+
+    def _tile_xy(idx):
+        col = idx % COLS
+        row = idx // COLS
+        return PAD + col * (TILE_W + PAD), PAD + row * (TILE_H + PAD)
+
+    def _select_tile(idx):
+        old = _st["sel_idx"]
+        if old is not None and old in _st["canvas_ids"]:
+            rid, _, _ = _st["canvas_ids"][old]
+            cv.itemconfig(rid, fill=BG_CARD, outline=BORDER_G)
+        _st["sel_idx"] = idx
+        gfx_key = _st["pairs"][idx][0]
+        selected_var.set(gfx_key)
+        if idx in _st["canvas_ids"]:
+            rid, _, _ = _st["canvas_ids"][idx]
+            cv.itemconfig(rid, fill=SEL_BG, outline=BLUE)
+
+    def _draw_tile(idx):
+        """Draw placeholder immediately; image filled in by background thread."""
+        if idx in _st["drawn"]:
+            return
+        _st["drawn"].add(idx)
+        gfx_key, path = _st["pairs"][idx]
+        x, y = _tile_xy(idx)
+        is_sel = gfx_key == selected_var.get()
+        rid = cv.create_rectangle(
+            x,
+            y,
+            x + TILE_W,
+            y + TILE_H,
+            fill=SEL_BG if is_sel else BG_CARD,
+            outline=BLUE if is_sel else BORDER_G,
+            width=2,
+            tags=("tile", f"t{idx}"),
+        )
+        iid = cv.create_text(
+            x + TILE_W // 2,
+            y + 44,
+            text="...",
+            fill=TEXT_DIM,
+            font=("Helvetica", 14),
+            tags=("tile", f"t{idx}"),
+        )
+        short = gfx_key.replace("GFX_focus_", "").replace("GFX_goal_", "")
+        short = (short[:16] + "...") if len(short) > 16 else short
+        lid = cv.create_text(
+            x + TILE_W // 2,
+            y + TILE_H - 14,
+            text=short,
+            fill=TEXT_DIM,
+            font=("Helvetica", 7),
+            width=TILE_W - 8,
+            tags=("tile", f"t{idx}"),
+        )
+        _st["canvas_ids"][idx] = (rid, iid, lid)
+        for item in (rid, iid, lid):
+            cv.tag_bind(item, "<Button-1>", lambda e, i=idx: _select_tile(i))
+            cv.tag_bind(
+                item,
+                "<Double-Button-1>",
+                lambda e, i=idx: [_select_tile(i), _apply()],
+            )
+        if path in _st["img_cache"]:
+            _fill_image(idx)
+
+    def _fill_image(idx):
+        """Replace placeholder with actual image (called from main thread)."""
+        if idx not in _st["canvas_ids"]:
+            return
+        rid, iid, lid = _st["canvas_ids"][idx]
+        gfx_key, path = _st["pairs"][idx]
+        img = _st["img_cache"].get(path)
+        cv.delete(iid)
+        x, y = _tile_xy(idx)
+        if img:
+            new_iid = cv.create_image(
+                x + TILE_W // 2,
+                y + 44,
+                anchor="center",
+                image=img,
+                tags=("tile", f"t{idx}"),
+            )
+            _st["pinned_imgs"][path] = img
+        else:
+            new_iid = cv.create_text(
+                x + TILE_W // 2,
+                y + 30,
+                text="?",
+                fill=TEXT_DIM,
+                font=("Helvetica", 20),
+                tags=("tile", f"t{idx}"),
+            )
+        _st["canvas_ids"][idx] = (rid, new_iid, lid)
+        for item in (rid, new_iid, lid):
+            cv.tag_bind(item, "<Button-1>", lambda e, i=idx: _select_tile(i))
+            cv.tag_bind(
+                item,
+                "<Double-Button-1>",
+                lambda e, i=idx: [_select_tile(i), _apply()],
+            )
+
+    def _bg_load_images(pairs_snapshot, indices):
+        """Background: load images for given indices, post update to main thread."""
+        for idx in indices:
+            if idx >= len(pairs_snapshot):
+                break
+            gfx_key, path = pairs_snapshot[idx]
+            pil = _load_thumbnail(path, 72, 72)
+            _safe_after(
+                gwin,
+                0,
+                lambda i=idx, image_path=path, image=pil: _store_image(
+                    i, image_path, image
+                ),
+            )
+
+    def _store_image(idx, path, pil):
+        if (
+            idx >= len(_st["pairs"])
+            or _st["pairs"][idx][1] != path
+            or path in _st["img_cache"]
+        ):
+            return
+        _st["img_cache"][path] = (
+            _PILImageTk.PhotoImage(pil) if pil is not None else None
+        )
+        _fill_image(idx)
+
+    def _lazy_fill(*_):
+        """Draw placeholders for visible tiles; kick off background image load."""
+        if not _st["pairs"]:
+            return
+        cv.update_idletasks()
+        top = cv.canvasy(0)
+        bottom = cv.canvasy(cv.winfo_height())
+        visible = []
+        for idx in range(len(_st["pairs"])):
+            _, ty = _tile_xy(idx)
+            if ty + TILE_H >= top and ty <= bottom:
+                _draw_tile(idx)
+                visible.append(idx)
+        last = max(visible) if visible else 0
+        ahead = list(range(last + 1, min(last + 41, len(_st["pairs"]))))
+        to_load = [
+            i for i in (visible + ahead) if _st["pairs"][i][1] not in _st["img_cache"]
+        ]
+        if to_load:
+            snapshot = list(_st["pairs"])
+            t = threading.Thread(
+                target=_bg_load_images, args=(snapshot, to_load), daemon=True
+            )
+            t.start()
+
+    def _rebuild(pairs):
+        cv.delete("all")
+        selected_var.set("")
+        _st.update(
+            {
+                "pairs": pairs,
+                "drawn": set(),
+                "canvas_ids": {},
+                "sel_idx": None,
+                "pinned_imgs": {},
+            }
+        )
+        # Keep img_cache across folders — avoids reloading same files
+        if not pairs:
+            status_lbl.config(text=tr("gfx.icons_count", "{count} icons", count=0))
+            return
+        status_lbl.config(text=f"{len(pairs)} icons")
+        rows = (len(pairs) + COLS - 1) // COLS
+        total_h = PAD + rows * (TILE_H + PAD)
+        total_w = PAD + COLS * (TILE_W + PAD)
+        cv.configure(scrollregion=(0, 0, total_w, total_h))
+        cv.yview_moveto(0)
+        _safe_after_idle(gwin, _lazy_fill)
+
+    def _collect_files(folder_path):
+        """Fast file scan — no MOD.sprites lookup, just walk the folder."""
+        pairs = []
+        ft = search_var.get().lower()
+        for root_d, dirs, fnames in os.walk(folder_path):
+            dirs.sort()
+            for fname in sorted(fnames):
+                if not fname.lower().endswith((".dds", ".png", ".tga")):
+                    continue
+                if ft and ft not in fname.lower():
+                    continue
+                full = os.path.join(root_d, fname)
+                stem = os.path.splitext(fname)[0]
+                gfx_key = "GFX_focus_" + stem
+                pairs.append((gfx_key, full))
+        return pairs
+
+    def _load_folder(folder_path):
+        status_lbl.config(text=tr("gfx.scanning", "scanning..."))
+        gwin.update_idletasks()
+        pairs = _collect_files(folder_path)
+        _rebuild(pairs)
+
+    def _on_folder_select(evt):
+        sel = folder_lb.curselection()
+        if not sel:
+            return
+        _load_folder(folders[sel[0]][1])
+
+    cv.bind("<Configure>", lambda e: _safe_after_idle(gwin, _lazy_fill))
+    for ev in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+        cv.bind(
+            ev,
+            lambda e: [
+                cv.yview_scroll(-1 if (e.delta > 0 or e.num == 4) else 1, "units"),
+                _safe_after_idle(gwin, _lazy_fill),
+            ],
+        )
+    folder_lb.bind("<<ListboxSelect>>", _on_folder_select)
+    search_var.trace_add(
+        "write",
+        lambda *_: _safe_after(
+            gwin,
+            300,
+            lambda: _on_folder_select(None) if folder_lb.curselection() else None,
+        ),
+    )
+
+    # Auto-select first folder
+    if folders:
+        folder_lb.selection_set(0)
+        _load_folder(folders[0][1])
+
+
+__all__ = [
+    "open_universal_gfx_browser",
+    "open_gfx_placement_editor",
+    "open_focus_icon_browser",
+]

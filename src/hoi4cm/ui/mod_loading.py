@@ -145,6 +145,7 @@ class ModLoadingMixin:
             MOD.scan(root, progress_cb=progress)
             _safe_after(pw, 0, lambda: self._on_mod_loaded(pw, root))
 
+        # Not ui.tasks.get_executor(): its pool threads are non-daemon, unlike this one.
         threading.Thread(target=worker, daemon=True).start()
 
     def _on_mod_loaded(self, pw, root):
@@ -163,6 +164,7 @@ class ModLoadingMixin:
         for f in self.focuses.values():
             f._draw_key = None
             f._items = []
+            f._culled = False
         self.cv.delete("focus")
         self._redraw_now()
         # Clear all wizard image caches so new mod GFX loads fresh. The live

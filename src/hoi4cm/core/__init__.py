@@ -13,10 +13,16 @@ from hoi4cm.data import (
     modifiers_in_cat,
 )
 from hoi4cm.focus_tree import (
+    EmptyDrawioGraphError,
     EmptyFocusTreeError,
     ParsedFocusTree,
+    build_drawio_focuses,
     build_focuses,
+    build_loc_yml,
+    drawio_to_focus_data,
     export_focus_tree,
+    export_main_tree,
+    parse_drawio_graph,
     parse_focus_tree,
 )
 from hoi4cm.models import Focus
@@ -49,11 +55,13 @@ from .logger import (
 from .paths import autosave_path, default_hoi4_mod_dir, read_file
 from .safe_path import safe_join, sanitize_component
 from .safe_xml import bounded_inflate, safe_fromstring
+from .undo import UndoStack
 
 __all__ = [
     "CONFIG_PATH",
     "EFFECT_CATS",
     "EFFECT_DEFS",
+    "EmptyDrawioGraphError",
     "EmptyFocusTreeError",
     "Focus",
     "I18N_LANG",
@@ -65,18 +73,23 @@ __all__ = [
     "MODIFIER_CATS",
     "MODIFIER_DEFS",
     "ParsedFocusTree",
+    "UndoStack",
     "add_error",
     "append_scripted_loc",
     "autosave_path",
     "bounded_inflate",
+    "build_drawio_focuses",
     "build_focuses",
+    "build_loc_yml",
     "cfg_load",
     "cfg_save",
     "clear_errors",
     "default_hoi4_mod_dir",
     "dict_to_raw",
+    "drawio_to_focus_data",
     "effects_in_cat",
     "export_focus_tree",
+    "export_main_tree",
     "get_error_entries",
     "get_logger",
     "install_excepthook",
@@ -86,6 +99,7 @@ __all__ = [
     "md_resource_cost_hint",
     "modifiers_in_cat",
     "normalize_effect_fields",
+    "parse_drawio_graph",
     "parse_focus_tree",
     "read_file",
     "safe_join",

@@ -40,6 +40,7 @@ class Focus:
         self.tree_idx = 0  # 0 = main tree; >0 = index into _extra_trees (1-based)
         self._items = []
         self._draw_key = None
+        self._culled = False  # runtime-only viewport-culling flag; never serialized
 
     def to_dict(self):
         return {k: v for k, v in self.__dict__.items() if not k.startswith("_")}
@@ -49,6 +50,7 @@ class Focus:
         f = object.__new__(Focus)
         f._items = []
         f._draw_key = None
+        f._culled = False
         for k, v in d.items():
             setattr(f, k, v)
         # Migrate old pixel-based coords to grid integers

@@ -1,7 +1,20 @@
 """Tkinter UI helpers for HOI4 Content Maker."""
 
-from hoi4cm.ui.gfx_browser import open_gfx_placement_editor, open_universal_gfx_browser
+from hoi4cm.ui.gfx_browser import (
+    open_focus_icon_browser,
+    open_gfx_placement_editor,
+    open_universal_gfx_browser,
+)
+from hoi4cm.ui.menubar import build_menubar
+from hoi4cm.ui.settings_dialog import open_settings
 from hoi4cm.ui.splash import show_splash
+from hoi4cm.ui.tasks import (
+    get_executor,
+    make_progress,
+    progress_modal,
+    run_bg,
+    shutdown_executor,
+)
 from hoi4cm.ui.theme import (
     BG_CARD,
     BG_DARK,
@@ -34,6 +47,7 @@ from hoi4cm.ui.theme import (
     YELLOW,
     YGRID,
 )
+from hoi4cm.ui.toolbar import build_toolbar_row2
 from hoi4cm.ui.widgets import Tooltip, _safe_after, _safe_after_idle
 
 __all__ = [
@@ -70,7 +84,16 @@ __all__ = [
     "YGRID",
     "_safe_after",
     "_safe_after_idle",
+    "build_menubar",
+    "build_toolbar_row2",
+    "get_executor",
+    "make_progress",
+    "open_focus_icon_browser",
     "open_gfx_placement_editor",
+    "open_settings",
     "open_universal_gfx_browser",
+    "progress_modal",
+    "run_bg",
     "show_splash",
+    "shutdown_executor",
 ]

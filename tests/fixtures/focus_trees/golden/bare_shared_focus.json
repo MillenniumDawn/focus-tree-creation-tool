@@ -1,0 +1,88 @@
+{
+  "focuses": {
+    "SHR_one": {
+      "ai_will_do": 1,
+      "ai_will_do_raw": "",
+      "allow_branch": "",
+      "available_cond": "",
+      "available_if_capitulated": false,
+      "bypass_cond": "",
+      "bypass_effect": "",
+      "cancel_cond": "",
+      "cancel_if_invalid": true,
+      "complete_tooltip": "",
+      "continue_if_invalid": false,
+      "cost": 6,
+      "desc": "",
+      "effects": [
+        {
+          "fields": {
+            "raw": "add_political_power = 30\n\t"
+          },
+          "type": "_raw_block"
+        }
+      ],
+      "gfx": "GFX_goal_generic_political_pressure",
+      "icon": "\u2694",
+      "mutex": [],
+      "name": "SHR_one",
+      "offsets": [],
+      "prereqs": [],
+      "relative_position_id": null,
+      "search_filters": "FOCUS_FILTER_POLITICAL",
+      "select_effect": "",
+      "text": "",
+      "tree_idx": 0,
+      "will_lead_to_war_with": "",
+      "x": 0,
+      "y": 0
+    },
+    "SHR_two": {
+      "ai_will_do": 1,
+      "ai_will_do_raw": "",
+      "allow_branch": "",
+      "available_cond": "",
+      "available_if_capitulated": false,
+      "bypass_cond": "",
+      "bypass_effect": "",
+      "cancel_cond": "",
+      "cancel_if_invalid": true,
+      "complete_tooltip": "",
+      "continue_if_invalid": false,
+      "cost": 10,
+      "desc": "",
+      "effects": [
+        {
+          "fields": {
+            "raw": "add_stability = 0.02\n\t"
+          },
+          "type": "_raw_block"
+        }
+      ],
+      "gfx": "GFX_goal_generic_political_pressure",
+      "icon": "\u2694",
+      "mutex": [],
+      "name": "SHR_two",
+      "offsets": [],
+      "prereqs": [],
+      "relative_position_id": "SHR_one",
+      "search_filters": "FOCUS_FILTER_POLITICAL",
+      "select_effect": "",
+      "text": "",
+      "tree_idx": 0,
+      "will_lead_to_war_with": "",
+      "x": 1,
+      "y": 1
+    }
+  },
+  "meta": {
+    "cfp_x": null,
+    "cfp_y": null,
+    "country_raw": "",
+    "country_tag": "TAG",
+    "had_wrapper": false,
+    "joint_refs": [],
+    "shared_refs": [],
+    "tree_id": "bare_shared_focus"
+  }
+}

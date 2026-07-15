@@ -1,0 +1,62 @@
+focus_tree = {
+	id = TST_main_tree
+
+	country = {
+		factor    =   0
+		modifier = {
+			add = 20
+			original_tag=TST
+		}
+
+	}
+
+	continuous_focus_position = { x = 20 y = 300 }
+
+	focus = {
+		id = TST_root
+		icon = GFX_goal_generic_demand_territory
+		x = 0
+		y = 0
+		cost = 5
+		completion_reward = {
+			add_political_power = 50
+		}
+	}
+
+	focus = {
+		id = TST_child_a
+		icon = GFX_goal_generic_political_pressure
+		x = 1
+		y = 1
+		relative_position_id = TST_root
+		prerequisite = { focus = TST_root }
+		completion_reward = {
+			add_stability = 0.05
+		}
+	}
+
+	focus = {
+		id = TST_child_b
+		icon = GFX_goal_generic_political_pressure
+		x = 1
+		y = 0
+		relative_position_id = TST_child_a
+		completion_reward = {
+			add_war_support = 0.02
+		}
+	}
+
+	focus = {
+		id = TST_needs_either
+		icon = GFX_goal_generic_political_pressure
+		x = 2
+		y = 2
+		relative_position_id = TST_child_b
+		prerequisite = { focus = TST_child_a focus = TST_child_b }
+		prerequisite = { focus = TST_root }
+		mutually_exclusive = { focus = TST_child_b }
+		completion_reward = {
+			add_political_power = 10
+		}
+	}
+}

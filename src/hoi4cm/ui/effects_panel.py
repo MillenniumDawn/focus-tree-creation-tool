@@ -457,7 +457,7 @@ class EffectsMixin:
         if not self.selected:
             self._hint(tr("dialog.select_focus_first", "Select a focus first."))
             return
-        self._push_undo("add effect")
+        self._push_undo("add effect", touched_ids=(self.selected.id,))
         defn = EFFECT_DEFS.get(etype, {})
         if fields is None:
             fields = {fn: dv for fn, _, dv, _ in defn.get("fields", [])}

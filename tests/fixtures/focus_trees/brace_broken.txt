@@ -1,0 +1,44 @@
+### BRK_beta is deliberately missing its own closing brace (the `if` and
+### `completion_reward` blocks close, but the enclosing `focus = {` never
+### does). The structured pass swallows BRK_gamma as a nested child of
+### BRK_beta instead of a sibling; the per-focus brace-walk fallback
+### recovers all three focuses independently. ###
+
+focus_tree = {
+	id = BRK_tree
+
+	focus = {
+		id = BRK_alpha
+		icon = GFX_goal_generic_political_pressure
+		x = 0
+		y = 0
+		cost = 5
+		completion_reward = {
+			add_political_power = 10
+		}
+	}
+
+	focus = {
+		id = BRK_beta
+		icon = GFX_goal_generic_political_pressure
+		x = 1
+		y = 0
+		cost = 5
+		completion_reward = {
+			if = {
+				limit = { has_war = yes }
+				add_political_power = 5
+		}
+	}
+
+	focus = {
+		id = BRK_gamma
+		icon = GFX_goal_generic_political_pressure
+		x = 2
+		y = 0
+		cost = 5
+		completion_reward = {
+			add_political_power = 15
+		}
+	}
+}
