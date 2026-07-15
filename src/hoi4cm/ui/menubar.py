@@ -1,15 +1,5 @@
 # ruff: noqa: E501, B023
-# This file was extracted verbatim from hoi4_content_maker.py. The noqa
-# covers the monolith's long i18n tooltip strings (E501) and the dropdown
-# builder's hover closures over a loop variable, safe here because each
-# closure only runs while its own row's widgets are alive (B023).
-"""Top menu bar: File/Edit/View/Tools dropdowns, error-log button, mod label.
-
-Extracted verbatim from the monolith's ``App._build_menubar``. One-shot
-builder, not a mixin: ``build_menubar(app, toolbar)`` populates widgets
-directly onto ``app`` and the caller-supplied ``toolbar`` frame, the same
-shape ``ui/settings_dialog.py``'s ``open_settings(app)`` uses.
-"""
+"""Top menu bar: File/Edit/View/Tools dropdowns, error-log button, mod label."""
 
 import tkinter as tk
 
@@ -39,19 +29,20 @@ def build_menubar(app, toolbar):
     tk.Frame(menubar, bg=BORDER_G, width=1, height=18).pack(side="left", padx=2)
 
     # ── Menu helpers ──────────────────────────────────────────
-    app._open_menu_win = [None]  # [current Toplevel or None]
-    app._open_menu_btn = [None]  # [button that opened it]
+    open_menu_win = None
+    open_menu_btn = None
 
     def _close_menu():
-        w = app._open_menu_win[0]
-        b = app._open_menu_btn[0]
+        nonlocal open_menu_win, open_menu_btn
+        w = open_menu_win
+        b = open_menu_btn
         if w:
             try:
                 w.destroy()
             except Exception:
                 pass
-        app._open_menu_win[0] = None
-        app._open_menu_btn[0] = None
+        open_menu_win = None
+        open_menu_btn = None
         if b:
             try:
                 b.config(bg="#080b10", fg=TEXT_DIM)
@@ -76,8 +67,9 @@ def build_menubar(app, toolbar):
         btn.pack(side="left")
 
         def _open(b=btn):
+            nonlocal open_menu_win, open_menu_btn
             # If this menu is already open, close it
-            if app._open_menu_btn[0] is b:
+            if open_menu_btn is b:
                 _close_menu()
                 return
             _close_menu()
@@ -206,25 +198,21 @@ def build_menubar(app, toolbar):
                 "<FocusOut>",
                 lambda e: app.after(
                     100,
-                    lambda: _close_menu() if app._open_menu_win[0] is drop else None,
+                    lambda: _close_menu() if open_menu_win is drop else None,
                 ),
             )
-            app._open_menu_win[0] = drop
-            app._open_menu_btn[0] = b
+            open_menu_win = drop
+            open_menu_btn = b
 
         btn.config(command=_open)
         btn.bind(
             "<Enter>",
-            lambda e, b=btn: (
-                b.config(fg=TEXT) if app._open_menu_btn[0] is not b else None
-            ),
+            lambda e, b=btn: (b.config(fg=TEXT) if open_menu_btn is not b else None),
         )
         btn.bind(
             "<Leave>",
             lambda e, b=btn: (
-                b.config(fg=TEXT_DIM, bg="#080b10")
-                if app._open_menu_btn[0] is not b
-                else None
+                b.config(fg=TEXT_DIM, bg="#080b10") if open_menu_btn is not b else None
             ),
         )
         return btn
@@ -533,8 +521,7 @@ def build_menubar(app, toolbar):
         "<Button-1>",
         lambda e: (
             _close_menu()
-            if app._open_menu_win[0]
-            and not str(e.widget).startswith(str(app._open_menu_win[0]))
+            if open_menu_win and not str(e.widget).startswith(str(open_menu_win))
             else None
         ),
         add="+",

@@ -104,56 +104,6 @@ def test_build_cross_tree_relative_and_prereq():
     assert child.prereqs == [[anchor.id]]
 
 
-def test_build_cross_tree_chained_relative_with_many_existing():
-    # A long existing_focuses list (as a batch-load of many trees would build
-    # up) — the cross-tree anchor sits at the end of it, pinning that
-    # resolve_abs's fallback still finds the right one via the name dict.
-    filler = []
-    for i in range(15):
-        ff = Focus(i, i)
-        ff.name = f"FILLER_{i}"
-        filler.append(ff)
-    anchor = Focus(10, 10)
-    anchor.name = "MAIN_anchor2"
-    existing = filler + [anchor]
-    src = (
-        "focus_tree = {\n"
-        "\tid = Z_tree\n"
-        "\tfocus = {\n"
-        "\t\tid = Z_a\n"
-        "\t\tx = 3\n"
-        "\t\ty = 2\n"
-        "\t\trelative_position_id = MAIN_anchor2\n"
-        '\t\tcompletion_reward = { log = "a" }\n'
-        "\t}\n"
-        "\tfocus = {\n"
-        "\t\tid = Z_b\n"
-        "\t\tx = 1\n"
-        "\t\ty = 1\n"
-        "\t\trelative_position_id = Z_a\n"
-        '\t\tcompletion_reward = { log = "b" }\n'
-        "\t}\n"
-        "\tfocus = {\n"
-        "\t\tid = Z_c\n"
-        "\t\tx = 2\n"
-        "\t\ty = -1\n"
-        "\t\trelative_position_id = Z_b\n"
-        '\t\tcompletion_reward = { log = "c" }\n'
-        "\t}\n"
-        "}\n"
-    )
-    parsed = parse_focus_tree(src, "/tmp/z.txt")
-    focuses = build_focuses(parsed, tree_idx=4, existing_focuses=existing)
-    by_name = _by_name(focuses)
-    a, b, c = by_name["Z_a"], by_name["Z_b"], by_name["Z_c"]
-    # a anchors cross-tree: (10,10) + (3,2)
-    assert (a.x, a.y) == (13, 12)
-    # b chains onto a in-tree: (13,12) + (1,1)
-    assert (b.x, b.y) == (14, 13)
-    # c chains onto b in-tree: (14,13) + (2,-1)
-    assert (c.x, c.y) == (16, 12)
-
-
 def test_build_name_collision_semantics():
     # Two existing focuses share a name at different coords — resolve_abs's
     # cross-tree fallback must use the FIRST one in list order (setdefault

@@ -69,7 +69,6 @@ if _os.path.isdir(_SRC) and _SRC not in _sys.path:
 from hoi4_logger import log, log_startup
 from hoi4cm.core import (
     EFFECT_CATS,
-    EFFECT_DEFS,
     EmptyDrawioGraphError,
     EmptyFocusTreeError,
     Focus,
@@ -78,9 +77,7 @@ from hoi4cm.core import (
     build_drawio_focuses,
     build_focuses,
     build_loc_yml,
-    dict_to_raw,
     drawio_to_focus_data,
-    effects_in_cat,
     export_focus_tree,
     export_main_tree,
     get_error_entries,
@@ -104,30 +101,19 @@ from hoi4cm.ui.toolbar import build_toolbar_row2
 from hoi4cm.ui import (
     BG_CARD,
     BG_DARK,
-    BG_HOVER,
     BG_PANEL,
     BLUE,
     BORDER,
     BORDER_G,
-    BOX,
     CANVAS_BG,
-    FC_BG,
     FC_BORDER,
-    FC_SEL,
-    FC_SEL_BD,
-    GOLD,
     GOLD_LT,
-    GREEN,
     ICONS,
-    MUTEX_COL,
     ORANGE,
-    PREREQ_COL,
     RED,
     TEXT,
     TEXT_DIM,
-    XGRID,
     YELLOW,
-    YGRID,
     Tooltip,
     _safe_after,
     make_progress,
@@ -142,8 +128,6 @@ from hoi4cm.wizards import (
     open_event_wizard,
     open_national_spirit_wizard,
 )
-from hoi4cm.wizards import _shared as _wiz_shared
-
 log_startup()
 
 # Re-import os/sys for the rest of the file (the _os/_sys aliases above
@@ -183,14 +167,13 @@ def _enable_windows_dpi_awareness():
 _enable_windows_dpi_awareness()
 log.info("Importing tkinter...")
 import tkinter as tk
-from tkinter import filedialog, messagebox, ttk
+from tkinter import filedialog, messagebox
 
 log.info("tkinter imported OK")
 import bisect
 import copy
 import json
 import re
-import subprocess
 import time
 
 
@@ -205,37 +188,6 @@ def _apply_tk_dpi_scaling(root):
             log.info(f"Tk scaling set from monitor DPI: {dpi:.1f}")
     except Exception as e:
         log.warning(f"Tk DPI scaling setup skipped: {e}")
-
-
-# ── Auto-install Pillow if missing ───────────────────────────────────
-log.info("Importing Pillow...")
-try:
-    from PIL import Image as _PILImage
-    from PIL import ImageTk as _PILImageTk
-
-    _PIL_OK = True
-    log.info("Pillow imported OK")
-except ImportError:
-    _PIL_OK = False
-    _frozen = getattr(sys, "frozen", False)
-    if _frozen:
-        log.warning("Pillow not available in frozen binary — skipping auto-install")
-    else:
-        try:
-            log.info("Pillow missing, attempting pip install...")
-            subprocess.check_call(
-                [sys.executable, "-m", "pip", "install", "Pillow"],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-            from PIL import Image as _PILImage
-            from PIL import ImageTk as _PILImageTk
-
-            _PIL_OK = True
-            log.info("Pillow installed and imported OK")
-        except Exception:
-            log.warning("Pillow auto-install failed")
-            _PIL_OK = False
 
 
 class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
@@ -384,8 +336,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
     def _build_ui(self):
         """Orchestrate full UI construction."""
         self._init_error_log()
-        self._undo_max = 60
-        self._undo_stack = UndoStack(maxlen=self._undo_max)
+        self._undo_stack = UndoStack(maxlen=60)
         self._tree_id = tk.StringVar(value="TAG_focus_tree")
         # Continuous focus position — stored as integers when read from file
         self._cfp_x = None  # None = no value read; use fallback on export
@@ -1797,7 +1748,9 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
         tk.Button(
             row,
             text=tr("common.browse_symbol", "⊞"),
-            command=self._open_gfx_browser,
+            command=lambda: open_focus_icon_browser(
+                self, self._set_gfx, self._fv_gfx.get()
+            ),
             bg=BG_CARD,
             fg=TEXT_DIM,
             relief="flat",
@@ -1824,15 +1777,6 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
             self.selected.gfx = gfx_name
             self.selected._draw_key = None
             self._redraw_now()
-
-    def _open_gfx_browser(self):
-        """Delegate to the sidebar's focus-icon browser (ui/gfx_browser.py).
-
-        Scoped to gfx/interface/goals/, GFX_focus_-prefixed keys — see
-        open_focus_icon_browser's docstring for why this isn't the same
-        dialog the wizards use.
-        """
-        open_focus_icon_browser(self, self._set_gfx, self._fv_gfx.get())
 
     def _attach_autocomplete(self, entry_widget, var, get_choices_fn):
         """Attach a live autocomplete popup to any Entry widget."""
@@ -2264,10 +2208,11 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
             "",
         ]
         rel_id = getattr(f, "relative_position_id", None)
-        name_to_focus = {}
-        for foc in self.focuses.values():
-            name_to_focus.setdefault(foc.name, foc)
-        parent = name_to_focus.get(rel_id) if rel_id else None
+        parent = (
+            next((foc for foc in self.focuses.values() if foc.name == rel_id), None)
+            if rel_id
+            else None
+        )
         if parent:
             out += [
                 f"{I}x = {f.x - parent.x}",
@@ -3538,24 +3483,9 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
     # ── IMPORT .TXT ─────────────────────────────────────────────
 
     def _import_drawio(self):
-        """Import a Draw.io .xml/.drawio file as a HOI4 focus tree skeleton.
-
-        Flow:
-          1. Pick file
-          2. Parse shapes (focuses) + arrows (prerequisites)
-          3. Show tree-setup dialog (tag, name, tree ID)  ← NEW
-          4. Apply tag prefix to every focus name
-          5. Preview dialog
-          6. Commit to canvas with proper HOI4 structure
-
-        The graph parsing and grid mapping (steps 2 and 4-5's coordinate
-        work) are pure functions in ``hoi4cm.focus_tree.drawio`` — this
-        method is the Tk shell around them: file I/O, dialogs, and wiring the
-        result into ``self.focuses``.
-        """
+        """Import a Draw.io file as a HOI4 focus tree skeleton."""
         import xml.etree.ElementTree as ET
 
-        # ── Step 1: File picker ───────────────────────────────────────
         path = filedialog.askopenfilename(
             filetypes=[
                 ("Draw.io / XML", "*.xml *.drawio"),
@@ -3582,7 +3512,6 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
             )
             return
 
-        # ── Step 2: Parse XML ─────────────────────────────────────────
         # parse_drawio_graph guards against decompression bombs and XML
         # entity-expansion (billion laughs) in shared .drawio files via
         # bounded_inflate/safe_fromstring, and raises EmptyDrawioGraphError
@@ -3619,12 +3548,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
         run_bg(self, work, on_done, on_error=on_error)
 
     def _import_drawio_continue(self, graph, path):
-        """Steps 3-7 of ``_import_drawio``: dialogs + committing to canvas.
-
-        Runs on the Tk thread as ``_import_drawio``'s ``on_done``, once the
-        worker thread has finished ``parse_drawio_graph``.
-        """
-        # ── Step 3: Tree-setup dialog (tag, name, tree ID) ───────────
+        """Collect import settings, preview the tree, and add its focuses."""
         result = {}  # filled by dialog
 
         setup = tk.Toplevel(self)
@@ -3810,15 +3734,9 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
         prefix = result["prefix"]  # e.g. "JAP_"
         tree_id = result["tree_id"]
 
-        # ── Steps 4-5: tag prefix + pixel-coords → HOI4 grid mapping ───
-        # drawio_to_focus_data clusters focuses into rows/columns by pixel
-        # proximity and snaps them onto HOI4's even-column grid, nudging
-        # right then wrapping to the next row to resolve collisions. See
-        # hoi4cm.focus_tree.drawio for the algorithm.
         drawio_result = drawio_to_focus_data(graph, prefix)
         label_by_cid = {df.cid: df.label for df in drawio_result.focuses}
 
-        # ── Step 6: Preview dialog ────────────────────────────────────
         prev_win = tk.Toplevel(self)
         prev_win.title(tr("drawio.preview.title", "Draw.io Import - Preview"))
         prev_win.configure(bg="#0d1117")
@@ -3965,12 +3883,6 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
             gx, gy = df.x, df.y
             fid = df.label
             prereqs = prereq_map.get(df.cid, [])
-            is_root = not prereqs  # root focus = no prerequisites
-
-            # ── Property order per skill rules ───────────────────────
-            # id, icon, x/y, cost, prerequisite, mutually_exclusive,
-            # search_filters, available, bypass, cancel,
-            # completion_reward (with log line), ai_will_do
             code_lines.append("\tfocus = {")
             code_lines.append(f"\t\tid = {fid}")
             code_lines.append(
@@ -4001,13 +3913,12 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
             code_lines.append("\t\t}")
             code_lines.append("")
             code_lines.append("\t\tai_will_do = {")
-            code_lines.append("\t\t\tfactor = 1")
+            code_lines.append("\t\t\tbase = 1")
             code_lines.append("\t\t}")
             code_lines.append("\t}")
             code_lines.append("")
 
         code_lines.append("}")
-        code_str = "\n".join(code_lines)
 
         for line in code_lines:
             stripped = line.lstrip("\t")
@@ -4344,14 +4255,12 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
 
 
 
-    def _install_extra_tree(self, raw, path, tree_type, defer_redraw=False):
+    def _install_extra_tree(self, raw, path, tree_type):
         """Parse raw focus-tree text, register the tree, and build its focuses.
 
         Shared core behind both the shared/joint loaders. Returns
         (focus_count, tree_id). Raises EmptyFocusTreeError when the file holds
-        no focus data. When ``defer_redraw`` is True, the panel refreshes and
-        canvas redraw/fit are skipped — for batch loads, the caller does each
-        once after the whole batch instead of once per file."""
+        no focus data."""
         t0 = time.perf_counter()
         parsed = parse_focus_tree(raw, path)
         t1 = time.perf_counter()
@@ -4373,8 +4282,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
             self._shared_focuses.append(parsed.tree_id)
         elif tree_type == "joint" and parsed.tree_id not in self._joint_focuses:
             self._joint_focuses.append(parsed.tree_id)
-        if not defer_redraw:
-            self._refresh_tree_meta_panel()
+        self._refresh_tree_meta_panel()
         # Snapshot existing focuses BEFORE inserting the new ones so cross-tree
         # position/prereq resolution sees only already-loaded trees.
         t2 = time.perf_counter()
@@ -4388,10 +4296,9 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
         for f in new_focuses:
             self.focuses[f.id] = f
             tree_info["focus_ids"].add(f.id)
-        if not defer_redraw:
-            self._refresh_loaded_trees_panel()
-            self._redraw()
-            self._fit_all()
+        self._refresh_loaded_trees_panel()
+        self._redraw()
+        self._fit_all()
         log.debug(
             "install tree %s: parse %.1fms build %.1fms (%d focuses)",
             path,
@@ -4448,9 +4355,6 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
         except EmptyFocusTreeError as e:
             messagebox.showwarning(tr("dialog.load_tree.title", "Load Tree"), str(e))
             return
-        self._refresh_loaded_trees_panel()
-        self._redraw()
-        self._fit_all()
         messagebox.showinfo(
             tr("dialog.loaded.title", "Loaded"),
             tr(
@@ -4637,61 +4541,28 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
         to_load,
         existing_seed,
         extra_trees_start_idx,
-        loaded_paths,
         country_tag,
         progress,
     ):
-        """Worker body for "Load All Trees" (runs on a background thread).
-
-        Everything it needs is a snapshot taken on the Tk thread before
-        submission (``existing_seed``, ``extra_trees_start_idx``,
-        ``loaded_paths``, ``country_tag``); it reads no other ``self``
-        state and mutates none -- the caller's ``on_done`` applies the
-        returned per-file results to ``self`` back on the Tk thread. See
-        ui/tasks.py's module docstring for the rules this follows.
-
-        Files are parsed and built SEQUENTIALLY, not in parallel: a later
-        file's cross-tree relative positions/prerequisites need to resolve
-        against earlier files' newly-built focuses, exactly like
-        ``_install_extra_tree``'s ``existing_focuses`` -- each file in the
-        batch sees the main tree plus every previously-installed extra tree,
-        including ones installed earlier in this same batch. Parallel
-        parsing would also buy nothing here: it's pure Python and GIL-bound
-        (see performance.md's GIL guidance).
-
-        Building ``Focus`` objects here bumps the shared ``Focus._next``
-        class counter; that's safe only because the caller holds a
-        progress_modal grab, so the user can't create a focus (and bump the
-        same counter) concurrently on the Tk thread.
-        """
+        """Parse and build selected trees sequentially on a worker thread."""
         total = len(to_load)
         existing = list(existing_seed)
-        seen = set(loaded_paths)
         tree_idx = extra_trees_start_idx
         results = []
         for i, (path, ttype) in enumerate(to_load, start=1):
             progress(i, total, os.path.basename(path))
-            norm = os.path.normpath(path)
-            if norm in seen:
-                # Silently-skipped duplicate, matching the old
-                # _load_extra_tree_from_path behaviour: it still counts as
-                # "loaded" in the summary, it just contributes nothing.
-                results.append(
-                    {"path": path, "type": ttype, "ok": True, "skipped": True}
-                )
-                continue
             try:
                 raw = read_file(path)
                 t0 = time.perf_counter()
                 parsed = parse_focus_tree(raw, path)
                 t1 = time.perf_counter()
-                tree_idx += 1
                 new_focuses = build_focuses(
                     parsed,
-                    tree_idx,
+                    tree_idx + 1,
                     country_tag=country_tag,
                     existing_focuses=existing,
                 )
+                tree_idx += 1
                 t2 = time.perf_counter()
                 log.debug(
                     "install tree %s: parse %.1fms build %.1fms (%d focuses)",
@@ -4701,13 +4572,11 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
                     len(new_focuses),
                 )
                 existing = existing + new_focuses
-                seen.add(norm)
                 results.append(
                     {
                         "path": path,
                         "type": ttype,
                         "ok": True,
-                        "skipped": False,
                         "parsed": parsed,
                         "new_focuses": new_focuses,
                     }
@@ -4919,7 +4788,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
 
         # Select/deselect all helpers
         def _sel_all():
-            for fp, cv2, tv, already in rows:
+            for _, cv2, tv, already in rows:
                 if not already and tv.get() != "main":
                     cv2.set(True)
 
@@ -5005,7 +4874,6 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
                     to_load,
                     existing_seed,
                     extra_trees_start_idx,
-                    loaded_paths,
                     country_tag,
                     progress,
                 )
@@ -5019,8 +4887,6 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
                         fail.append(f"{fname}: {r['error']}")
                         continue
                     ok.append(fname)
-                    if r.get("skipped"):
-                        continue  # already-loaded file; counts as ok, nothing to install
                     parsed = r["parsed"]
                     tree_info = {
                         "type": r["type"],

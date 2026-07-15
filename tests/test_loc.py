@@ -1,11 +1,4 @@
-"""Tests for hoi4cm.focus_tree.loc.build_loc_yml.
-
-Pins the monolith's ``_export`` loc-writing behavior: existing keys are
-detected via a ``key: "val"`` / ``key:0 "val"`` regex, a missing file gets an
-``l_english:`` header, a section header is written once per country tag (not
-duplicated on repeat exports), and existing content is never rewritten —
-only appended to.
-"""
+"""Tests for hoi4cm.focus_tree.loc.build_loc_yml."""
 
 from types import SimpleNamespace
 
@@ -102,3 +95,13 @@ def test_name_title_cased_with_underscores_replaced():
     focuses = [_focus("TST_some_focus_name")]
     text, _count = build_loc_yml(None, focuses, "TST")
     assert ' TST_some_focus_name: "Tst Some Focus Name"\n' in text
+
+
+def test_values_are_escaped():
+    text, _count = build_loc_yml(None, [_focus("TST_alpha", 'Say "hello"\\now')], "TST")
+    assert ' TST_alpha_desc: "Say \\"hello\\"\\\\now"\n' in text
+
+
+def test_existing_content_without_newline_gets_separator():
+    text, _count = build_loc_yml("l_english:", [_focus("TST_alpha")], "TST")
+    assert text.startswith("l_english:\n")

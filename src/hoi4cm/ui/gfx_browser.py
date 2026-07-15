@@ -51,19 +51,19 @@ def _load_thumbnail(path, width, height, *, preserve_aspect=False):
     try:
         with _PILImage.open(path) as source:
             pil = source.convert("RGBA")
-    except OSError:
+        resample = getattr(_PILImage, "LANCZOS", getattr(_PILImage, "ANTIALIAS", 1))
+        if preserve_aspect:
+            source_width, source_height = pil.size
+            ratio = min(width / max(source_width, 1), height / max(source_height, 1))
+            size = (
+                max(1, int(source_width * ratio)),
+                max(1, int(source_height * ratio)),
+            )
+        else:
+            size = (width, height)
+        return pil.resize(size, resample)
+    except (OSError, ValueError):
         return None
-    resample = getattr(_PILImage, "LANCZOS", getattr(_PILImage, "ANTIALIAS", 1))
-    if preserve_aspect:
-        source_width, source_height = pil.size
-        ratio = min(width / max(source_width, 1), height / max(source_height, 1))
-        size = (
-            max(1, int(source_width * ratio)),
-            max(1, int(source_height * ratio)),
-        )
-    else:
-        size = (width, height)
-    return pil.resize(size, resample)
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -1730,6 +1730,7 @@ def open_focus_icon_browser(win, on_select, current_gfx="", mod=None):
 
     def _rebuild(pairs):
         cv.delete("all")
+        selected_var.set("")
         _st.update(
             {
                 "pairs": pairs,

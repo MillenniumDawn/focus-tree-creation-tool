@@ -82,10 +82,7 @@
     "country_tag": "TAG",
     "had_wrapper": false,
     "joint_refs": [],
-    "shared_refs": [
-      "{",
-      "{"
-    ],
+    "shared_refs": [],
     "tree_id": "bare_shared_focus"
   }
 }

@@ -1216,6 +1216,7 @@ class CanvasMixin:
                                     width=1,
                                     tags="mm_content",
                                 )
+                                mm.tag_lower(item)
                                 self._mm_line_pool.append(item)
                             line_idx += 1
         for idx in range(line_idx, len(self._mm_line_pool)):
@@ -1308,7 +1309,8 @@ class CanvasMixin:
                 vx1,
                 vy1,
                 outline="#60a5fa",
-                fill="#60a5fa18",
+                fill="#60a5fa",
+                stipple="gray12",
                 width=1,
                 tags="mm_overlay",
             )

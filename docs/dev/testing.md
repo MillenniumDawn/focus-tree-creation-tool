@@ -1,6 +1,6 @@
 # Testing
 
-269 tests across 26 files under `tests/` (`pytest --collect-only -q`).
+Run `pytest --collect-only -q` to list the tests under `tests/`.
 `pyproject.toml`'s `[tool.pytest.ini_options]` puts `src/` on `pythonpath`
 and scopes `testpaths` to `tests/`, so `pytest` from the repo root just
 works. No `conftest.py`; fixtures live in the file that uses them.
@@ -142,7 +142,7 @@ targets in `performance.md` only show up at MD's size:
 - Import the largest tree (`usa.txt`, 776 focus blocks) standalone.
 - "Load All Trees" across the full `common/national_focus` directory while
   interacting with the canvas (pan/zoom) during and after the batch.
-- Edit and move a focus, undo, redo five times in a row (`edit/move/undo x5`),
+- Repeat edit, move, and undo five times (`edit/move/undo x5`),
   watching for undo-stack correctness and canvas redraw glitches.
 - Export to a scratch copy of a file and diff it against the original to
   confirm the round-trip didn't drop or reorder fields.
@@ -171,9 +171,8 @@ doesn't reproduce (event bindings, undo, mod reload, the minimap widget):
 
 ### Phases 9-10: settings, menu sweep, GFX browser parity
 
-None of `ui/settings_dialog.py`, `ui/menubar.py`, `ui/toolbar.py`, or
-`ui/gfx_browser.py` can run in CI (all Tk-only, see "The headless
-constraint" above). These need a live `App` against a loaded mod:
+These modules can be imported in CI, and pure settings helpers have headless
+tests. Widget construction still needs a live `App` against a loaded mod:
 
 - **Settings walkthrough**: open Settings from the Tools menu, change the
   mod path, a GFX directory, MD detection, and a locale, then close and

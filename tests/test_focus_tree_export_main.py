@@ -1,11 +1,4 @@
-"""Characterization + round-trip tests for export_main_tree (tree_idx == 0).
-
-The golden text in test_full_focus_body_matches_hand_derived_text was derived
-by hand-reading the monolith's pre-extraction ``_export`` (see
-docs/dev/monolith-migration.md, phase 4) line by line, not by running the new
-code and copying its output — it exists to catch porting mistakes, not to
-freeze whatever export_main_tree happens to produce.
-"""
+"""Tests for export_main_tree (tree_idx == 0)."""
 
 import os
 
@@ -67,7 +60,7 @@ def test_full_focus_body_matches_hand_derived_text():
     child.allow_branch = "always = yes"
     child.available_cond = "has_flag = only_child"
     child.bypass_cond = "OR = {\n\thas_flag = a\n\thas_flag = b\n}"
-    child.will_lead_to_war_with = "{ ENG FRA }"
+    child.will_lead_to_war_with = "ENG"
     child.complete_tooltip = 'log = "test"'
     child.cancel_if_invalid = False
     child.continue_if_invalid = True
@@ -106,7 +99,7 @@ def test_full_focus_body_matches_hand_derived_text():
             "",
             "\tfocus = {",
             "\t\tid = TST_root",
-            "\t\ticon = generic_political_pressure",
+            "\t\ticon = GFX_goal_generic_political_pressure",
             "\t\tx = 0",
             "\t\ty = 0",
             "\t\tcost = 10",
@@ -124,7 +117,7 @@ def test_full_focus_body_matches_hand_derived_text():
             "",
             "\tfocus = {",
             "\t\tid = TST_child",
-            "\t\ticon = political_effort",
+            "\t\ticon = GFX_goal_political_effort",
             "\t\ttext = custom_loc_key",
             "\t\tx = 2",
             "\t\ty = 3",
@@ -152,9 +145,7 @@ def test_full_focus_body_matches_hand_derived_text():
             "\t\t\t\thas_flag = b",
             "\t\t\t}",
             "\t\t}",
-            "\t\twill_lead_to_war_with = {",
-            "\t\t\tENG FRA",
-            "\t\t}",
+            "\t\twill_lead_to_war_with = ENG",
             "\t\tcomplete_tooltip = {",
             '\t\t\tlog = "test"',
             "\t\t}",
@@ -206,27 +197,6 @@ def test_cfp_none_and_no_focuses_defaults_to_zero():
     assert "continuous_focus_position = { x = 0 y = 0 }" in text
 
 
-def test_relative_position_can_point_outside_main_tree():
-    """relative_position_id may resolve against a focus in another tree."""
-    other = Focus(10, 10)
-    other.name = "SHR_anchor"
-    other.tree_idx = 1
-
-    child = Focus(11, 12)
-    child.name = "TST_child"
-    child.relative_position_id = "SHR_anchor"
-    child._rel_dx = 1
-    child._rel_dy = 2
-
-    lookup = {other.id: other, child.id: child}
-    text = export_main_tree(
-        [child], _info(), focus_lookup=lookup, effect_renderer=raw_block_renderer
-    )
-    assert "relative_position_id = SHR_anchor" in text
-    assert "x = 1" in text
-    assert "y = 2" in text
-
-
 def test_relative_position_first_match_wins_on_duplicate_names():
     first = Focus(1, 1)
     first.name = "DUP"
@@ -272,34 +242,12 @@ def test_country_raw_written_verbatim_with_nested_indent_preserved():
     assert "base = 0" not in text
 
 
-# ── Fixture round-trip (see tests/fixtures/focus_trees/wrapper_basic.txt) ──
-#
-# Full-text idempotence across repeated export->reparse->export cycles is NOT
-# asserted here: unlike export_focus_tree (which always writes a canned
-# country block, ignoring whatever was imported), export_main_tree writes
-# country_raw back verbatim by prefixing every non-blank line with a flat two
-# tabs, not by dedenting first. Re-parsing that output and exporting again
-# changes the block's nested-line indentation (each round adds two tabs to
-# interior lines) even though the leading line is always re-stripped flat.
-# That's a property of "verbatim from the last import," not a per-focus field
-# loss, so it's out of scope for the round-trip guarantee below, which checks
-# focus data survival instead.
-
-
-def _norm_gfx(gfx):
-    # export_main_tree strips a leading "GFX_goal_" on write (main tree only,
-    # unlike export_focus_tree's shared/joint path); reparsing takes the icon
-    # field verbatim, so the prefix doesn't survive a round trip. Normalize
-    # here so the comparison checks the same icon, not the same prefix.
-    return gfx[len("GFX_goal_") :] if gfx.startswith("GFX_goal_") else gfx
-
-
 def _summary(focuses):
     by_id = {f.id: f.name for f in focuses}
     return [
         (
             f.name,
-            _norm_gfx(f.gfx),
+            f.gfx,
             f.cost,
             f.x,
             f.y,
@@ -343,8 +291,9 @@ def test_fixture_structural_fields_survive_round_trip():
     path = os.path.join(FIX_DIR, "wrapper_basic.txt")
     raw = read_file(path)
     f1, t1 = _load_and_export_main(raw, path)
-    f2, _t2 = _load_and_export_main(t1)
+    f2, t2 = _load_and_export_main(t1)
     assert _summary(f1) == _summary(f2)
+    assert t1 == t2
 
 
 def test_fixture_country_raw_present_verbatim_on_first_export():

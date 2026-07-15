@@ -2,8 +2,8 @@
 
 ## The story so far
 
-`hoi4_content_maker.py` started as a single ~21k-line file. It's down to
-5,948 lines. What moved, and when:
+`hoi4_content_maker.py` started as a single ~21k-line file. It's down to about
+6k lines. What moved, and when:
 
 - **#8**: logging pulled into `hoi4cm.core.logger`, plus the packaging/tooling
   setup (`pyproject.toml`, ruff/black scoping, pytest config) that made an
@@ -54,16 +54,13 @@
   `ui/settings_dialog.py` as `open_settings(app)`, the same one-line-delegate
   pattern the five wizards use. Lifted out along with it: `relativize_to_mod_root`
   (the mod-relative-path normalization every GFX-path browse button used
-  inline), `loc_token_preview_text`, `parse_event_dim_profile`, and two data
-  constants that used to get rebuilt on every dialog open,
-  `VANILLA_COUNTRY_TAGS` and `GFX_PATH_PRESETS`. The dead
-  `_default_hoi4_mod_dir` alias is gone too: its only remaining call site was
-  inside the method that just moved out, so it and four other now-unused
-  `hoi4cm.core` imports (`CONFIG_PATH`, `I18N_LANGS`, `get_language`,
-  `set_language`) came out with it. `ui/settings_dialog.py` is wired in with a
-  direct `from hoi4cm.ui.settings_dialog import open_settings`, not through
-  the `hoi4cm.ui` facade; that file is mid-edit elsewhere on this branch, so
-  adding the facade re-export is left for later.
+  inline), and two data constants that used to get rebuilt on every dialog
+  open, `VANILLA_COUNTRY_TAGS` and `GFX_PATH_PRESETS`. The dead
+  `_default_hoi4_mod_dir` alias is gone from the monolith too, so it and four
+  other now-unused `hoi4cm.core` imports (`CONFIG_PATH`, `I18N_LANGS`,
+  `get_language`, `set_language`) came out with it. `ui/settings_dialog.py`
+  is wired in with a direct
+  `from hoi4cm.ui.settings_dialog import open_settings`.
 - GFX browser dedup + menubar/toolbar (phase 10, the last phase of this
   round): `_open_gfx_browser`/`_gfx_browse_files` audited against the
   already-extracted `ui/gfx_browser.py` (`open_universal_gfx_browser`,
@@ -200,11 +197,7 @@ extracted as-is into a third function, `open_focus_icon_browser`, in the
 same `ui/gfx_browser.py` module, rather than merged. It did inherit the one
 improvement that carries over cleanly: the bounded `LRUCache` +
 pinned-thumbnail image cache the sibling browser already had, in place of
-the old unbounded dict. A future consolidation is possible: `on_select`
-could grow an optional prefix override and `open_universal_gfx_browser`
-could take a `folder_allowlist` to restrict its category list, but that's
-a deliberate follow-up, not something to bolt on under this ticket's
-behavior-preserving constraint.
+  the old unbounded dict.
 
 ## Extraction recipe
 

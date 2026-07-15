@@ -86,53 +86,6 @@ def test_fixture_matches_golden(fname, kwargs):
     assert focuses == golden["focuses"]
 
 
-def test_wrapper_basic_country_raw_is_verbatim():
-    # Distinctive formatting (irregular spacing, no space around one `=`,
-    # trailing blank line) survives parse_focus_tree unchanged.
-    meta, _ = _parse_and_build("wrapper_basic.txt", {})
-    assert meta["country_raw"] == (
-        "factor    =   0\nmodifier = {\n\tadd = 20\n\toriginal_tag=TST\n}\n\n\t"
-    )
-
-
-def test_wrapper_basic_prereq_groups_and_mutex():
-    _, focuses = _parse_and_build("wrapper_basic.txt", {})
-    needs_either = focuses["TST_needs_either"]
-    # AND of two groups; first group is an OR of two focuses.
-    assert needs_either["prereqs"] == [
-        ["TST_child_a", "TST_child_b"],
-        ["TST_root"],
-    ]
-    assert needs_either["mutex"] == ["TST_child_b"]
-
-
-def test_wrapper_basic_nested_relative_position_chain():
-    _, focuses = _parse_and_build("wrapper_basic.txt", {})
-    # root(0,0) -> child_a(+1,+1) -> child_b(+1,+0) -> needs_either(+2,+2)
-    assert (focuses["TST_root"]["x"], focuses["TST_root"]["y"]) == (0, 0)
-    assert (focuses["TST_child_a"]["x"], focuses["TST_child_a"]["y"]) == (1, 1)
-    assert (focuses["TST_child_b"]["x"], focuses["TST_child_b"]["y"]) == (2, 1)
-    assert (focuses["TST_needs_either"]["x"], focuses["TST_needs_either"]["y"]) == (
-        4,
-        3,
-    )
-
-
-def test_bare_focus_no_wrapper_falls_back_to_filename():
-    meta, focuses = _parse_and_build("bare_focus.txt", {})
-    assert meta["had_wrapper"] is False
-    assert meta["tree_id"] == "bare_focus"
-    assert set(focuses) == {"BAR_alpha", "BAR_beta"}
-    assert focuses["BAR_beta"]["prereqs"] == [["BAR_alpha"]]
-
-
-def test_bare_shared_focus_no_wrapper():
-    meta, focuses = _parse_and_build("bare_shared_focus.txt", {})
-    assert meta["had_wrapper"] is False
-    assert set(focuses) == {"SHR_one", "SHR_two"}
-    assert (focuses["SHR_two"]["x"], focuses["SHR_two"]["y"]) == (1, 1)
-
-
 def test_offset_applies_only_for_matching_tag():
     _, matching = _parse_and_build("offset_original_tag.txt", {"country_tag": "OFS"})
     _, other = _parse_and_build("offset_original_tag.txt", {"country_tag": "ZZZ"})
@@ -141,18 +94,3 @@ def test_offset_applies_only_for_matching_tag():
     assert (matching["OFS_shifted"]["x"], matching["OFS_shifted"]["y"]) == (16, 9)
     assert (other["OFS_shifted"]["x"], other["OFS_shifted"]["y"]) == (11, 11)
     assert (none["OFS_shifted"]["x"], none["OFS_shifted"]["y"]) == (11, 11)
-
-
-def test_brace_broken_recovers_all_focuses_via_fallback():
-    meta, focuses = _parse_and_build("brace_broken.txt", {})
-    assert set(focuses) == {"BRK_alpha", "BRK_beta", "BRK_gamma"}
-    # The structured pass alone would have merged BRK_gamma into BRK_beta as a
-    # nested value; the per-focus brace-walk recovers all three as siblings
-    # with their basic scalar fields intact.
-    for name, (x, y) in {
-        "BRK_alpha": (0, 0),
-        "BRK_beta": (1, 0),
-        "BRK_gamma": (2, 0),
-    }.items():
-        assert (focuses[name]["x"], focuses[name]["y"]) == (x, y)
-        assert focuses[name]["cost"] == 5

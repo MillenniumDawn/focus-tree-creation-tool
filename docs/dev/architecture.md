@@ -8,8 +8,8 @@
   sanitizing, the sparse undo stack (`undo.py`, `UndoStack`), and a bounded
   LRU mapping (`lru.py`, `LRUCache`) backing the in-memory `PhotoImage`
   caches. Re-exported flat through `core/__init__.py` (the "facade", see
-  below). Everything else in the package can depend on `core`; `core`
-  depends on nothing else in `hoi4cm`.
+  below). Everything else in the package can depend on `core`; core submodules
+  other than the facade depend on nothing else in `hoi4cm`.
 - **`data/`**: static tables: `EFFECT_DEFS`/`MODIFIER_DEFS` and the MD
   building/resource cost tables. No logic beyond lookup helpers.
 - **`models/`**: `Focus`, the plain-data class behind every canvas item.
@@ -125,7 +125,7 @@ worker-thread-plus-`_safe_after` shape into `run_bg`.
 
 ### The `run_bg` contract
 
-`run_bg(widget, work, on_done, on_error=None, progress_cb=None)` submits
+`run_bg(widget, work, on_done, on_error=None)` submits
 `work` (a zero-arg callable) to a shared `ThreadPoolExecutor`
 (`get_executor()`, lazily created, `max_workers=2`,
 `thread_name_prefix="hoi4cm-bg"`). On success, `on_done(result)` runs on the
@@ -154,8 +154,8 @@ calling it marshals `fn(*args, **kwargs)` onto the Tk thread via
 `_load_mod`, factored out.
 
 `_safe_after`/`_safe_after_idle` (`ui/widgets.py`) only swallow
-`AttributeError` (the documented Python 3.14 `_tclCommands` destroyed-widget
-bug), not arbitrary exceptions from the scheduled callback. A bare
+destroyed-widget `AttributeError` and `TclError`, not arbitrary exceptions
+from the scheduled callback. A bare
 `except Exception` there would silently eat bugs inside `on_done`/`on_error`
 instead of surfacing them.
 

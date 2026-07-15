@@ -4,6 +4,7 @@ Pure string building: no file I/O. The caller reads the existing loc file (if
 any) and writes the result back; see ``hoi4_content_maker.py``'s ``_export``.
 """
 
+import json
 import re
 
 _KEY_RE = re.compile(r'\s+(\S+?)(?::\d+)?\s*[=:]?\s*"')
@@ -39,10 +40,12 @@ def build_loc_yml(existing_text, focuses, country_tag, *, language="english"):
         return None, 0
 
     base = existing_text if existing_text is not None else f"l_{language}:\n"
+    if base and not base.endswith("\n"):
+        base += "\n"
     needs_header = f"##########Focuses - {country_tag}##########" not in base
     addition = []
     if needs_header:
         addition.append(f"\n ##########Focuses - {country_tag}##########\n")
     for k, v in to_add.items():
-        addition.append(f' {k}: "{v}"\n')
+        addition.append(f" {k}: {json.dumps(v, ensure_ascii=False)}\n")
     return base + "".join(addition), len(to_add)

@@ -1,8 +1,4 @@
 # ruff: noqa: E501, UP031
-# This file was extracted from hoi4_content_maker.py. The dialog body
-# retains the original monolith's style (long translated-string lines,
-# a percent-format log line). Tightening any of this is a separate refactor.
-
 """Settings dialog: GFX paths, MD detection, extra dirs, locale, etc."""
 
 import os
@@ -101,24 +97,15 @@ TOKEN_STYLE_PREVIEWS = {
 
 def relativize_to_mod_root(path, mod_root):
     """Rewrite an absolute path under mod_root as mod-relative, else leave it alone."""
-    if mod_root and path.startswith(mod_root):
-        return os.path.relpath(path, mod_root)
+    if mod_root:
+        path_abs = os.path.abspath(path)
+        root_abs = os.path.abspath(mod_root)
+        try:
+            if os.path.commonpath((path_abs, root_abs)) == root_abs:
+                return os.path.relpath(path_abs, root_abs)
+        except ValueError:
+            pass
     return path
-
-
-def loc_token_preview_text(style):
-    """Preview string for a given loc_token_style setting value."""
-    return TOKEN_STYLE_PREVIEWS.get(style, "")
-
-
-def parse_event_dim_profile(country_w, country_h, news_w, news_h):
-    """Parse the four dimension-entry strings into an event_dim_profiles value.
-
-    Raises ValueError if any of the four values isn't an integer.
-    """
-    cw, ch = int(country_w), int(country_h)
-    nw, nh = int(news_w), int(news_h)
-    return {"country": (cw, ch), "news": (nw, nh)}
 
 
 def open_settings(app):
@@ -728,9 +715,10 @@ def open_settings(app):
             messagebox.showerror("Error", "Profile name cannot be empty.", parent=win)
             return
         try:
-            profile = parse_event_dim_profile(
-                np_cw.get(), np_ch.get(), np_nw.get(), np_nh.get()
-            )
+            profile = {
+                "country": (int(np_cw.get()), int(np_ch.get())),
+                "news": (int(np_nw.get()), int(np_nh.get())),
+            }
         except ValueError:
             messagebox.showerror("Error", "Dimensions must be integers.", parent=win)
             return
@@ -1311,7 +1299,7 @@ def open_settings(app):
     tok_prev_lbl.pack(fill="x")
 
     def _update_tok_preview(*_):
-        tok_prev_lbl.config(text="  " + loc_token_preview_text(_tok_var.get()))
+        tok_prev_lbl.config(text="  " + TOKEN_STYLE_PREVIEWS.get(_tok_var.get(), ""))
 
     _tok_var.trace_add("write", _update_tok_preview)
     _update_tok_preview()

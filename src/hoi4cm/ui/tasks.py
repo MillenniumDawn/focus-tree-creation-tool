@@ -61,15 +61,11 @@ def shutdown_executor():
         _executor = None
 
 
-def run_bg(widget, work, on_done, on_error=None, progress_cb=None):
+def run_bg(widget, work, on_done, on_error=None):
     """Run ``work`` on a background thread; marshal the outcome to ``widget``.
 
-    ``work`` is a zero-arg callable, unless ``progress_cb`` is given, in
-    which case ``work`` is called with one argument: a progress callable
-    safe to invoke from the worker (built via :func:`make_progress`). If a
-    caller needs progress reporting without going through this shortcut, it
-    can build that callable itself with :func:`make_progress` and close over
-    it in a zero-arg ``work``.
+    ``work`` is a zero-arg callable. Callers that need progress reporting can
+    close over a callable built with :func:`make_progress`.
 
     On success, ``on_done(result)`` runs on the Tk thread. On any exception
     from ``work``, it is logged and recorded via ``add_error`` so it reaches
@@ -89,10 +85,7 @@ def run_bg(widget, work, on_done, on_error=None, progress_cb=None):
 
     def _job():
         try:
-            if progress_cb is not None:
-                result = work(make_progress(widget, progress_cb))
-            else:
-                result = work()
+            result = work()
         except Exception as exc:
             log.exception("background task failed")
             error_trace = traceback.format_exc()
@@ -134,10 +127,8 @@ def progress_modal(parent, title, *, determinate=True):
     user mutating the live dict concurrently on the Tk thread.
 
     Returns a ``SimpleNamespace`` with:
-      - ``window``: the ``Toplevel``, for callers that need it directly.
       - ``set_text(msg)``: update the status label.
       - ``set_fraction(frac)``: move a determinate bar to ``frac`` (0.0-1.0).
-      - ``pulse()``: advance an indeterminate bar by one step.
       - ``close()``: release the grab and destroy the window.
     """
     win = tk.Toplevel(parent)
@@ -163,8 +154,6 @@ def progress_modal(parent, title, *, determinate=True):
     bar_fill = tk.Frame(bar_frame, bg=BLUE, height=6, width=0 if determinate else 40)
     bar_fill.place(x=0, y=0, height=6)
 
-    _pulse_x = [0]
-
     def set_text(msg):
         status_lbl.config(text=msg)
         win.update_idletasks()
@@ -172,11 +161,6 @@ def progress_modal(parent, title, *, determinate=True):
     def set_fraction(frac):
         frac = max(0.0, min(1.0, frac))
         bar_fill.place_configure(width=int(frac * 380))
-        win.update_idletasks()
-
-    def pulse():
-        _pulse_x[0] = (_pulse_x[0] + 20) % 380
-        bar_fill.place_configure(x=_pulse_x[0])
         win.update_idletasks()
 
     def close():
@@ -190,10 +174,8 @@ def progress_modal(parent, title, *, determinate=True):
             pass
 
     return SimpleNamespace(
-        window=win,
         set_text=set_text,
         set_fraction=set_fraction,
-        pulse=pulse,
         close=close,
     )
 

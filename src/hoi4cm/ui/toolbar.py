@@ -1,13 +1,5 @@
 # ruff: noqa: E501
-# This file was extracted verbatim from hoi4_content_maker.py. The noqa
-# covers the monolith's long i18n tooltip strings.
-"""Toolbar row 2: canvas action buttons, wizard shortcuts, coord display.
-
-Extracted verbatim from the monolith's ``App._build_toolbar_row2``. One-shot
-builder, not a mixin: ``build_toolbar_row2(app, toolbar)`` populates widgets
-directly onto ``app`` and the caller-supplied ``toolbar`` frame, the same
-shape ``menubar.py``'s ``build_menubar(app, toolbar)`` uses.
-"""
+"""Toolbar row 2: canvas action buttons, wizard shortcuts, coord display."""
 
 import tkinter as tk
 
@@ -22,8 +14,6 @@ def build_toolbar_row2(app, toolbar):
     row2 = tk.Frame(toolbar, bg="#090d14", height=36)
     row2.pack(fill="x")
     row2.pack_propagate(False)
-    app._conn_btn = None
-    app._mutex_btn = None
 
     def _tb_sep():
         tk.Frame(row2, bg=BORDER_G, width=1, height=20).pack(side="left", padx=5)

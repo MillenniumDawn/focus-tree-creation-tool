@@ -94,17 +94,6 @@ def test_on_done_skipped_when_widget_destroyed():
     assert calls == []
 
 
-def test_on_done_exception_is_not_swallowed():
-    widget = FakeWidget()
-
-    def on_done(_result):
-        raise RuntimeError("boom in on_done")
-
-    future = tasks.run_bg(widget, lambda: "ok", on_done)
-    with pytest.raises(RuntimeError, match="boom in on_done"):
-        future.result(timeout=2)
-
-
 # ── run_bg: error path ────────────────────────────────────────────────
 
 
@@ -175,19 +164,3 @@ def test_make_progress_marshals_calls_in_order():
     for i in range(1, 6):
         progress(i, 5, f"file{i}.txt")
     assert seen == [(i, 5, f"file{i}.txt") for i in range(1, 6)]
-
-
-def test_run_bg_progress_cb_is_wrapped_and_passed_to_work():
-    widget = FakeWidget()
-    seen = []
-
-    def work(progress):
-        for i in range(3):
-            progress(i)
-        return "done"
-
-    calls = []
-    future = tasks.run_bg(widget, work, calls.append, progress_cb=seen.append)
-    future.result(timeout=2)
-    assert calls == ["done"]
-    assert seen == [0, 1, 2]

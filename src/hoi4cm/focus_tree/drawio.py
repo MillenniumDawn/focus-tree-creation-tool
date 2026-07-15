@@ -22,10 +22,6 @@ from dataclasses import dataclass
 from hoi4cm.core.safe_xml import bounded_inflate, safe_fromstring
 from hoi4cm.models import Focus
 
-DEFAULT_GFX = "GFX_goal_generic_political_pressure"
-DEFAULT_COST = 10
-DEFAULT_SEARCH_FILTERS = "FOCUS_FILTER_POLITICAL"
-
 
 class EmptyDrawioGraphError(ValueError):
     """Raised when a draw.io diagram has no recognizable focus shapes."""
@@ -39,8 +35,6 @@ class DrawioVertex:
     label: str
     x: float
     y: float
-    w: float
-    h: float
 
 
 @dataclass
@@ -90,7 +84,9 @@ def _get_graph_root(xml_text):
     for diag in root.iter("diagram"):
         text = (diag.text or "").strip()
         if not text:
-            return diag
+            if diag.find(".//mxCell") is not None:
+                return diag
+            continue
         try:
             return safe_fromstring(decompress_drawio(text))
         except Exception:
@@ -123,13 +119,9 @@ def _read_geometry(geo):
     try:
         x = float(geo.get("x", 0) or 0)
         y = float(geo.get("y", 0) or 0)
-        w = float(geo.get("width", 120) or 120)
-        h = float(geo.get("height", 60) or 60)
     except Exception:
         x = y = 0
-        w = 120
-        h = 60
-    return x, y, w, h
+    return x, y
 
 
 def parse_drawio_graph(xml_text):
@@ -152,8 +144,8 @@ def parse_drawio_graph(xml_text):
         if geo is None:
             continue
         label = clean_label(c.get("value", "")) or f"focus_{cid}"
-        x, y, w, h = _read_geometry(geo)
-        vertices[cid] = DrawioVertex(cid=cid, label=label, x=x, y=y, w=w, h=h)
+        x, y = _read_geometry(geo)
+        vertices[cid] = DrawioVertex(cid=cid, label=label, x=x, y=y)
 
     # UserObject / object wrappers carry the label outside the inner mxCell,
     # which the loop above will already have picked up with a placeholder
@@ -172,8 +164,8 @@ def parse_drawio_graph(xml_text):
             clean_label(obj.get("label") or obj.get("value") or obj.get("name") or "")
             or f"focus_{cid}"
         )
-        x, y, w, h = _read_geometry(geo)
-        vertices[cid] = DrawioVertex(cid=cid, label=label, x=x, y=y, w=w, h=h)
+        x, y = _read_geometry(geo)
+        vertices[cid] = DrawioVertex(cid=cid, label=label, x=x, y=y)
 
     if not vertices:
         raise EmptyDrawioGraphError("No shapes found in the diagram.")
@@ -290,7 +282,7 @@ def drawio_to_focus_data(graph, prefix):
         label = v.label
         if not label.upper().startswith(prefix.upper()):
             label = prefix + label
-        prefixed[cid] = DrawioVertex(cid=cid, label=label, x=v.x, y=v.y, w=v.w, h=v.h)
+        prefixed[cid] = DrawioVertex(cid=cid, label=label, x=v.x, y=v.y)
 
     grid_positions, auto_shifted = _assign_grid_positions(prefixed)
 
@@ -323,12 +315,6 @@ def build_drawio_focuses(result):
     for df in result.focuses:
         f = Focus(df.x, df.y)
         f.name = df.label
-        f.gfx = DEFAULT_GFX
-        f.cost = DEFAULT_COST
-        f.cancel_if_invalid = True
-        f.continue_if_invalid = False
-        f.available_if_capitulated = False
-        f.search_filters = DEFAULT_SEARCH_FILTERS
         new_focuses.append(f)
         cid_to_fid[df.cid] = f.id
 

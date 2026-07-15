@@ -247,8 +247,8 @@ def parse_focus_tree(raw, path):
     if raw.startswith("\ufeff"):
         raw = raw[1:]
     txt = strip_comments(raw)
-    shared_refs = re.findall(r"\bshared_focus\s*=\s*(\S+)", txt)
-    joint_refs = re.findall(r"\bjoint_focus\s*=\s*(\S+)", txt)
+    shared_refs = re.findall(r"\bshared_focus\s*=\s*([^\s{]\S*)", txt)
+    joint_refs = re.findall(r"\bjoint_focus\s*=\s*([^\s{]\S*)", txt)
 
     raw_rewards = _extract_raw_rewards(txt)
 
@@ -325,10 +325,10 @@ def parse_focus_tree(raw, path):
     # The fallback can find at most one focus per `focus = {` block, so when
     # the passes above already produced that many it can never win — skip the
     # brace-walk entirely on well-formed files (the common case).
-    block_count = len(re.findall(r"\b(?:focus|shared_focus)\s*=\s*\{", txt))
+    block_count = len(re.findall(r"\b(?:focus|shared_focus|joint_focus)\s*=\s*\{", txt))
     if len(focuses_data) < block_count:
         per_block_focuses = []
-        for bm in re.finditer(r"\b(?:focus|shared_focus)\s*=\s*\{", txt):
+        for bm in re.finditer(r"\b(?:focus|shared_focus|joint_focus)\s*=\s*\{", txt):
             bs = bm.end() - 1  # position of '{'
             bi = match_brace(txt, bs)
             if bi >= len(txt):
