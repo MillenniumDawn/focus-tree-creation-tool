@@ -47,6 +47,20 @@ def test_domains_are_independent(cache):
     assert cache.get("events", "/a", 1.0, 1) == ["E"]
 
 
+def test_cache_persists_after_reopen(tmp_path, monkeypatch):
+    monkeypatch.setattr(sc, "STATE_DIR", str(tmp_path / "state"))
+    mod_root = str(tmp_path / "mod")
+    first = sc.ScanCache(mod_root)
+    first.put("focus", "/x/a.txt", 100.0, 5, {"ids": ["A"]})
+    first.close()
+
+    second = sc.ScanCache(mod_root)
+    try:
+        assert second.get("focus", "/x/a.txt", 100.0, 5) == {"ids": ["A"]}
+    finally:
+        second.close()
+
+
 def test_prune_removes_missing_paths(cache):
     cache.put("d", "/a", 1.0, 1, {})
     cache.put("d", "/b", 1.0, 1, {})

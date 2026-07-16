@@ -12,6 +12,14 @@ import os
 import re
 from dataclasses import dataclass
 
+from hoi4cm.script.syntax import (
+    match_brace,
+    parse_block,
+    serialize_block,
+    strip_comments,
+    tokenize,
+)
+
 # Conditional/effect blocks preserved verbatim from a focus block.
 _COND_KEYS = (
     "available",
@@ -50,31 +58,6 @@ class ParsedFocusTree:
     country_raw: str = ""
 
 
-def strip_comments(s):
-    """Drop ``#`` comments, keeping line structure."""
-    return "\n".join(
-        (line[: line.find("#")] if "#" in line else line) for line in s.splitlines()
-    )
-
-
-def match_brace(s, open_idx):
-    """Return the index of the ``}`` matching the ``{`` at ``open_idx``.
-
-    Returns ``len(s)`` when the brace is unbalanced (no matching close).
-    """
-    depth = 0
-    i = open_idx
-    while i < len(s):
-        if s[i] == "{":
-            depth += 1
-        elif s[i] == "}":
-            depth -= 1
-            if depth == 0:
-                return i
-        i += 1
-    return i
-
-
 def extract_raw_block(source, key):
     """Return the dedented inner text of ``key = { ... }`` in ``source``."""
     m = re.search(key + r"\s*=\s*\{", source)
@@ -92,78 +75,6 @@ def extract_raw_block(source, key):
     return "\n".join(lines).strip("\n")
 
 
-def tokenize(s):
-    """Split HOI4 script into ``{`` ``}`` ``=`` and bareword/quoted tokens."""
-    tokens = []
-    i = 0
-    while i < len(s):
-        c = s[i]
-        if c in " \t\n\r":
-            i += 1
-            continue
-        if c == "{":
-            tokens.append("{")
-            i += 1
-            continue
-        if c == "}":
-            tokens.append("}")
-            i += 1
-            continue
-        if c == "=":
-            tokens.append("=")
-            i += 1
-            continue
-        if c == '"':
-            j = i + 1
-            while j < len(s) and s[j] != '"':
-                j += 1
-            tokens.append(s[i + 1 : j])
-            i = j + 1
-            continue
-        j = i
-        while j < len(s) and s[j] not in ' \t\n\r{}="':
-            j += 1
-        if j > i:
-            tokens.append(s[i:j])
-        i = j
-    return tokens
-
-
-def parse_block(tokens, pos):
-    """Recursively parse a ``{ ... }`` block starting at ``tokens[pos]``.
-
-    Repeated keys collapse into lists; bare words land in ``_values``.
-    Returns ``(dict, next_pos)``.
-    """
-    result = {}
-    pos += 1
-    while pos < len(tokens) and tokens[pos] != "}":
-        key = tokens[pos]
-        pos += 1
-        if pos >= len(tokens):
-            break
-        if tokens[pos] == "=":
-            pos += 1
-            if pos >= len(tokens):
-                break
-            if tokens[pos] == "{":
-                val, pos = parse_block(tokens, pos)
-            else:
-                val = tokens[pos]
-                pos += 1
-            if key in result:
-                existing = result[key]
-                if not isinstance(existing, list):
-                    result[key] = [existing]
-                result[key].append(val)
-            else:
-                result[key] = val
-        else:
-            if key not in ("", "=", "{", "}"):
-                result.setdefault("_values", []).append(key)
-    return result, pos + 1
-
-
 def block_to_str(block, depth=1):
     """Convert a parsed block dict back to HOI4 script text.
 
@@ -171,34 +82,7 @@ def block_to_str(block, depth=1):
     """
     if not block:
         return ""
-    if isinstance(block, bool):
-        return "yes" if block else "no"
-    if isinstance(block, str):
-        return block.strip()
-    if not isinstance(block, dict):
-        return str(block)
-    indent = "\t" * depth
-    lines = []
-    for k, v in block.items():
-        if str(k).startswith("_"):
-            continue
-        if isinstance(v, bool):
-            lines.append(f"{indent}{k} = {'yes' if v else 'no'}")
-        elif isinstance(v, list):
-            for item in v:
-                if isinstance(item, dict):
-                    inner = block_to_str(item, depth + 1)
-                    lines.append(f"{indent}{k} = {{\n{inner}\n{indent}}}")
-                elif isinstance(item, bool):
-                    lines.append(f"{indent}{k} = {'yes' if item else 'no'}")
-                else:
-                    lines.append(f"{indent}{k} = {item}")
-        elif isinstance(v, dict):
-            inner = block_to_str(v, depth + 1)
-            lines.append(f"{indent}{k} = {{\n{inner}\n{indent}}}")
-        else:
-            lines.append(f"{indent}{k} = {v}")
-    return "\n".join(lines)
+    return serialize_block(block, indent="\t" * depth, strip_strings=True)
 
 
 def _extract_raw_rewards(txt):

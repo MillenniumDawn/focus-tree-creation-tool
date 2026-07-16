@@ -74,24 +74,32 @@ from hoi4cm.core import (
     Focus,
     UndoStack,
     add_error,
+    apply_focus_code,
+    BuildContext,
     build_drawio_focuses,
+    build_focus_name_lookup,
     build_focuses,
     build_loc_yml,
     drawio_to_focus_data,
     export_focus_tree,
     export_main_tree,
+    group_focuses_by_tree,
     get_error_entries,
     install_excepthook,
     parse_drawio_graph,
     parse_focus_tree,
     read_file,
+    render_focus_block,
     sanitize_component,
     set_error_callback,
     show_splash,
     tr,
 )
+from hoi4cm.editor import read_project, write_project
 from hoi4cm.mod import MOD, detect_loc_file
+from hoi4cm.models import EditorWorkspace, TreeDocument, TreeMetadata
 from hoi4cm.ui.canvas import CanvasMixin
+from hoi4cm.ui.focus_list import FocusListItem, VirtualFocusList
 from hoi4cm.ui.mod_loading import ModLoadingMixin
 from hoi4cm.ui.effects_panel import EffectsMixin
 from hoi4cm.ui.settings_dialog import open_settings
@@ -99,6 +107,7 @@ from hoi4cm.ui.gfx_browser import open_focus_icon_browser
 from hoi4cm.ui.menubar import build_menubar
 from hoi4cm.ui.toolbar import build_toolbar_row2
 from hoi4cm.ui import (
+    ApplicationLifecycle,
     BG_CARD,
     BG_DARK,
     BG_PANEL,
@@ -119,8 +128,8 @@ from hoi4cm.ui import (
     make_progress,
     progress_modal,
     run_bg,
-    shutdown_executor,
 )
+from hoi4cm.wizards import _shared as _wiz_shared
 from hoi4cm.wizards import (
     open_additional_income_wizard,
     open_decision_wizard,
@@ -172,7 +181,6 @@ from tkinter import filedialog, messagebox
 log.info("tkinter imported OK")
 import bisect
 import copy
-import json
 import re
 import time
 
@@ -197,6 +205,8 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
     def __init__(self):
         log.info("App.__init__: calling tk.Tk.__init__...")
         super().__init__()
+        self._lifecycle = ApplicationLifecycle(self)
+        self._lifecycle.add_resource(self._close_app_caches)
         _apply_tk_dpi_scaling(self)
         log.info("App.__init__: tk.Tk initialized")
         self.title(
@@ -210,7 +220,8 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
         self.geometry(saved_geom if saved_geom else "1440x880")
         self.configure(bg=BG_DARK)
         self.resizable(True, True)
-        self.focuses = {}
+        self.workspace = EditorWorkspace()
+        self.focuses = self.workspace.focuses
         # Inclusive cell bounds of the usable canvas (grid indices).
         self._canvas_min = [0, 0]
         self._canvas_max = [self.CANVAS_MIN_SIZE - 1, self.CANVAS_MIN_SIZE - 1]
@@ -238,16 +249,24 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
         self._redraw()
 
     def _on_app_close(self):
+        if not self._lifecycle.begin_close():
+            return
         try:
             MOD.save_config()
         except Exception:
             pass
-        try:
-            shutdown_executor()
-        except Exception:
-            pass
-        self.destroy()
-        os._exit(0)
+        finally:
+            self._lifecycle.finish_close()
+            self.destroy()
+
+    def _close_app_caches(self):
+        MOD.sprite_imgs.clear()
+        for cache in _wiz_shared._app_img_caches:
+            cache.clear()
+
+    def _begin_document_generation(self):
+        self._lifecycle.begin("document")
+        self._invalidate_canvas_images()
 
     # ── TOP BAR ─────────────────────────────────────────────────
     # ── Widget factories (use for all new UI code) ───────────────────
@@ -344,8 +363,8 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
         self._cfp_x_var = tk.StringVar(value="")
         self._cfp_y_var = tk.StringVar(value="")
         # shared_focus and joint_focus lines preserved from import
-        self._shared_focuses = []
-        self._joint_focuses = []
+        self._shared_focuses = self.workspace.main_tree.metadata.shared_focuses
+        self._joint_focuses = self.workspace.main_tree.metadata.joint_focuses
         # Extra loaded trees (shared/joint trees loaded alongside the main tree)
         self._extra_trees = []  # list of dicts: {type, file_path, tree_id, cfp_x, cfp_y, shared_focuses, joint_focuses, country_tag, focus_ids}
         toolbar = tk.Frame(self, bg=BG_DARK)
@@ -504,31 +523,12 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
         # list
         lp_list_frame = tk.Frame(self._left_panel, bg=BG_PANEL)
         lp_list_frame.pack(fill="both", expand=True)
-        lp_sb = tk.Scrollbar(lp_list_frame, orient="vertical")
-        lp_sb.pack(side="right", fill="y")
-        self._lp_canvas = tk.Canvas(
-            lp_list_frame, bg=BG_PANEL, highlightthickness=0, yscrollcommand=lp_sb.set
+        self._focus_list = VirtualFocusList(
+            lp_list_frame,
+            on_select=self._select_focus_from_list,
+            background=BG_PANEL,
         )
-        lp_sb.config(command=self._lp_canvas.yview)
-        self._lp_canvas.pack(fill="both", expand=True)
-        self._lp_inner = tk.Frame(self._lp_canvas, bg=BG_PANEL)
-        self._lp_win = self._lp_canvas.create_window(
-            (0, 0), window=self._lp_inner, anchor="nw"
-        )
-        self._lp_inner.bind(
-            "<Configure>",
-            lambda e: self._lp_canvas.configure(
-                scrollregion=self._lp_canvas.bbox("all")
-            ),
-        )
-        self._lp_canvas.bind(
-            "<Configure>",
-            lambda e: self._lp_canvas.itemconfig(self._lp_win, width=e.width),
-        )
-        self._lp_canvas.bind(
-            "<MouseWheel>",
-            lambda e: self._lp_canvas.yview_scroll(int(-1 * (e.delta / 120)), "units"),
-        )
+        self._focus_list.pack(fill="both", expand=True)
         tk.Frame(self._left_panel, bg=BORDER_G, width=1).place(
             relx=1, rely=0, relheight=1, x=-1
         )
@@ -738,6 +738,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
             self._refresh_mutex()
             self._refresh_effects()
         self._redraw()
+        self._invalidate_focus_list_structure()
         self._hint(f"↩ Undid: {label}")
 
     def _hint(self, t):
@@ -1768,14 +1769,12 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
         self._fv_gfx.set(name)
         if self.selected:
             self.selected.gfx = name
-            self.selected._draw_key = None
             self._redraw_now()
 
     def _update_gfx_preview(self, gfx_name):
         """No sidebar preview — just invalidate canvas so icon redraws."""
         if self.selected and getattr(self.selected, "gfx", "") != gfx_name:
             self.selected.gfx = gfx_name
-            self.selected._draw_key = None
             self._redraw_now()
 
     def _attach_autocomplete(self, entry_widget, var, get_choices_fn):
@@ -1925,7 +1924,6 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
         if not self.selected:
             return
         self.selected.icon = self._fv_icon.get()
-        self.selected._draw_key = None
         self._redraw_now()
 
     def _autosave(self):
@@ -1951,11 +1949,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
             f.ai_will_do = int(float(m.group(1))) if m else 1
             nx = int(self._fv_x.get())
             ny = int(self._fv_y.get())
-            if not any(
-                o.x == nx and o.y == ny and o.id != f.id for o in self.focuses.values()
-            ):
-                f.x = nx
-                f.y = ny
+            self.focuses.move(f.id, nx, ny)
             f.desc = self._fv_desc.get("1.0", "end").strip()
             f.search_filters = self._fv_search.get().strip() or "FOCUS_FILTER_POLITICAL"
             f.available_cond = self._fv_avail.get("1.0", "end").strip()
@@ -1965,7 +1959,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
             f.continue_if_invalid = self._fv_continue.get()
             f.available_if_capitulated = self._fv_cap.get()
             self._save_offsets_to_focus()
-            f._draw_key = None
+            self.focuses.touch()
         except (ValueError, Exception):
             pass
 
@@ -2045,137 +2039,21 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
 
     def _apply_focus_code(self, f, new_code):
         """Parse an edited focus block back into the focus object. Returns True on success."""
-
         try:
-
-            def _extract_block(text, start):
-                depth = 0
-                i = start
-                while i < len(text):
-                    if text[i] == "{":
-                        depth += 1
-                    elif text[i] == "}":
-                        depth -= 1
-                        if depth == 0:
-                            return text[start + 1 : i].strip(), i
-                    i += 1
-                return text[start + 1 :].strip(), len(text) - 1
-
-            def _extract_raw_block(text, key):
-                m = re.search(rf"\b{re.escape(key)}\s*=\s*\{{", text)
-                if not m:
-                    return ""
-                inner, _ = _extract_block(text, m.end() - 1)
-                return inner.strip()
-
-            # ── Simple scalar fields ───────────────────────────────────
-            m = re.search(r"\bid\s*=\s*(\S+)", new_code)
-            if m:
-                f.name = m.group(1)
-
-            m = re.search(r"\bicon\s*=\s*(\S+)", new_code)
-            if m:
-                f.gfx = m.group(1)
-
-            m = re.search(r"(?<![a-z_])x\s*=\s*(-?\d+)", new_code)
-            if m:
-                f.x = int(m.group(1))
-
-            m = re.search(r"(?<![a-z_])y\s*=\s*(-?\d+)", new_code)
-            if m:
-                f.y = int(m.group(1))
-
-            m = re.search(r"\bcost\s*=\s*([\d.]+)", new_code)
-            if m:
-                try:
-                    f.cost = int(float(m.group(1)))
-                except Exception:
-                    pass
-
-            m = re.search(r"\brelative_position_id\s*=\s*(\S+)", new_code)
-            if m:
-                f.relative_position_id = m.group(1)
-
-            for flag, attr in [
-                ("cancel_if_invalid", "cancel_if_invalid"),
-                ("continue_if_invalid", "continue_if_invalid"),
-                ("available_if_capitulated", "available_if_capitulated"),
-            ]:
-                m = re.search(rf"\b{flag}\s*=\s*(yes|no)", new_code)
-                if m:
-                    setattr(f, attr, m.group(1) == "yes")
-
-            m = re.search(r"\bsearch_filters\s*=\s*\{([^}]*)\}", new_code)
-            if m:
-                f.search_filters = m.group(1).strip()
-
-            # ── Block fields ───────────────────────────────────────────
-            for key, attr in [
-                ("available", "available_cond"),
-                ("bypass", "bypass_cond"),
-                ("cancel", "cancel_cond"),
-                ("will_lead_to_war_with", "will_lead_to_war_with"),
-                ("complete_tooltip", "complete_tooltip"),
-                ("select_effect", "select_effect"),
-                ("bypass_effect", "bypass_effect"),
-            ]:
-                raw = _extract_raw_block(new_code, key)
-                if raw is not None and raw != "":
-                    setattr(f, attr, raw)
-
-            raw_ai = _extract_raw_block(new_code, "ai_will_do")
-            if raw_ai:
-                f.ai_will_do_raw = raw_ai
-
-            raw_reward = _extract_raw_block(new_code, "completion_reward")
-            if raw_reward:
-                f.effects = [{"type": "_raw_block", "fields": {"raw": raw_reward}}]
-
-            # ── Parse offset blocks ────────────────────────────────────
-            _parsed_offsets = []
-            for _om in re.finditer(r"\boffset\s*=\s*\{", new_code):
-                _os = _om.end() - 1
-                _od = 0
-                _oi = _os
-                while _oi < len(new_code):
-                    if new_code[_oi] == "{":
-                        _od += 1
-                    elif new_code[_oi] == "}":
-                        _od -= 1
-                        if _od == 0:
-                            break
-                    _oi += 1
-                _oinner = new_code[_os + 1 : _oi]
-                _oxm = re.search(r"\bx\s*=\s*(-?\d+)", _oinner)
-                _oym = re.search(r"\by\s*=\s*(-?\d+)", _oinner)
-                _ox = int(_oxm.group(1)) if _oxm else 0
-                _oy = int(_oym.group(1)) if _oym else 0
-                _otrig = _extract_raw_block(_oinner, "trigger")
-                _parsed_offsets.append({"x": _ox, "y": _oy, "trigger": _otrig})
-            f.offsets = _parsed_offsets
-
-            # ── Sync sidebar fields & canvas ───────────────────────────
+            apply_focus_code(
+                f,
+                new_code,
+                focus_lookup=self.focuses,
+            )
+            self.focuses.touch()
+            self._invalidate_focus_list_structure()
             if self.selected and self.selected.id == f.id:
                 self._populate(f)
-                for tv, attr in [
-                    (self._fv_avail, "available_cond"),
-                    (self._fv_bypass, "bypass_cond"),
-                    (self._fv_cancel2, "cancel_cond"),
-                ]:
-                    try:
-                        tv.config(state="normal")
-                        tv.delete("1.0", "end")
-                        tv.insert("1.0", getattr(f, attr, ""))
-                    except Exception:
-                        pass
-            # Preserve viewport exactly — code edits must never move the camera
+
             _saved_zoom = self.zoom
             _saved_offset = self.offset[:]
-            # Invalidate draw cache for this focus so the canvas updates its label
-            f._draw_key = None
             self._redraw()
 
-            # Schedule viewport restore AFTER the throttled redraw fires (16ms + margin)
             def _restore_vp():
                 self.zoom = _saved_zoom
                 self.offset[0] = _saved_offset[0]
@@ -2200,120 +2078,11 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
 
     def _build_focus_code(self, f):
         """Render a single focus block as HOI4 script (used by Code tab)."""
-        I = "\t\t"
-        out = [
-            "focus = {",
-            f"{I}id = {f.name}",
-            f"{I}icon = {getattr(f,'gfx','GFX_goal_generic_political_pressure')}",
-            "",
-        ]
-        rel_id = getattr(f, "relative_position_id", None)
-        parent = (
-            next((foc for foc in self.focuses.values() if foc.name == rel_id), None)
-            if rel_id
-            else None
+        return render_focus_block(
+            f,
+            focus_lookup=self.focuses,
+            focus_name_lookup=build_focus_name_lookup(self.focuses.values()),
         )
-        if parent:
-            out += [
-                f"{I}x = {f.x - parent.x}",
-                f"{I}y = {f.y - parent.y}",
-                f"{I}relative_position_id = {rel_id}",
-            ]
-        else:
-            out += [f"{I}x = {f.x}", f"{I}y = {f.y}"]
-        for _off in getattr(f, "offsets", []):
-            out.append(f"{I}offset = {{")
-            out.append(f"{I}\tx = {_off['x']}")
-            out.append(f"{I}\ty = {_off['y']}")
-            if _off.get("trigger", "").strip():
-                out.append(f"{I}\ttrigger = {{")
-                for _ln in _off["trigger"].strip().splitlines():
-                    out.append(f"{I}\t\t{_ln.strip()}")
-                out.append(f"{I}\t}}")
-            out.append(f"{I}}}")
-        out += ["", f"{I}cost = {f.cost}", ""]
-        for grp in f.prereqs:
-            valid = [p for p in grp if p in self.focuses]
-            if valid:
-                inner = " ".join(f"focus = {self.focuses[p].name}" for p in valid)
-                out.append(f"\t\tprerequisite = {{ {inner} }}")
-        for mid in f.mutex:
-            if mid in self.focuses:
-                out.append(
-                    f"\t\tmutually_exclusive = {{ focus = {self.focuses[mid].name} }}"
-                )
-        sf = getattr(f, "search_filters", "").strip()
-        if sf:
-            out.append(f"{I}search_filters = {{ {sf} }}")
-        avail = getattr(f, "available_cond", "").strip()
-        if avail:
-            out.append(f"{I}available = {{")
-            for ln in avail.splitlines():
-                out.append(f"{I}\t{ln.strip()}")
-            out.append(f"{I}}}")
-        bypass = getattr(f, "bypass_cond", "").strip()
-        if bypass:
-            out.append(f"{I}bypass = {{")
-            for ln in bypass.splitlines():
-                out.append(f"{I}\t{ln.strip()}")
-            out.append(f"{I}}}")
-        cancelc = getattr(f, "cancel_cond", "").strip()
-        if cancelc:
-            out.append(f"{I}cancel = {{")
-            for ln in cancelc.splitlines():
-                out.append(f"{I}\t{ln.strip()}")
-            out.append(f"{I}}}")
-        wltww = getattr(f, "will_lead_to_war_with", "").strip()
-        if wltww:
-            out.append(f"{I}will_lead_to_war_with = {{")
-            for ln in wltww.splitlines():
-                if ln.strip():
-                    out.append(f"{I}\t{ln.strip()}")
-            out.append(f"{I}}}")
-        ctip = getattr(f, "complete_tooltip", "").strip()
-        if ctip:
-            out.append(f"{I}complete_tooltip = {{")
-            for ln in ctip.splitlines():
-                if ln.strip():
-                    out.append(f"{I}\t{ln.strip()}")
-            out.append(f"{I}}}")
-        sel_eff = getattr(f, "select_effect", "").strip()
-        if sel_eff:
-            out.append(f"{I}select_effect = {{")
-            for ln in sel_eff.splitlines():
-                if ln.strip():
-                    out.append(f"{I}\t{ln.strip()}")
-            out.append(f"{I}}}")
-        if not f.cancel_if_invalid:
-            out.append(f"{I}cancel_if_invalid = no")
-        if f.continue_if_invalid:
-            out.append(f"{I}continue_if_invalid = yes")
-        if f.available_if_capitulated:
-            out.append(f"{I}available_if_capitulated = yes")
-        out += ["", f"{I}completion_reward = {{"]
-        if f.effects:
-            for eff in f.effects:
-                out.append(self._render_effect(eff))
-        else:
-            out.append(f"{I}\t# add effects here")
-        out.append(f"{I}}}")
-        bp_eff = getattr(f, "bypass_effect", "").strip()
-        if bp_eff:
-            out.append(f"{I}bypass_effect = {{")
-            for ln in bp_eff.splitlines():
-                if ln.strip():
-                    out.append(f"{I}\t{ln.strip()}")
-            out.append(f"{I}}}")
-        raw_ai = getattr(f, "ai_will_do_raw", "").strip()
-        # MD convention: ai_will_do uses `base` at top level, `factor` only in modifier sub-blocks
-        out += [
-            "",
-            f"{I}ai_will_do = {{",
-            f"{I}\t{raw_ai}" if raw_ai else f"{I}\tbase = {f.ai_will_do}",
-            f"{I}}}",
-            "}",
-        ]
-        return "\n".join(out)
 
     def _refresh_prereqs(self):
         for w in self._prereq_box.winfo_children():
@@ -2793,6 +2562,9 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
                 self._grid_img = None
                 self._hide_form()
                 self._redraw_now()
+                self._invalidate_focus_list_structure()
+
+            self._begin_document_generation()
 
             # Set tree ID
             self._tree_id.set(tree_id)
@@ -2857,7 +2629,8 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
         win.bind("<Return>", lambda e: _create())
 
     def _add_focus(self):
-        occ = {(f.x, f.y) for f in self.focuses.values()}
+        self.focuses.validate_indexes(rebuild=True)
+        occ = self.focuses.occupied_positions
         gx, gy = 0, 0
         while (gx, gy) in occ:
             gx += 2  # HOI4 standard: focuses placed at even columns
@@ -2872,9 +2645,10 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
         pfx = self._default_focus_prefix
         if pfx:
             f.name = pfx + "focus_%d" % f.id
-        self.focuses[f.id] = f
+        self.focuses.add(f)
         self._redraw()
         self._select(f)
+        self._invalidate_focus_list_structure()
 
     def _apply(self):
         if not self.selected:
@@ -2904,12 +2678,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
             nx = int(self._fv_x.get())
             ny = int(self._fv_y.get())
             # move on canvas if x/y changed
-            if not any(
-                o.x == nx and o.y == ny and o.id != f.id for o in self.focuses.values()
-            ):
-                f.x = nx
-                f.y = ny
-            else:
+            if not self.focuses.move(f.id, nx, ny):
                 messagebox.showwarning(
                     tr("dialog.position.title", "Position"),
                     tr(
@@ -2934,10 +2703,10 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
         f.cancel_if_invalid = self._fv_cancel.get()
         f.continue_if_invalid = self._fv_continue.get()
         f.available_if_capitulated = self._fv_cap.get()
-        f._draw_key = None
+        self.focuses.touch()
         self._redraw()
         self._populate(f)
-        self._refresh_focus_list()
+        self._invalidate_focus_list_structure()
 
     def _toggle_multisel(self):
         self._multisel_mode = not self._multisel_mode
@@ -2994,32 +2763,19 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
         ):
             return
         del_ids = {fid for fid in self._multi_sel if fid in self.focuses}
-        touched_ids = set(del_ids)
-        for o in self.focuses.values():
-            if o.id in del_ids:
-                continue
-            if any(p in del_ids for g in o.prereqs for p in g) or any(
-                m in del_ids for m in o.mutex
-            ):
-                touched_ids.add(o.id)
+        touched_ids = del_ids | set().union(
+            *(self.focuses.reverse_prerequisites.get(fid, set()) for fid in del_ids)
+        ) | set().union(*(self.focuses.reverse_mutex.get(fid, set()) for fid in del_ids))
         self._push_undo("delete selected", touched_ids=touched_ids)
-        for fid in list(self._multi_sel):
-            if fid not in self.focuses:
-                continue
-            # Remove refs from other focuses
-            for o in self.focuses.values():
-                o.prereqs = [[p for p in g if p != fid] for g in o.prereqs]
-                o.prereqs = [g for g in o.prereqs if g]
-                o.mutex = [m for m in o.mutex if m != fid]
-            # Delete canvas items
-            for item in self.focuses[fid]._items:
-                self.cv.delete(item)
-            del self.focuses[fid]
+        for fid in del_ids:
+            self.cv.delete("F" + str(fid))
+        self.focuses.delete_many(del_ids)
         self._multi_sel.clear()
         if self.selected and self.selected.id not in self.focuses:
             self.selected = None
             self._hide_form()
         self._redraw()
+        self._invalidate_focus_list_structure()
         self._hint(tr("hint.deleted_focuses", "Deleted {count} focus(es).", count=n))
 
     def _key_delete(self):
@@ -3038,22 +2794,15 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
             return
         fid = self.selected.id
         touched_ids = {fid}
-        for o in self.focuses.values():
-            if o.id == fid:
-                continue
-            if any(fid in g for g in o.prereqs) or fid in o.mutex:
-                touched_ids.add(o.id)
+        touched_ids.update(self.focuses.reverse_prerequisites.get(fid, ()))
+        touched_ids.update(self.focuses.reverse_mutex.get(fid, ()))
         self._push_undo("delete focus", touched_ids=touched_ids)
-        for o in self.focuses.values():
-            o.prereqs = [[p for p in g if p != fid] for g in o.prereqs]
-            o.prereqs = [g for g in o.prereqs if g]
-            o.mutex = [m for m in o.mutex if m != fid]
-        for i in self.selected._items:
-            self.cv.delete(i)
-        del self.focuses[fid]
+        self.cv.delete("F" + str(fid))
+        self.focuses.delete_many((fid,))
         self.selected = None
         self._hide_form()
         self._redraw()
+        self._invalidate_focus_list_structure()
 
     def _clear_all(self):
         if not messagebox.askyesno(
@@ -3061,6 +2810,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
             tr("dialog.clear_all.body", "Delete ALL focuses?"),
         ):
             return
+        self._begin_document_generation()
         self.cv.delete("all")
         self.focuses.clear()
         self._reset_canvas_bounds()
@@ -3076,6 +2826,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
         self._refresh_tree_meta_panel()
         self._hide_form()
         self._draw_grid()
+        self._invalidate_focus_list_structure()
 
     # ── CONNECT / MUTEX ─────────────────────────────────────────
     def _pick_prereq(self):
@@ -3315,7 +3066,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
             if not group:
                 return
             self._push_undo("add prerequisite OR group", touched_ids=(child.id,))
-            child.prereqs.append(group)
+            self.focuses.link_prerequisite(child.id, group, mode="or")
             self._refresh_prereqs()
             self._draw_lines()
             win.destroy()
@@ -3335,8 +3086,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
             if not fids:
                 return
             self._push_undo("add prerequisite AND group", touched_ids=(child.id,))
-            for fid in fids:
-                child.prereqs.append([fid])
+            self.focuses.link_prerequisite(child.id, fids, mode="and")
             self._refresh_prereqs()
             self._draw_lines()
             win.destroy()
@@ -3399,7 +3149,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
         for g in child.prereqs:
             if parent.id in g:
                 return
-        child.prereqs.append([parent.id])
+        self.focuses.link_prerequisite(child.id, (parent.id,))
         self._redraw()
         if self.selected:
             self._refresh_prereqs()
@@ -3407,7 +3157,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
     def _rm_prereq(self, gi):
         if not self.selected:
             return
-        self.selected.prereqs.pop(gi)
+        self.focuses.unlink_prerequisite_group(self.selected.id, gi)
         self._refresh_prereqs()
         self._draw_lines()
 
@@ -3453,10 +3203,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
         self._redraw()
 
     def _make_mutex(self, a, b):
-        if b.id not in a.mutex:
-            a.mutex.append(b.id)
-        if a.id not in b.mutex:
-            b.mutex.append(a.id)
+        self.focuses.link_mutex(a.id, b.id)
         self._redraw()
         if self.selected:
             self._refresh_mutex()
@@ -3464,11 +3211,8 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
     def _rm_mutex(self, idx):
         if not self.selected:
             return
-        mid = self.selected.mutex.pop(idx)
-        if mid in self.focuses:
-            other = self.focuses[mid]
-            if self.selected.id in other.mutex:
-                other.mutex.remove(self.selected.id)
+        mid = self.selected.mutex[idx]
+        self.focuses.unlink_mutex(self.selected.id, mid)
         self._refresh_mutex()
         self._draw_lines()
 
@@ -3495,6 +3239,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
         )
         if not path:
             return
+        self._begin_document_generation()
 
         try:
             # Untrusted file: cap the raw read so a giant .drawio can't
@@ -3545,7 +3290,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
         def on_done(graph):
             self._import_drawio_continue(graph, path)
 
-        run_bg(self, work, on_done, on_error=on_error)
+        run_bg(self, work, on_done, on_error=on_error, scope="document")
 
     def _import_drawio_continue(self, graph, path):
         """Collect import settings, preview the tree, and add its focuses."""
@@ -4035,10 +3780,10 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
 
         # Build Focus objects (sorted by visual order) and wire prerequisites.
         new_focuses = build_drawio_focuses(drawio_result)
-        for f in new_focuses:
-            self.focuses[f.id] = f
+        self.focuses.load(new_focuses)
 
         self._redraw()
+        self._invalidate_focus_list_structure()
         auto_shifted = drawio_result.auto_shifted
         shift_note = (
             tr(
@@ -4110,6 +3855,8 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
             )
             return
 
+        self._begin_document_generation()
+
         # Auto-set the edit target so Export writes back to this file in place
         MOD.edit_focus_file = path
         # If mod is loaded, also try to auto-detect the matching localisation file
@@ -4177,6 +3924,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
             self._cfp_x_var.set("" if self._cfp_x is None else str(self._cfp_x))
             self._cfp_y_var.set("" if self._cfp_y is None else str(self._cfp_y))
             self._tree_country_raw = parsed.country_raw
+            self._tree_had_wrapper = parsed.had_wrapper
             self._shared_focuses = parsed.shared_refs
             self._joint_focuses = parsed.joint_refs
             # Only overwrite the country tag when one was actually detected in
@@ -4185,8 +3933,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
             if parsed.country_tag and parsed.country_tag != "TAG":
                 self._tree_country_tag = parsed.country_tag
 
-            for f in new_focuses:
-                self.focuses[f.id] = f
+            self.focuses.load(new_focuses)
 
             self._detect_and_apply_tag()  # scan IDs now all focuses are loaded
             # If explicit tag was read from original_tag, ensure prefix is
@@ -4197,6 +3944,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
                 self._default_focus_prefix = self._tree_country_tag + "_"
             self._refresh_tree_meta_panel()
             self._redraw()
+            self._invalidate_focus_list_structure()
             self._fit_all()
             _sf_info = (
                 f"\nshared_focus: {len(self._shared_focuses)} ref(s)"
@@ -4230,7 +3978,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
             # else: unexpected error, already recorded in the in-app error
             # log by run_bg.
 
-        run_bg(self, work, on_done, on_error=on_error)
+        run_bg(self, work, on_done, on_error=on_error, scope="document")
 
     # ── MULTI-TREE HELPERS ───────────────────────────────────────
 
@@ -4293,11 +4041,12 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
             existing_focuses=list(self.focuses.values()),
         )
         t3 = time.perf_counter()
+        self.focuses.extend(new_focuses)
         for f in new_focuses:
-            self.focuses[f.id] = f
             tree_info["focus_ids"].add(f.id)
         self._refresh_loaded_trees_panel()
         self._redraw()
+        self._invalidate_focus_list_structure()
         self._fit_all()
         log.debug(
             "install tree %s: parse %.1fms build %.1fms (%d focuses)",
@@ -4380,28 +4129,25 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
         # Delete canvas items and focus objects
         for fid in list(info["focus_ids"]):
             if fid in self.focuses:
-                f = self.focuses[fid]
-                for item in f._items:
-                    try:
-                        self.cv.delete(item)
-                    except Exception:
-                        pass
-                del self.focuses[fid]
+                self.cv.delete("F" + str(fid))
+        self.focuses.delete_many(info["focus_ids"], clean_references=False)
         self._lines.clear()
         if self.selected and self.selected.id not in self.focuses:
             self.selected = None
             self._hide_form()
         # Remove from list; re-index tree_idx on focuses belonging to later trees
         self._extra_trees.pop(tree_idx - 1)
+        tree_updates = {}
         for new_idx, et in enumerate(self._extra_trees, start=1):
             if new_idx >= tree_idx:
                 for fid in et["focus_ids"]:
                     if fid in self.focuses:
-                        self.focuses[fid].tree_idx = new_idx
-                        self.focuses[fid]._draw_key = None
+                        tree_updates[fid] = new_idx
+        self.focuses.set_trees(tree_updates)
         self._refresh_tree_meta_panel()
         self._refresh_loaded_trees_panel()
         self._redraw()
+        self._invalidate_focus_list_structure()
 
     def _refresh_loaded_trees_panel(self):
         """Rebuild the Loaded Trees panel list in the sidebar."""
@@ -4487,25 +4233,36 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
                 cursor="hand2",
             ).pack(pady=(0, 4))
 
-    def _export_extra_tree(self, tree_idx):
+    def _export_extra_tree(
+        self,
+        tree_idx,
+        *,
+        focuses_in_tree=None,
+        focus_name_lookup=None,
+        show_dialog=True,
+    ):
         """Export a single extra (shared/joint) tree to its source file."""
         if tree_idx <= 0 or tree_idx > len(self._extra_trees):
             return
         info = self._extra_trees[tree_idx - 1]
-        focuses_in_tree = [
-            f for f in self.focuses.values() if getattr(f, "tree_idx", 0) == tree_idx
-        ]
+        if focuses_in_tree is None:
+            focuses_in_tree = [
+                f
+                for f in self.focuses.values()
+                if getattr(f, "tree_idx", 0) == tree_idx
+            ]
         if not focuses_in_tree:
-            messagebox.showwarning(
-                tr("dialog.export.title", "Export"),
-                tr("dialog.no_focuses_in_tree", "No focuses in this tree."),
-            )
+            if show_dialog:
+                messagebox.showwarning(
+                    tr("dialog.export.title", "Export"),
+                    tr("dialog.no_focuses_in_tree", "No focuses in this tree."),
+                )
             return
         out_text = export_focus_tree(
             focuses_in_tree,
             info,
             focus_lookup=self.focuses,
-            effect_renderer=self._render_effect,
+            focus_name_lookup=focus_name_lookup,
         )
         # Save to source file or ask
         if os.path.isfile(info["file_path"]):
@@ -4526,15 +4283,17 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
         with open(path, "w", encoding="utf-8") as fp:
             fp.write(out_text)
         info["file_path"] = path
-        messagebox.showinfo(
-            tr("dialog.saved.title", "Saved"),
-            tr(
-                "dialog.extra_tree_saved",
-                "{type} tree saved:\n{file}",
-                type=info["type"].capitalize(),
-                file=os.path.basename(path),
-            ),
-        )
+        if show_dialog:
+            messagebox.showinfo(
+                tr("dialog.saved.title", "Saved"),
+                tr(
+                    "dialog.extra_tree_saved",
+                    "{type} tree saved:\n{file}",
+                    type=info["type"].capitalize(),
+                    file=os.path.basename(path),
+                ),
+            )
+        return path
 
     def _batch_load_trees_worker(
         self,
@@ -4547,6 +4306,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
         """Parse and build selected trees sequentially on a worker thread."""
         total = len(to_load)
         existing = list(existing_seed)
+        build_context = BuildContext(existing)
         tree_idx = extra_trees_start_idx
         results = []
         for i, (path, ttype) in enumerate(to_load, start=1):
@@ -4560,7 +4320,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
                     parsed,
                     tree_idx + 1,
                     country_tag=country_tag,
-                    existing_focuses=existing,
+                    context=build_context,
                 )
                 tree_idx += 1
                 t2 = time.perf_counter()
@@ -4571,7 +4331,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
                     (t2 - t1) * 1000,
                     len(new_focuses),
                 )
-                existing = existing + new_focuses
+                existing.extend(new_focuses)
                 results.append(
                     {
                         "path": path,
@@ -4867,7 +4627,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
                 )
                 modal.set_fraction(i / total if total else 1.0)
 
-            progress = make_progress(self, _update_progress)
+            progress = make_progress(self, _update_progress, scope="document")
 
             def work():
                 return self._batch_load_trees_worker(
@@ -4881,6 +4641,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
             def on_done(results):
                 modal.close()
                 ok, fail = [], []
+                pending_focuses = []
                 for r in results:
                     fname = os.path.basename(r["path"])
                     if not r["ok"]:
@@ -4912,13 +4673,16 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
                     ):
                         self._joint_focuses.append(parsed.tree_id)
                     for f in r["new_focuses"]:
-                        self.focuses[f.id] = f
+                        pending_focuses.append(f)
                         tree_info["focus_ids"].add(f.id)
+
+                self.focuses.extend(pending_focuses)
 
                 if ok:
                     self._refresh_tree_meta_panel()
                     self._refresh_loaded_trees_panel()
                     self._redraw()
+                    self._invalidate_focus_list_structure()
 
                 msg = (
                     tr(
@@ -4960,7 +4724,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
                     ),
                 )
 
-            run_bg(self, work, on_done, on_error=on_error)
+            run_bg(self, work, on_done, on_error=on_error, scope="document")
 
         tk.Button(
             btn_row,
@@ -4991,15 +4755,29 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
         """Export all loaded trees (main + extra) with one click."""
         results = []
         errors = []
+        self._autosave()
+        focuses_by_tree = group_focuses_by_tree(self.focuses.values())
+        focus_name_lookup = build_focus_name_lookup(self.focuses.values())
         try:
-            self._export()
-            results.append(f"Main: {self._tree_id.get()}")
+            path = self._export(
+                focuses_in_tree=focuses_by_tree.get(0, []),
+                focus_name_lookup=focus_name_lookup,
+                show_dialog=False,
+            )
+            if path:
+                results.append(f"Main: {self._tree_id.get()}")
         except Exception as e:
             errors.append(f"Main tree: {e}")
         for idx, et in enumerate(self._extra_trees, start=1):
             try:
-                self._export_extra_tree(idx)
-                results.append(f"{et['type'].capitalize()}: {et['tree_id']}")
+                path = self._export_extra_tree(
+                    idx,
+                    focuses_in_tree=focuses_by_tree.get(idx, []),
+                    focus_name_lookup=focus_name_lookup,
+                    show_dialog=False,
+                )
+                if path:
+                    results.append(f"{et['type'].capitalize()}: {et['tree_id']}")
             except Exception as e:
                 errors.append(f"{et['tree_id']}: {e}")
         msg = tr("save_all.complete", "Save All Trees complete!") + "\n\n"
@@ -5019,6 +4797,115 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
         messagebox.showinfo(tr("save_all.title", "Save All Trees"), msg)
 
     # ── SAVE / LOAD ─────────────────────────────────────────────
+    def _capture_workspace(self):
+        main_extras = self.workspace.main_tree.extras
+        try:
+            cfp_x = int(self._cfp_x_var.get())
+        except (TypeError, ValueError):
+            cfp_x = getattr(self, "_cfp_x", None)
+        try:
+            cfp_y = int(self._cfp_y_var.get())
+        except (TypeError, ValueError):
+            cfp_y = getattr(self, "_cfp_y", None)
+        meta = TreeMetadata(
+            tree_id=self._tree_id.get(),
+            country_tag=getattr(self, "_tree_country_tag", ""),
+            country_name=getattr(self, "_tree_country_name", ""),
+            country_raw=getattr(self, "_tree_country_raw", ""),
+            focus_prefix=getattr(self, "_tree_focus_prefix", ""),
+            cfp_x=cfp_x,
+            cfp_y=cfp_y,
+            shared_focuses=list(self._shared_focuses),
+            joint_focuses=list(self._joint_focuses),
+        )
+        self.workspace.main_tree = TreeDocument(
+            metadata=meta,
+            file_path=getattr(MOD, "edit_focus_file", "") or "",
+            had_wrapper=getattr(self, "_tree_had_wrapper", True),
+            focus_ids=set(self.focuses.tree_membership.get(0, ())),
+            extras=main_extras,
+        )
+        self.workspace.extra_trees = []
+        for tree in self._extra_trees:
+            known_tree_keys = {
+                "type",
+                "file_path",
+                "tree_id",
+                "cfp_x",
+                "cfp_y",
+                "shared_focuses",
+                "joint_focuses",
+                "country_tag",
+                "had_wrapper",
+                "focus_ids",
+            }
+            tree_meta = TreeMetadata(
+                tree_id=tree.get("tree_id", ""),
+                country_tag=tree.get("country_tag", ""),
+                cfp_x=tree.get("cfp_x"),
+                cfp_y=tree.get("cfp_y"),
+                shared_focuses=list(tree.get("shared_focuses", [])),
+                joint_focuses=list(tree.get("joint_focuses", [])),
+            )
+            self.workspace.extra_trees.append(
+                TreeDocument(
+                    metadata=tree_meta,
+                    tree_type=tree.get("type", "shared"),
+                    file_path=tree.get("file_path", ""),
+                    had_wrapper=tree.get("had_wrapper", True),
+                    focus_ids=set(tree.get("focus_ids", ())),
+                    extras={
+                        key: value
+                        for key, value in tree.items()
+                        if key not in known_tree_keys
+                    },
+                )
+            )
+        self.workspace.canvas_min = tuple(self._canvas_min)
+        self.workspace.canvas_max = tuple(self._canvas_max)
+        self.workspace.default_focus_prefix = self._default_focus_prefix
+        return self.workspace
+
+    def _install_workspace(self, workspace):
+        self._begin_document_generation()
+        self.workspace = workspace
+        self.focuses = workspace.focuses
+        meta = workspace.main_tree.metadata
+        self._tree_id.set(meta.tree_id)
+        self._tree_country_tag = meta.country_tag
+        self._tree_country_name = meta.country_name
+        self._tree_country_raw = meta.country_raw
+        self._tree_focus_prefix = meta.focus_prefix
+        self._tree_had_wrapper = workspace.main_tree.had_wrapper
+        MOD.edit_focus_file = workspace.main_tree.file_path or ""
+        self._cfp_x = meta.cfp_x
+        self._cfp_y = meta.cfp_y
+        self._cfp_x_var.set("" if meta.cfp_x is None else str(meta.cfp_x))
+        self._cfp_y_var.set("" if meta.cfp_y is None else str(meta.cfp_y))
+        self._shared_focuses = meta.shared_focuses
+        self._joint_focuses = meta.joint_focuses
+        self._extra_trees = []
+        for tree in workspace.extra_trees:
+            tree_meta = tree.metadata
+            self._extra_trees.append(
+                {
+                    **tree.extras,
+                    "type": tree.tree_type,
+                    "file_path": tree.file_path,
+                    "tree_id": tree_meta.tree_id,
+                    "cfp_x": tree_meta.cfp_x,
+                    "cfp_y": tree_meta.cfp_y,
+                    "shared_focuses": tree_meta.shared_focuses,
+                    "joint_focuses": tree_meta.joint_focuses,
+                    "country_tag": tree_meta.country_tag,
+                    "had_wrapper": tree.had_wrapper,
+                    "focus_ids": tree.focus_ids,
+                }
+            )
+        self._canvas_min = list(workspace.canvas_min)
+        self._canvas_max = list(workspace.canvas_max)
+        self._default_focus_prefix = workspace.default_focus_prefix
+
     def _save(self):
         path = filedialog.asksaveasfilename(
             defaultextension=".json",
@@ -5030,12 +4917,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
         )
         if not path:
             return
-        data = {
-            "tree_name": self._tree_id.get(),
-            "focuses": [f.to_dict() for f in self.focuses.values()],
-        }
-        with open(path, "w", encoding="utf-8") as fp:
-            json.dump(data, fp, indent=2)
+        write_project(path, self._capture_workspace())
         messagebox.showinfo(
             tr("dialog.saved.title", "Saved"),
             tr("dialog.project_saved", "Project saved:\n{path}", path=path),
@@ -5077,25 +4959,21 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
         )
         if not path:
             return
-        with open(path, encoding="utf-8") as fp:
-            data = json.load(fp)
+        workspace = read_project(path)
         self.cv.delete("all")
-        self.focuses.clear()
-        self._reset_canvas_bounds()
         self.selected = None
         self._lines.clear()
         self._grid_item = None
         self._grid_key = None
         self._grid_img = None
-        self._tree_id.set(data.get("tree_name", "TAG_focus_tree"))
+        self._install_workspace(workspace)
         self._update_title()
-        for fd in data.get("focuses", []):
-            f = Focus.from_dict(fd)
-            f._draw_key = None
-            self.focuses[f.id] = f
         self._detect_and_apply_tag()
+        self._refresh_tree_meta_panel()
+        self._refresh_loaded_trees_panel()
         self._hide_form()
         self._redraw()
+        self._invalidate_focus_list_structure()
 
     # ── EXPORT ──────────────────────────────────────────────────
 
@@ -5181,98 +5059,51 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
 
     # ─────────────────── FOCUS LIST PANEL ────────────────────────
     def _refresh_focus_list_debounced(self):
-        """Coalesce rapid search-box keystrokes into a single list rebuild.
-
-        _refresh_focus_list() tears down and recreates every row, so firing it
-        on each keystroke is wasteful on large trees. Schedule one rebuild
-        ~120ms after typing stops instead.
-        """
+        """Coalesce rapid search-box keystrokes into one structural refresh."""
         if getattr(self, "_lp_search_job", None):
             try:
                 self.after_cancel(self._lp_search_job)
             except Exception:
                 pass
-        self._lp_search_job = self.after(120, self._refresh_focus_list)
+        self._lp_search_job = self.after(120, self._invalidate_focus_list_structure)
 
-    def _refresh_focus_list(self):
-        """Rebuild the left-panel focus list widgets.
-        Called on: add/delete focus, rename, search change, mod load.
-        For selection-only changes, _update_focus_list_selection() is cheaper.
-        """
+    def _invalidate_focus_list_structure(self):
+        """Refresh list data after add/delete/rename/import or search changes."""
         self._lp_search_job = None
-        if not hasattr(self, "_lp_inner"):
+        if not hasattr(self, "_focus_list"):
             return
-        for w in self._lp_inner.winfo_children():
-            w.destroy()
-        self._lp_row_widgets = {}  # fid -> (row, bar, dot, lbl)
-        query = ""
-        if hasattr(self, "_lp_search_var"):
-            q = self._lp_search_var.get().strip()
-            if q and q != "Search\u2026":
-                query = q.lower()
-        for f in self.focuses.values():
-            if query and query not in f.name.lower():
-                continue
-            has_fx = bool(f.effects)
-            broken = any(pid not in self.focuses for grp in f.prereqs for pid in grp)
-            dot_col = "#ef4444" if broken else ("#22c55e" if has_fx else "#fbbf24")
-            is_sel = bool(self.selected and self.selected.id == f.id)
-            row_bg = "#1e2d4a" if is_sel else BG_PANEL
-            row_fg = "#93c5fd" if is_sel else TEXT_DIM
-            row = tk.Frame(self._lp_inner, bg=row_bg, cursor="hand2")
-            row.pack(fill="x")
-            bar = tk.Frame(row, bg=BLUE if is_sel else row_bg, width=3)
-            bar.pack(side="left", fill="y")
-            dot = tk.Label(
-                row, text="\u25cf", bg=row_bg, fg=dot_col, font=("Helvetica", 7), padx=2
+        items = [
+            FocusListItem(
+                f.id,
+                f.name,
+                has_effects=bool(f.effects),
+                has_broken_prerequisite=any(
+                    pid not in self.focuses for group in f.prereqs for pid in group
+                ),
             )
-            dot.pack(side="left")
-            lbl = tk.Label(
-                row,
-                text=f.name,
-                bg=row_bg,
-                fg=row_fg,
-                font=("Courier", 9),
-                anchor="w",
-                padx=2,
-                pady=4,
-            )
-            lbl.pack(side="left", fill="x", expand=True)
-            self._lp_row_widgets[f.id] = (row, bar, dot, lbl)
-
-            def _click(e, fid=f.id):
-                if fid in self.focuses:
-                    self._select(self.focuses[fid])
-                    self._redraw()
-
-            for w in (row, dot, lbl, bar):
-                w.bind("<Button-1>", _click)
-                w.bind(
-                    "<Enter>",
-                    lambda e, r=row, s=is_sel: r.config(
-                        bg="#253550" if not s else "#1e2d4a"
-                    ),
-                )
-                w.bind("<Leave>", lambda e, r=row, s=is_sel, c=row_bg: r.config(bg=c))
+            for f in self.focuses.values()
+        ]
+        query = self._lp_search_var.get() if hasattr(self, "_lp_search_var") else ""
+        placeholder = tr("common.search_placeholder", "Search...")
+        selected_id = self.selected.id if self.selected else None
+        self._focus_list.invalidate_structure(
+            items,
+            query=query,
+            placeholder=placeholder,
+            selected_key=selected_id,
+        )
 
     def _update_focus_list_selection(self):
-        """Fast highlight update — only recolours rows, no widget rebuild."""
-        if not hasattr(self, "_lp_row_widgets"):
-            self._refresh_focus_list()
+        """Update at most the old and new materialized row highlights."""
+        if not hasattr(self, "_focus_list"):
             return
         sel_id = self.selected.id if self.selected else None
-        for fid, (row, bar, dot, lbl) in self._lp_row_widgets.items():
-            try:
-                is_sel = fid == sel_id
-                bg = "#1e2d4a" if is_sel else BG_PANEL
-                fg = "#93c5fd" if is_sel else TEXT_DIM
-                bar_bg = BLUE if is_sel else bg
-                row.config(bg=bg)
-                bar.config(bg=bar_bg)
-                dot.config(bg=bg)
-                lbl.config(bg=bg, fg=fg)
-            except tk.TclError:
-                pass  # widget destroyed mid-update
+        self._focus_list.update_selection(sel_id)
+
+    def _select_focus_from_list(self, focus_id):
+        if focus_id in self.focuses:
+            self._select(self.focuses[focus_id])
+            self._redraw()
 
     def _toggle_focus_list(self):
         """Show/hide the left focus list panel."""
@@ -5321,14 +5152,11 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
         # Clear prereqs/mutex since IDs won't match
         nf.prereqs = []
         nf.mutex = []
-        # Clear draw cache so new focus renders immediately
-        nf._draw_key = None
-        nf._items = []
         self._push_undo("duplicate", touched_ids=())
-        self.focuses[nf.id] = nf
+        self.focuses.add(nf)
         self._redraw_now()  # force immediate, bypass throttle
         self._select(nf)
-        self._refresh_focus_list()
+        self._invalidate_focus_list_structure()
 
     # ─────────────────── BULK RENAME ─────────────────────────────
     def _bulk_rename_dialog(self):
@@ -5465,21 +5293,11 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
                 f.id for f in self.focuses.values() if f.name.startswith(fr)
             }
             self._push_undo("bulk_rename", touched_ids=renamed_ids)
-            # Build mapping old_name → new_name
-            mapping = {}
-            for f in self.focuses.values():
-                if f.name.startswith(fr):
-                    mapping[f.name] = to + f.name[len(fr) :]
-            # Apply to names
-            for f in self.focuses.values():
-                if f.name in mapping:
-                    f.name = mapping[f.name]
-            # prereqs and mutex store integer fids — no remapping needed
-            # (names changed above; fid links are stable)
-            n = len(mapping)
+            n = len({f.name for f in self.focuses.values() if f.name.startswith(fr)})
+            self.focuses.rename_prefix(fr, to)
             win.destroy()
             self._redraw()
-            self._refresh_focus_list()
+            self._invalidate_focus_list_structure()
             messagebox.showinfo(
                 tr("bulk_rename.renamed_title", "Renamed"),
                 tr("bulk_rename.renamed_body", "Renamed {count} focus IDs.", count=n),
@@ -5635,7 +5453,9 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
             )
         txt.config(state="disabled")
 
-    def _export(self):
+    def _export(
+        self, *, focuses_in_tree=None, focus_name_lookup=None, show_dialog=True
+    ):
         # Flush any unsaved edits from the form back to the current focus before export
         try:
             if self.selected:
@@ -5643,17 +5463,20 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
         except Exception:
             pass
         # Only export main-tree focuses (tree_idx == 0)
-        main_focuses = {
-            fid: f for fid, f in self.focuses.items() if getattr(f, "tree_idx", 0) == 0
-        }
+        main_focuses = focuses_in_tree
+        if main_focuses is None:
+            main_focuses = [
+                f for f in self.focuses.values() if getattr(f, "tree_idx", 0) == 0
+            ]
         if not main_focuses:
-            messagebox.showwarning(
-                tr("dialog.export.title", "Export"),
-                tr(
-                    "dialog.no_main_focuses_export",
-                    "No main-tree focuses to export.\nUse 'Save All' or the Loaded Trees panel to export shared/joint trees.",
-                ),
-            )
+            if show_dialog:
+                messagebox.showwarning(
+                    tr("dialog.export.title", "Export"),
+                    tr(
+                        "dialog.no_main_focuses_export",
+                        "No main-tree focuses to export.\nUse 'Save All' or the Loaded Trees panel to export shared/joint trees.",
+                    ),
+                )
             return
         tid = (
             re.sub(r"[^A-Za-z0-9_]", "_", self._tree_id.get().strip())
@@ -5687,7 +5510,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
 
         t0 = time.perf_counter()
         out_text = export_main_tree(
-            list(main_focuses.values()),
+            main_focuses,
             {
                 "tree_id": self._tree_id.get(),
                 "country_tag": country_tag,
@@ -5698,7 +5521,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
                 "joint_focuses": getattr(self, "_joint_focuses", []),
             },
             focus_lookup=self.focuses,
-            effect_renderer=self._render_effect,
+            focus_name_lookup=focus_name_lookup,
         )
         t1 = time.perf_counter()
 
@@ -5764,7 +5587,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
 
         existing_loc_text = read_file(loc_path) if os.path.isfile(loc_path) else None
         new_loc_text, added_count = build_loc_yml(
-            existing_loc_text, main_focuses.values(), country_tag
+            existing_loc_text, main_focuses, country_tag
         )
         t2 = time.perf_counter()
         log.debug(
@@ -5792,16 +5615,18 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
                 file=os.path.basename(loc_path),
             )
 
-        messagebox.showinfo(
-            tr("dialog.exported.title", "Exported"),
-            tr(
-                "dialog.exported.body",
-                "Export complete!\n\nFocus tree: {focus_file}{loc_saved}\n\nInstall paths:\n  .txt  ->  common/national_focus/{default_filename}\n\nReminders:\n  - Replace placeholder icons with real GFX keys\n  - Add shared_focus lines if using shared trees",
-                focus_file=os.path.basename(path),
-                loc_saved=loc_saved,
-                default_filename=default_filename,
-            ),
-        )
+        if show_dialog:
+            messagebox.showinfo(
+                tr("dialog.exported.title", "Exported"),
+                tr(
+                    "dialog.exported.body",
+                    "Export complete!\n\nFocus tree: {focus_file}{loc_saved}\n\nInstall paths:\n  .txt  ->  common/national_focus/{default_filename}\n\nReminders:\n  - Replace placeholder icons with real GFX keys\n  - Add shared_focus lines if using shared trees",
+                    focus_file=os.path.basename(path),
+                    loc_saved=loc_saved,
+                    default_filename=default_filename,
+                ),
+            )
+        return path
 
 
 # ─────────────────────────── ENTRY POINT ────────────────────────

@@ -7,10 +7,13 @@ the real ``ThreadPoolExecutor``; tests wait on the returned ``Future``
 instead of sleeping.
 """
 
+import threading
+
 import pytest
 
 import hoi4cm.core.logger as logmod
 from hoi4cm.ui import tasks
+from hoi4cm.ui.lifecycle import ApplicationLifecycle
 
 
 class FakeWidget:
@@ -27,6 +30,23 @@ class FakeWidget:
     def after(self, delay, fn):
         self.after_calls.append((delay, fn))
         fn()
+
+
+class QueuedWidget:
+    def __init__(self):
+        self.master = None
+        self._lifecycle = ApplicationLifecycle(self)
+        self.callbacks = []
+
+    def winfo_exists(self):
+        return True
+
+    def after(self, delay, fn):
+        self.callbacks.append(fn)
+        return len(self.callbacks)
+
+    def after_cancel(self, identifier):
+        return None
 
 
 @pytest.fixture(autouse=True)
@@ -91,6 +111,26 @@ def test_on_done_skipped_when_widget_destroyed():
     calls = []
     future = tasks.run_bg(widget, lambda: 1, calls.append)
     future.result(timeout=2)
+    assert calls == []
+
+
+def test_on_done_skipped_after_document_generation_changes():
+    widget = QueuedWidget()
+    gate = threading.Event()
+    calls = []
+    future = tasks.run_bg(
+        widget,
+        lambda: gate.wait(timeout=2) or 1,
+        calls.append,
+        scope="document",
+    )
+    widget._lifecycle.invalidate("document")
+    gate.set()
+    future.result(timeout=2)
+    for callback in widget.callbacks:
+        callback()
+    widget._lifecycle.close()
+
     assert calls == []
 
 

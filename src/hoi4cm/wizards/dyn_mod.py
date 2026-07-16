@@ -9,7 +9,6 @@
 import json
 import os
 import re
-import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox
 
@@ -20,7 +19,8 @@ from hoi4cm.core import (
 )
 from hoi4cm.core.image import PIL_OK, PILImage, PILImageTk
 from hoi4cm.core.paths import read_file
-from hoi4cm.mod import MOD, ModContext
+from hoi4cm.mod import MOD, WorkspaceFiles
+from hoi4cm.script.syntax import match_brace, parse_script, serialize_block
 from hoi4cm.ui import (
     BG_CARD,
     BG_DARK,
@@ -34,6 +34,8 @@ from hoi4cm.ui import (
     _safe_after,
     _safe_after_idle,
 )
+from hoi4cm.wizards._graphics import browser_folders, collect_image_pairs
+from hoi4cm.wizards._image_loader import TkImageLoader
 
 
 def open_dyn_mod_wizard(app):
@@ -176,6 +178,9 @@ def open_dyn_mod_wizard(app):
 
     def _open_dynmod_gfx_browser():
         ideas_root = os.path.join(MOD.root, MOD.path_ideas_gfx) if MOD.loaded else None
+        catalog = (
+            MOD.graphics_catalog if ideas_root and os.path.isdir(ideas_root) else None
+        )
         if not MOD.loaded or not ideas_root or not os.path.isdir(ideas_root):
             folder = filedialog.askdirectory(
                 title=tr(
@@ -186,21 +191,8 @@ def open_dyn_mod_wizard(app):
             if not folder:
                 return
             ideas_root = folder
-        folders = []
-        try:
-            loose = [
-                f
-                for f in os.listdir(ideas_root)
-                if f.lower().endswith((".dds", ".png", ".tga"))
-            ]
-            if loose:
-                folders.append(("[ideas root]", ideas_root))
-            for _e in sorted(os.listdir(ideas_root)):
-                full = os.path.join(ideas_root, _e)
-                if os.path.isdir(full):
-                    folders.append((_e, full))
-        except Exception:
-            pass
+            catalog = None
+        folders = browser_folders(ideas_root, "[ideas root]", catalog=catalog)
         if not folders:
             messagebox.showinfo(
                 "No Folders",
@@ -219,6 +211,7 @@ def open_dyn_mod_wizard(app):
         bwin.geometry("900x580")
         bwin.resizable(True, True)
         bwin.grab_set()
+        image_loader = TkImageLoader(bwin)
         panes = tk.Frame(bwin, bg=BG_DARK)
         panes.pack(fill="both", expand=True, padx=8, pady=8)
         lf = tk.Frame(panes, bg=BG_PANEL, width=200)
@@ -450,37 +443,36 @@ def open_dyn_mod_wizard(app):
                     lambda e, i=idx: [_select_tile2(i), _apply_dynmod_icon()],
                 )
 
-        def _bg_load2(snap, indices):
-            for i in indices:
-                if i >= len(snap):
-                    break
-                _, path = snap[i]
-                if path in _st2["img_cache"]:
-                    continue
-                img = None
-                paths_try = [path] + [
-                    os.path.splitext(path)[0] + ext
-                    for ext in (".png", ".tga")
-                    if os.path.exists(os.path.splitext(path)[0] + ext)
-                ]
-                for tp in paths_try:
-                    try:
-                        if PIL_OK and os.path.exists(tp):
-                            pil = PILImage.open(tp).convert("RGBA")
-                            rs = getattr(
-                                PILImage, "LANCZOS", getattr(PILImage, "ANTIALIAS", 1)
-                            )
-                            pw, ph = pil.size
-                            ratio = min(IMG_W2 / max(pw, 1), IMG_H2 / max(ph, 1))
-                            pil = pil.resize(
-                                (max(1, int(pw * ratio)), max(1, int(ph * ratio))), rs
-                            )
-                            img = PILImageTk.PhotoImage(pil)
-                            break
-                    except Exception:
-                        pass
-                _st2["img_cache"][path] = img
-                _safe_after(bwin, 0, lambda i2=i: _fill_image2(i2))
+        def _decode_image2(item):
+            i, path = item
+            if not PIL_OK:
+                return None
+            paths_try = [path] + [
+                os.path.splitext(path)[0] + ext
+                for ext in (".png", ".tga")
+                if os.path.exists(os.path.splitext(path)[0] + ext)
+            ]
+            for tp in paths_try:
+                try:
+                    if not os.path.exists(tp):
+                        continue
+                    with PILImage.open(tp) as source:
+                        pil = source.convert("RGBA")
+                    rs = getattr(PILImage, "LANCZOS", getattr(PILImage, "ANTIALIAS", 1))
+                    pw, ph = pil.size
+                    ratio = min(IMG_W2 / max(pw, 1), IMG_H2 / max(ph, 1))
+                    return pil.resize(
+                        (max(1, int(pw * ratio)), max(1, int(ph * ratio))), rs
+                    )
+                except Exception:
+                    pass
+            return None
+
+        def _apply_image2(item, img):
+            i, path = item
+            _st2["img_cache"][path] = img
+            if i < len(_st2["pairs"]) and _st2["pairs"][i][1] == path:
+                _fill_image2(i)
 
         def _lazy_fill2(*_):
             if not _st2["pairs"]:
@@ -503,11 +495,15 @@ def open_dyn_mod_wizard(app):
             ]
             if to_load:
                 snap = list(_st2["pairs"])
-                threading.Thread(
-                    target=_bg_load2, args=(snap, to_load), daemon=True
-                ).start()
+                image_loader.submit_many(
+                    ((i, snap[i][1]) for i in to_load if i < len(snap)),
+                    _decode_image2,
+                    realizer=lambda pil: PILImageTk.PhotoImage(pil),
+                    apply=_apply_image2,
+                )
 
         def _rebuild2(pairs):
+            image_loader.invalidate()
             cv.delete("all")
             _st2.update(
                 {"pairs": pairs, "drawn": set(), "canvas_ids": {}, "sel_idx": None}
@@ -529,18 +525,12 @@ def open_dyn_mod_wizard(app):
             _safe_after_idle(bwin, _lazy_fill2)
 
         def _collect_files2(folder_path):
-            ft = search_var.get().strip().lower()
-            pairs = []
-            for rd, dirs, fnames in os.walk(folder_path):
-                dirs.sort()
-                for fname in sorted(fnames):
-                    if not fname.lower().endswith((".dds", ".png", ".tga")):
-                        continue
-                    if ft and ft not in fname.lower():
-                        continue
-                    stem = os.path.splitext(fname)[0]
-                    pairs.append(("GFX_idea_" + stem, os.path.join(rd, fname)))
-            return pairs
+            return collect_image_pairs(
+                folder_path,
+                "GFX_idea_",
+                search=search_var.get().strip(),
+                catalog=catalog,
+            )
 
         def _load_folder2(folder_path):
             status_lbl.config(text=tr("gfx.scanning", "scanning..."))
@@ -1099,6 +1089,15 @@ def open_dyn_mod_wizard(app):
 
         results = []  # (rel_path, action, note)
         errors = []
+        workspace_files = WorkspaceFiles(
+            on_written=(
+                MOD.note_file_written
+                if MOD.loaded
+                and os.path.normcase(os.path.abspath(MOD.root))
+                == os.path.normcase(os.path.abspath(mod_root))
+                else None
+            )
+        )
 
         # ── Helpers ───────────────────────────────────────────
         def full(rel):
@@ -1116,10 +1115,8 @@ def open_dyn_mod_wizard(app):
 
         def write(rel, content, encoding="utf-8"):
             p = full(rel)
-            os.makedirs(os.path.dirname(p), exist_ok=True)
             try:
-                with open(p, "w", encoding=encoding) as f:
-                    f.write(content)
+                workspace_files.write_text(p, content, encoding=encoding)
                 return True
             except Exception as e:
                 errors.append(f"{rel}: {e}")
@@ -1174,19 +1171,10 @@ def open_dyn_mod_wizard(app):
                 if not m:
                     # Not found — append
                     return src.rstrip() + "\n\n" + new_block + "\n", "appended"
-                # Walk forward counting braces to find closing }
-                depth = 0
-                i = m.start()
-                while i < len(src):
-                    if src[i] == "{":
-                        depth += 1
-                    elif src[i] == "}":
-                        depth -= 1
-                        if depth == 0:
-                            # Replace from m.start() to i+1
-                            replaced = src[: m.start()] + new_block + src[i + 1 :]
-                            return replaced, "updated"
-                    i += 1
+                i = match_brace(src, m.end() - 1)
+                if i < len(src):
+                    replaced = src[: m.start()] + new_block + src[i + 1 :]
+                    return replaced, "updated"
                 return src.rstrip() + "\n\n" + new_block + "\n", "appended"
 
             dm_final, action = replace_or_append(dm_existing, mid, dm_new_block)
@@ -1377,9 +1365,7 @@ def open_dyn_mod_wizard(app):
                 src = read_file(fp)
                 if not src:
                     continue
-                tokens = ModContext._tokenize(src)
-                tokens = ["{"] + tokens + ["}"]
-                parsed, _ = ModContext._parse_block(tokens, 0)
+                parsed = parse_script(src)
                 for k, v in parsed.items():
                     if k not in ("_values", "=") and isinstance(v, dict):
                         mods.append((k, fp))
@@ -1442,42 +1428,7 @@ def open_dyn_mod_wizard(app):
             lb.insert("end", f"  {mid:<50}  {os.path.basename(fp)}")
 
         def _block_to_enable_text(blk, depth=0):
-            """Recursively convert a parsed HOI4 block dict back to script text.
-            Handles nested dicts, repeated keys (lists), bools → yes/no."""
-            if not isinstance(blk, dict):
-                # scalar fallback (list of scalars is handled in caller)
-                if isinstance(blk, bool):
-                    return "yes" if blk else "no"
-                return str(blk)
-            ind = "\t" * depth
-            lines = []
-            for k, v in blk.items():
-                if k == "_values":
-                    for val in (v if isinstance(v, list) else [v]):
-                        if isinstance(val, bool):
-                            lines.append(f"{ind}{'yes' if val else 'no'}")
-                        else:
-                            lines.append(f"{ind}{val}")
-                    continue
-                if isinstance(v, bool):
-                    lines.append(f"{ind}{k} = {'yes' if v else 'no'}")
-                elif isinstance(v, list):
-                    for item in v:
-                        if isinstance(item, dict):
-                            lines.append(f"{ind}{k} = {{")
-                            lines.append(_block_to_enable_text(item, depth + 1))
-                            lines.append(f"{ind}}}")
-                        elif isinstance(item, bool):
-                            lines.append(f"{ind}{k} = {'yes' if item else 'no'}")
-                        else:
-                            lines.append(f"{ind}{k} = {item}")
-                elif isinstance(v, dict):
-                    lines.append(f"{ind}{k} = {{")
-                    lines.append(_block_to_enable_text(v, depth + 1))
-                    lines.append(f"{ind}}}")
-                else:
-                    lines.append(f"{ind}{k} = {v}")
-            return "\n".join(lines)
+            return serialize_block(blk, indent="\t" * depth, include_bare_values=True)
 
         def _load_selected():
             sel = lb.curselection()
@@ -1486,9 +1437,7 @@ def open_dyn_mod_wizard(app):
             modifier_id, fp = mods[sel[0]]
             try:
                 src = read_file(fp)
-                tokens = ModContext._tokenize(src)
-                tokens = ["{"] + tokens + ["}"]
-                parsed, _ = ModContext._parse_block(tokens, 0)
+                parsed = parse_script(src)
                 blk = parsed.get(modifier_id, {})
                 if not isinstance(blk, dict):
                     messagebox.showerror(

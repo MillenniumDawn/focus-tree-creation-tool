@@ -9,7 +9,6 @@
 import json
 import os
 import re
-import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox
 
@@ -24,6 +23,7 @@ from hoi4cm.core import (
 )
 from hoi4cm.core.image import PIL_OK, PILImage, PILImageTk
 from hoi4cm.mod import MOD
+from hoi4cm.script.syntax import parse_block, tokenize
 from hoi4cm.ui import (
     BG_CARD,
     BG_DARK,
@@ -41,6 +41,12 @@ from hoi4cm.ui import (
     _safe_after,
     _safe_after_idle,
 )
+from hoi4cm.wizards._graphics import (
+    browser_folders,
+    collect_image_pairs,
+    find_catalog_image,
+)
+from hoi4cm.wizards._image_loader import TkImageLoader
 from hoi4cm.wizards._shared import (
     _ev_gfx_cache,
     _ev_imgsize_cache,
@@ -262,6 +268,8 @@ def open_event_wizard(app):
 
     # ── Window ───────────────────────────────────────────────────────
     win = tk.Toplevel(app)
+    preview_image_loader = TkImageLoader(win)
+    gfx_image_loader = TkImageLoader(win)
     win.title(tr("wizard.event.title", "Event Maker"))
     win.configure(bg=BG_DARK)
     win.geometry("1320x820")
@@ -310,27 +318,7 @@ def open_event_wizard(app):
                 for prefix in ("GFX_report_event_", "GFX_news_event_", "GFX_"):
                     if gfx_name.startswith(prefix):
                         stem = gfx_name[len(prefix) :]
-                        # 2. Flat lookup in ev_dir
-                        for ext in (".dds", ".tga", ".png"):
-                            p = os.path.join(ev_dir, stem + ext)
-                            if os.path.isfile(p):
-                                path = p
-                                break
-                        if path:
-                            break
-                        # 3. Deep walk with pre-built lowercase map per directory
-                        if os.path.isdir(ev_dir):
-                            for rd, _dirs, fnames in os.walk(ev_dir):
-                                lmap = {f.lower(): f for f in fnames}
-                                for ext in (".dds", ".tga", ".png"):
-                                    orig = lmap.get(stem + ext) or lmap.get(
-                                        (stem + ext).lower()
-                                    )
-                                    if orig:
-                                        path = os.path.join(rd, orig)
-                                        break
-                                if path:
-                                    break
+                        path = find_catalog_image(MOD.graphics_catalog, ev_dir, stem)
                         break
         _ev_gfx_cache[gfx_name] = path
         return path
@@ -359,6 +347,7 @@ def open_event_wizard(app):
     # ── Preview scheduler (defined early so all callbacks can reference it) ──
     _prev_job = [None]
     _prev_img_cache = {}  # (gfx_key, w, h) -> PhotoImage or None
+    _prev_img_pending = set()
 
     def _schedule_preview(*_):
         if _prev_job[0]:
@@ -471,42 +460,33 @@ def open_event_wizard(app):
                 pic_shown = True
             # else: already tried and failed, show placeholder
 
-        elif fpath:
+        elif fpath and cache_key not in _prev_img_pending:
             # Draw placeholder immediately, then load image in background
-            def _load_and_show(
-                path=fpath,
-                key=cache_key,
-                wcv=cv,
-                wcx=cx,
-                wcy=cy,
-                wpw=pic_w_px,
-                wph=pic_h_px,
-                wev_uid=ev.uid if hasattr(ev, "uid") else id(ev),
-            ):
-                img_ref = None
+            def _decode_preview_image(item):
+                path, wpw, wph = item
+                if not PIL_OK:
+                    return (
+                        ("tk", path, wpw, wph)
+                        if path.lower().endswith(".png")
+                        else None
+                    )
+
+                def _decode(path_to_decode):
+                    with PILImage.open(path_to_decode) as source:
+                        pil = source.convert("RGBA")
+                    rs = getattr(PILImage, "LANCZOS", getattr(PILImage, "ANTIALIAS", 1))
+                    pw, ph = pil.size
+                    ratio = min(wpw / max(pw, 1), wph / max(ph, 1))
+                    return pil.resize(
+                        (max(1, int(pw * ratio)), max(1, int(ph * ratio))), rs
+                    )
+
                 try:
-                    if PIL_OK:
-                        pil = PILImage.open(path).convert("RGBA")
-                        rs = getattr(
-                            PILImage, "LANCZOS", getattr(PILImage, "ANTIALIAS", 1)
-                        )
-                        # scale to fill picture area, keep aspect ratio
-                        pw, ph = pil.size
-                        ratio = min(wpw / max(pw, 1), wph / max(ph, 1))
-                        nw2 = max(1, int(pw * ratio))
-                        nh2 = max(1, int(ph * ratio))
-                        pil = pil.resize((nw2, nh2), rs)
-                        img_ref = PILImageTk.PhotoImage(pil)
-                    elif path.lower().endswith(".png"):
-                        raw = tk.PhotoImage(file=path)
-                        sx = max(1, raw.width() // wpw)
-                        sy = max(1, raw.height() // wph)
-                        s = max(sx, sy)
-                        img_ref = raw.subsample(s, s) if s > 1 else raw
-                except Exception as _pil_err:
+                    return ("pil", _decode(path))
+                except Exception:
                     # PIL failed (e.g. unsupported DDS compression BC1/BC3)
                     # Try alternative: look for a PNG/TGA version of the same stem
-                    if img_ref is None and path:
+                    if path:
                         stem2 = os.path.splitext(path)[0]
                         for alt_ext in (".png", ".tga", ".jpg"):
                             alt_path = stem2 + alt_ext
@@ -523,38 +503,42 @@ def open_event_wizard(app):
                                     pass
                             if os.path.exists(alt_path):
                                 try:
-                                    if PIL_OK:
-                                        pil2 = PILImage.open(alt_path).convert("RGBA")
-                                        rs2 = getattr(
-                                            PILImage,
-                                            "LANCZOS",
-                                            getattr(PILImage, "ANTIALIAS", 1),
-                                        )
-                                        pw2, ph2 = pil2.size
-                                        ratio2 = min(
-                                            wpw / max(pw2, 1), wph / max(ph2, 1)
-                                        )
-                                        nw3 = max(1, int(pw2 * ratio2))
-                                        nh3 = max(1, int(ph2 * ratio2))
-                                        pil2 = pil2.resize((nw3, nh3), rs2)
-                                        img_ref = PILImageTk.PhotoImage(pil2)
-                                        break
+                                    return ("pil", _decode(alt_path))
                                 except Exception:
                                     pass
+                return None
+
+            def _realize_preview_image(decoded):
+                kind, value, *dimensions = decoded
+                if kind == "pil":
+                    return PILImageTk.PhotoImage(value)
+                wpw, wph = dimensions
+                raw = tk.PhotoImage(file=value)
+                sx = max(1, raw.width() // wpw)
+                sy = max(1, raw.height() // wph)
+                s = max(sx, sy)
+                return raw.subsample(s, s) if s > 1 else raw
+
+            wev_uid = ev.uid if hasattr(ev, "uid") else id(ev)
+
+            def _show_preview(item, img_ref, key=cache_key, event_uid=wev_uid):
+                _prev_img_pending.discard(key)
                 _prev_img_cache[key] = img_ref
-
                 # Re-render on main thread only if same event is still selected
-                def _repaint():
-                    if (
-                        sel[0]
-                        and (sel[0].uid if hasattr(sel[0], "uid") else id(sel[0]))
-                        == wev_uid
-                    ):
-                        _render_preview()
+                if (
+                    sel[0]
+                    and (sel[0].uid if hasattr(sel[0], "uid") else id(sel[0]))
+                    == event_uid
+                ):
+                    _render_preview()
 
-                win.after(0, _repaint)
-
-            threading.Thread(target=_load_and_show, daemon=True).start()
+            _prev_img_pending.add(cache_key)
+            preview_image_loader.submit(
+                (fpath, pic_w_px, pic_h_px),
+                _decode_preview_image,
+                realizer=_realize_preview_image,
+                apply=_show_preview,
+            )
 
         if not pic_shown:
             # Placeholder — GFX key + expected dims
@@ -723,12 +707,14 @@ def open_event_wizard(app):
                 ),
             )
             if os.path.isdir(ev_dir):
-                for fname in os.listdir(ev_dir):
-                    stem, ext = os.path.splitext(fname)
-                    if ext.lower() in (".dds", ".tga", ".png"):
-                        k = f"GFX_report_event_{stem}"
-                        if k not in base:
-                            base.append(k)
+                for key, _path in collect_image_pairs(
+                    ev_dir,
+                    "GFX_report_event_",
+                    catalog=MOD.graphics_catalog,
+                    recursive=False,
+                ):
+                    if key not in base:
+                        base.append(key)
         return sorted(set(base))
 
     def _refresh_list():
@@ -1910,66 +1896,6 @@ def open_event_wizard(app):
         except Exception as e:
             messagebox.showerror("Import Error", str(e), parent=win)
             return
-        stripped = []
-        for ln in raw.splitlines():
-            idx = ln.find("#")
-            stripped.append(ln[:idx] if idx >= 0 else ln)
-        txt = "\n".join(stripped)
-
-        def _tok(s):
-            tokens = []
-            i = 0
-            while i < len(s):
-                c = s[i]
-                if c in " \t\n\r":
-                    i += 1
-                    continue
-                if c in "{}=":
-                    tokens.append(c)
-                    i += 1
-                    continue
-                if c == '"':
-                    j = i + 1
-                    while j < len(s) and s[j] != '"':
-                        j += 1
-                    tokens.append(s[i + 1 : j])
-                    i = j + 1
-                    continue
-                j = i
-                while j < len(s) and s[j] not in ' \t\n\r{}="':
-                    j += 1
-                if j > i:
-                    tokens.append(s[i:j])
-                i = j
-            return tokens
-
-        def _pblk(tokens, pos):
-            result = {}
-            pos += 1
-            while pos < len(tokens) and tokens[pos] != "}":
-                key = tokens[pos]
-                pos += 1
-                if pos >= len(tokens):
-                    break
-                if tokens[pos] == "=":
-                    pos += 1
-                    if pos >= len(tokens):
-                        break
-                    if tokens[pos] == "{":
-                        val, pos = _pblk(tokens, pos)
-                    else:
-                        val = tokens[pos]
-                        pos += 1
-                    if key in result:
-                        ex = result[key]
-                        if not isinstance(ex, list):
-                            result[key] = [ex]
-                        result[key].append(val)
-                    else:
-                        result[key] = val
-                else:
-                    result.setdefault("_values", []).append(key)
-            return result, pos + 1
 
         def _str_val(v, default=""):
             """Extract a plain string from a value that may be a str, dict, or list
@@ -1986,7 +1912,7 @@ def open_event_wizard(app):
                         return item
             return default
 
-        tokens = _tok(txt)
+        tokens = tokenize(raw)
         imported = []
         i = 0
         while i < len(tokens):
@@ -1996,7 +1922,7 @@ def open_event_wizard(app):
                 and tokens[i + 1] == "="
             ):
                 etype = tokens[i]
-                blk, i = _pblk(tokens, i + 2)
+                blk, i = parse_block(tokens, i + 2)
                 ev = _Ev()
                 ev.etype = etype
                 ev.eid = blk.get("id", ev.eid)
@@ -2070,6 +1996,7 @@ def open_event_wizard(app):
 
         # ── Resolve root folder ───────────────────────────────────────
         ev_root = None
+        catalog = None
         if MOD.loaded and MOD.root:
             candidate = os.path.join(
                 MOD.root,
@@ -2079,6 +2006,7 @@ def open_event_wizard(app):
             )
             if os.path.isdir(candidate):
                 ev_root = candidate
+                catalog = MOD.graphics_catalog
         if not ev_root:
             ev_root = filedialog.askdirectory(
                 title="Select event pictures folder  (gfx/event_pictures/)", parent=win
@@ -2087,21 +2015,7 @@ def open_event_wizard(app):
                 return
 
         # ── Build folder list ─────────────────────────────────────────
-        folders = []
-        try:
-            loose = [
-                f
-                for f in os.listdir(ev_root)
-                if f.lower().endswith((".dds", ".png", ".tga"))
-            ]
-            if loose:
-                folders.append(("[event_pictures]", ev_root))
-            for entry in sorted(os.listdir(ev_root)):
-                full = os.path.join(ev_root, entry)
-                if os.path.isdir(full):
-                    folders.append((entry, full))
-        except Exception:
-            pass
+        folders = browser_folders(ev_root, "[event_pictures]", catalog=catalog)
         if not folders:
             folders.append(("[selected folder]", ev_root))
 
@@ -2114,6 +2028,7 @@ def open_event_wizard(app):
         bwin.geometry("900x580")
         bwin.resizable(True, True)
         bwin.grab_set()
+        image_loader = TkImageLoader(bwin)
 
         panes = tk.Frame(bwin, bg=BG_DARK)
         panes.pack(fill="both", expand=True, padx=8, pady=8)
@@ -2370,38 +2285,37 @@ def open_event_wizard(app):
                     lambda e, i=idx: [_select_tile(i), _apply()],
                 )
 
-        def _bg_load_images(pairs_snapshot, indices):
-            for idx in indices:
-                if idx >= len(pairs_snapshot):
-                    break
-                gfx_key, path = pairs_snapshot[idx]
-                if path in _st["img_cache"]:
-                    continue
-                img = None
-                stem_p2 = os.path.splitext(path)[0]
-                paths_to_try2 = [path] + [
-                    stem_p2 + alt
-                    for alt in (".png", ".tga", ".jpg")
-                    if os.path.exists(stem_p2 + alt) and stem_p2 + alt != path
-                ]
-                for try_path2 in paths_to_try2:
-                    try:
-                        if PIL_OK and os.path.exists(try_path2):
-                            pil = PILImage.open(try_path2).convert("RGBA")
-                            rs = getattr(
-                                PILImage, "LANCZOS", getattr(PILImage, "ANTIALIAS", 1)
-                            )
-                            pw, ph = pil.size
-                            ratio = min(IMG_W / max(pw, 1), IMG_H / max(ph, 1))
-                            nw = max(1, int(pw * ratio))
-                            nh = max(1, int(ph * ratio))
-                            pil = pil.resize((nw, nh), rs)
-                            img = PILImageTk.PhotoImage(pil)
-                            break
-                    except Exception:
-                        pass
-                _st["img_cache"][path] = img
-                _safe_after(bwin, 0, lambda i=idx: _fill_image(i))
+        def _decode_browser_image(item):
+            idx, path = item
+            if not PIL_OK:
+                return None
+            stem_p2 = os.path.splitext(path)[0]
+            paths_to_try2 = [path] + [
+                stem_p2 + alt
+                for alt in (".png", ".tga", ".jpg")
+                if os.path.exists(stem_p2 + alt) and stem_p2 + alt != path
+            ]
+            for try_path2 in paths_to_try2:
+                try:
+                    if not os.path.exists(try_path2):
+                        continue
+                    with PILImage.open(try_path2) as source:
+                        pil = source.convert("RGBA")
+                    rs = getattr(PILImage, "LANCZOS", getattr(PILImage, "ANTIALIAS", 1))
+                    pw, ph = pil.size
+                    ratio = min(IMG_W / max(pw, 1), IMG_H / max(ph, 1))
+                    nw = max(1, int(pw * ratio))
+                    nh = max(1, int(ph * ratio))
+                    return pil.resize((nw, nh), rs)
+                except Exception:
+                    pass
+            return None
+
+        def _apply_browser_image(item, img):
+            idx, path = item
+            _st["img_cache"][path] = img
+            if idx < len(_st["pairs"]) and _st["pairs"][idx][1] == path:
+                _fill_image(idx)
 
         def _lazy_fill(*_):
             if not _st["pairs"]:
@@ -2424,11 +2338,15 @@ def open_event_wizard(app):
             ]
             if to_load:
                 snapshot = list(_st["pairs"])
-                threading.Thread(
-                    target=_bg_load_images, args=(snapshot, to_load), daemon=True
-                ).start()
+                image_loader.submit_many(
+                    ((i, snapshot[i][1]) for i in to_load if i < len(snapshot)),
+                    _decode_browser_image,
+                    realizer=lambda pil: PILImageTk.PhotoImage(pil),
+                    apply=_apply_browser_image,
+                )
 
         def _rebuild(pairs):
+            image_loader.invalidate()
             cv.delete("all")
             _st["pairs"] = pairs
             _st["drawn"].clear()
@@ -2446,22 +2364,15 @@ def open_event_wizard(app):
             _safe_after_idle(bwin, _lazy_fill)
 
         def _collect_files(folder_path):
-            ft = search_var.get().lower()
-            pairs = []
             prefix = (
                 "GFX_news_event_" if ev_type == "news_event" else "GFX_report_event_"
             )
-            for root_d, dirs, fnames in os.walk(folder_path):
-                dirs.sort()
-                for fname in sorted(fnames):
-                    if not fname.lower().endswith((".dds", ".png", ".tga")):
-                        continue
-                    if ft and ft not in fname.lower():
-                        continue
-                    stem = os.path.splitext(fname)[0]
-                    gfx_key = prefix + stem
-                    pairs.append((gfx_key, os.path.join(root_d, fname)))
-            return pairs
+            return collect_image_pairs(
+                folder_path,
+                prefix,
+                search=search_var.get(),
+                catalog=catalog,
+            )
 
         def _load_folder(folder_path):
             status_lbl.config(text=tr("gfx.scanning", "scanning..."))
@@ -2923,39 +2834,38 @@ def open_event_wizard(app):
                 lambda e, i=idx: [_gfx_select_tile(i), _gfx_apply_sel()],
             )
 
-    def _gfx_bg_load(pairs_snap, indices):
-        for i in indices:
-            if i >= len(pairs_snap):
-                break
-            _, path = pairs_snap[i]
-            if path in _gfx_st["img_cache"]:
-                continue
-            img = None
-            paths_to_try = [path]
-            # Also queue alt extensions in case primary (DDS) fails
-            stem_p = os.path.splitext(path)[0]
-            for alt in (".png", ".tga", ".jpg"):
-                ap = stem_p + alt
-                if ap != path and os.path.exists(ap):
-                    paths_to_try.append(ap)
-            for try_path in paths_to_try:
-                try:
-                    if PIL_OK and os.path.exists(try_path):
-                        pil = PILImage.open(try_path).convert("RGBA")
-                        rs = getattr(
-                            PILImage, "LANCZOS", getattr(PILImage, "ANTIALIAS", 1)
-                        )
-                        pw, ph = pil.size
-                        ratio = min(GFX_IMG_W / max(pw, 1), GFX_IMG_H / max(ph, 1))
-                        nw2 = max(1, int(pw * ratio))
-                        nh2 = max(1, int(ph * ratio))
-                        pil = pil.resize((nw2, nh2), rs)
-                        img = PILImageTk.PhotoImage(pil)
-                        break  # success — stop trying
-                except Exception:
-                    pass
-            _gfx_st["img_cache"][path] = img
-            _safe_after(win, 0, lambda i2=i: _gfx_fill_image(i2))
+    def _gfx_decode_image(item):
+        i, path = item
+        if not PIL_OK:
+            return None
+        paths_to_try = [path]
+        # Also queue alt extensions in case primary (DDS) fails
+        stem_p = os.path.splitext(path)[0]
+        for alt in (".png", ".tga", ".jpg"):
+            ap = stem_p + alt
+            if ap != path and os.path.exists(ap):
+                paths_to_try.append(ap)
+        for try_path in paths_to_try:
+            try:
+                if not os.path.exists(try_path):
+                    continue
+                with PILImage.open(try_path) as source:
+                    pil = source.convert("RGBA")
+                rs = getattr(PILImage, "LANCZOS", getattr(PILImage, "ANTIALIAS", 1))
+                pw, ph = pil.size
+                ratio = min(GFX_IMG_W / max(pw, 1), GFX_IMG_H / max(ph, 1))
+                nw2 = max(1, int(pw * ratio))
+                nh2 = max(1, int(ph * ratio))
+                return pil.resize((nw2, nh2), rs)
+            except Exception:
+                pass
+        return None
+
+    def _gfx_apply_image(item, img):
+        i, path = item
+        _gfx_st["img_cache"][path] = img
+        if i < len(_gfx_st["pairs"]) and _gfx_st["pairs"][i][1] == path:
+            _gfx_fill_image(i)
 
     def _gfx_lazy_fill(*_):
         if not _gfx_st["pairs"]:
@@ -2978,11 +2888,15 @@ def open_event_wizard(app):
         ]
         if to_load:
             snap = list(_gfx_st["pairs"])
-            threading.Thread(
-                target=_gfx_bg_load, args=(snap, to_load), daemon=True
-            ).start()
+            gfx_image_loader.submit_many(
+                ((i, snap[i][1]) for i in to_load if i < len(snap)),
+                _gfx_decode_image,
+                realizer=lambda pil: PILImageTk.PhotoImage(pil),
+                apply=_gfx_apply_image,
+            )
 
     def _gfx_rebuild(pairs):
+        gfx_image_loader.invalidate()
         gfx_cv.delete("all")
         _gfx_st.update(
             {"pairs": pairs, "drawn": set(), "canvas_ids": {}, "sel_idx": None}
@@ -3027,17 +2941,12 @@ def open_event_wizard(app):
                     if ev_type == "news_event"
                     else "GFX_report_event_"
                 )
-                ft = v_gfx_search.get().lower()
-                pairs = []
-                for rd, dirs, fnames in os.walk(ev_dir):
-                    dirs.sort()
-                    for fname in sorted(fnames):
-                        if not fname.lower().endswith((".dds", ".png", ".tga")):
-                            continue
-                        if ft and ft not in fname.lower():
-                            continue
-                        stem = os.path.splitext(fname)[0]
-                        pairs.append((prefix + stem, os.path.join(rd, fname)))
+                pairs = collect_image_pairs(
+                    ev_dir,
+                    prefix,
+                    search=v_gfx_search.get(),
+                    catalog=MOD.graphics_catalog,
+                )
                 _gfx_rebuild(pairs)
                 return
         gfx_status_lbl.config(

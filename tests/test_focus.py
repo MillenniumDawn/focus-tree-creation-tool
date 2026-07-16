@@ -43,8 +43,6 @@ def test_to_dict_roundtrips():
 
     assert restored.to_dict() == d
     assert restored.id == f.id
-    assert restored._items == []
-    assert restored._draw_key is None
 
 
 def test_from_dict_migrates_pixel_coords():
@@ -68,10 +66,10 @@ def test_from_dict_bumps_counter():
     assert Focus._next == 43
 
 
-def test_from_dict_preserves_private_attrs():
+def test_to_dict_excludes_dynamic_private_attrs():
     f = Focus()
     f._items = ["a"]
     f._draw_key = "key"  # type: ignore[assignment]
     restored = Focus.from_dict(f.to_dict())
-    assert restored._items == []
-    assert restored._draw_key is None
+    assert not hasattr(restored, "_items")
+    assert not hasattr(restored, "_draw_key")

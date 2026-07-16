@@ -197,6 +197,16 @@ def test_cfp_none_and_no_focuses_defaults_to_zero():
     assert "continuous_focus_position = { x = 0 y = 0 }" in text
 
 
+def test_default_effect_renderer_removes_ui_callback_requirement():
+    focus = Focus(0, 0)
+    focus.name = "TST_effect"
+    focus.effects = [{"type": "add_political_power", "fields": {"amount": "25"}}]
+
+    text = export_main_tree([focus], _info(), focus_lookup={focus.id: focus})
+
+    assert "\t\t\tadd_political_power = 25" in text
+
+
 def test_relative_position_first_match_wins_on_duplicate_names():
     first = Focus(1, 1)
     first.name = "DUP"

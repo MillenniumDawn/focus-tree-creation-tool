@@ -26,12 +26,18 @@ from hoi4cm.ui import (
     XGRID,
     YGRID,
 )
+from hoi4cm.ui.canvas_renderer import FocusCanvasBundle
+from hoi4cm.ui.canvas_scheduler import DirtyRedrawState, RedrawChannel
+from hoi4cm.ui.image_broker import ImageBroker
+from hoi4cm.ui.scene_index import SceneIndex
+from hoi4cm.ui.tasks import get_executor
 from hoi4cm.ui.viewport import edge_visible, focus_visible, visible_world_rect
 
 # Margin (canvas pixels, scaled by zoom) added around the viewport before
 # culling: covers the card's shadow/glow overhang and the label drawn below
 # it, so nothing pops in/out right at the screen edge.
 _CULL_MARGIN_BOXES = 2
+_FOCUS_LOD_ZOOM = 0.4
 
 
 class CanvasMixin:
@@ -43,6 +49,13 @@ class CanvasMixin:
 
     def _bind_canvas(self):
         c = self.cv
+        self._image_broker = ImageBroker(
+            get_executor(self), generation=lambda: MOD.graphics_catalog.generation
+        )
+        self._image_poll_job = None
+        lifecycle = getattr(self, "_lifecycle", None)
+        if lifecycle is not None:
+            lifecycle.add_resource(self._close_canvas_tasks)
         c.bind("<ButtonPress-1>", self._lmb_dn)
         c.bind("<B1-Motion>", self._lmb_mv)
         c.bind("<ButtonRelease-1>", self._lmb_up)
@@ -57,8 +70,48 @@ class CanvasMixin:
         c.bind("<Button-4>", self._scroll)
         c.bind("<Button-5>", self._scroll)
         c.bind("<Motion>", self._motion)
-        c.bind("<Configure>", lambda e: self._redraw())
+        c.bind(
+            "<Configure>",
+            lambda e: self._redraw(RedrawChannel.VIEW, reason="configure"),
+        )
         c.bind("<Leave>", lambda e: self._coord_lbl.config(text="  —  "))
+
+    def _poll_images(self):
+        self._image_poll_job = None
+        lifecycle = getattr(self, "_lifecycle", None)
+        if lifecycle is not None and not lifecycle.accepting:
+            return
+        self._image_broker.drain()
+        if self._image_broker.pending:
+            self._image_poll_job = self.cv.after(16, self._poll_images)
+
+    def _start_image_poll(self):
+        lifecycle = getattr(self, "_lifecycle", None)
+        if (
+            (lifecycle is None or lifecycle.accepting)
+            and self._image_poll_job is None
+            and self._image_broker.pending
+        ):
+            self._image_poll_job = self.cv.after(16, self._poll_images)
+
+    def _invalidate_canvas_images(self):
+        image_broker = getattr(self, "_image_broker", None)
+        if image_broker is not None:
+            image_broker.clear()
+
+    def _close_canvas_tasks(self):
+        for attribute in ("_image_poll_job", "_redraw_job", "_lines_job"):
+            job = getattr(self, attribute, None)
+            if job is None:
+                continue
+            try:
+                self.cv.after_cancel(job)
+            except tk.TclError:
+                pass
+            setattr(self, attribute, None)
+        image_broker = getattr(self, "_image_broker", None)
+        if image_broker is not None:
+            image_broker.close()
 
     def w2c(self, gx, gy):
         """HOI4 grid integer coords -> canvas pixel coords.
@@ -158,29 +211,62 @@ class CanvasMixin:
             self.offset[0], self.offset[1], self.zoom, W, H, margin
         )
 
-    def _redraw(self):
-        """Throttled full redraw — cancels any pending and schedules one 16ms out."""
-        if self._redraw_job:
-            self.cv.after_cancel(self._redraw_job)
-        self._redraw_job = self.cv.after(16, self._do_redraw)
+    def _canvas_runtime(self):
+        if not hasattr(self, "_redraw_state"):
+            self._redraw_state = DirtyRedrawState()
+        if not hasattr(self, "_scene_index"):
+            self._scene_index = SceneIndex()
+        if not hasattr(self, "_focus_bundles"):
+            self._focus_bundles = {}
+
+    def _redraw(
+        self,
+        channels=RedrawChannel.VIEW | RedrawChannel.SCENE | RedrawChannel.FOCUS_LIST,
+        *,
+        reason="legacy",
+    ):
+        """Schedule one frame and merge any additional dirty channels into it."""
+        self._canvas_runtime()
+        if channels & RedrawChannel.SCENE and getattr(self, "_lines_job", None):
+            self.cv.after_cancel(self._lines_job)
+            self._lines_job = None
+        if self._redraw_state.request(channels, reason) and not self._redraw_job:
+            self._redraw_job = self.cv.after(16, self._do_redraw)
 
     def _do_redraw(self):
+        self._canvas_runtime()
         self._redraw_job = None
         self._redraw_pending = False
+        request = self._redraw_state.consume()
+        self._render_frame(request.channels)
+
+    def _render_frame(self, channels):
         max(1, self.cv.winfo_width())
         max(1, self.cv.winfo_height())
-        self._grow_canvas_to_focuses()
+        self._scene_index.ensure(
+            self.focuses, validate=bool(channels & RedrawChannel.SCENE)
+        )
+        if channels & RedrawChannel.SCENE:
+            self._grow_canvas_to_focuses()
         self._draw_grid()
         self._draw_canvas_bounds()
         self._draw_coord_labels()
         vis_rect = self._visible_rect()
         self._draw_lines(vis_rect)
-        for f in self.focuses.values():
-            self._draw_focus(f, vis_rect)
+        if vis_rect is None:
+            visible_ids = list(self.focuses)
+        else:
+            visible_ids = self._scene_index.query_focus_ids(vis_rect)
+        self._reclaim_focus_bundles(set(visible_ids))
+        for focus_id in visible_ids:
+            focus = self.focuses.get(focus_id)
+            if focus is not None:
+                self._draw_focus(focus, vis_rect)
         self._draw_cfp_markers()
         self._draw_canvas_legend()
         self._update_statusbar()
-        self._update_focus_list_selection()
+        if channels & RedrawChannel.FOCUS_LIST:
+            self._update_focus_list_selection()
         self._draw_minimap()
 
     def _draw_lines_throttled(self):
@@ -195,27 +281,28 @@ class CanvasMixin:
 
     def _do_draw_lines_throttled(self):
         self._lines_job = None
+        self._canvas_runtime()
+        self._scene_index.ensure(self.focuses, validate=True)
         self._draw_lines()
 
-    def _redraw_now(self):
+    def _redraw_now(
+        self,
+        channels=RedrawChannel.VIEW | RedrawChannel.SCENE,
+        *,
+        reason="immediate",
+    ):
         """Immediate redraw for zoom/resize — skips throttle."""
+        self._canvas_runtime()
         if self._redraw_job:
             self.cv.after_cancel(self._redraw_job)
             self._redraw_job = None
+        if self._lines_job:
+            self.cv.after_cancel(self._lines_job)
+            self._lines_job = None
         self._redraw_pending = False
-        max(1, self.cv.winfo_width())
-        max(1, self.cv.winfo_height())
-        self._grow_canvas_to_focuses()
-        self._draw_grid()
-        self._draw_canvas_bounds()
-        self._draw_coord_labels()
-        vis_rect = self._visible_rect()
-        self._draw_lines(vis_rect)
-        for f in self.focuses.values():
-            self._draw_focus(f, vis_rect)
-        self._draw_cfp_markers()
-        self._draw_canvas_legend()
-        self._draw_minimap()
+        self._redraw_state.request(channels, reason)
+        request = self._redraw_state.consume()
+        self._render_frame(request.channels)
 
     def _draw_grid(self):
         """Draw the bounded grid as native canvas lines.
@@ -389,6 +476,8 @@ class CanvasMixin:
 
     def _draw_lines(self, vis_rect=None):
         """Draw edges: solid blue elbow+arrow for prereqs; dashed orange for mutex."""
+        self._canvas_runtime()
+        self._scene_index.ensure(self.focuses, validate=False)
         cv = self.cv
         if vis_rect is None:
             vis_rect = self._visible_rect()
@@ -397,30 +486,23 @@ class CanvasMixin:
         asz = max(4, int(10 * self.zoom))  # arrowhead half-width
         aht = max(5, int(14 * self.zoom))  # arrowhead height
 
-        edges = []
-        for f in self.focuses.values():
-            f_tidx = getattr(f, "tree_idx", 0)
-            for grp in f.prereqs:
-                for pid in grp:
-                    if pid in self.focuses:
-                        cross = f_tidx != getattr(self.focuses[pid], "tree_idx", 0)
-                        edges.append(("arr", pid, f.id, cross))
-            for mid in f.mutex:
-                if mid in self.focuses and mid > f.id:
-                    edges.append(("mut", f.id, mid, False))
-
-        if vis_rect is not None:
-            edges = [
-                e
-                for e in edges
-                if edge_visible(
-                    self.focuses[e[1]].x,
-                    self.focuses[e[1]].y,
-                    self.focuses[e[2]].x,
-                    self.focuses[e[2]].y,
-                    vis_rect,
-                )
-            ]
+        indexed_edges = (
+            self._scene_index.query_edges(vis_rect)
+            if vis_rect is not None
+            else self._scene_index.all_edges()
+        )
+        edges = [
+            (edge.kind, edge.source_id, edge.target_id, edge.cross_tree)
+            for edge in indexed_edges
+            if vis_rect is None
+            or edge_visible(
+                self.focuses[edge.source_id].x,
+                self.focuses[edge.source_id].y,
+                self.focuses[edge.target_id].x,
+                self.focuses[edge.target_id].y,
+                vis_rect,
+            )
+        ]
 
         need = len(edges) * 2  # 1 line + 1 arrowhead polygon per edge
         while len(self._lines) < need:
@@ -481,29 +563,61 @@ class CanvasMixin:
             if cv.find_withtag("focus_lbl"):
                 cv.tag_lower("focus_lbl", "line")
 
+    def _delete_focus_bundle(self, focus_id):
+        self._canvas_runtime()
+        bundle = self._focus_bundles.pop(focus_id, None)
+        if bundle is not None:
+            for item in bundle.items:
+                self.cv.delete(item)
+        image_broker = getattr(self, "_image_broker", None)
+        if image_broker is not None:
+            image_broker.release(("canvas", focus_id))
+
+    def _reclaim_focus_bundles(self, visible_ids):
+        self._canvas_runtime()
+        for focus_id in self._focus_bundles.keys() - visible_ids:
+            self._delete_focus_bundle(focus_id)
+
+    def _bind_focus_items(self, items, focus_id):
+        for item in items:
+            self.cv.tag_bind(
+                item, "<ButtonPress-1>", lambda e, i=focus_id: self._foc_pr(i, e)
+            )
+            self.cv.tag_bind(
+                item, "<B1-Motion>", lambda e, i=focus_id: self._foc_mv(i, e)
+            )
+            self.cv.tag_bind(
+                item, "<ButtonRelease-1>", lambda e, i=focus_id: self._foc_rl(i)
+            )
+            self.cv.tag_bind(item, "<Enter>", lambda e, i=focus_id: self._foc_en(i))
+            self.cv.tag_bind(
+                item,
+                "<Leave>",
+                lambda e: self._hint(
+                    "Right-click canvas to place focus  •  "
+                    "Ctrl+drag to pan  •  Scroll to zoom"
+                ),
+            )
+
     def _draw_focus(self, f, vis_rect=None):
         """Create once; skip update if state unchanged for near-zero idle cost."""
+        self._canvas_runtime()
         if vis_rect is None:
             vis_rect = self._visible_rect()
         cx, cy = self.w2c(f.x, f.y)
 
         if vis_rect is not None and not focus_visible(f.x, f.y, vis_rect):
-            # Offscreen: hide any existing items (cheap, one tag-wide call) and
-            # bail out before creating anything — the real memory win for a
-            # huge load is that offscreen focuses with no items never get any.
-            if f._items:
-                self.cv.itemconfig("F" + str(f.id), state="hidden")
-            f._culled = True
-            # Force a full recompute on the frame this focus becomes visible
-            # again, so coords/labels aren't stale ("ghost position" bug).
-            f._draw_key = None
+            self._delete_focus_bundle(f.id)
             return
-        if getattr(f, "_culled", False):
-            f._culled = False
-            if f._items:
-                self.cv.itemconfig("F" + str(f.id), state="normal")
-            f._draw_key = None
 
+        bundle = self._focus_bundles.get(f.id)
+        if bundle is not None and any(not self.cv.type(item) for item in bundle.items):
+            self._focus_bundles.pop(f.id, None)
+            bundle = None
+        lod = "compact" if self.zoom < _FOCUS_LOD_ZOOM else "full"
+        if bundle is not None and bundle.lod != lod:
+            self._delete_focus_bundle(f.id)
+            bundle = None
         z = self.zoom
         XGRID * z  # horizontal slot width
         box = BOX * z
@@ -532,6 +646,44 @@ class CanvasMixin:
         fill_col = FC_SEL if sel else ("#0a2030" if msel else FC_BG)
         bw = 3 if sel else (2 if msel else 1)
 
+        if lod == "compact":
+            state_key = (
+                round(cx, 1),
+                round(cy, 1),
+                round(h, 1),
+                border_col,
+                fill_col,
+                bw,
+            )
+            if bundle is not None and bundle.draw_key == state_key:
+                return
+            tag = "F" + str(f.id)
+            if bundle is None:
+                shadow = self.cv.create_rectangle(
+                    0, 0, 1, 1, outline="", fill="#060a10", tags=("focus", tag)
+                )
+                box_rect = self.cv.create_rectangle(
+                    0, 0, 1, 1, outline=border_col, fill=fill_col, tags=("focus", tag)
+                )
+                center = self.cv.create_rectangle(
+                    0, 0, 1, 1, outline="", fill=border_col, tags=("focus", tag)
+                )
+                bundle = FocusCanvasBundle((shadow, box_rect, center), lod)
+                self._focus_bundles[f.id] = bundle
+                self._bind_focus_items(bundle.items, f.id)
+            shadow, box_rect, center = bundle.items
+            dot = max(1, int(3 * z))
+            self.cv.coords(shadow, cx - h + sd, cy - h + sd, cx + h + sd, cy + h + sd)
+            self.cv.coords(box_rect, cx - h, cy - h, cx + h, cy + h)
+            self.cv.coords(center, cx - dot, cy - dot, cx + dot, cy + dot)
+            self.cv.itemconfig(box_rect, outline=border_col, fill=fill_col, width=bw)
+            self.cv.itemconfig(center, fill=border_col)
+            bundle.draw_key = state_key
+            image_broker = getattr(self, "_image_broker", None)
+            if image_broker is not None:
+                image_broker.release(("canvas", f.id))
+            return
+
         if z >= 1.2:
             label_text = f.name
         elif z >= 0.8:
@@ -559,15 +711,14 @@ class CanvasMixin:
             tree_idx,
             has_offsets,
         )
-        if f._items and getattr(f, "_draw_key", None) == state_key:
+        if bundle is not None and bundle.draw_key == state_key:
             return
-        f._draw_key = state_key
 
         tag = "F" + str(f.id)
         fid = f.id
         cv = self.cv
 
-        if not f._items:
+        if bundle is None:
             # Create all items exactly once, bind events once
             shadow = cv.create_rectangle(
                 0, 0, 1, 1, outline="", fill="#060a10", tags=("focus", tag)
@@ -637,7 +788,7 @@ class CanvasMixin:
                 fill="#06b6d4",
                 tags=("focus", tag),
             )
-            f._items = [
+            items = (
                 shadow,
                 mat,
                 box_rect,
@@ -652,32 +803,14 @@ class CanvasMixin:
                 lbl,
                 badge,
                 off_ind,
-            ]
-            for item in f._items:
-                cv.tag_bind(
-                    item, "<ButtonPress-1>", lambda e, i=fid: self._foc_pr(i, e)
-                )
-                cv.tag_bind(item, "<B1-Motion>", lambda e, i=fid: self._foc_mv(i, e))
-                cv.tag_bind(item, "<ButtonRelease-1>", lambda e, i=fid: self._foc_rl(i))
-                cv.tag_bind(item, "<Enter>", lambda e, i=fid: self._foc_en(i))
-                cv.tag_bind(
-                    item,
-                    "<Leave>",
-                    lambda e: self._hint(
-                        "Right-click canvas to place focus  •  "
-                        "Ctrl+drag to pan  •  Scroll to zoom"
-                    ),
-                )
+            )
+            bundle = FocusCanvasBundle(items, lod)
+            self._focus_bundles[f.id] = bundle
+            self._bind_focus_items(items, fid)
+        bundle.draw_key = state_key
 
         # Guard: recreate if item count is stale (14 items:
         # shadow,mat,box,rv*4,glow,ico,img,lbl_bg,lbl,badge,off_ind)
-        if len(f._items) < 14:
-            for item in f._items:
-                cv.delete(item)
-            f._items = []
-            f._draw_key = None
-            self._draw_focus(f, vis_rect)
-            return
         (
             shadow,
             mat,
@@ -693,7 +826,7 @@ class CanvasMixin:
             lbl,
             badge,
             off_ind,
-        ) = f._items
+        ) = bundle.items
 
         # Update positions (cheap coords calls, no create/delete)
         cv.coords(shadow, cx - h + sd, cy - h + sd, cx + h + sd, cy + h + sd)
@@ -734,12 +867,56 @@ class CanvasMixin:
         cv.itemconfig(glow, state="normal" if sel else "hidden")
         # Use mod GFX image — fixed 64px tile, cached once, no per-zoom resize
         gfx_name = getattr(f, "gfx", "")
-        mod_img = MOD.get_image(gfx_name) if MOD.loaded and gfx_name else None
+        mod_img = None
+        image_broker = getattr(self, "_image_broker", None)
+        if image_broker is not None and MOD.loaded and gfx_name:
+            asset = MOD.graphics_catalog.resolve(gfx_name)
+            if asset is not None:
+                path = MOD.graphics_catalog.path_for(asset)
+                lifecycle = getattr(self, "_lifecycle", None)
+                document_token = (
+                    lifecycle.token("document") if lifecycle is not None else None
+                )
+
+                def image_ready(image, fid=f.id, expected_gfx=gfx_name):
+                    if (
+                        lifecycle is not None
+                        and document_token is not None
+                        and not lifecycle.is_current(document_token)
+                    ):
+                        return
+                    current = self.focuses.get(fid)
+                    current_bundle = self._focus_bundles.get(fid)
+                    if (
+                        current is None
+                        or getattr(current, "gfx", "") != expected_gfx
+                        or current_bundle is None
+                        or current_bundle.lod != "full"
+                    ):
+                        return
+                    current_bundle.image = image
+                    current_icon_item = current_bundle.items[8]
+                    current_image_item = current_bundle.items[9]
+                    self.cv.itemconfig(current_icon_item, state="hidden")
+                    self.cv.itemconfig(current_image_item, image=image, state="normal")
+
+                mod_img = image_broker.request(
+                    asset,
+                    path,
+                    owner=("canvas", f.id),
+                    callback=image_ready,
+                )
+                self._start_image_poll()
+            else:
+                image_broker.release(("canvas", f.id))
+        elif image_broker is not None:
+            image_broker.release(("canvas", f.id))
         if mod_img:
+            bundle.image = mod_img
             cv.itemconfig(ico, state="hidden")
             cv.itemconfig(img_item, image=mod_img, state="normal")
-            f._canvas_img = mod_img  # prevent GC
         else:
+            bundle.image = None
             cv.itemconfig(
                 ico,
                 state="normal",
@@ -844,7 +1021,7 @@ class CanvasMixin:
         self._pan_start = None
         self.cv.config(cursor="fleur")
         # One clean redraw on release snaps everything to exact positions.
-        self._redraw_now()
+        self._redraw_now(RedrawChannel.VIEW, reason="pan-release")
 
     def _scroll(self, e):
         f = 1.1 if (e.num == 4 or e.delta > 0) else 0.9
@@ -852,8 +1029,7 @@ class CanvasMixin:
         self.zoom = max(0.10, min(4.0, self.zoom * f))
         self.offset[0] = e.x - (e.x - self.offset[0]) * (self.zoom / old)
         self.offset[1] = e.y - (e.y - self.offset[1]) * (self.zoom / old)
-        self._redraw_now()
-        self._update_statusbar()
+        self._redraw(RedrawChannel.VIEW, reason="wheel")
 
     def _rmb(self, e):
         hits = self.cv.find_overlapping(e.x - 2, e.y - 2, e.x + 2, e.y + 2)
@@ -928,10 +1104,11 @@ class CanvasMixin:
         if (ngx, ngy) in d.get("occupied", ()):
             return
         old_cx, old_cy = self.w2c(f.x, f.y)
-        f.x, f.y = ngx, ngy
+        self.focuses.move(fid, ngx, ngy)
         new_cx, new_cy = self.w2c(f.x, f.y)
         px, py = new_cx - old_cx, new_cy - old_cy
-        for item in f._items:
+        bundle = self._focus_bundles.get(fid)
+        for item in bundle.items if bundle is not None else ():
             self.cv.move(item, px, py)
         d["last_snap"] = (ngx, ngy)
         self._fv_x.set(str(ngx))
@@ -1102,6 +1279,76 @@ class CanvasMixin:
                 except Exception:
                     pass
 
+    def _draw_minimap_content(self, mm, g2mm, scale):
+        downsample = len(self.focuses) > self._MM_DOWNSAMPLE_THRESHOLD
+        line_idx = 0
+        if not downsample:
+            for f in self.focuses.values():
+                fx, fy = g2mm(f.x, f.y)
+                for group in f.prereqs:
+                    for parent_id in group:
+                        parent = self.focuses.get(parent_id)
+                        if parent is None:
+                            continue
+                        px, py = g2mm(parent.x, parent.y)
+                        if line_idx < len(self._mm_line_pool):
+                            item = self._mm_line_pool[line_idx]
+                            mm.coords(item, fx, fy, px, py)
+                            mm.itemconfig(item, state="normal")
+                        else:
+                            item = mm.create_line(
+                                fx,
+                                fy,
+                                px,
+                                py,
+                                fill="#1e3048",
+                                width=1,
+                                tags="mm_content",
+                            )
+                            mm.tag_lower(item)
+                            self._mm_line_pool.append(item)
+                        line_idx += 1
+        for index in range(line_idx, len(self._mm_line_pool)):
+            mm.itemconfig(self._mm_line_pool[index], state="hidden")
+
+        dot = max(2, int(scale * 0.45))
+        if downsample:
+            buckets = {}
+            for f in self.focuses.values():
+                mx, my = g2mm(f.x, f.y)
+                key = (int(mx), int(my))
+                if key not in buckets:
+                    buckets[key] = (mx, my, getattr(f, "tree_idx", 0))
+            dot_positions = buckets.values()
+        else:
+            dot_positions = (
+                (*g2mm(f.x, f.y), getattr(f, "tree_idx", 0))
+                for f in self.focuses.values()
+            )
+        dot_idx = 0
+        for mx, my, tree_idx in dot_positions:
+            _, color = self._get_tree_badge(tree_idx)
+            if tree_idx == 0:
+                color = "#475569"
+            if dot_idx < len(self._mm_dot_pool):
+                item = self._mm_dot_pool[dot_idx]
+                mm.coords(item, mx - dot, my - dot, mx + dot, my + dot)
+                mm.itemconfig(item, fill=color, state="normal")
+            else:
+                item = mm.create_rectangle(
+                    mx - dot,
+                    my - dot,
+                    mx + dot,
+                    my + dot,
+                    fill=color,
+                    outline="",
+                    tags="mm_content",
+                )
+                self._mm_dot_pool.append(item)
+            dot_idx += 1
+        for index in range(dot_idx, len(self._mm_dot_pool)):
+            mm.itemconfig(self._mm_dot_pool[index], state="hidden")
+
     def _draw_minimap(self):
         """Render all focuses as small colored dots plus the viewport rectangle.
 
@@ -1143,28 +1390,41 @@ class CanvasMixin:
             mm.delete("mm_overlay")
             return
 
+        self._canvas_runtime()
+        self._scene_index.ensure(self.focuses, validate=False)
         MM_W = mm.winfo_width() or 220
         MM_H = mm.winfo_height() or 150
         margin = 10
 
-        # Bounding box of all focuses in grid coords
-        all_xs = [f.x for f in self.focuses.values()]
-        all_ys = [f.y for f in self.focuses.values()]
-        # Include CFP positions in bounds
-        if getattr(self, "_cfp_x", None) is not None:
-            all_xs.append(self._cfp_x / XGRID)
-        if getattr(self, "_cfp_y", None) is not None:
-            all_ys.append(self._cfp_y / YGRID)
-        for et in getattr(self, "_extra_trees", []):
-            if et.get("cfp_x") is not None:
-                all_xs.append(et["cfp_x"] / XGRID)
-            if et.get("cfp_y") is not None:
-                all_ys.append(et["cfp_y"] / YGRID)
-
-        min_x = min(all_xs) - 1
-        max_x = max(all_xs) + 1
-        min_y = min(all_ys) - 1
-        max_y = max(all_ys) + 1
+        cfp_key = (
+            getattr(self, "_cfp_x", None),
+            getattr(self, "_cfp_y", None),
+            tuple(
+                (et.get("cfp_x"), et.get("cfp_y"))
+                for et in getattr(self, "_extra_trees", [])
+            ),
+        )
+        bounds_key = (self._scene_index.revision, cfp_key)
+        if getattr(self, "_mm_bounds_key", None) != bounds_key:
+            all_xs = [f.x for f in self.focuses.values()]
+            all_ys = [f.y for f in self.focuses.values()]
+            if getattr(self, "_cfp_x", None) is not None:
+                all_xs.append(self._cfp_x / XGRID)
+            if getattr(self, "_cfp_y", None) is not None:
+                all_ys.append(self._cfp_y / YGRID)
+            for et in getattr(self, "_extra_trees", []):
+                if et.get("cfp_x") is not None:
+                    all_xs.append(et["cfp_x"] / XGRID)
+                if et.get("cfp_y") is not None:
+                    all_ys.append(et["cfp_y"] / YGRID)
+            self._mm_world_bounds = (
+                min(all_xs) - 1,
+                min(all_ys) - 1,
+                max(all_xs) + 1,
+                max(all_ys) + 1,
+            )
+            self._mm_bounds_key = bounds_key
+        min_x, min_y, max_x, max_y = self._mm_world_bounds
         w_span = max(1.0, max_x - min_x)
         h_span = max(1.0, max_y - min_y)
 
@@ -1188,81 +1448,10 @@ class CanvasMixin:
         def g2mm(gx, gy):
             return ox + (gx - min_x) * scale, oy + (gy - min_y) * scale
 
-        downsample = len(self.focuses) > self._MM_DOWNSAMPLE_THRESHOLD
-
-        # Draw prereq lines first (underneath focuses) — skipped once
-        # downsampled, since at that density individual edges aren't
-        # legible and drawing tens of thousands of them isn't cheap.
-        line_idx = 0
-        if not downsample:
-            for f in self.focuses.values():
-                fx, fy = g2mm(f.x, f.y)
-                for grp in f.prereqs:
-                    for pid in grp:
-                        if pid in self.focuses:
-                            pf = self.focuses[pid]
-                            px, py = g2mm(pf.x, pf.y)
-                            if line_idx < len(self._mm_line_pool):
-                                item = self._mm_line_pool[line_idx]
-                                mm.coords(item, fx, fy, px, py)
-                                mm.itemconfig(item, state="normal")
-                            else:
-                                item = mm.create_line(
-                                    fx,
-                                    fy,
-                                    px,
-                                    py,
-                                    fill="#1e3048",
-                                    width=1,
-                                    tags="mm_content",
-                                )
-                                mm.tag_lower(item)
-                                self._mm_line_pool.append(item)
-                            line_idx += 1
-        for idx in range(line_idx, len(self._mm_line_pool)):
-            mm.itemconfig(self._mm_line_pool[idx], state="hidden")
-
-        # Draw focuses as small colored rectangles — one dot per focus, or
-        # (above the downsample threshold) one dot per occupied minimap
-        # pixel cell, first-focus-in-bucket wins the color.
-        dot = max(2, int(scale * 0.45))
-        if downsample:
-            buckets = {}
-            for f in self.focuses.values():
-                mx, my = g2mm(f.x, f.y)
-                key = (int(mx), int(my))
-                if key not in buckets:
-                    t_idx = getattr(f, "tree_idx", 0)
-                    buckets[key] = (mx, my, t_idx)
-            dot_positions = buckets.values()
-        else:
-            dot_positions = (
-                (*g2mm(f.x, f.y), getattr(f, "tree_idx", 0))
-                for f in self.focuses.values()
-            )
-        dot_idx = 0
-        for mx, my, t_idx in dot_positions:
-            _, col = self._get_tree_badge(t_idx)
-            if t_idx == 0:
-                col = "#475569"
-            if dot_idx < len(self._mm_dot_pool):
-                item = self._mm_dot_pool[dot_idx]
-                mm.coords(item, mx - dot, my - dot, mx + dot, my + dot)
-                mm.itemconfig(item, fill=col, state="normal")
-            else:
-                item = mm.create_rectangle(
-                    mx - dot,
-                    my - dot,
-                    mx + dot,
-                    my + dot,
-                    fill=col,
-                    outline="",
-                    tags="mm_content",
-                )
-                self._mm_dot_pool.append(item)
-            dot_idx += 1
-        for idx in range(dot_idx, len(self._mm_dot_pool)):
-            mm.itemconfig(self._mm_dot_pool[idx], state="hidden")
+        content_key = (bounds_key, MM_W, MM_H)
+        if getattr(self, "_mm_content_key", None) != content_key:
+            self._draw_minimap_content(mm, g2mm, scale)
+            self._mm_content_key = content_key
 
         # CFP markers, viewport rectangle, label: a handful of items
         # regardless of tree size, so plain delete+recreate is fine.
@@ -1338,10 +1527,8 @@ class CanvasMixin:
         ch = self.cv.winfo_height()
         self.offset[0] = cw / 2 - gx * XGRID * self.zoom
         self.offset[1] = ch / 2 - gy * YGRID * self.zoom
-        for f in self.focuses.values():
-            f._draw_key = None
         self._grid_key = None
-        self._redraw_now()
+        self._redraw_now(RedrawChannel.VIEW, reason="minimap-pan")
 
     def _fit_all(self):
         """Fit all focuses into view by resetting pan/zoom."""
@@ -1362,4 +1549,4 @@ class CanvasMixin:
         cy = (min(ys) + max(ys)) / 2
         self.offset[0] = cw / 2 - cx * XGRID * self.zoom
         self.offset[1] = ch / 2 - cy * YGRID * self.zoom
-        self._redraw_now()
+        self._redraw_now(RedrawChannel.VIEW, reason="fit-all")

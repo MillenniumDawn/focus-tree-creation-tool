@@ -1,36 +1,41 @@
 """Low-level HOI4 script marshalling helpers."""
 
+from .effects import render_effect
+from .syntax import (
+    extract_block,
+    extract_named_block,
+    find_blocks,
+    match_brace,
+    parse_block,
+    parse_script,
+    serialize_block,
+    strip_comments,
+    tokenize,
+)
+
+__all__ = [
+    "append_scripted_loc",
+    "dict_to_raw",
+    "extract_block",
+    "extract_named_block",
+    "find_blocks",
+    "match_brace",
+    "normalize_effect_fields",
+    "parse_block",
+    "parse_script",
+    "render_effect",
+    "serialize_block",
+    "strip_comments",
+    "tokenize",
+]
+
 
 def dict_to_raw(d, indent="\t"):
     """Recursively convert a parsed dict back to HOI4 script lines.
 
     Handles nested dicts, repeated keys (lists), and bools (True→yes, False→no).
     """
-    if isinstance(d, bool):
-        return "yes" if d else "no"
-    if not isinstance(d, dict):
-        return str(d)
-    lines = []
-    for k, v in d.items():
-        if str(k).startswith("_"):
-            continue
-        if isinstance(v, bool):
-            lines.append(f"{indent}{k} = {'yes' if v else 'no'}")
-        elif isinstance(v, list):
-            for item in v:
-                if isinstance(item, dict):
-                    inner = dict_to_raw(item, indent + "\t")
-                    lines.append(f"{indent}{k} = {{\n{inner}\n{indent}}}")
-                elif isinstance(item, bool):
-                    lines.append(f"{indent}{k} = {'yes' if item else 'no'}")
-                else:
-                    lines.append(f"{indent}{k} = {item}")
-        elif isinstance(v, dict):
-            inner = dict_to_raw(v, indent + "\t")
-            lines.append(f"{indent}{k} = {{\n{inner}\n{indent}}}")
-        else:
-            lines.append(f"{indent}{k} = {v}")
-    return "\n".join(lines)
+    return serialize_block(d, indent=indent)
 
 
 def _flat_value(etype, val):

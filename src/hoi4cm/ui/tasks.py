@@ -28,23 +28,30 @@ counter) concurrently on the Tk thread.
 
 import tkinter as tk
 import traceback
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future
 from types import SimpleNamespace
 
 from hoi4cm.core.logger import add_error, get_logger
+from hoi4cm.ui.lifecycle import ApplicationLifecycle, find_lifecycle
 from hoi4cm.ui.theme import BG_DARK, BLUE, BORDER_G, TEXT, TEXT_DIM
 from hoi4cm.ui.widgets import _safe_after
 
 log = get_logger("tasks")
 
+_default_lifecycle = ApplicationLifecycle()
 _executor = None
 
 
-def get_executor():
+def get_executor(owner=None):
     """Return the shared background executor, creating it on first use."""
-    global _executor
+    global _default_lifecycle, _executor
+    lifecycle = find_lifecycle(owner)
+    if lifecycle is not None:
+        return lifecycle.executor
     if _executor is None:
-        _executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="hoi4cm-bg")
+        if not _default_lifecycle.accepting:
+            _default_lifecycle = ApplicationLifecycle()
+        _executor = _default_lifecycle.executor
     return _executor
 
 
@@ -57,11 +64,11 @@ def shutdown_executor():
     """
     global _executor
     if _executor is not None:
-        _executor.shutdown(wait=False, cancel_futures=True)
+        _default_lifecycle.close()
         _executor = None
 
 
-def run_bg(widget, work, on_done, on_error=None):
+def run_bg(widget, work, on_done, on_error=None, *, scope="application"):
     """Run ``work`` on a background thread; marshal the outcome to ``widget``.
 
     ``work`` is a zero-arg callable. Callers that need progress reporting can
@@ -83,34 +90,53 @@ def run_bg(widget, work, on_done, on_error=None):
     (``future.result(timeout=...)``) instead of sleeping.
     """
 
+    lifecycle = find_lifecycle(widget)
+    token = lifecycle.token(scope) if lifecycle is not None else None
+
+    def schedule(callback):
+        if lifecycle is not None:
+            lifecycle.after(widget, 0, callback, token=token)
+        else:
+            _safe_after(widget, 0, callback)
+
     def _job():
         try:
             result = work()
         except Exception as exc:
             log.exception("background task failed")
             error_trace = traceback.format_exc()
-            _safe_after(
-                widget,
-                0,
-                lambda error_trace=error_trace: add_error(error_trace),
-            )
+            schedule(lambda error_trace=error_trace: add_error(error_trace))
             if on_error is not None:
-                _safe_after(widget, 0, lambda exc=exc: on_error(exc))
+                schedule(lambda exc=exc: on_error(exc))
             return
-        _safe_after(widget, 0, lambda result=result: on_done(result))
+        schedule(lambda result=result: on_done(result))
 
-    return get_executor().submit(_job)
+    try:
+        return get_executor(widget).submit(_job)
+    except RuntimeError:
+        future = Future()
+        future.cancel()
+        return future
 
 
-def make_progress(widget, fn):
+def make_progress(widget, fn, *, scope="application"):
     """Return a callable safe to invoke from a worker thread.
 
     Calling the returned callable marshals ``fn(*args, **kwargs)`` onto the
     Tk thread via ``_safe_after``, in the order the calls were made.
     """
 
+    lifecycle = find_lifecycle(widget)
+    token = lifecycle.token(scope) if lifecycle is not None else None
+
     def _progress(*args, **kwargs):
-        _safe_after(widget, 0, lambda: fn(*args, **kwargs))
+        def callback():
+            fn(*args, **kwargs)
+
+        if lifecycle is not None:
+            lifecycle.after(widget, 0, callback, token=token)
+        else:
+            _safe_after(widget, 0, callback)
 
     return _progress
 

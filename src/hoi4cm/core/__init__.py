@@ -13,17 +13,23 @@ from hoi4cm.data import (
     modifiers_in_cat,
 )
 from hoi4cm.focus_tree import (
+    BuildContext,
     EmptyDrawioGraphError,
     EmptyFocusTreeError,
     ParsedFocusTree,
+    apply_focus_code,
     build_drawio_focuses,
+    build_focus_name_lookup,
     build_focuses,
     build_loc_yml,
     drawio_to_focus_data,
     export_focus_tree,
     export_main_tree,
+    group_focuses_by_tree,
     parse_drawio_graph,
     parse_focus_tree,
+    plan_reference_cleanup,
+    render_focus_block,
 )
 from hoi4cm.models import Focus
 from hoi4cm.script import (
@@ -59,6 +65,7 @@ from .undo import UndoStack
 
 __all__ = [
     "CONFIG_PATH",
+    "BuildContext",
     "EFFECT_CATS",
     "EFFECT_DEFS",
     "EmptyDrawioGraphError",
@@ -77,8 +84,10 @@ __all__ = [
     "add_error",
     "append_scripted_loc",
     "autosave_path",
+    "apply_focus_code",
     "bounded_inflate",
     "build_drawio_focuses",
+    "build_focus_name_lookup",
     "build_focuses",
     "build_loc_yml",
     "cfg_load",
@@ -90,6 +99,7 @@ __all__ = [
     "effects_in_cat",
     "export_focus_tree",
     "export_main_tree",
+    "group_focuses_by_tree",
     "get_error_entries",
     "get_logger",
     "install_excepthook",
@@ -101,7 +111,9 @@ __all__ = [
     "normalize_effect_fields",
     "parse_drawio_graph",
     "parse_focus_tree",
+    "plan_reference_cleanup",
     "read_file",
+    "render_focus_block",
     "safe_join",
     "safe_fromstring",
     "sanitize_component",
