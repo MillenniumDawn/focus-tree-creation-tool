@@ -47,6 +47,7 @@ from hoi4cm.wizards._graphics import find_catalog_image
 from hoi4cm.wizards._image_loader import TkImageLoader
 from hoi4cm.wizards._shared import (
     _app_img_caches,
+    notifying_workspace_files,
 )
 
 
@@ -5120,6 +5121,7 @@ def open_decision_wizard(app):
         )
         saved = []
         errs = []
+        wf = notifying_workspace_files(MOD, mod_root)
         # Prefer the imported/user-set edit target so we overwrite the source file in place
         if MOD.edit_decisions_file and os.path.isfile(MOD.edit_decisions_file):
             dec_path = MOD.edit_decisions_file
@@ -5129,8 +5131,7 @@ def open_decision_wizard(app):
             )
         os.makedirs(os.path.dirname(dec_path), exist_ok=True)
         try:
-            with open(dec_path, "w", encoding="utf-8") as f:
-                f.write(_gen_decisions_file())
+            wf.write_text(dec_path, _gen_decisions_file(), encoding="utf-8")
             try:
                 saved.append(os.path.relpath(dec_path, mod_root))
             except ValueError:
@@ -5146,8 +5147,7 @@ def open_decision_wizard(app):
             )
         os.makedirs(os.path.dirname(cat_path), exist_ok=True)
         try:
-            with open(cat_path, "w", encoding="utf-8") as f:
-                f.write(_gen_categories_file())
+            wf.write_text(cat_path, _gen_categories_file(), encoding="utf-8")
             try:
                 saved.append(os.path.relpath(cat_path, mod_root))
             except ValueError:
@@ -5174,8 +5174,7 @@ def open_decision_wizard(app):
                         if m:
                             existing_loc_keys.add(m.group(1))
             else:
-                with open(yml_path, "w", encoding="utf-8-sig") as f:
-                    f.write("l_english:\n")
+                wf.write_text(yml_path, "l_english:\n", encoding="utf-8-sig")
             new_lines = [
                 l
                 for l in _gen_yml().splitlines()
@@ -5189,8 +5188,9 @@ def open_decision_wizard(app):
                     continue
                 to_write.append(ln)
             if to_write:
-                with open(yml_path, "a", encoding="utf-8-sig") as f:
-                    f.write("\n".join(to_write) + "\n")
+                wf.append_text(
+                    yml_path, "\n".join(to_write) + "\n", encoding="utf-8-sig"
+                )
             saved.append(
                 os.path.relpath(yml_path, mod_root) + f"  (+{len(to_write)} keys)"
             )

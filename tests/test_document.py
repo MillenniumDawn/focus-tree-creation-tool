@@ -99,6 +99,29 @@ def test_bulk_add_rejects_duplicate_ids_without_partial_update():
     assert list(document) == [1]
 
 
+def test_move_updates_positions_without_full_rebuild():
+    document = FocusDocument((_focus(1, x=0, y=0), _focus(2, x=1, y=1)))
+    revision = document.revision
+
+    assert document.move(1, 5, 5) is True
+
+    assert document.revision == revision + 1
+    assert document.occupied_positions == {(5, 5): {1}, (1, 1): {2}}
+    assert document.validate_indexes()
+    _assert_indexes(document)
+
+
+def test_rename_prefix_bumps_revision_so_cached_ui_refreshes():
+    document = FocusDocument((_focus(1, name="OLD_a"), _focus(2, name="keep")))
+    revision = document.revision
+
+    renamed = document.rename_prefix("OLD_", "NEW_")
+
+    assert renamed == 1
+    assert document.revision == revision + 1
+    assert document.first_by_name == {"NEW_a": 1, "keep": 2}
+
+
 def test_randomized_mutations_match_reference_indexes():
     rng = random.Random(4815162342)
     document = FocusDocument()

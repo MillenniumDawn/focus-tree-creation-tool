@@ -15,17 +15,46 @@ from hoi4cm.script.syntax import (
 
 
 def test_tokenize_ignores_comments_only_outside_quotes():
-    source = 'name = "value # { \\"quoted\\" }" # } ignored\nnext = yes'
+    source = 'name = "value # { quoted } text" # } ignored\nnext = yes'
 
     assert tokenize(source) == [
         "name",
         "=",
-        'value # { \\"quoted\\" }',
+        "value # { quoted } text",
         "next",
         "=",
         "yes",
     ]
-    assert strip_comments(source) == ('name = "value # { \\"quoted\\" }" \nnext = yes')
+    assert strip_comments(source) == 'name = "value # { quoted } text" \nnext = yes'
+
+
+def test_trailing_backslash_quote_does_not_swallow_closing_quote():
+    source = 'focus = { icon = "gfx\\interface\\" cost = 5 }\nnext = yes'
+
+    assert tokenize(source) == [
+        "focus",
+        "=",
+        "{",
+        "icon",
+        "=",
+        "gfx\\interface\\",
+        "cost",
+        "=",
+        "5",
+        "}",
+        "next",
+        "=",
+        "yes",
+    ]
+    assert strip_comments(source) == source
+
+    open_index = source.index("{")
+    close_index = match_brace(source, open_index)
+    assert source[close_index:] == "}\nnext = yes"
+
+    blocks = find_blocks(source)
+    assert [name for name, _, _ in blocks] == ["focus"]
+    assert blocks[0][2] == 'focus = { icon = "gfx\\interface\\" cost = 5 }'
 
 
 def test_match_and_extract_block_ignore_braces_in_strings_and_comments():

@@ -24,6 +24,7 @@ the target.
 | `_scan_files_cached` reads cache-miss files in parallel, then extracts them serially in a follow-up loop | `mod/context.py:341` | Read+extract submitted together per file to one `ThreadPoolExecutor`, so a file's read (GIL released) overlaps another file's extraction; cache put/prune/commit stay on the calling thread since the sqlite connection isn't thread-safe | fixed in phase 6 | not yet measured, needs a display session against the real mod |
 | Undo deep-copied every loaded focus (`copy.deepcopy` of the whole `self.focuses` dict) on every `_push_undo`, 60 entries retained (`deque(maxlen=60)`), then `_undo` did `cv.delete("all")` and rebuilt every focus | `hoi4_content_maker.py:1561` (`_push_undo`/`_undo`) | `core/undo.py`'s `UndoStack`: each push snapshots only the focus ids the caller says it's about to mutate/delete (`touched_ids`), plus a `frozenset` of every id at push time so undo can spot and delete ids the action created without ever snapshotting them. The few call sites that touch most of the tree anyway (draw.io import) fall back to one zlib-compressed full snapshot instead of bounding the set. `_undo` now deletes canvas items only for the ids that came back changed/removed and does one `_redraw()`, no more `cv.delete("all")` | fixed in phase 7 | not yet measured, needs a display session against the real mod |
 | No canvas viewport culling: `_do_redraw` iterates every loaded `Focus` regardless of what's on screen; loading all trees puts ~329k items on the canvas | `ui/canvas.py` (`_do_redraw`, `_draw_focus`, `_draw_lines`) | Viewport rect computed once per redraw (`ui/viewport.py`'s pure `visible_world_rect`/`focus_visible`/`edge_visible`); offscreen focuses never get canvas items (lazy creation), and an already-drawn focus that pans offscreen gets one `itemconfig(state="hidden")` per redraw instead of a full coord/style recompute | fixed in phase 8 | not yet measured, needs a display session against the real mod |
+| A single-focus drag rebuilt every `FocusDocument` index on each snap step (`move()`) and did a full `SceneIndex` rebuild (all edges rasterized) on each throttled line-redraw frame, O(F+E) per drag frame | `models/document.py` (`move`), `ui/scene_index.py` (`rebuild`/`update_focus`), `ui/canvas.py` (`_do_draw_lines_throttled`) | `move()` patches only `occupied_positions`; `SceneIndex.update_focus` patches the moved focus's cell and re-rasterizes only its incident edges; the drag line-redraw calls `update_focus` instead of `ensure`'s full rebuild | fixed | synthetic 2000-focus / 2860-edge tree (Python 3.14): drag-snap step (`move` + scene) median 7.8-8.3ms -> 0.029ms, p95 12-14ms -> 0.05ms, max up to 21ms -> 0.1ms. See the drag-snap note below |
 
 The `_draw_key`/state-key check in `_draw_focus` (`ui/canvas.py:486`) already
 makes an unchanged focus close to free to redraw, but every `_redraw()` call
@@ -50,6 +51,23 @@ below some zoom threshold, instead of the full multi-item card) was
 scoped for phase 8 but not implemented — noted here as future work, since
 lazy item creation already removes the up-front item explosion for the
 zoomed-in case, which was the more common one.
+
+### Drag-snap step
+
+Dragging one focus is the interactive hot path: `_foc_mv` calls
+`FocusDocument.move()` on every grid cell crossed, and the throttled line
+redraw (`_do_draw_lines_throttled`, ~60fps) has to reflect the new position.
+Both used to be O(F+E): `move()` did a full index rebuild, and the redraw did
+a full `SceneIndex.rebuild` (rasterizing all 2,860 edges). Measured on a
+synthetic 2,000-focus / 2,860-edge tree (`scratchpad/bench_drag.py`, Python
+3.14), the combined step was median 7.8-8.3ms, p95 12-14ms, and up to 21ms,
+which overruns a 16ms frame before any drawing. Two changes make it
+constant-time in the tree size: `move()` only x/y touches `occupied_positions`,
+so it patches that one index instead of rebuilding all seven; and
+`SceneIndex.update_focus` moves just the dragged focus between cells and
+re-rasterizes only its incident edges. After: median 0.029ms, p95 0.05ms, max
+0.1ms. This is synthetic-scale, not a real-mod display session, but the win is
+algorithmic (O(F+E) -> O(1 + focus degree)) so it holds at any tree size.
 
 ## GIL guidance
 
@@ -109,12 +127,14 @@ concerns on a single file.
 
 | Cache | Scope | Keyed by | Eviction |
 |---|---|---|---|
-| `WorkspaceCache` graphics snapshot (SQLite, `~/.hoi4cm/scan_cache/<hash>.db`) | relative graphics inventory, sprite declarations, and configured focus/idea views | root identity, graphics path fingerprint, directory `mtime_ns`/`ctime_ns`, and `.gfx` file stamps | one snapshot per graphics path configuration; detected stale rows rebuild. In-place image edits require an app write notification or explicit refresh |
+| `WorkspaceCache` graphics snapshot (SQLite, `~/.hoi4cm/scan_cache/<hash>.db`) | relative graphics inventory, sprite declarations, and configured focus/idea views | root identity, graphics path fingerprint, directory `mtime_ns`/`ctime_ns`, `.gfx` file stamps, and image stamps | one snapshot per graphics path configuration; detected stale rows rebuild. A warm load restats the known images, so an in-place image overwrite (same filename) is caught without an explicit refresh |
 | `ScanCache` (same SQLite database) | per-file scan contribution, per domain | `(mtime, size)` | none, though `prune()` drops rows for paths no longer in the mod (no size/age cap) |
 | Canvas `ImageBroker` | one application session | normalized path, file stamp, catalog generation, and transform | bounded LRU; visible renderer bundles own bounded pins and offscreen bundles release them |
 | Browser `ImageBroker` | one browser dialog | normalized path, file stamp, catalog generation, and transform | bounded LRU; the virtual thumbnail grid pins only visible rows plus overscan |
 
-Warm graphics loads stat known directories and `.gfx` files. They do not
-recursively enumerate directories or stat image files. `ScanCache.prune`'s
-stale-path removal remains its only eviction. The image brokers bound decoded
-Tk images and visible pins independently.
+Warm graphics loads stat known directories, `.gfx` files, and the known image
+paths. They do not recursively enumerate directories or reparse `.gfx` files.
+Statting the known images is what catches an in-place overwrite (the directory
+mtime doesn't move when a file's content changes), and it's far cheaper than a
+full rescan. `ScanCache.prune`'s stale-path removal remains its only eviction.
+The image brokers bound decoded Tk images and visible pins independently.

@@ -24,11 +24,12 @@ class SceneIndex:
         self._signature: tuple[object, ...] = ()
         self._focus_cells: dict[tuple[int, int], list[int]] = {}
         self._edge_cells: dict[tuple[int, int], list[int]] = {}
-        self._wide_edges: tuple[int, ...] = ()
+        self._wide_edges: set[int] = set()
         self._focus_order: dict[int, int] = {}
         self._positions: dict[int, tuple[float, float]] = {}
         self._edges: tuple[SceneEdge, ...] = ()
-        self._edge_bounds: tuple[tuple[float, float, float, float], ...] = ()
+        self._edge_bounds: list[tuple[float, float, float, float]] = []
+        self._edges_by_focus: dict[int, list[int]] = {}
 
     def rebuild(self, focuses: Mapping[int, object]) -> None:
         focus_cells: dict[tuple[int, int], list[int]] = defaultdict(list)
@@ -57,41 +58,61 @@ class SceneIndex:
                 if mutex_id in focuses and mutex_id > focus_id:
                     edges.append(SceneEdge("mut", focus_id, mutex_id))
 
-        edge_cells: dict[tuple[int, int], list[int]] = defaultdict(list)
-        wide_edges: list[int] = []
-        edge_bounds: list[tuple[float, float, float, float]] = []
-        for index, edge in enumerate(edges):
-            source = focuses[edge.source_id]
-            target = focuses[edge.target_id]
-            edge_bounds.append(
-                (
-                    min(source.x, target.x),
-                    min(source.y, target.y),
-                    max(source.x, target.x),
-                    max(source.y, target.y),
-                )
-            )
-            cell_x0, cell_y0, cell_x1, cell_y1 = self._cell_span(
-                source.x, source.y, target.x, target.y
-            )
-            cell_count = (cell_x1 - cell_x0 + 1) * (cell_y1 - cell_y0 + 1)
-            if cell_count > 256:
-                wide_edges.append(index)
-                continue
-            for cell_x in range(cell_x0, cell_x1 + 1):
-                for cell_y in range(cell_y0, cell_y1 + 1):
-                    edge_cells[(cell_x, cell_y)].append(index)
-
         self._focus_cells = dict(focus_cells)
-        self._edge_cells = dict(edge_cells)
-        self._wide_edges = tuple(wide_edges)
         self._focus_order = focus_order
         self._positions = positions
         self._edges = tuple(edges)
-        self._edge_bounds = tuple(edge_bounds)
+        self._edge_bounds = [(0.0, 0.0, 0.0, 0.0)] * len(edges)
+        self._edge_cells = {}
+        self._wide_edges = set()
+        edges_by_focus: dict[int, list[int]] = defaultdict(list)
+        for index, edge in enumerate(edges):
+            edges_by_focus[edge.source_id].append(index)
+            edges_by_focus[edge.target_id].append(index)
+            self._place_edge(index, edge, focuses)
+        self._edges_by_focus = dict(edges_by_focus)
         self._signature = self.signature(focuses)
         self._document_revision = getattr(focuses, "revision", None)
         self.revision += 1
+
+    def _place_edge(
+        self, index: int, edge: SceneEdge, focuses: Mapping[int, object]
+    ) -> None:
+        source = focuses[edge.source_id]
+        target = focuses[edge.target_id]
+        self._edge_bounds[index] = (
+            min(source.x, target.x),
+            min(source.y, target.y),
+            max(source.x, target.x),
+            max(source.y, target.y),
+        )
+        cell_x0, cell_y0, cell_x1, cell_y1 = self._cell_span(
+            source.x, source.y, target.x, target.y
+        )
+        cell_count = (cell_x1 - cell_x0 + 1) * (cell_y1 - cell_y0 + 1)
+        if cell_count > 256:
+            self._wide_edges.add(index)
+            return
+        for cell_x in range(cell_x0, cell_x1 + 1):
+            for cell_y in range(cell_y0, cell_y1 + 1):
+                self._edge_cells.setdefault((cell_x, cell_y), []).append(index)
+
+    def _unplace_edge(self, index: int) -> None:
+        if index in self._wide_edges:
+            self._wide_edges.discard(index)
+            return
+        min_x, min_y, max_x, max_y = self._edge_bounds[index]
+        cell_x0, cell_y0, cell_x1, cell_y1 = self._cell_span(min_x, min_y, max_x, max_y)
+        for cell_x in range(cell_x0, cell_x1 + 1):
+            for cell_y in range(cell_y0, cell_y1 + 1):
+                bucket = self._edge_cells.get((cell_x, cell_y))
+                if not bucket:
+                    continue
+                remaining = [i for i in bucket if i != index]
+                if remaining:
+                    self._edge_cells[(cell_x, cell_y)] = remaining
+                else:
+                    del self._edge_cells[(cell_x, cell_y)]
 
     def ensure(self, focuses: Mapping[int, object], *, validate: bool) -> bool:
         document_revision = getattr(focuses, "revision", None)
@@ -104,10 +125,42 @@ class SceneIndex:
         return False
 
     def update_focus(self, focuses: Mapping[int, object], focus_id: int) -> None:
-        if focus_id not in focuses:
+        """Apply a single focus's geometry move without a full rebuild.
+
+        Caller contract: only *focus_id*'s x/y changed since the last rebuild
+        (the drag hot path). Anything structural (add/remove/link, another
+        focus moving) must go back through ``rebuild``/``ensure``.
+        """
+        if (
+            not self.revision
+            or focus_id not in focuses
+            or focus_id not in self._positions
+        ):
             self.rebuild(focuses)
             return
-        self.rebuild(focuses)
+        focus = focuses[focus_id]
+        new_pos = (focus.x, focus.y)
+        old_pos = self._positions[focus_id]
+        if old_pos != new_pos:
+            old_cell = self._cell(*old_pos)
+            new_cell = self._cell(*new_pos)
+            if old_cell != new_cell:
+                bucket = self._focus_cells.get(old_cell)
+                if bucket is not None:
+                    remaining = [fid for fid in bucket if fid != focus_id]
+                    if remaining:
+                        self._focus_cells[old_cell] = remaining
+                    else:
+                        del self._focus_cells[old_cell]
+                self._focus_cells.setdefault(new_cell, []).append(focus_id)
+            self._positions[focus_id] = new_pos
+            for index in self._edges_by_focus.get(focus_id, ()):
+                self._unplace_edge(index)
+                self._place_edge(index, self._edges[index], focuses)
+        # The stale _signature is left as-is: a later validate=True ensure()
+        # will rebuild once and refresh it, which is harmless.
+        self._document_revision = getattr(focuses, "revision", None)
+        self.revision += 1
 
     def query_focus_ids(self, rect: tuple[float, float, float, float]) -> list[int]:
         ids: set[int] = set()

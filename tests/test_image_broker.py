@@ -152,6 +152,63 @@ def test_new_generation_does_not_reuse_stale_inflight_decode() -> None:
     assert len(new_results) == 1
 
 
+def test_cache_hit_survives_generation_change() -> None:
+    generation = 1
+    decode_count = 0
+
+    def decode(path: str, transform: ImageTransform) -> object:
+        nonlocal decode_count
+        decode_count += 1
+        return object()
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        broker = ImageBroker(
+            executor,
+            generation=lambda: generation,
+            decoder=decode,
+            realizer=lambda image: image,
+            pillow_available=True,
+        )
+        broker.request(
+            _asset(generation=1), "/tmp/icon.png", owner="a", callback=lambda _: None
+        )
+        _drain_when_ready(broker)
+        generation = 2
+        result = broker.request(
+            _asset(generation=2), "/tmp/icon.png", owner="b", callback=lambda _: None
+        )
+
+    assert decode_count == 1
+    assert result is not None
+
+
+def test_failed_decode_delivers_none_to_subscribers() -> None:
+    delivered = []
+
+    def decode(path: str, transform: ImageTransform) -> object:
+        raise OSError("boom")
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        broker = ImageBroker(
+            executor,
+            generation=lambda: 1,
+            decoder=decode,
+            realizer=lambda image: image,
+            pillow_available=True,
+        )
+        broker.request(_asset(), "/tmp/icon.png", owner="a", callback=delivered.append)
+        _drain_when_ready(broker)
+
+        # A later request for the same failed asset is served from the cache
+        # and still delivers None rather than hanging on a placeholder.
+        cached = []
+        broker.request(_asset(), "/tmp/icon.png", owner="b", callback=cached.append)
+        broker.drain()
+
+    assert delivered == [None]
+    assert cached == [None]
+
+
 def test_decode_runs_on_worker_and_realization_runs_on_owner_thread() -> None:
     owner_thread = threading.get_ident()
     decode_threads = []

@@ -31,6 +31,21 @@ class _ImageKey:
 
 
 @dataclass(frozen=True)
+class _CacheKey:
+    path: str
+    stamp: FileStamp
+    transform: ImageTransform
+
+
+def _cache_key(key: _ImageKey) -> _CacheKey:
+    # The generation is deliberately excluded: the FileStamp already changes
+    # when content changes, so a decoded image stays valid across generation
+    # bumps (e.g. revisiting a folder). Generation lives on for subscriber
+    # staleness and callback cancellation, not for cache identity.
+    return _CacheKey(key.path, key.stamp, key.transform)
+
+
+@dataclass(frozen=True)
 class _Subscriber:
     generation: int
     callback: Callable[[object], None]
@@ -108,7 +123,7 @@ class ImageBroker:
         self._pin_size = pin_size
         self._owner_thread = threading.get_ident()
         self._lock = threading.Lock()
-        self._cache: OrderedDict[_ImageKey, object | None] = OrderedDict()
+        self._cache: OrderedDict[_CacheKey, object | None] = OrderedDict()
         self._pins: OrderedDict[Hashable, tuple[_ImageKey, object]] = OrderedDict()
         self._pending: dict[_ImageKey, _Pending] = {}
         self._owner_requests: dict[Hashable, _ImageKey] = {}
@@ -149,22 +164,24 @@ class ImageBroker:
             asset.generation,
             transform,
         )
+        cache_key = _cache_key(key)
         on_owner_thread = threading.get_ident() == self._owner_thread
         with self._lock:
             if self._closed:
                 return None
-            cached = self._cache.get(key, _MISSING)
+            cached = self._cache.get(cache_key, _MISSING)
             if cached is not _MISSING:
-                self._cache.move_to_end(key)
+                self._cache.move_to_end(cache_key)
                 self._forget_request_locked(owner)
                 if cached is not None and on_owner_thread:
                     self._pin_locked(owner, key, cached)
                     return cached
-                if cached is not None:
-                    pending = self._pending.setdefault(key, _Pending({}))
-                    pending.subscribers[owner] = _Subscriber(asset.generation, callback)
-                    self._owner_requests[owner] = key
-                    self._completed.put((key, cached, True))
+                # Deliver via the queue -- including a cached failure (None) so
+                # the caller can render a placeholder instead of hanging.
+                pending = self._pending.setdefault(key, _Pending({}))
+                pending.subscribers[owner] = _Subscriber(asset.generation, callback)
+                self._owner_requests[owner] = key
+                self._completed.put((key, cached, True))
                 return None
 
             self._forget_request_locked(owner)
@@ -293,7 +310,9 @@ class ImageBroker:
                 self._owner_requests.pop(owner, None)
                 if photo is not None:
                     self._pin_locked(owner, key, photo)
-                    delivered.append(subscriber)
+                # Deliver failures (photo is None) too, so the subscriber can
+                # swap its loading placeholder for an error marker.
+                delivered.append(subscriber)
 
         for subscriber in delivered:
             subscriber.callback(photo)
@@ -304,8 +323,9 @@ class ImageBroker:
             self._pending[previous].subscribers.pop(owner, None)
 
     def _cache_locked(self, key: _ImageKey, image: object | None) -> None:
-        self._cache[key] = image
-        self._cache.move_to_end(key)
+        entry = _cache_key(key)
+        self._cache[entry] = image
+        self._cache.move_to_end(entry)
         while len(self._cache) > self._cache_size:
             self._cache.popitem(last=False)
 

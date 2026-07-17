@@ -14,6 +14,9 @@ from hoi4cm.mod.workspace_cache import WorkspaceCache
 
 _CACHE_VERSION = 1
 _IMAGE_EXTENSIONS = (".dds", ".png", ".tga")
+# Pre-catalog builds dropped this JSON sidecar in the mod root. The SQLite
+# scan cache replaced it; clean the stray file up so it stops confusing users.
+_LEGACY_SIDECAR_NAME = ".hoi4cm_gfx_cache.json"
 _SPRITE_BLOCK_RE = re.compile(r"spriteType\s*=\s*\{")
 _SPRITE_NAME_RE = re.compile(r'\bname\s*=\s*"([^"]+)"')
 _SPRITE_TEXTURE_RE = re.compile(r'\btexturefile\s*=\s*"([^"]+)"')
@@ -178,6 +181,7 @@ class GraphicsSnapshot:
 class GraphicsScanConfig:
     path_goals: str
     path_ideas_gfx: str
+    path_event_pictures: str = ""
     custom_gfx_dirs: tuple[str, ...] = ()
 
 
@@ -210,7 +214,8 @@ class GraphicsCatalog:
     def __init__(self) -> None:
         self.generation = 0
         self.last_metrics = GraphicsMetrics()
-        self._snapshot = GraphicsSnapshot((), (), (), (), ())
+        self._image_stamps: dict[PathReference, FileStamp] = {}
+        self._install_snapshot(GraphicsSnapshot((), (), (), (), ()))
         self._source_roots: dict[str, str] = {}
         self._sprite_refs: dict[str, PathReference] = {}
         self._idea_refs: dict[str, PathReference] = {}
@@ -253,14 +258,19 @@ class GraphicsCatalog:
             self.last_metrics.cache_status = "hit"
 
         self.generation += 1
-        self._snapshot = snapshot
+        self._install_snapshot(snapshot)
         self._source_roots = source_roots
         self._root = root
         self._config = config
         self._root_identity = root_identity
         self._config_fingerprint = config_fingerprint
         self._derive_references(root, config)
+        _remove_legacy_sidecar(root)
         return self._materialize_maps()
+
+    def _install_snapshot(self, snapshot: GraphicsSnapshot) -> None:
+        self._snapshot = snapshot
+        self._image_stamps = {record.path: record.stamp for record in snapshot.images}
 
     def note_written(
         self, path: str, *, read_text: Callable[[str], str]
@@ -296,7 +306,8 @@ class GraphicsCatalog:
                     tuple(
                         _parse_declarations(
                             read_text(absolute_path),
-                            top_level=os.path.dirname(absolute_path) == interface_root,
+                            top_level=os.path.normcase(os.path.dirname(absolute_path))
+                            == os.path.normcase(interface_root),
                             strict_extension=os.path.basename(absolute_path).endswith(
                                 ".gfx"
                             ),
@@ -338,11 +349,10 @@ class GraphicsCatalog:
         path = references.get(gfx_name)
         if path is None:
             return None
-        stamps = {record.path: record.stamp for record in self._snapshot.images}
         return AssetRef(
             source_id=path.source_id,
             relative_path=path.relative_path,
-            stamp=stamps.get(path, FileStamp(0, 0, 0)),
+            stamp=self._image_stamps.get(path, FileStamp(0, 0, 0)),
             generation=self.generation,
         )
 
@@ -397,20 +407,22 @@ class GraphicsCatalog:
             goals_root = os.path.join(self._root, "gfx", "interface")
         ideas_root = _configured_path(self._root, self._config.path_ideas_gfx)
         self.generation += 1
-        self._snapshot = GraphicsSnapshot(
-            directories=directories,
-            images=tuple(images),
-            gfx_files=tuple(gfx_files),
-            goal_images=tuple(
-                record.path
-                for record in images
-                if _is_under(record.path.resolve(self._source_roots), goals_root)
-            ),
-            idea_images=tuple(
-                record.path
-                for record in images
-                if _is_under(record.path.resolve(self._source_roots), ideas_root)
-            ),
+        self._install_snapshot(
+            GraphicsSnapshot(
+                directories=directories,
+                images=tuple(images),
+                gfx_files=tuple(gfx_files),
+                goal_images=tuple(
+                    record.path
+                    for record in images
+                    if _is_under(record.path.resolve(self._source_roots), goals_root)
+                ),
+                idea_images=tuple(
+                    record.path
+                    for record in images
+                    if _is_under(record.path.resolve(self._source_roots), ideas_root)
+                ),
+            )
         )
         self._derive_references(self._root, self._config)
         if self._snapshot.cacheable:
@@ -506,6 +518,20 @@ class GraphicsCatalog:
                 continue
             if _stamp_from_stat(stat) != record.stamp:
                 current = False
+
+        # Stat the known image paths too. Directory mtimes don't change when a
+        # file is overwritten in place, so an image edit that keeps the same
+        # name would otherwise leave a stale FileStamp — and that stamp is the
+        # thumbnail cache key. Restatting is cheaper than a full rescan.
+        for record in snapshot.images:
+            self.last_metrics.image_stats += 1
+            try:
+                stat = os.stat(record.path.resolve(source_roots))
+            except (KeyError, OSError):
+                current = False
+                continue
+            if _stamp_from_stat(stat) != record.stamp:
+                current = False
         return current
 
     def _scan_snapshot(
@@ -550,6 +576,10 @@ class GraphicsCatalog:
             goals_root = os.path.join(root, "gfx", "interface")
         ideas_root = _configured_path(root, config.path_ideas_gfx)
         extra_roots = [("goals", goals_root), ("ideas", ideas_root)]
+        if config.path_event_pictures:
+            extra_roots.append(
+                ("events", _configured_path(root, config.path_event_pictures))
+            )
         extra_roots.extend(
             (f"custom:{index}", os.path.abspath(path))
             for index, path in enumerate(config.custom_gfx_dirs)
@@ -701,7 +731,6 @@ class GraphicsCatalog:
                 self._idea_refs[declaration.name] = declaration.texture_path
             self._decision_refs[declaration.name] = declaration.texture_path
 
-        images_by_path = {record.path: record for record in self._snapshot.images}
         for path in self._snapshot.goal_images:
             stem = Path(path.relative_path).stem
             self._sprite_refs.setdefault(f"GFX_focus_{stem}", path)
@@ -725,7 +754,7 @@ class GraphicsCatalog:
                 full_path = record.path.resolve(self._source_roots)
             except KeyError:
                 continue
-            if record.path not in images_by_path or not _is_under(full_path, gfx_root):
+            if not _is_under(full_path, gfx_root):
                 continue
             stem = Path(record.path.relative_path).stem
             relative = os.path.relpath(full_path, root).replace(os.sep, "/").lower()
@@ -762,6 +791,11 @@ class GraphicsCatalog:
         ideas_root = _configured_path(root, config.path_ideas_gfx)
         source_roots["goals"] = root if _is_under(goals_root, root) else goals_root
         source_roots["ideas"] = root if _is_under(ideas_root, root) else ideas_root
+        if config.path_event_pictures:
+            events_root = _configured_path(root, config.path_event_pictures)
+            source_roots["events"] = (
+                root if _is_under(events_root, root) else events_root
+            )
         source_roots.update(
             {
                 f"custom:{index}": os.path.abspath(path)
@@ -841,6 +875,15 @@ def _configured_path(root: str, configured_path: str) -> str:
     return os.path.abspath(os.path.join(root, configured_path))
 
 
+def _remove_legacy_sidecar(root: str) -> None:
+    sidecar = os.path.join(root, _LEGACY_SIDECAR_NAME)
+    try:
+        if os.path.isfile(sidecar):
+            os.remove(sidecar)
+    except OSError:
+        pass
+
+
 def _is_under(path: str, parent: str) -> bool:
     path = os.path.normcase(os.path.abspath(path))
     parent = os.path.normcase(os.path.abspath(parent))
@@ -860,6 +903,7 @@ def _config_fingerprint(config: GraphicsScanConfig) -> str:
         {
             "path_goals": config.path_goals,
             "path_ideas_gfx": config.path_ideas_gfx,
+            "path_event_pictures": config.path_event_pictures,
             "custom_gfx_dirs": [
                 os.path.normcase(os.path.abspath(path))
                 for path in config.custom_gfx_dirs

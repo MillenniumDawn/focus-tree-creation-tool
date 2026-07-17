@@ -5,7 +5,30 @@ Pulling them into one module keeps the wizard code free of cross-wizard
 coupling and gives the App a single place to clear caches on mod reload.
 """
 
+import os
 import re
+
+from hoi4cm.mod import WorkspaceFiles
+
+
+def notifying_workspace_files(mod, mod_root):
+    """A ``WorkspaceFiles`` that tells the mod's catalog what it writes.
+
+    The ``on_written`` callback fires only when the save target is inside the
+    currently loaded mod, so writing into some other folder never pokes the
+    live catalog. This is the seam that keeps newly written images / .gfx
+    files visible without a full rescan.
+    """
+    on_written = None
+    root = getattr(mod, "root", "") or ""
+    if getattr(mod, "loaded", False) and root:
+        same_mod = os.path.normcase(os.path.abspath(root)) == os.path.normcase(
+            os.path.abspath(mod_root)
+        )
+        if same_mod:
+            on_written = mod.note_file_written
+    return WorkspaceFiles(on_written=on_written)
+
 
 # ── Image cache registry ──────────────────────────────────────────
 # Wizards register their own caches here so the App can invalidate
@@ -28,4 +51,5 @@ __all__ = [
     "_ev_gfx_cache",
     "_ev_imgsize_cache",
     "_LOC_KEY_RE",
+    "notifying_workspace_files",
 ]

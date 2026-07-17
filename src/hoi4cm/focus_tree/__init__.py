@@ -18,7 +18,6 @@ from .loc import build_loc_yml
 from .operations import (
     build_focus_name_lookup,
     group_focuses_by_tree,
-    plan_reference_cleanup,
 )
 from .parse import EmptyFocusTreeError, ParsedFocusTree, parse_focus_tree
 
@@ -33,7 +32,6 @@ __all__ = [
     "export_focus_tree",
     "export_main_tree",
     "group_focuses_by_tree",
-    "plan_reference_cleanup",
     "render_focus_block",
     "render_focus_body",
     "build_loc_yml",

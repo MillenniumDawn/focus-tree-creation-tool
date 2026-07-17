@@ -42,6 +42,7 @@ from hoi4cm.ui import (
 )
 from hoi4cm.wizards._graphics import browser_folders, collect_image_pairs
 from hoi4cm.wizards._image_loader import TkImageLoader
+from hoi4cm.wizards._shared import notifying_workspace_files
 
 
 def open_national_spirit_wizard(app):
@@ -1583,6 +1584,7 @@ def open_national_spirit_wizard(app):
             ideas_path = os.path.join(mod_root, "common", "ideas", f"{sid}.txt")
 
         os.makedirs(os.path.dirname(ideas_path), exist_ok=True)
+        wf = notifying_workspace_files(MOD, mod_root)
 
         # ── SAFE APPEND to ideas file ─────────────────────────────────────
         try:
@@ -1640,14 +1642,12 @@ def open_national_spirit_wizard(app):
                     else:
                         new_existing = existing.rstrip() + "\n\n" + ideas_block + "\n"
 
-                    with open(ideas_path, "w", encoding="utf-8") as f:
-                        f.write(new_existing)
+                    wf.write_text(ideas_path, new_existing, encoding="utf-8")
                     rel = os.path.relpath(ideas_path, mod_root)
                     saved.append(rel + "  (spirit appended into existing file)")
             else:
                 # New file — write as-is
-                with open(ideas_path, "w", encoding="utf-8") as f:
-                    f.write(ideas_block)
+                wf.write_text(ideas_path, ideas_block, encoding="utf-8")
                 rel = os.path.relpath(ideas_path, mod_root)
                 saved.append(rel + "  (new file created)")
 
@@ -1675,11 +1675,9 @@ def open_national_spirit_wizard(app):
             to_add = {k: v for k, v in new_entries.items() if k not in existing_keys}
             if to_add:
                 if not os.path.isfile(loc_path):
-                    with open(loc_path, "w", encoding="utf-8-sig") as f:
-                        f.write("l_english:\n")
-                with open(loc_path, "a", encoding="utf-8-sig") as f:
-                    for k, v in to_add.items():
-                        f.write(f' {k}: "{v}"\n')
+                    wf.write_text(loc_path, "l_english:\n", encoding="utf-8-sig")
+                loc_body = "".join(f' {k}: "{v}"\n' for k, v in to_add.items())
+                wf.append_text(loc_path, loc_body, encoding="utf-8-sig")
                 rel = os.path.relpath(loc_path, mod_root)
                 saved.append(rel + f"  (+{len(to_add)} keys)")
             else:

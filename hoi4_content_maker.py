@@ -4877,7 +4877,10 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
         self._tree_country_raw = meta.country_raw
         self._tree_focus_prefix = meta.focus_prefix
         self._tree_had_wrapper = workspace.main_tree.had_wrapper
-        MOD.edit_focus_file = workspace.main_tree.file_path or ""
+        # Legacy projects decode with an empty file_path; keep the user's
+        # existing export target rather than wiping it.
+        if workspace.main_tree.file_path:
+            MOD.edit_focus_file = workspace.main_tree.file_path
         self._cfp_x = meta.cfp_x
         self._cfp_y = meta.cfp_y
         self._cfp_x_var.set("" if meta.cfp_x is None else str(meta.cfp_x))

@@ -284,6 +284,7 @@ class ModContext:
             GraphicsScanConfig(
                 path_goals=self.path_goals,
                 path_ideas_gfx=self.path_ideas_gfx,
+                path_event_pictures=self.path_event_pictures,
                 custom_gfx_dirs=tuple(self.custom_gfx_dirs),
             ),
             read_text=self._read,

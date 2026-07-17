@@ -107,11 +107,19 @@ class FocusDocument(MutableMapping[int, Focus]):
         occupants = self.occupied_positions.get((x, y), set()) - {focus_id}
         if occupants and not allow_occupied:
             return False
-        if (focus.x, focus.y) == (x, y):
+        old = (focus.x, focus.y)
+        if old == (x, y):
             return True
         focus.x, focus.y = x, y
+        # Only occupied_positions depends on x/y, so update it in place rather
+        # than rebuilding every index. This keeps a drag cheap on a big tree.
+        old_bucket = self.occupied_positions.get(old)
+        if old_bucket is not None:
+            old_bucket.discard(focus_id)
+            if not old_bucket:
+                del self.occupied_positions[old]
+        self.occupied_positions.setdefault((x, y), set()).add(focus_id)
         self._changed()
-        self.rebuild_indexes()
         return True
 
     def link_prerequisite(
@@ -216,7 +224,10 @@ class FocusDocument(MutableMapping[int, Focus]):
                 focus.name = new + focus.name[len(old) :]
                 renamed += 1
         if renamed:
-            self.rebuild_indexes()
+            # Bump the revision too: names don't affect the SceneIndex
+            # signature, so without this the canvas keeps the old labels until
+            # something else forces a rebuild.
+            self.touch()
         return renamed
 
     def set_tree(self, focus_id: int, tree_idx: int) -> None:

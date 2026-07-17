@@ -282,7 +282,14 @@ class CanvasMixin:
     def _do_draw_lines_throttled(self):
         self._lines_job = None
         self._canvas_runtime()
-        self._scene_index.ensure(self.focuses, validate=True)
+        drag = getattr(self, "_drag", None)
+        drag_id = drag.get("id") if drag and drag.get("moved") else None
+        if drag_id is not None:
+            # Single-focus geometry move (a drag): patch just that focus and its
+            # edges instead of rebuilding the whole scene index every frame.
+            self._scene_index.update_focus(self.focuses, drag_id)
+        else:
+            self._scene_index.ensure(self.focuses, validate=True)
         self._draw_lines()
 
     def _redraw_now(
@@ -1029,7 +1036,9 @@ class CanvasMixin:
         self.zoom = max(0.10, min(4.0, self.zoom * f))
         self.offset[0] = e.x - (e.x - self.offset[0]) * (self.zoom / old)
         self.offset[1] = e.y - (e.y - self.offset[1]) * (self.zoom / old)
-        self._redraw(RedrawChannel.VIEW, reason="wheel")
+        # Zoom redraws immediately (like a resize) so the wheel feels instant;
+        # the 16ms throttle stays for the other channels via _redraw().
+        self._redraw_now(RedrawChannel.VIEW, reason="wheel")
 
     def _rmb(self, e):
         hits = self.cv.find_overlapping(e.x - 2, e.y - 2, e.x + 2, e.y + 2)

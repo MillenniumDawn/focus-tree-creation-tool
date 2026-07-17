@@ -43,6 +43,14 @@ def test_legacy_two_field_project_loads_without_changing_focus_data():
     assert restored.focuses.names["duplicate"] == (91, 92)
 
 
+def test_legacy_decode_yields_empty_file_path():
+    # The app must not treat this empty file_path as "clear the export target"
+    # -- loading an old project keeps whatever export file the user had chosen.
+    workspace = decode_project({"tree_name": "legacy_tree", "focuses": []})
+
+    assert workspace.main_tree.file_path == ""
+
+
 def test_v2_roundtrip_preserves_workspace_and_tree_metadata():
     main = Focus(1, 2)
     main.id = 12345678901234567890

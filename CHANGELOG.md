@@ -2,6 +2,37 @@
 
 ---
 
+## Application Modernization — Behavior Changes
+
+The modernization rounds changed a few user-visible behaviors on purpose.
+They are recorded here so they don't get "fixed" back.
+
+### Code-tab apply replaces every editable field
+
+**[BEHAVIOR CHANGE] Applying the Code tab now resets fields you leave out**
+- The old regex patcher only rewrote the fields it recognized and left the
+  rest untouched. The new apply parses the block and rewrites every editable
+  field, so a field you delete from the code is now cleared on the focus
+  instead of silently kept. Keep a field by keeping it in the code.
+
+### Focus-sprite scanning honors `path_goals`
+
+**[BEHAVIOR CHANGE] Focus icons are read from your configured goals path**
+- Focus-sprite discovery used to hardcode `gfx/interface/goals`. It now
+  honors the `path_goals` setting, so a mod that keeps focus goal icons
+  somewhere else has them found.
+
+### Quote-aware script parsing
+
+**[BEHAVIOR CHANGE] `#` and `{ }` inside quoted strings now parse correctly**
+- Comments and braces inside a quoted value are no longer treated as real
+  comments or braces, so a value like `"a # b { c }"` parses intact instead
+  of getting truncated. Clausewitz has no string escapes, so a quoted value
+  that ends in a backslash (e.g. `icon = "gfx\interface\"`) no longer swallows
+  its closing quote and derails the rest of the file.
+
+---
+
 ## Session 5 — Shared Focus Tree Position and Viewport Fixes
 
 ### Focus Tree — `_raw_rewards` Regex Missing `shared_focus` Blocks

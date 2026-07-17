@@ -22,18 +22,16 @@ _BLOCK_START_RE = re.compile(r"\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*\{")
 
 
 def _quoted_end(source: str, start: int) -> int:
-    escaped = False
-    position = start + 1
-    while position < len(source):
-        char = source[position]
-        if char == '"' and not escaped:
-            return position + 1
-        if char == "\\":
-            escaped = not escaped
-        else:
-            escaped = False
-        position += 1
-    return len(source)
+    """Return the index past the closing quote.
+
+    Clausewitz/Paradox script has no string escapes, so a backslash is a
+    literal character and the string closes at the very next quote. Treating
+    ``\\"`` as an escape swallows the closing quote of values that end in a
+    backslash (e.g. ``icon = "gfx\\interface\\"``) and derails the rest of
+    the parse.
+    """
+    position = source.find('"', start + 1)
+    return position + 1 if position != -1 else len(source)
 
 
 def strip_comments(source: str) -> str:

@@ -314,6 +314,45 @@ def test_fixture_country_raw_present_verbatim_on_first_export():
     assert "original_tag=TST" in text  # no space around '=', preserved verbatim
 
 
+def test_main_tree_roundtrip_drops_unknown_focus_keys_and_is_idempotent():
+    # country_raw is preserved verbatim, but focus-level keys the model does
+    # not know (`some_unknown_field`, `another_unknown`) are DROPPED on export.
+    # That drop is intentional: the editor only round-trips the fields it
+    # models, so parse -> export -> reparse -> export stays a fixed point.
+    src = "\n".join(
+        [
+            "focus_tree = {",
+            "\tid = TST_main_tree",
+            "\tcountry = {",
+            "\t\tfactor = 0",
+            "\t\tmodifier = { add = 10 original_tag = TST }",
+            "\t}",
+            "\tcontinuous_focus_position = { x = 20 y = 300 }",
+            "\tfocus = {",
+            "\t\tid = TST_root",
+            "\t\tx = 0",
+            "\t\ty = 0",
+            "\t\tcost = 10",
+            "\t\tsome_unknown_field = mystery",
+            "\t\tanother_unknown = { nested = yes }",
+            "\t\tcompletion_reward = {",
+            "\t\t\tadd_political_power = 50",
+            "\t\t}",
+            "\t}",
+            "}",
+        ]
+    )
+
+    f1, t1 = _load_and_export_main(src)
+    f2, t2 = _load_and_export_main(t1)
+
+    assert t1 == t2
+    assert _summary(f1) == _summary(f2)
+    assert "original_tag" in t1  # country_raw survived
+    assert "some_unknown_field" not in t1  # unknown focus keys dropped
+    assert "another_unknown" not in t1
+
+
 def test_fixture_content_present():
     path = os.path.join(FIX_DIR, "wrapper_basic.txt")
     raw = read_file(path)

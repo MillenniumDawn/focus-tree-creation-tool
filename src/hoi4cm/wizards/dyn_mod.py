@@ -19,7 +19,7 @@ from hoi4cm.core import (
 )
 from hoi4cm.core.image import PIL_OK, PILImage, PILImageTk
 from hoi4cm.core.paths import read_file
-from hoi4cm.mod import MOD, WorkspaceFiles
+from hoi4cm.mod import MOD
 from hoi4cm.script.syntax import match_brace, parse_script, serialize_block
 from hoi4cm.ui import (
     BG_CARD,
@@ -36,6 +36,7 @@ from hoi4cm.ui import (
 )
 from hoi4cm.wizards._graphics import browser_folders, collect_image_pairs
 from hoi4cm.wizards._image_loader import TkImageLoader
+from hoi4cm.wizards._shared import notifying_workspace_files
 
 
 def open_dyn_mod_wizard(app):
@@ -1089,15 +1090,7 @@ def open_dyn_mod_wizard(app):
 
         results = []  # (rel_path, action, note)
         errors = []
-        workspace_files = WorkspaceFiles(
-            on_written=(
-                MOD.note_file_written
-                if MOD.loaded
-                and os.path.normcase(os.path.abspath(MOD.root))
-                == os.path.normcase(os.path.abspath(mod_root))
-                else None
-            )
-        )
+        workspace_files = notifying_workspace_files(MOD, mod_root)
 
         # ── Helpers ───────────────────────────────────────────
         def full(rel):

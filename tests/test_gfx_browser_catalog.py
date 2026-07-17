@@ -37,15 +37,21 @@ def test_catalog_image_paths_uses_in_memory_query(tmp_path):
     assert catalog.queries == [(str(root), "b")]
 
 
-def test_catalog_folder_groups_include_only_folders_with_images(tmp_path):
+def test_catalog_folder_groups_include_event_pictures_when_scanned(tmp_path):
+    # Once the catalog scans a custom event-pictures dir (even one outside
+    # gfx/), its images show up here and the browser keeps the group. A folder
+    # with no catalogued images is still dropped.
     gfx = tmp_path / "gfx"
+    event_pics = tmp_path / "event_pictures"
     paths = (
         str(gfx / "ideas" / "a.dds"),
         str(gfx / "ideas" / "nested" / "b.dds"),
+        str(event_pics / "war.dds"),
     )
     candidates = (
         ("ideas", str(gfx / "ideas"), "GFX_idea_"),
-        ("events", str(gfx / "events"), "GFX_event_"),
+        ("event pictures", str(event_pics), "GFX_event_"),
+        ("empty", str(gfx / "empty"), "GFX_"),
     )
 
     groups = _catalog_folder_groups(candidates, paths)
@@ -53,6 +59,7 @@ def test_catalog_folder_groups_include_only_folders_with_images(tmp_path):
     assert groups == [
         ("ideas", str(gfx / "ideas"), "GFX_idea_", True),
         ("  ideas/nested", str(gfx / "ideas" / "nested"), "GFX_idea_", True),
+        ("event pictures", str(event_pics), "GFX_event_", True),
     ]
 
 

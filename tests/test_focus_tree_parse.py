@@ -155,7 +155,7 @@ def test_parse_quoted_hash_and_braces_without_losing_following_fields():
     id = quoted_tree
     focus = {
         id = quoted_focus
-        custom_text = "value # with { braces } and \\"quotes\\""
+        custom_text = "value # with { braces } inside"
         x = 3 # real comment }
         y = 4
     }
@@ -163,8 +163,6 @@ def test_parse_quoted_hash_and_braces_without_losing_following_fields():
 
     parsed = parse_focus_tree(source, "/tmp/quoted.txt")
 
-    assert parsed.focuses_data[0]["custom_text"] == (
-        'value # with { braces } and \\"quotes\\"'
-    )
+    assert parsed.focuses_data[0]["custom_text"] == "value # with { braces } inside"
     assert parsed.focuses_data[0]["x"] == "3"
     assert parsed.focuses_data[0]["y"] == "4"

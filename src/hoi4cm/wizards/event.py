@@ -50,6 +50,7 @@ from hoi4cm.wizards._image_loader import TkImageLoader
 from hoi4cm.wizards._shared import (
     _ev_gfx_cache,
     _ev_imgsize_cache,
+    notifying_workspace_files,
 )
 
 
@@ -1618,6 +1619,7 @@ def open_event_wizard(app):
             )
         os.makedirs(os.path.dirname(ev_file), exist_ok=True)
         os.makedirs(os.path.dirname(loc_file), exist_ok=True)
+        wf = notifying_workspace_files(MOD, mod_root)
 
         # ── EVENTS: safe append — never touch existing content ────────────
         try:
@@ -1650,8 +1652,11 @@ def open_event_wizard(app):
                     lines.append("")
                     lines.append(_render_event_txt(ev))
 
-                with open(ev_file, "a" if file_exists else "w", encoding="utf-8") as f:
-                    f.write("\n".join(lines) + "\n")
+                ev_content = "\n".join(lines) + "\n"
+                if file_exists:
+                    wf.append_text(ev_file, ev_content, encoding="utf-8")
+                else:
+                    wf.write_text(ev_file, ev_content, encoding="utf-8")
                 rel = os.path.relpath(ev_file, mod_root)
                 saved.append(
                     f"{rel}  (+{len(to_append)} event{'s' if len(to_append)!=1 else ''})"
@@ -1694,8 +1699,7 @@ def open_event_wizard(app):
 
             if to_add:
                 if not yml_exists:
-                    with open(loc_file, "w", encoding="utf-8-sig") as f:
-                        f.write("l_english:\n")
+                    wf.write_text(loc_file, "l_english:\n", encoding="utf-8-sig")
                 # Only add the section header if it's not already there
                 needs_hdr = True
                 try:
@@ -1704,10 +1708,11 @@ def open_event_wizard(app):
                             needs_hdr = False
                 except Exception:
                     pass
-                with open(loc_file, "a", encoding="utf-8-sig") as f:
-                    if needs_hdr:
-                        f.write(f"\n ##########Events - {ns}##########\n")
-                    f.write("\n".join(to_add) + "\n")
+                loc_body = ""
+                if needs_hdr:
+                    loc_body += f"\n ##########Events - {ns}##########\n"
+                loc_body += "\n".join(to_add) + "\n"
+                wf.append_text(loc_file, loc_body, encoding="utf-8-sig")
                 rel = os.path.relpath(loc_file, mod_root)
                 saved.append(f"{rel}  (+{len(to_add)} keys)")
             else:

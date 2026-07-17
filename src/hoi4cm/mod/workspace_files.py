@@ -6,6 +6,20 @@ from collections.abc import Callable
 from pathlib import Path
 
 
+def _relax_permissions(path: str) -> None:
+    """Widen NamedTemporaryFile's 0600 to the process default (0666 & ~umask).
+
+    Without this, every atomically-written mod file lands owner-only, unlike
+    a plain ``open(...)`` write.
+    """
+    mask = os.umask(0)
+    os.umask(mask)
+    try:
+        os.chmod(path, 0o666 & ~mask)
+    except OSError:
+        pass
+
+
 class WorkspaceFiles:
     def __init__(self, *, on_written: Callable[[str], None] | None = None) -> None:
         self._on_written = on_written
@@ -27,6 +41,7 @@ class WorkspaceFiles:
                 temporary.flush()
                 os.fsync(temporary.fileno())
                 temporary_path = temporary.name
+            _relax_permissions(temporary_path)
             os.replace(temporary_path, target)
         finally:
             if temporary_path:

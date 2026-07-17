@@ -5,7 +5,7 @@ import threading
 import tkinter as tk
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
-from typing import Protocol, TypeVar
+from typing import Protocol, TypeVar, Union
 
 from hoi4cm.ui.lifecycle import find_lifecycle
 
@@ -38,7 +38,9 @@ class _BatchDone:
     generation: int
 
 
-_QueueItem = _ImageResult | _BatchDone
+# Runtime alias, so it must stay 3.9-safe: PEP 604 `A | B` here raises
+# TypeError before 3.10 (future-annotations only covers annotations).
+_QueueItem = Union[_ImageResult, _BatchDone]
 _Item = TypeVar("_Item")
 
 

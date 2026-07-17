@@ -28,7 +28,6 @@ from hoi4cm.focus_tree import (
     group_focuses_by_tree,
     parse_drawio_graph,
     parse_focus_tree,
-    plan_reference_cleanup,
     render_focus_block,
 )
 from hoi4cm.models import Focus
@@ -111,7 +110,6 @@ __all__ = [
     "normalize_effect_fields",
     "parse_drawio_graph",
     "parse_focus_tree",
-    "plan_reference_cleanup",
     "read_file",
     "render_focus_block",
     "safe_join",

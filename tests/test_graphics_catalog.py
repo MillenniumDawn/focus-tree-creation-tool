@@ -1,11 +1,12 @@
 import json
+import os
 import sqlite3
 
 import pytest
 
 from hoi4cm.core.paths import read_file
 from hoi4cm.mod import scan_cache
-from hoi4cm.mod.graphics_catalog import GraphicsCatalog, GraphicsScanConfig
+from hoi4cm.mod.graphics_catalog import FileStamp, GraphicsCatalog, GraphicsScanConfig
 
 
 @pytest.fixture(autouse=True)
@@ -43,7 +44,7 @@ def _config(**overrides):
     return GraphicsScanConfig(**values)
 
 
-def test_warm_catalog_load_avoids_directory_walks_and_image_stats(graphics_tree):
+def test_warm_catalog_load_restats_without_walking_or_reparsing(graphics_tree):
     first = GraphicsCatalog()
     cold_maps = first.refresh(str(graphics_tree), _config(), read_text=read_file)
     assert first.last_metrics.cache_status == "miss"
@@ -55,9 +56,56 @@ def test_warm_catalog_load_avoids_directory_walks_and_image_stats(graphics_tree)
     warm_maps = second.refresh(str(graphics_tree), _config(), read_text=read_file)
     assert second.last_metrics.cache_status == "hit"
     assert second.last_metrics.directory_listings == 0
-    assert second.last_metrics.image_stats == 0
+    # Warm loads restat the known images (cheap) so an in-place overwrite is
+    # caught, but they never rewalk directories or reparse .gfx files.
+    assert second.last_metrics.image_stats == 3
     assert second.last_metrics.gfx_reads == 0
     assert warm_maps == cold_maps
+
+
+def test_event_pictures_dir_outside_gfx_is_catalogued(graphics_tree):
+    events = graphics_tree / "event_pictures"
+    events.mkdir()
+    (events / "war_scene.dds").write_bytes(b"scene")
+
+    catalog = GraphicsCatalog()
+    catalog.refresh(
+        str(graphics_tree),
+        _config(path_event_pictures="event_pictures"),
+        read_text=read_file,
+    )
+
+    found = [catalog.path_for(asset) for asset in catalog.query(under=str(events))]
+    assert found == [str(events / "war_scene.dds")]
+
+
+def test_in_place_image_overwrite_invalidates_cached_snapshot(graphics_tree):
+    first = GraphicsCatalog()
+    first.refresh(str(graphics_tree), _config(), read_text=read_file)
+    before = first.resolve("GFX_focus_disk_focus")
+
+    focus_image = graphics_tree / "gfx" / "interface" / "goals" / "disk_focus.dds"
+    focus_image.write_bytes(b"focus-overwritten-with-more-bytes")
+
+    second = GraphicsCatalog()
+    second.refresh(str(graphics_tree), _config(), read_text=read_file)
+
+    assert second.last_metrics.cache_status == "miss"
+    after = second.resolve("GFX_focus_disk_focus")
+    assert before is not None and after is not None
+    assert after.stamp != before.stamp
+
+
+def test_resolve_reports_the_current_image_stamp(graphics_tree):
+    catalog = GraphicsCatalog()
+    catalog.refresh(str(graphics_tree), _config(), read_text=read_file)
+    focus_image = graphics_tree / "gfx" / "interface" / "goals" / "disk_focus.dds"
+    stat = os.stat(focus_image)
+
+    asset = catalog.resolve("GFX_focus_disk_focus")
+
+    assert asset is not None
+    assert asset.stamp == FileStamp(stat.st_mtime_ns, stat.st_ctime_ns, stat.st_size)
 
 
 def test_cached_graphics_paths_are_relative(graphics_tree):
@@ -147,6 +195,61 @@ def test_corrupt_graphics_snapshot_degrades_to_rescan(graphics_tree):
     assert second.last_metrics.cache_status == "miss"
     assert second.last_metrics.directory_listings > 0
     assert actual == expected
+
+
+def test_refresh_removes_legacy_sidecar_only_from_root(graphics_tree):
+    sidecar = graphics_tree / ".hoi4cm_gfx_cache.json"
+    sidecar.write_text("{}")
+    nested = graphics_tree / "gfx" / ".hoi4cm_gfx_cache.json"
+    nested.write_text("{}")
+
+    GraphicsCatalog().refresh(str(graphics_tree), _config(), read_text=read_file)
+
+    assert not sidecar.exists()
+    assert nested.exists()  # only the exact file in the scanned root is removed
+
+
+def test_absolute_texturefile_snapshot_is_not_cached(graphics_tree):
+    abs_target = graphics_tree / "external" / "goals" / "abs_focus.dds"
+    gfx_text = (
+        'spriteType = { name = "GFX_focus_abs" ' f'texturefile = "{abs_target}" }}\n'
+    )
+    (graphics_tree / "interface" / "abs.gfx").write_text(gfx_text)
+
+    catalog = GraphicsCatalog()
+    maps = catalog.refresh(str(graphics_tree), _config(), read_text=read_file)
+    assert catalog.last_metrics.cache_status == "miss"
+    assert maps.sprites["GFX_focus_abs"] == str(abs_target)
+
+    # The absolute texturefile makes the snapshot non-cacheable, so nothing is
+    # stored and a fresh catalog is still a miss rather than a warm hit.
+    second = GraphicsCatalog()
+    second.refresh(str(graphics_tree), _config(), read_text=read_file)
+    assert second.last_metrics.cache_status == "miss"
+
+
+def test_note_deleted_removes_image_from_maps(graphics_tree):
+    catalog = GraphicsCatalog()
+    catalog.refresh(str(graphics_tree), _config(), read_text=read_file)
+    idea_image = graphics_tree / "gfx" / "interface" / "ideas" / "disk_idea.png"
+    idea_image.unlink()
+
+    maps = catalog.note_deleted(str(idea_image))
+
+    assert maps is not None
+    assert "GFX_idea_disk_idea" not in maps.idea_sprites
+    assert catalog.query(search="disk_idea.png") == ()
+
+
+def test_image_under_decisions_dir_becomes_decision_sprites(graphics_tree):
+    catalog = GraphicsCatalog()
+    maps = catalog.refresh(str(graphics_tree), _config(), read_text=read_file)
+    decision_image = str(graphics_tree / "gfx" / "decisions" / "disk_decision.tga")
+
+    assert maps.decision_sprites["GFX_decision_disk_decision"] == decision_image
+    assert (
+        maps.decision_sprites["GFX_decision_category_disk_decision"] == decision_image
+    )
 
 
 def test_note_written_adds_image_without_rescanning(graphics_tree, monkeypatch):

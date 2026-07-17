@@ -107,7 +107,7 @@ class VirtualThumbnailGrid(tk.Frame):
         self._broker = ImageBroker(
             get_executor(self),
             generation=lambda: self._generation,
-            cache_size=256,
+            cache_size=512,
             pin_size=256,
         )
         self._transform = ImageTransform(image_size, preserve_aspect=preserve_aspect)
@@ -250,6 +250,11 @@ class VirtualThumbnailGrid(tk.Frame):
         if generation != self._generation or index not in self._live:
             return
         rectangle, old_image, label = self._live[index]
+        if image is None:
+            # Decode failed: turn the "..." placeholder into a "?" marker
+            # instead of leaving it spinning forever.
+            self.canvas.itemconfigure(old_image, text="?")
+            return
         self.canvas.delete(old_image)
         x, y = self._tile_xy(index)
         image_id = self.canvas.create_image(
