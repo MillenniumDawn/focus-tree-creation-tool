@@ -165,6 +165,7 @@ class ModLoadingMixin:
         self._refresh_mod_dropdowns()
         self._update_statusbar()
         # Invalidate all focus draw caches so mod images render on next frame
+        self._invalidate_canvas_images()
         if hasattr(self, "_focus_bundles"):
             self._focus_bundles.clear()
         self.cv.delete("focus")

@@ -1,23 +1,20 @@
 from __future__ import annotations
 
 import os
-import tempfile
+import secrets
+import stat
 from collections.abc import Callable
 from pathlib import Path
 
 
-def _relax_permissions(path: str) -> None:
-    """Widen NamedTemporaryFile's 0600 to the process default (0666 & ~umask).
-
-    Without this, every atomically-written mod file lands owner-only, unlike
-    a plain ``open(...)`` write.
-    """
-    mask = os.umask(0)
-    os.umask(mask)
-    try:
-        os.chmod(path, 0o666 & ~mask)
-    except OSError:
-        pass
+def _open_temporary_file(target: Path) -> tuple[Path, int]:
+    for _ in range(100):
+        path = target.parent / f".{target.name}.{secrets.token_hex(8)}.tmp"
+        try:
+            return path, os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o666)
+        except FileExistsError:
+            continue
+    raise FileExistsError(f"could not create a temporary file for {target}")
 
 
 class WorkspaceFiles:
@@ -27,24 +24,26 @@ class WorkspaceFiles:
     def write_text(self, path: str | Path, text: str, *, encoding: str) -> None:
         target = Path(path)
         target.parent.mkdir(parents=True, exist_ok=True)
-        temporary_path = ""
         try:
-            with tempfile.NamedTemporaryFile(
-                "w",
-                encoding=encoding,
-                dir=target.parent,
-                prefix=f".{target.name}.",
-                suffix=".tmp",
-                delete=False,
-            ) as temporary:
+            target_mode = stat.S_IMODE(target.stat().st_mode)
+        except FileNotFoundError:
+            target_mode = None
+        temporary_path: Path | None = None
+        descriptor: int | None = None
+        try:
+            temporary_path, descriptor = _open_temporary_file(target)
+            if target_mode is not None:
+                os.chmod(temporary_path, target_mode)
+            with os.fdopen(descriptor, "w", encoding=encoding) as temporary:
+                descriptor = None
                 temporary.write(text)
                 temporary.flush()
                 os.fsync(temporary.fileno())
-                temporary_path = temporary.name
-            _relax_permissions(temporary_path)
             os.replace(temporary_path, target)
         finally:
-            if temporary_path:
+            if descriptor is not None:
+                os.close(descriptor)
+            if temporary_path is not None:
                 try:
                     os.unlink(temporary_path)
                 except FileNotFoundError:

@@ -217,6 +217,7 @@ class GraphicsCatalog:
         self._image_stamps: dict[PathReference, FileStamp] = {}
         self._install_snapshot(GraphicsSnapshot((), (), (), (), ()))
         self._source_roots: dict[str, str] = {}
+        self._scan_roots: dict[str, str] = {}
         self._sprite_refs: dict[str, PathReference] = {}
         self._idea_refs: dict[str, PathReference] = {}
         self._decision_refs: dict[str, PathReference] = {}
@@ -260,6 +261,7 @@ class GraphicsCatalog:
         self.generation += 1
         self._install_snapshot(snapshot)
         self._source_roots = source_roots
+        self._scan_roots = self._extra_scan_roots(root, config)
         self._root = root
         self._config = config
         self._root_identity = root_identity
@@ -352,7 +354,7 @@ class GraphicsCatalog:
         return AssetRef(
             source_id=path.source_id,
             relative_path=path.relative_path,
-            stamp=self._image_stamps.get(path, FileStamp(0, 0, 0)),
+            stamp=self._stamp_for_path(path),
             generation=self.generation,
         )
 
@@ -457,21 +459,43 @@ class GraphicsCatalog:
         return tuple(records.values())
 
     def _reference_for_path(self, path: str) -> PathReference | None:
-        if _is_under(path, self._root):
-            return _reference_for("mod", self._root, path)
+        records = (
+            *(record.path for record in self._snapshot.images),
+            *(record.path for record in self._snapshot.gfx_files),
+            *(record.path for record in self._snapshot.directories),
+        )
+        matches = []
+        for record in records:
+            try:
+                record_path = record.resolve(self._source_roots)
+            except KeyError:
+                continue
+            if _is_under(path, record_path):
+                matches.append((len(record_path), record))
+        if matches:
+            _length, record = max(matches, key=lambda item: item[0])
+            return _reference_for(
+                record.source_id, self._source_roots[record.source_id], path
+            )
+
         candidates = sorted(
-            (
-                item
-                for item in self._source_roots.items()
-                if item[0] not in {"mod", "goals", "ideas"}
-            ),
+            self._scan_roots.items(),
             key=lambda item: len(item[1]),
             reverse=True,
         )
         for source_id, source_root in candidates:
             if _is_under(path, source_root):
-                return _reference_for(source_id, source_root, path)
+                return _reference_for(source_id, self._source_roots[source_id], path)
+        if _is_under(path, self._root):
+            return _reference_for("mod", self._root, path)
         return None
+
+    def _stamp_for_path(self, path: PathReference) -> FileStamp:
+        for candidate in _image_candidates(path):
+            stamp = self._image_stamps.get(candidate)
+            if stamp is not None:
+                return stamp
+        return FileStamp(0, 0, 0)
 
     def _is_interface_file(self, path: str) -> bool:
         return _is_under(path, os.path.join(self._root, "interface"))
@@ -804,6 +828,34 @@ class GraphicsCatalog:
         )
         return source_roots
 
+    @staticmethod
+    def _extra_scan_roots(root: str, config: GraphicsScanConfig) -> dict[str, str]:
+        interface_root = os.path.join(root, "interface")
+        gfx_root = os.path.join(root, "gfx")
+        goals_root = _configured_path(root, config.path_goals)
+        if not os.path.isdir(goals_root):
+            goals_root = os.path.join(root, "gfx", "interface")
+        roots = {
+            "goals": goals_root,
+            "ideas": _configured_path(root, config.path_ideas_gfx),
+        }
+        if config.path_event_pictures:
+            roots["events"] = _configured_path(root, config.path_event_pictures)
+        roots.update(
+            {
+                f"custom:{index}": os.path.abspath(path)
+                for index, path in enumerate(config.custom_gfx_dirs)
+            }
+        )
+        return {
+            source_id: scan_root
+            for source_id, scan_root in roots.items()
+            if not any(
+                _is_under(scan_root, existing)
+                for existing in (interface_root, gfx_root)
+            )
+        }
+
 
 def _parse_declarations(
     text: str, *, top_level: bool, strict_extension: bool
@@ -860,6 +912,17 @@ def _stamp_from_stat(stat: os.stat_result) -> FileStamp:
 def _reference_for(source_id: str, source_root: str, path: str) -> PathReference:
     relative_path = os.path.relpath(path, source_root)
     return PathReference(source_id, relative_path)
+
+
+def _image_candidates(path: PathReference) -> tuple[PathReference, ...]:
+    if not path.relative_path.lower().endswith(".dds"):
+        return (path,)
+    stem = os.path.splitext(path.relative_path)[0]
+    return (
+        path,
+        PathReference(path.source_id, stem + ".png"),
+        PathReference(path.source_id, stem + ".tga"),
+    )
 
 
 def _replace_or_append(records, replacement):

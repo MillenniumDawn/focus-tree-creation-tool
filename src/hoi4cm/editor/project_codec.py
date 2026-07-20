@@ -17,7 +17,14 @@ from hoi4cm.models import (
 PROJECT_FORMAT = "hoi4cm-project"
 PROJECT_VERSION = 2
 _KNOWN_ROOT_KEYS = {"format", "version", "workspace", "tree_name", "focuses"}
-_SEMANTIC_FOCUS_ATTRS = ("_raw_gx", "_raw_gy", "_rel_dx", "_rel_dy", "_joint_extra")
+_SEMANTIC_FOCUS_ATTRS = (
+    "_raw_gx",
+    "_raw_gy",
+    "_rel_dx",
+    "_rel_dy",
+    "_joint_extra",
+    "_script_extras",
+)
 
 
 def encode_project(workspace: EditorWorkspace) -> dict[str, Any]:
@@ -34,6 +41,7 @@ def encode_project(workspace: EditorWorkspace) -> dict[str, Any]:
                     _encode_focus(focus) for focus in workspace.focuses.values()
                 ],
                 "canvas": {
+                    **workspace.canvas_extras,
                     "min": list(workspace.canvas_min),
                     "max": list(workspace.canvas_max),
                 },
@@ -45,6 +53,15 @@ def encode_project(workspace: EditorWorkspace) -> dict[str, Any]:
 
 
 def decode_project(data: Mapping[str, Any]) -> EditorWorkspace:
+    format_name = data.get("format")
+    if format_name is not None:
+        if format_name != PROJECT_FORMAT:
+            raise ValueError(f"unsupported project format: {format_name!r}")
+        if data.get("version") != PROJECT_VERSION:
+            raise ValueError(f"unsupported project version: {data.get('version')!r}")
+        if not isinstance(data.get("workspace"), Mapping):
+            raise ValueError("project workspace must be an object")
+        return _decode_v2(data)
     if data.get("version") == PROJECT_VERSION and isinstance(
         data.get("workspace"), Mapping
     ):
@@ -74,7 +91,7 @@ def _encode_tree(tree: TreeDocument) -> dict[str, Any]:
     data = dict(tree.extras)
     data.update(
         {
-            "metadata": asdict(tree.metadata),
+            "metadata": {**tree.metadata_extras, **asdict(tree.metadata)},
             "tree_type": tree.tree_type,
             "file_path": tree.file_path,
             "had_wrapper": tree.had_wrapper,
@@ -87,6 +104,8 @@ def _encode_tree(tree: TreeDocument) -> dict[str, Any]:
 def _decode_v2(data: Mapping[str, Any]) -> EditorWorkspace:
     raw_workspace = data["workspace"]
     raw_canvas = raw_workspace.get("canvas", {})
+    if not isinstance(raw_canvas, Mapping):
+        raw_canvas = {}
     canvas_min = _pair(raw_canvas.get("min"), (0, 0))
     canvas_max = _pair(raw_canvas.get("max"), (9, 9))
     return EditorWorkspace(
@@ -100,6 +119,9 @@ def _decode_v2(data: Mapping[str, Any]) -> EditorWorkspace:
         ],
         canvas_min=canvas_min,
         canvas_max=canvas_max,
+        canvas_extras={
+            key: value for key, value in raw_canvas.items() if key not in {"min", "max"}
+        },
         default_focus_prefix=raw_workspace.get("default_focus_prefix", ""),
         workspace_extras={
             key: value
@@ -136,6 +158,8 @@ def _decode_legacy(data: Mapping[str, Any]) -> EditorWorkspace:
 
 def _decode_tree(data: Mapping[str, Any], default_type: str) -> TreeDocument:
     metadata_data = data.get("metadata", {})
+    if not isinstance(metadata_data, Mapping):
+        metadata_data = {}
     metadata_fields = TreeMetadata.__dataclass_fields__
     metadata = TreeMetadata(
         **{key: value for key, value in metadata_data.items() if key in metadata_fields}
@@ -147,6 +171,11 @@ def _decode_tree(data: Mapping[str, Any], default_type: str) -> TreeDocument:
         file_path=data.get("file_path", ""),
         had_wrapper=bool(data.get("had_wrapper", True)),
         focus_ids=set(data.get("focus_ids", [])),
+        metadata_extras={
+            key: value
+            for key, value in metadata_data.items()
+            if key not in metadata_fields
+        },
         extras={key: value for key, value in data.items() if key not in known},
     )
 

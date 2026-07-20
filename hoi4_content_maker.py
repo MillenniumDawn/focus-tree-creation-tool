@@ -2812,6 +2812,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
             return
         self._begin_document_generation()
         self.cv.delete("all")
+        self._focus_bundles.clear()
         self.focuses.clear()
         self._reset_canvas_bounds()
         self.selected = None
@@ -4605,6 +4606,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
                 )
                 return
             win.destroy()
+            self._begin_document_generation()
 
             # Snapshot the Tk-thread state the worker needs to resolve
             # cross-tree relative positions/prereqs. The worker must not

@@ -108,6 +108,83 @@ def test_resolve_reports_the_current_image_stamp(graphics_tree):
     assert asset.stamp == FileStamp(stat.st_mtime_ns, stat.st_ctime_ns, stat.st_size)
 
 
+def test_declared_dds_uses_fallback_image_stamp(graphics_tree):
+    fallback = graphics_tree / "gfx" / "interface" / "goals" / "declared.png"
+    fallback.write_bytes(b"fallback")
+    catalog = GraphicsCatalog()
+    catalog.refresh(str(graphics_tree), _config(), read_text=read_file)
+
+    asset = catalog.resolve("GFX_focus_declared")
+
+    assert asset is not None
+    stat = fallback.stat()
+    assert asset.stamp == FileStamp(stat.st_mtime_ns, stat.st_ctime_ns, stat.st_size)
+
+    fallback.write_bytes(b"new fallback with a different size")
+    catalog.note_written(str(fallback), read_text=read_file)
+    updated = catalog.resolve("GFX_focus_declared")
+
+    assert updated is not None
+    assert updated.stamp != asset.stamp
+
+
+@pytest.mark.parametrize(
+    ("setting", "source_id"),
+    (
+        ("path_goals", "goals"),
+        ("path_ideas_gfx", "ideas"),
+        ("path_event_pictures", "events"),
+    ),
+)
+def test_incremental_changes_keep_in_mod_configured_source(
+    graphics_tree, setting, source_id
+):
+    image_root = graphics_tree / "custom_assets" / source_id
+    image_root.mkdir(parents=True)
+    configured = str(image_root.relative_to(graphics_tree))
+    catalog = GraphicsCatalog()
+    catalog.refresh(
+        str(graphics_tree), _config(**{setting: configured}), read_text=read_file
+    )
+    added = image_root / "added.dds"
+    added.write_bytes(b"added")
+
+    assert catalog.note_written(str(added), read_text=read_file) is not None
+    assets = catalog.query(under=str(image_root))
+    assert len(assets) == 1
+    assert assets[0].source_id == source_id
+
+    added.unlink()
+    assert catalog.note_deleted(str(added)) is not None
+    assert catalog.query(under=str(image_root)) == ()
+
+
+@pytest.mark.parametrize(
+    ("setting", "source_id"),
+    (("path_goals", "goals"), ("path_ideas_gfx", "ideas")),
+)
+def test_incremental_changes_keep_external_configured_source(
+    graphics_tree, tmp_path, setting, source_id
+):
+    image_root = tmp_path / f"external_{source_id}"
+    image_root.mkdir()
+    catalog = GraphicsCatalog()
+    catalog.refresh(
+        str(graphics_tree), _config(**{setting: str(image_root)}), read_text=read_file
+    )
+    added = image_root / "added.dds"
+    added.write_bytes(b"added")
+
+    assert catalog.note_written(str(added), read_text=read_file) is not None
+    assets = catalog.query(under=str(image_root))
+    assert len(assets) == 1
+    assert assets[0].source_id == source_id
+
+    added.unlink()
+    assert catalog.note_deleted(str(added)) is not None
+    assert catalog.query(under=str(image_root)) == ()
+
+
 def test_cached_graphics_paths_are_relative(graphics_tree):
     catalog = GraphicsCatalog()
     catalog.refresh(str(graphics_tree), _config(), read_text=read_file)

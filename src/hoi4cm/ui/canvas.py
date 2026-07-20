@@ -714,6 +714,7 @@ class CanvasMixin:
             label_text,
             ico_size,
             lbl_size,
+            f.icon,
             getattr(f, "gfx", ""),
             tree_idx,
             has_offsets,
@@ -885,7 +886,9 @@ class CanvasMixin:
                     lifecycle.token("document") if lifecycle is not None else None
                 )
 
-                def image_ready(image, fid=f.id, expected_gfx=gfx_name):
+                def image_ready(
+                    image, fid=f.id, expected_gfx=gfx_name, icon_size=ico_size
+                ):
                     if (
                         lifecycle is not None
                         and document_token is not None
@@ -901,11 +904,24 @@ class CanvasMixin:
                         or current_bundle.lod != "full"
                     ):
                         return
-                    current_bundle.image = image
                     current_icon_item = current_bundle.items[8]
                     current_image_item = current_bundle.items[9]
-                    self.cv.itemconfig(current_icon_item, state="hidden")
-                    self.cv.itemconfig(current_image_item, image=image, state="normal")
+                    if image is None:
+                        current_bundle.image = None
+                        self.cv.itemconfig(
+                            current_icon_item,
+                            state="normal",
+                            text=current.icon,
+                            font=("TkDefaultFont", icon_size),
+                            fill=TEXT,
+                        )
+                        self.cv.itemconfig(current_image_item, state="hidden")
+                    else:
+                        current_bundle.image = image
+                        self.cv.itemconfig(current_icon_item, state="hidden")
+                        self.cv.itemconfig(
+                            current_image_item, image=image, state="normal"
+                        )
 
                 mod_img = image_broker.request(
                     asset,

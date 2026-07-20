@@ -18,9 +18,12 @@ def browser_folders(
         return _filesystem_browser_folders(folder, root_label)
 
     folder_path = os.path.abspath(folder)
+    image_paths = catalog_image_paths(catalog, under=folder_path)
+    if not image_paths:
+        return _filesystem_browser_folders(folder, root_label)
     direct_image = False
     child_names: set[str] = set()
-    for path in catalog_image_paths(catalog, under=folder_path):
+    for path in image_paths:
         relative = os.path.relpath(path, folder_path)
         parts = Path(relative).parts
         if len(parts) == 1:
@@ -45,6 +48,8 @@ def collect_image_pairs(
         paths = _walk_image_paths(folder, recursive=recursive)
     else:
         paths = catalog_image_paths(catalog, under=folder)
+        if not paths:
+            paths = _walk_image_paths(folder, recursive=recursive)
 
     search_text = search.casefold()
     pairs = []

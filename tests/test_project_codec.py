@@ -1,3 +1,5 @@
+import pytest
+
 from hoi4cm.editor.project_codec import decode_project, encode_project
 from hoi4cm.models import (
     EditorWorkspace,
@@ -74,6 +76,7 @@ def test_v2_roundtrip_preserves_workspace_and_tree_metadata():
                 joint_focuses=["joint_tree"],
             ),
             focus_ids={main.id},
+            metadata_extras={"future_metadata_field": {"kept": True}},
         ),
         extra_trees=[
             TreeDocument(
@@ -87,6 +90,7 @@ def test_v2_roundtrip_preserves_workspace_and_tree_metadata():
         ],
         canvas_min=(-4, -5),
         canvas_max=(40, 50),
+        canvas_extras={"future_canvas_field": [1, 2, 3]},
         default_focus_prefix="ABC_",
         workspace_extras={"future_workspace_field": {"enabled": True}},
         extras={"future_root_field": [1, 2, 3]},
@@ -98,8 +102,20 @@ def test_v2_roundtrip_preserves_workspace_and_tree_metadata():
     assert restored.extra_trees == workspace.extra_trees
     assert restored.canvas_min == (-4, -5)
     assert restored.canvas_max == (40, 50)
+    assert restored.canvas_extras == {"future_canvas_field": [1, 2, 3]}
     assert restored.default_focus_prefix == "ABC_"
     assert restored.workspace_extras == {"future_workspace_field": {"enabled": True}}
     assert restored.extras == {"future_root_field": [1, 2, 3]}
     assert list(restored.focuses) == [main.id, extra.id]
     assert restored.focuses.names["same_name"] == (main.id, extra.id)
+
+
+def test_future_project_version_is_rejected_without_legacy_fallback():
+    project = {
+        "format": "hoi4cm-project",
+        "version": 3,
+        "workspace": {"focuses": [{"id": 1, "name": "kept"}]},
+    }
+
+    with pytest.raises(ValueError, match="unsupported project version"):
+        decode_project(project)

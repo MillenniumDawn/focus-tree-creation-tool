@@ -34,15 +34,15 @@ class _ImageKey:
 class _CacheKey:
     path: str
     stamp: FileStamp
+    generation: int | None
     transform: ImageTransform
 
 
 def _cache_key(key: _ImageKey) -> _CacheKey:
-    # The generation is deliberately excluded: the FileStamp already changes
-    # when content changes, so a decoded image stays valid across generation
-    # bumps (e.g. revisiting a folder). Generation lives on for subscriber
-    # staleness and callback cancellation, not for cache identity.
-    return _CacheKey(key.path, key.stamp, key.transform)
+    # Stamped files survive catalog refreshes. Untracked paths need generation
+    # because their zero stamp cannot distinguish a replacement on disk.
+    generation = key.generation if key.stamp == FileStamp(0, 0, 0) else None
+    return _CacheKey(key.path, key.stamp, generation, key.transform)
 
 
 @dataclass(frozen=True)
@@ -54,6 +54,7 @@ class _Subscriber:
 @dataclass
 class _Pending:
     subscribers: dict[Hashable, _Subscriber]
+    future: Future[object | None] | None = None
 
 
 _MISSING = object()
@@ -194,6 +195,7 @@ class ImageBroker:
                 pending = _Pending({})
                 self._pending[key] = pending
                 future = self._executor.submit(self._decode, key)
+                pending.future = future
                 future.add_done_callback(
                     lambda completed, image_key=key: self._queue_result(
                         image_key, completed
@@ -213,8 +215,12 @@ class ImageBroker:
             self._cache.clear()
             self._pins.clear()
             self._owner_requests.clear()
-            for pending in self._pending.values():
-                pending.subscribers.clear()
+            pending = tuple(self._pending.values())
+            self._pending.clear()
+            for request in pending:
+                request.subscribers.clear()
+                if request.future is not None:
+                    request.future.cancel()
 
     def close(self) -> None:
         with self._lock:
@@ -224,7 +230,11 @@ class ImageBroker:
             self._cache.clear()
             self._pins.clear()
             self._owner_requests.clear()
+            pending = tuple(self._pending.values())
             self._pending.clear()
+            for request in pending:
+                if request.future is not None:
+                    request.future.cancel()
         self._discard_completed()
 
     def drain(self) -> int:
@@ -320,7 +330,14 @@ class ImageBroker:
     def _forget_request_locked(self, owner: Hashable) -> None:
         previous = self._owner_requests.pop(owner, None)
         if previous is not None and previous in self._pending:
-            self._pending[previous].subscribers.pop(owner, None)
+            pending = self._pending[previous]
+            pending.subscribers.pop(owner, None)
+            if (
+                not pending.subscribers
+                and pending.future is not None
+                and pending.future.cancel()
+            ):
+                self._pending.pop(previous, None)
 
     def _cache_locked(self, key: _ImageKey, image: object | None) -> None:
         entry = _cache_key(key)

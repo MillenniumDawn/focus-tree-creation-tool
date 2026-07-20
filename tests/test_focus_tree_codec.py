@@ -93,3 +93,64 @@ def test_code_apply_failure_does_not_mutate_existing_focus():
         )
 
     assert focus.__dict__ == before
+
+
+def test_code_block_apply_preserves_joint_trigger():
+    focus = Focus(1, 2)
+    focus.name = "TST_joint"
+    focus._joint_extra = 'joint_trigger = {\n\thas_dlc = "No Step Back"\n}'
+    lookup = {focus.id: focus}
+
+    apply_focus_code(
+        focus,
+        render_focus_block(
+            focus,
+            focus_lookup=lookup,
+            focus_name_lookup=build_focus_name_lookup(lookup.values()),
+        ),
+        focus_lookup=lookup,
+    )
+
+    assert "has_dlc" in focus._joint_extra
+
+
+def test_code_block_apply_keeps_moved_relative_focus_position():
+    parent = Focus(0, 0)
+    parent.name = "TST_parent"
+    focus = Focus(5, 2)
+    focus.name = "TST_child"
+    focus.relative_position_id = parent.name
+    focus._raw_gx = 1
+    focus._raw_gy = 0
+    focus._rel_dx = 1
+    focus._rel_dy = 0
+    lookup = {parent.id: parent, focus.id: focus}
+
+    code = render_focus_block(
+        focus,
+        focus_lookup=lookup,
+        focus_name_lookup=build_focus_name_lookup(lookup.values()),
+    )
+    apply_focus_code(focus, code, focus_lookup=lookup)
+
+    assert (focus.x, focus.y) == (5, 2)
+    assert (focus._rel_dx, focus._rel_dy) == (1, 0)
+
+
+def test_code_block_apply_keeps_raw_coordinates_with_conditional_offset():
+    focus = Focus(3, 0)
+    focus.name = "TST_offset"
+    focus._raw_gx = 1
+    focus._raw_gy = 0
+    focus.offsets = [{"x": 2, "y": 0, "trigger": "original_tag = TST"}]
+    lookup = {focus.id: focus}
+
+    code = render_focus_block(
+        focus,
+        focus_lookup=lookup,
+        focus_name_lookup=build_focus_name_lookup(lookup.values()),
+    )
+    apply_focus_code(focus, code, focus_lookup=lookup)
+
+    assert (focus.x, focus.y) == (3, 0)
+    assert (focus._raw_gx, focus._raw_gy) == (1, 0)

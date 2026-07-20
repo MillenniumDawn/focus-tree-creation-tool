@@ -58,16 +58,12 @@ Dragging one focus is the interactive hot path: `_foc_mv` calls
 `FocusDocument.move()` on every grid cell crossed, and the throttled line
 redraw (`_do_draw_lines_throttled`, ~60fps) has to reflect the new position.
 Both used to be O(F+E): `move()` did a full index rebuild, and the redraw did
-a full `SceneIndex.rebuild` (rasterizing all 2,860 edges). Measured on a
-synthetic 2,000-focus / 2,860-edge tree (`scratchpad/bench_drag.py`, Python
-3.14), the combined step was median 7.8-8.3ms, p95 12-14ms, and up to 21ms,
-which overruns a 16ms frame before any drawing. Two changes make it
-constant-time in the tree size: `move()` only x/y touches `occupied_positions`,
-so it patches that one index instead of rebuilding all seven; and
+a full `SceneIndex.rebuild`. Two changes make the update cost independent of
+the whole tree size: `move()` only x/y touches `occupied_positions`, so it
+patches that one index instead of rebuilding all seven; and
 `SceneIndex.update_focus` moves just the dragged focus between cells and
-re-rasterizes only its incident edges. After: median 0.029ms, p95 0.05ms, max
-0.1ms. This is synthetic-scale, not a real-mod display session, but the win is
-algorithmic (O(F+E) -> O(1 + focus degree)) so it holds at any tree size.
+re-rasterizes only its incident edges. The resulting work is O(1 + focus
+degree), not O(F+E).
 
 ## GIL guidance
 
@@ -129,8 +125,8 @@ concerns on a single file.
 |---|---|---|---|
 | `WorkspaceCache` graphics snapshot (SQLite, `~/.hoi4cm/scan_cache/<hash>.db`) | relative graphics inventory, sprite declarations, and configured focus/idea views | root identity, graphics path fingerprint, directory `mtime_ns`/`ctime_ns`, `.gfx` file stamps, and image stamps | one snapshot per graphics path configuration; detected stale rows rebuild. A warm load restats the known images, so an in-place image overwrite (same filename) is caught without an explicit refresh |
 | `ScanCache` (same SQLite database) | per-file scan contribution, per domain | `(mtime, size)` | none, though `prune()` drops rows for paths no longer in the mod (no size/age cap) |
-| Canvas `ImageBroker` | one application session | normalized path, file stamp, catalog generation, and transform | bounded LRU; visible renderer bundles own bounded pins and offscreen bundles release them |
-| Browser `ImageBroker` | one browser dialog | normalized path, file stamp, catalog generation, and transform | bounded LRU; the virtual thumbnail grid pins only visible rows plus overscan |
+| Canvas `ImageBroker` | one application session | normalized path, file stamp, transform, and catalog generation for zero-stamp assets | bounded LRU; visible renderer bundles own bounded pins and offscreen bundles release them |
+| Browser `ImageBroker` | one browser dialog | normalized path, file stamp, transform, and catalog generation for zero-stamp assets | bounded LRU; the virtual thumbnail grid pins only visible rows plus overscan |
 
 Warm graphics loads stat known directories, `.gfx` files, and the known image
 paths. They do not recursively enumerate directories or reparse `.gfx` files.

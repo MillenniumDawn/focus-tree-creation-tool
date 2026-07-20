@@ -8,6 +8,7 @@ from typing import Literal
 
 from hoi4cm.models import Focus
 from hoi4cm.script.effects import render_effect
+from hoi4cm.script.syntax import serialize_block
 
 from .build import build_focuses
 from .parse import parse_focus_tree
@@ -46,7 +47,14 @@ _EDITABLE_FIELDS = (
     "text",
     "offsets",
 )
-_PRESERVED_PARSE_FIELDS = ("_raw_gx", "_raw_gy", "_rel_dx", "_rel_dy", "_joint_extra")
+_PRESERVED_PARSE_FIELDS = (
+    "_raw_gx",
+    "_raw_gy",
+    "_rel_dx",
+    "_rel_dy",
+    "_joint_extra",
+    "_script_extras",
+)
 
 
 def _emit_preserved_block(
@@ -97,9 +105,12 @@ def _render_coordinates(
     if parent is None:
         return x, y, None
 
-    dx = getattr(focus, "_rel_dx", None)
-    dy = getattr(focus, "_rel_dy", None)
-    if dx is None or dy is None:
+    if policy == "raw":
+        dx = getattr(focus, "_rel_dx", None)
+        dy = getattr(focus, "_rel_dy", None)
+        if dx is None or dy is None:
+            dx, dy = x - parent.x, y - parent.y
+    else:
         dx, dy = x - parent.x, y - parent.y
     return dx, dy, relative_id
 
@@ -157,6 +168,14 @@ def render_focus_body(
             )
             out.append(f"{inner_indent}}}")
         out.append(f"{indent}}}")
+
+    extras = getattr(focus, "_script_extras", None)
+    if extras:
+        rendered_extras = serialize_block(
+            extras, indent=indent, include_bare_values=True, strip_strings=True
+        )
+        if rendered_extras:
+            out.extend(rendered_extras.splitlines())
 
     out.append(f"{indent}cost = {focus.cost}")
     if include_joint_extra:
@@ -265,6 +284,7 @@ def render_focus_block(
             indent=indent,
             effect_renderer=effect_renderer,
             completion_reward_policy="preview",
+            include_joint_extra=True,
         )
     )
     out.append("}")
@@ -310,6 +330,8 @@ def apply_focus_code(
     for offset in candidate.offsets:
         offset["trigger"] = offset.get("trigger", "").strip()
 
+    _preserve_raw_coordinates(focus, candidate, focus_lookup)
+
     values = {
         field: deepcopy(getattr(candidate, field))
         for field in (*_EDITABLE_FIELDS, *_PRESERVED_PARSE_FIELDS)
@@ -320,3 +342,32 @@ def apply_focus_code(
             delattr(focus, field)
     for field, value in values.items():
         setattr(focus, field, value)
+
+
+def _preserve_raw_coordinates(
+    focus: Focus, candidate: Focus, focus_lookup: Mapping[int, Focus]
+) -> None:
+    if not hasattr(focus, "_raw_gx") or candidate.offsets != focus.offsets:
+        return
+
+    focus_by_name = {item.name: item for item in focus_lookup.values()}
+    original_parent = focus_by_name.get(getattr(focus, "relative_position_id", ""))
+    if original_parent is None:
+        offset_x = focus.x - focus._raw_gx
+        offset_y = focus.y - focus._raw_gy
+    else:
+        raw_dx = getattr(focus, "_rel_dx", focus._raw_gx)
+        raw_dy = getattr(focus, "_rel_dy", focus._raw_gy)
+        offset_x = focus.x - original_parent.x - raw_dx
+        offset_y = focus.y - original_parent.y - raw_dy
+
+    candidate_parent = focus_by_name.get(candidate.relative_position_id)
+    if candidate_parent is None:
+        candidate._raw_gx = candidate.x - offset_x
+        candidate._raw_gy = candidate.y - offset_y
+        return
+
+    candidate._rel_dx = candidate.x - candidate_parent.x - offset_x
+    candidate._rel_dy = candidate.y - candidate_parent.y - offset_y
+    candidate._raw_gx = candidate._rel_dx
+    candidate._raw_gy = candidate._rel_dy

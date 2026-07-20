@@ -12,7 +12,7 @@ They are recorded here so they don't get "fixed" back.
 **[BEHAVIOR CHANGE] Applying the Code tab now resets fields you leave out**
 - The old regex patcher only rewrote the fields it recognized and left the
   rest untouched. The new apply parses the block and rewrites every editable
-  field, so a field you delete from the code is now cleared on the focus
+  field, so a field you delete from the code is reset to its parser default
   instead of silently kept. Keep a field by keeping it in the code.
 
 ### Focus-sprite scanning honors `path_goals`

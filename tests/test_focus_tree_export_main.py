@@ -314,11 +314,7 @@ def test_fixture_country_raw_present_verbatim_on_first_export():
     assert "original_tag=TST" in text  # no space around '=', preserved verbatim
 
 
-def test_main_tree_roundtrip_drops_unknown_focus_keys_and_is_idempotent():
-    # country_raw is preserved verbatim, but focus-level keys the model does
-    # not know (`some_unknown_field`, `another_unknown`) are DROPPED on export.
-    # That drop is intentional: the editor only round-trips the fields it
-    # models, so parse -> export -> reparse -> export stays a fixed point.
+def test_main_tree_roundtrip_preserves_unknown_focus_keys_and_is_idempotent():
     src = "\n".join(
         [
             "focus_tree = {",
@@ -349,8 +345,8 @@ def test_main_tree_roundtrip_drops_unknown_focus_keys_and_is_idempotent():
     assert t1 == t2
     assert _summary(f1) == _summary(f2)
     assert "original_tag" in t1  # country_raw survived
-    assert "some_unknown_field" not in t1  # unknown focus keys dropped
-    assert "another_unknown" not in t1
+    assert "some_unknown_field = mystery" in t1
+    assert "another_unknown = {" in t1
 
 
 def test_fixture_content_present():

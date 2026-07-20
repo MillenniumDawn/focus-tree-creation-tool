@@ -62,6 +62,13 @@ def test_duplicate_name_lookup_has_explicit_first_and_last_policy():
     assert document.find_by_name("duplicate", policy="last") is last
 
 
+def test_mapping_delete_missing_id_raises_key_error():
+    document = FocusDocument()
+
+    with pytest.raises(KeyError):
+        del document[42]
+
+
 def test_legacy_direct_mutation_can_be_detected_and_rebuilt():
     focus = _focus(1, name="before")
     document = FocusDocument((focus,))

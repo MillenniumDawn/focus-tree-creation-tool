@@ -56,6 +56,17 @@ def test_collect_image_pairs_falls_back_to_recursive_folder_scan(tmp_path):
     ]
 
 
+def test_collect_image_pairs_falls_back_when_catalog_is_stale(tmp_path):
+    root = tmp_path / "event_pictures"
+    root.mkdir()
+    image = root / "new.png"
+    image.touch()
+
+    pairs = collect_image_pairs(str(root), "GFX_event_", catalog=FakeCatalog(()))
+
+    assert pairs == [("GFX_event_new", str(image))]
+
+
 def test_browser_folders_uses_catalog_image_locations(tmp_path):
     root = tmp_path / "event_pictures"
     paths = (
@@ -84,6 +95,16 @@ def test_browser_folders_preserves_selected_folder_fallback(tmp_path):
         ("[selected folder]", str(root)),
         ("empty", str(root / "empty")),
     ]
+
+
+def test_browser_folders_falls_back_when_catalog_is_stale(tmp_path):
+    root = tmp_path / "event_pictures"
+    root.mkdir()
+    (root / "new.dds").touch()
+
+    folders = browser_folders(str(root), "[event_pictures]", catalog=FakeCatalog(()))
+
+    assert folders == [("[event_pictures]", str(root))]
 
 
 def test_find_catalog_image_prefers_flat_path_and_extension_order(tmp_path):

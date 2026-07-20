@@ -102,6 +102,19 @@ def test_draw_key_fast_exits_when_unchanged(tk_root):
     assert cv.coords(box_rect) == nudged  # fast-exit: no recompute happened
 
 
+def test_draw_key_updates_changed_icon(tk_root):
+    cv = tk.Canvas(tk_root, width=200, height=200)
+    app = _FakeApp(cv)
+    f = Focus(x=5, y=5)
+
+    app._draw_focus(f, FAR_RECT)
+    icon_item = app._focus_bundles[f.id].items[8]
+    f.icon = "X"
+    app._draw_focus(f, FAR_RECT)
+
+    assert cv.itemcget(icon_item, "text") == "X"
+
+
 def test_retained_focus_bundles_are_bounded_by_visible_set(tk_root):
     cv = tk.Canvas(tk_root, width=200, height=200)
     app = _FakeApp(cv)

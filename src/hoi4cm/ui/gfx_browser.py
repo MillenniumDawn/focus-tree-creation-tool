@@ -81,6 +81,21 @@ def _catalog_folder_groups(candidates, image_paths):
     return groups
 
 
+def _uncatalogued_custom_groups(groups, custom_dirs):
+    result = list(groups)
+    known_paths = {
+        os.path.normcase(os.path.abspath(folder)) for _, folder, _, _ in result
+    }
+    for folder in custom_dirs:
+        normalized_folder = os.path.normcase(os.path.abspath(folder))
+        if normalized_folder in known_paths or not os.path.isdir(folder):
+            continue
+        known_paths.add(normalized_folder)
+        label = os.path.basename(os.path.normpath(folder)) + " (custom)"
+        result.append((label, folder, "GFX_", False))
+    return result
+
+
 def _path_is_under(path, parent):
     try:
         return os.path.commonpath((path, parent)) == parent
@@ -154,10 +169,13 @@ def open_universal_gfx_browser(
         ]
         for cdir in getattr(mod, "custom_gfx_dirs", []):
             resolved_candidates.append(
-                (os.path.basename(cdir) + " (custom)", cdir, "GFX_")
+                (os.path.basename(os.path.normpath(cdir)) + " (custom)", cdir, "GFX_")
             )
         all_paths = _catalog_image_paths(catalog)
         folder_groups = _catalog_folder_groups(resolved_candidates, all_paths)
+        folder_groups = _uncatalogued_custom_groups(
+            folder_groups, getattr(mod, "custom_gfx_dirs", [])
+        )
 
     if not folder_groups:
         folder = filedialog.askdirectory(
@@ -208,12 +226,27 @@ def open_universal_gfx_browser(
             parent=bwin,
         )
         if d:
-            if d not in [g[1] for g in folder_groups]:
+            normalized = os.path.normcase(os.path.abspath(d))
+            known_paths = {
+                os.path.normcase(os.path.abspath(group[1])) for group in folder_groups
+            }
+            if normalized not in known_paths:
                 folder_groups.append(
-                    (os.path.basename(d) + " (custom)", d, "GFX_", False)
+                    (
+                        os.path.basename(os.path.normpath(d)) + " (custom)",
+                        d,
+                        "GFX_",
+                        False,
+                    )
                 )
-                folder_lb.insert("end", "  " + os.path.basename(d) + " (custom)")
-            if d not in getattr(mod, "custom_gfx_dirs", []):
+                folder_lb.insert(
+                    "end", "  " + os.path.basename(os.path.normpath(d)) + " (custom)"
+                )
+            configured_paths = {
+                os.path.normcase(os.path.abspath(path))
+                for path in getattr(mod, "custom_gfx_dirs", [])
+            }
+            if normalized not in configured_paths:
                 mod.custom_gfx_dirs.append(d)
 
     tk.Button(
@@ -1092,6 +1125,7 @@ def open_focus_icon_browser(win, on_select, current_gfx="", mod=None):
         if os.path.isabs(mod.path_goals)
         else os.path.join(mod.root, mod.path_goals)
     )
+    goals_root = os.path.normcase(os.path.abspath(goals_root))
     goal_paths = _catalog_image_paths(catalog, under=goals_root) if catalog else ()
     if not goal_paths:
         fallback_root = os.path.join(mod.root, "gfx", "interface")
@@ -1099,7 +1133,7 @@ def open_focus_icon_browser(win, on_select, current_gfx="", mod=None):
             _catalog_image_paths(catalog, under=fallback_root) if catalog else ()
         )
         if fallback_paths:
-            goals_root = fallback_root
+            goals_root = os.path.normcase(os.path.abspath(fallback_root))
             goal_paths = fallback_paths
     if not goal_paths:
         messagebox.showinfo(
@@ -1112,7 +1146,11 @@ def open_focus_icon_browser(win, on_select, current_gfx="", mod=None):
         return
 
     folders = []
-    loose = [path for path in goal_paths if os.path.dirname(path) == goals_root]
+    loose = [
+        path
+        for path in goal_paths
+        if os.path.normcase(os.path.abspath(os.path.dirname(path))) == goals_root
+    ]
     if loose:
         folders.append(("[goals root]", goals_root))
     children = {

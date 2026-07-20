@@ -3,7 +3,7 @@ from __future__ import annotations
 import threading
 import tkinter as tk
 from collections.abc import Callable
-from concurrent.futures import Executor
+from concurrent.futures import Executor, Future
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -50,6 +50,7 @@ class ApplicationLifecycle:
         self._accepting = True
         self._finished = False
         self._generations: dict[str, int] = {}
+        self._scope_futures: dict[str, set[Future]] = {}
         self._after_jobs: list[tuple[TkOwner, object]] = []
         self._resources: list[Callable[[], None]] = []
         self._lock = threading.RLock()
@@ -79,11 +80,30 @@ class ApplicationLifecycle:
     def invalidate(self, scope: str) -> None:
         with self._lock:
             self._generations[scope] = self._generations.get(scope, 0) + 1
+            futures = tuple(self._scope_futures.pop(scope, ()))
+        for future in futures:
+            future.cancel()
 
     def is_current(self, token: GenerationToken) -> bool:
         with self._lock:
             current = self._generations.get(token.scope, 0)
             return self._accepting and current == token.value
+
+    def track_future(self, future: Future, token: GenerationToken) -> None:
+        with self._lock:
+            if (
+                not self._accepting
+                or self._generations.get(token.scope, 0) != token.value
+            ):
+                cancel = True
+            else:
+                self._scope_futures.setdefault(token.scope, set()).add(future)
+                future.add_done_callback(
+                    lambda completed: self._forget_future(token.scope, completed)
+                )
+                cancel = False
+        if cancel:
+            future.cancel()
 
     def add_resource(self, close: Callable[[], None]) -> Callable[[], None]:
         with self._lock:
@@ -139,7 +159,15 @@ class ApplicationLifecycle:
             self._accepting = False
             for scope in tuple(self._generations):
                 self._generations[scope] += 1
-            return True
+            futures = tuple(
+                future
+                for scope_futures in self._scope_futures.values()
+                for future in scope_futures
+            )
+            self._scope_futures.clear()
+        for future in futures:
+            future.cancel()
+        return True
 
     def finish_close(self) -> None:
         self.begin_close()
@@ -175,6 +203,14 @@ class ApplicationLifecycle:
                 self._after_jobs.remove((owner, job))
             except ValueError:
                 pass
+
+    def _forget_future(self, scope: str, future: Future) -> None:
+        with self._lock:
+            futures = self._scope_futures.get(scope)
+            if futures is not None:
+                futures.discard(future)
+                if not futures:
+                    self._scope_futures.pop(scope, None)
 
     @staticmethod
     def _owner_exists(owner: TkOwner) -> bool:

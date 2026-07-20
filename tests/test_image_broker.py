@@ -182,6 +182,76 @@ def test_cache_hit_survives_generation_change() -> None:
     assert result is not None
 
 
+def test_zero_stamp_cache_misses_after_generation_change() -> None:
+    generation = 1
+    decode_count = 0
+
+    def decode(path: str, transform: ImageTransform) -> object:
+        nonlocal decode_count
+        decode_count += 1
+        return object()
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        broker = ImageBroker(
+            executor,
+            generation=lambda: generation,
+            decoder=decode,
+            realizer=lambda image: image,
+            pillow_available=True,
+        )
+        broker.request(
+            _asset(generation=1, stamp=0),
+            "/tmp/icon.png",
+            owner="old",
+            callback=lambda _: None,
+        )
+        _drain_when_ready(broker)
+        generation = 2
+        broker.request(
+            _asset(generation=2, stamp=0),
+            "/tmp/icon.png",
+            owner="new",
+            callback=lambda _: None,
+        )
+        _drain_when_ready(broker)
+
+    assert decode_count == 2
+
+
+def test_release_cancels_queued_decode() -> None:
+    started = threading.Event()
+    unblock = threading.Event()
+    calls = []
+
+    def decode(path: str, transform: ImageTransform) -> object:
+        calls.append(path)
+        if path.endswith("first.png"):
+            started.set()
+            unblock.wait(timeout=2)
+        return object()
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        broker = ImageBroker(
+            executor,
+            generation=lambda: 1,
+            decoder=decode,
+            realizer=lambda image: image,
+            pillow_available=True,
+        )
+        broker.request(
+            _asset(), "/tmp/first.png", owner="first", callback=lambda _: None
+        )
+        assert started.wait(timeout=2)
+        broker.request(
+            _asset(stamp=2), "/tmp/second.png", owner="second", callback=lambda _: None
+        )
+        broker.release("second")
+        unblock.set()
+        _drain_when_ready(broker)
+
+    assert calls == ["/tmp/first.png"]
+
+
 def test_failed_decode_delivers_none_to_subscribers() -> None:
     delivered = []
 

@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 from hoi4cm.mod.graphics_catalog import AssetRef, FileStamp
@@ -5,6 +6,7 @@ from hoi4cm.ui.gfx_browser import (
     _catalog_folder_groups,
     _catalog_image_paths,
     _pairs_from_paths,
+    _uncatalogued_custom_groups,
 )
 
 
@@ -75,4 +77,19 @@ def test_pairs_from_paths_preserves_first_stem_after_sorting(tmp_path):
     assert pairs == [
         ("GFX_other", str(tmp_path / "a" / "other.tga")),
         ("GFX_same", str(tmp_path / "a" / "same.dds")),
+    ]
+
+
+def test_uncatalogued_custom_groups_survive_catalog_refresh(tmp_path):
+    custom = tmp_path / "custom"
+    custom.mkdir()
+    catalogued = [("ideas", str(tmp_path / "ideas"), "GFX_idea_", True)]
+
+    groups = _uncatalogued_custom_groups(
+        catalogued, [str(custom), str(custom) + os.sep]
+    )
+
+    assert groups == [
+        ("ideas", str(tmp_path / "ideas"), "GFX_idea_", True),
+        ("custom (custom)", str(custom), "GFX_", False),
     ]

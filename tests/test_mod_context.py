@@ -582,7 +582,9 @@ def test_gfx_scan_preserves_dictionary_identity(gfx_mod_tree):
     dictionaries = (MOD.sprites, MOD.idea_sprites, MOD.decision_sprites)
     MOD.scan(str(gfx_mod_tree))
     MOD.scan(str(gfx_mod_tree))
-    assert dictionaries == (MOD.sprites, MOD.idea_sprites, MOD.decision_sprites)
+    assert MOD.sprites is dictionaries[0]
+    assert MOD.idea_sprites is dictionaries[1]
+    assert MOD.decision_sprites is dictionaries[2]
 
 
 # ── Read/extract overlap in _scan_files_cached ─────────────────────────────

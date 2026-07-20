@@ -22,6 +22,7 @@ _FOCUS_SEMANTIC_METADATA = (
     "_rel_dx",
     "_rel_dy",
     "_joint_extra",
+    "_script_extras",
 )
 
 

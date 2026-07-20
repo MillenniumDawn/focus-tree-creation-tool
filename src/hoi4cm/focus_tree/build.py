@@ -11,11 +11,42 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable
+from copy import deepcopy
 
 from hoi4cm.models import Focus
 from hoi4cm.script import dict_to_raw
 
 from .parse import ParsedFocusTree, block_to_str
+
+_KNOWN_FOCUS_FIELDS = frozenset(
+    {
+        "id",
+        "icon",
+        "text",
+        "x",
+        "y",
+        "relative_position_id",
+        "offset",
+        "cost",
+        "prerequisite",
+        "mutually_exclusive",
+        "search_filters",
+        "allow_branch",
+        "available",
+        "bypass",
+        "cancel",
+        "will_lead_to_war_with",
+        "complete_tooltip",
+        "select_effect",
+        "bypass_effect",
+        "cancel_if_invalid",
+        "continue_if_invalid",
+        "available_if_capitulated",
+        "completion_reward",
+        "ai_will_do",
+        "joint_trigger",
+    }
+)
 
 
 class BuildContext:
@@ -191,6 +222,13 @@ def build_focuses(
         )
         f._joint_extra = raw_rewards.get((fid_str, "_joint_extra"), "")
         f.offsets = raw_rewards.get((fid_str, "_offsets"), [])
+        extras = {
+            key: deepcopy(value)
+            for key, value in rf.items()
+            if key not in _KNOWN_FOCUS_FIELDS
+        }
+        if extras:
+            f._script_extras = extras
         raw_rw = raw_rewards.get(fid_str, "")
         if raw_rw:
             f.effects = [{"type": "_raw_block", "fields": {"raw": raw_rw}}]

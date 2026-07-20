@@ -8,6 +8,7 @@ instead of sleeping.
 """
 
 import threading
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
@@ -33,9 +34,9 @@ class FakeWidget:
 
 
 class QueuedWidget:
-    def __init__(self):
+    def __init__(self, *, executor_factory=None):
         self.master = None
-        self._lifecycle = ApplicationLifecycle(self)
+        self._lifecycle = ApplicationLifecycle(self, executor_factory=executor_factory)
         self.callbacks = []
 
     def winfo_exists(self):
@@ -116,14 +117,16 @@ def test_on_done_skipped_when_widget_destroyed():
 
 def test_on_done_skipped_after_document_generation_changes():
     widget = QueuedWidget()
+    started = threading.Event()
     gate = threading.Event()
     calls = []
     future = tasks.run_bg(
         widget,
-        lambda: gate.wait(timeout=2) or 1,
+        lambda: started.set() or gate.wait(timeout=2) or 1,
         calls.append,
         scope="document",
     )
+    assert started.wait(timeout=1)
     widget._lifecycle.invalidate("document")
     gate.set()
     future.result(timeout=2)
@@ -132,6 +135,29 @@ def test_on_done_skipped_after_document_generation_changes():
     widget._lifecycle.close()
 
     assert calls == []
+
+
+def test_document_invalidation_cancels_queued_work():
+    executor = ThreadPoolExecutor(max_workers=1)
+    widget = QueuedWidget(executor_factory=lambda: executor)
+    started = threading.Event()
+    release = threading.Event()
+
+    first = tasks.run_bg(
+        widget,
+        lambda: started.set() or release.wait(timeout=2),
+        lambda _result: None,
+        scope="document",
+    )
+    assert started.wait(timeout=1)
+    second = tasks.run_bg(widget, lambda: 2, lambda _result: None, scope="document")
+
+    widget._lifecycle.invalidate("document")
+
+    assert second.cancelled()
+    release.set()
+    first.result(timeout=2)
+    widget._lifecycle.close()
 
 
 # ── run_bg: error path ────────────────────────────────────────────────

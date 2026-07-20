@@ -28,6 +28,7 @@ class TreeDocument:
     file_path: str = ""
     had_wrapper: bool = True
     focus_ids: set[int] = field(default_factory=set)
+    metadata_extras: dict[str, Any] = field(default_factory=dict)
     extras: dict[str, Any] = field(default_factory=dict)
 
 
@@ -63,6 +64,8 @@ class FocusDocument(MutableMapping[int, Focus]):
         self.add(focus, replace=focus_id in self._focuses)
 
     def __delitem__(self, focus_id: int) -> None:
+        if focus_id not in self._focuses:
+            raise KeyError(focus_id)
         self.delete_many((focus_id,), clean_references=False)
 
     def __iter__(self) -> Iterator[int]:
@@ -332,6 +335,7 @@ class EditorWorkspace:
     extra_trees: list[TreeDocument] = field(default_factory=list)
     canvas_min: tuple[int, int] = (0, 0)
     canvas_max: tuple[int, int] = (9, 9)
+    canvas_extras: dict[str, Any] = field(default_factory=dict)
     default_focus_prefix: str = ""
     workspace_extras: dict[str, Any] = field(default_factory=dict)
     extras: dict[str, Any] = field(default_factory=dict)

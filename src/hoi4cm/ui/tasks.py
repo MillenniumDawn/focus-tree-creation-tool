@@ -112,7 +112,10 @@ def run_bg(widget, work, on_done, on_error=None, *, scope="application"):
         schedule(lambda result=result: on_done(result))
 
     try:
-        return get_executor(widget).submit(_job)
+        future = get_executor(widget).submit(_job)
+        if lifecycle is not None and token is not None:
+            lifecycle.track_future(future, token)
+        return future
     except RuntimeError:
         future = Future()
         future.cancel()
