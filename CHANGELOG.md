@@ -2,6 +2,23 @@
 
 ---
 
+## Application Modernization — Python Floor Raised to 3.14
+
+**Minimum supported Python is now 3.14, up from 3.9.**
+- `requires-python` in `pyproject.toml` bumped to `>=3.14`. CI's test matrix collapsed
+  from `3.9`/`3.13` to `3.14` only, and the lint job moved off `3.12` to match.
+- `black` now targets `py314` and `ruff` infers the same from `requires-python`, so both
+  apply 3.14-only style — e.g. PEP 758's unparenthesized `except A, B:`. Dev-extra pins
+  bumped to `black>=26.5` and `ruff>=0.16`; older releases either don't know the `py314`
+  target or can't parse the resulting syntax at all.
+- Dropped the last pre-3.10 shim: `_image_loader.py`'s `_QueueItem` runtime alias is a
+  plain `X | Y` union now instead of `typing.Union`.
+- Ruff's B905 (`zip()` without `strict=`) is live under the 3.14 target. Every existing
+  `zip()` call got an explicit `strict=True` or `strict=False` after checking whether the
+  two sequences are guaranteed to be the same length.
+
+---
+
 ## Application Modernization — Behavior Changes
 
 The modernization rounds changed a few user-visible behaviors on purpose.

@@ -13,7 +13,7 @@ app still works.
 import os
 import re
 import time
-from typing import Callable, Optional
+from collections.abc import Callable
 
 from hoi4cm.core.concurrency import DaemonThreadPoolExecutor
 from hoi4cm.core.config import cfg_load, cfg_save
@@ -249,7 +249,7 @@ class ModContext:
                 max_workers=workers, thread_name_prefix="hoi4cm-scan"
             ) as ex:
                 futures = [ex.submit(read_and_extract, p) for p in to_read]
-                for p, fut in zip(to_read, futures):
+                for p, fut in zip(to_read, futures, strict=True):
                     contrib[p] = fut.result()
 
         if self._cache:
@@ -524,7 +524,7 @@ class ModContext:
         self._img_errors.append(f"LOAD FAILED {gfx_name}: {last_err}")
         return None
 
-    def scan(self, root, progress_cb: Optional[Callable] = None):
+    def scan(self, root, progress_cb: Callable | None = None):
         self.root = root
         self.mod_name = os.path.basename(root)
         self.sprites.clear()

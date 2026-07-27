@@ -24,7 +24,7 @@ def fake_config(tmp_path, monkeypatch):
     def fake_load():
         try:
             return json.loads(config_file.read_text())
-        except (FileNotFoundError, json.JSONDecodeError):
+        except FileNotFoundError, json.JSONDecodeError:
             return {}
 
     def fake_save(d):
@@ -40,7 +40,7 @@ def fake_config(tmp_path, monkeypatch):
 def _read_json_or_empty(path):
     try:
         return json.loads(path.read_text())
-    except (FileNotFoundError, json.JSONDecodeError):
+    except FileNotFoundError, json.JSONDecodeError:
         return {}
 
 

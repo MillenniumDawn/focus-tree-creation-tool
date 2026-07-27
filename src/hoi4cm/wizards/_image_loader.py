@@ -5,7 +5,7 @@ import threading
 import tkinter as tk
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
-from typing import Protocol, TypeVar, Union
+from typing import Protocol, TypeVar
 
 from hoi4cm.ui.lifecycle import find_lifecycle
 
@@ -38,9 +38,7 @@ class _BatchDone:
     generation: int
 
 
-# Runtime alias, so it must stay 3.9-safe: PEP 604 `A | B` here raises
-# TypeError before 3.10 (future-annotations only covers annotations).
-_QueueItem = Union[_ImageResult, _BatchDone]
+_QueueItem = _ImageResult | _BatchDone
 _Item = TypeVar("_Item")
 
 
@@ -61,7 +59,7 @@ class TkImageLoader:
             self._remove_resource = lifecycle.add_resource(self.close)
         try:
             owner.bind("<Destroy>", self._on_destroy, add="+")
-        except (AttributeError, RuntimeError, tk.TclError):
+        except AttributeError, RuntimeError, tk.TclError:
             pass
 
     def submit_many(
@@ -135,7 +133,7 @@ class TkImageLoader:
         if self._poll_job is not None:
             try:
                 self._owner.after_cancel(self._poll_job)
-            except (AttributeError, RuntimeError, tk.TclError):
+            except AttributeError, RuntimeError, tk.TclError:
                 pass
             self._poll_job = None
         self._poll_scheduled = False
@@ -147,7 +145,7 @@ class TkImageLoader:
         self._poll_scheduled = True
         try:
             self._poll_job = self._owner.after(self._poll_interval, self._poll)
-        except (AttributeError, RuntimeError, tk.TclError):
+        except AttributeError, RuntimeError, tk.TclError:
             self._closed = True
             self._poll_scheduled = False
 

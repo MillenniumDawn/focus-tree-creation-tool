@@ -48,7 +48,7 @@ HOI4 Content Maker  —  v2.0  |  Millennium Dawn Team
 Copyright (c) 2025 Millennium Dawn Team. All Rights Reserved.
 
 Wiki    : https://hoi4.paradoxwikis.com/National_focus_modding
-Requires: Python 3.9+  (tkinter built-in, no pip install needed)
+Requires: Python 3.14+  (tkinter built-in, no pip install needed)
 Run     : python hoi4_focus_maker.py
 
 Controls:

@@ -841,7 +841,7 @@ class CanvasMixin:
         cv.coords(mat, cx - h - mp, cy - h - mp, cx + h + mp, cy + h + mp)
         cv.coords(box_rect, cx - h, cy - h, cx + h, cy + h)
         for rv, (dx, dy) in zip(
-            (rv0, rv1, rv2, rv3), ((-1, -1), (1, -1), (-1, 1), (1, 1))
+            (rv0, rv1, rv2, rv3), ((-1, -1), (1, -1), (-1, 1), (1, 1)), strict=True
         ):
             cv.coords(
                 rv,

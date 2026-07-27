@@ -58,7 +58,8 @@ def get_executor(owner=None):
 def shutdown_executor():
     """Tear down the shared executor, if one was ever created. Idempotent.
 
-    ``cancel_futures=True`` needs Python 3.9+ (this project's floor). Pending
+    ``cancel_futures=True`` needs Python 3.9+, well under this project's
+    3.14 floor. Pending
     (not-yet-started) work is dropped rather than waited on, so app close
     isn't blocked by a background parse.
     """

@@ -143,7 +143,7 @@ class ApplicationLifecycle:
 
         try:
             job = owner.after(milliseconds, guarded)
-        except (AttributeError, RuntimeError, tk.TclError):
+        except AttributeError, RuntimeError, tk.TclError:
             return None
         with self._lock:
             if self._accepting:
@@ -216,14 +216,14 @@ class ApplicationLifecycle:
     def _owner_exists(owner: TkOwner) -> bool:
         try:
             return bool(owner.winfo_exists())
-        except (AttributeError, RuntimeError, tk.TclError):
+        except AttributeError, RuntimeError, tk.TclError:
             return False
 
     @staticmethod
     def _cancel_after(owner: TkOwner, job: object) -> None:
         try:
             owner.after_cancel(job)
-        except (AttributeError, RuntimeError, tk.TclError):
+        except AttributeError, RuntimeError, tk.TclError:
             pass
 
     def _cancel_tk_after_jobs(self) -> None:
@@ -232,7 +232,7 @@ class ApplicationLifecycle:
             return
         try:
             jobs = owner.tk.call("after", "info")
-        except (AttributeError, RuntimeError, tk.TclError):
+        except AttributeError, RuntimeError, tk.TclError:
             return
         for job in jobs if isinstance(jobs, tuple) else ():
             self._cancel_after(owner, job)

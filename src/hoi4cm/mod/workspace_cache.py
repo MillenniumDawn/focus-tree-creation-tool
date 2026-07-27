@@ -45,7 +45,7 @@ class WorkspaceCache:
             return None
         try:
             data = json.loads(row[2])
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return None
         return data if isinstance(data, dict) else None
 

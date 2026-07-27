@@ -189,9 +189,10 @@ the worker runs.
 
 `get_executor()` creates the pool on first use and returns the same
 instance after that. `shutdown_executor()` (`wait=False,
-cancel_futures=True`; `cancel_futures` needs Python 3.9+, this project's
-floor) is wired into `_on_app_close` so pending background work doesn't
-block process exit; it's idempotent and safe to call from tests.
+cancel_futures=True`; `cancel_futures` needs Python 3.9+, well under this
+project's 3.14 floor) is wired into `_on_app_close` so pending background
+work doesn't block process exit; it's idempotent and safe to call from
+tests.
 
 The background pool the modernized UI uses (the mod scan and image decoding)
 is `core/concurrency.py`'s `DaemonThreadPoolExecutor`, handed out through

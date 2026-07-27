@@ -26,7 +26,7 @@ black --check .                 # formatting
 python build/build.py           # standalone exe (after pip install ".[build]")
 ```
 
-CI runs ruff + black on 3.12 and pytest on 3.9 and 3.13.
+CI runs ruff + black and pytest, all on 3.14 (the project's floor).
 
 ## Layout
 

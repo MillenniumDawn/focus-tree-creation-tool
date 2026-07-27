@@ -509,7 +509,7 @@ class GraphicsCatalog:
             return None
         try:
             snapshot = GraphicsSnapshot.from_data(data)
-        except (KeyError, TypeError, ValueError):
+        except KeyError, TypeError, ValueError:
             return None
         return snapshot if self._snapshot_is_current(snapshot, source_roots) else None
 
@@ -523,7 +523,7 @@ class GraphicsCatalog:
             self.last_metrics.directory_stats += 1
             try:
                 stat = os.stat(record.path.resolve(source_roots))
-            except (KeyError, OSError):
+            except KeyError, OSError:
                 if record.exists:
                     current = False
                 continue
@@ -537,7 +537,7 @@ class GraphicsCatalog:
             self.last_metrics.gfx_file_stats += 1
             try:
                 stat = os.stat(record.path.resolve(source_roots))
-            except (KeyError, OSError):
+            except KeyError, OSError:
                 current = False
                 continue
             if _stamp_from_stat(stat) != record.stamp:
@@ -551,7 +551,7 @@ class GraphicsCatalog:
             self.last_metrics.image_stats += 1
             try:
                 stat = os.stat(record.path.resolve(source_roots))
-            except (KeyError, OSError):
+            except KeyError, OSError:
                 current = False
                 continue
             if _stamp_from_stat(stat) != record.stamp:
