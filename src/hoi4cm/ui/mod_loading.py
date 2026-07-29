@@ -8,7 +8,6 @@ methods here call it via ``self``.
 
 import os
 import re
-import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox
 
@@ -24,8 +23,8 @@ from hoi4cm.ui import (
     SEL_BG,
     TEXT,
     TEXT_DIM,
-    _safe_after,
 )
+from hoi4cm.ui.tasks import make_progress, run_bg
 from hoi4cm.wizards import _shared as _wiz_shared
 
 # Alias used by the moved methods (matches the monolith's alias).
@@ -63,6 +62,9 @@ class ModLoadingMixin:
             _fd.askdirectory = orig
 
     def _load_mod(self):
+        lifecycle = getattr(self, "_lifecycle", None)
+        if lifecycle is not None and not lifecycle.accepting:
+            return
         _hoi4_mod_dir = _default_hoi4_mod_dir()
         _custom = getattr(MOD, "custom_mod_path", "")
         _init_dir = (
@@ -123,30 +125,32 @@ class ModLoadingMixin:
 
         def progress(i, total, label):
             pct = int((i / total) * 380) if total else 380
-            _safe_after(
-                pw,
-                0,
-                lambda i=i, t=total, lb=label, p=pct: [
-                    prog_lbl.config(
-                        text=tr(
-                            "mod.loading.step",
-                            "Step {step}/{total}: {label}",
-                            step=i,
-                            total=t,
-                            label=lb,
-                        )
-                    ),
-                    bar_fill.place_configure(width=p),
-                    pw.update_idletasks(),
-                ],
+            prog_lbl.config(
+                text=tr(
+                    "mod.loading.step",
+                    "Step {step}/{total}: {label}",
+                    step=i,
+                    total=total,
+                    label=label,
+                )
             )
+            bar_fill.place_configure(width=pct)
+            pw.update_idletasks()
+
+        if lifecycle is not None:
+            lifecycle.begin("mod")
+        report_progress = make_progress(pw, progress, scope="mod")
 
         def worker():
-            MOD.scan(root, progress_cb=progress)
-            _safe_after(pw, 0, lambda: self._on_mod_loaded(pw, root))
+            MOD.scan(root, progress_cb=report_progress)
+            return root
 
-        # Not ui.tasks.get_executor(): its pool threads are non-daemon, unlike this one.
-        threading.Thread(target=worker, daemon=True).start()
+        run_bg(
+            pw,
+            worker,
+            lambda loaded_root: self._on_mod_loaded(pw, loaded_root),
+            scope="mod",
+        )
 
     def _on_mod_loaded(self, pw, root):
         pw.grab_release()
@@ -161,10 +165,9 @@ class ModLoadingMixin:
         self._refresh_mod_dropdowns()
         self._update_statusbar()
         # Invalidate all focus draw caches so mod images render on next frame
-        for f in self.focuses.values():
-            f._draw_key = None
-            f._items = []
-            f._culled = False
+        self._invalidate_canvas_images()
+        if hasattr(self, "_focus_bundles"):
+            self._focus_bundles.clear()
         self.cv.delete("focus")
         self._redraw_now()
         # Clear all wizard image caches so new mod GFX loads fresh. The live
@@ -226,7 +229,16 @@ class ModLoadingMixin:
             ),
         )
         # Prompt user to pick edit targets for ideas/events files
-        self.after(150, self._show_post_load_prompt)
+        lifecycle = getattr(self, "_lifecycle", None)
+        if lifecycle is None:
+            self.after(150, self._show_post_load_prompt)
+        else:
+            lifecycle.after(
+                self,
+                150,
+                self._show_post_load_prompt,
+                token=lifecycle.token("mod"),
+            )
 
     def _show_post_load_prompt(self):
         """Dialog to pick which existing ideas/events files to append new content to."""

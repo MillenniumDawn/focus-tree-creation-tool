@@ -12,7 +12,7 @@ import pytest
 
 from hoi4cm.core.undo import UndoStack
 from hoi4cm.focus_tree.export import export_focus_tree
-from hoi4cm.models import Focus
+from hoi4cm.models import Focus, FocusDocument
 
 
 @pytest.fixture(autouse=True)
@@ -87,6 +87,21 @@ def test_creation_only_undo_removes_new_focus():
     assert set(focuses) == {1}
 
 
+def test_focus_document_undo_batches_index_rebuilds():
+    focuses = FocusDocument(_mk_focus(i, f"focus_{i}") for i in range(100))
+    stack = UndoStack()
+    stack.push("bulk edit", focuses, touched_ids=tuple(focuses))
+    for focus in focuses.values():
+        focus.name += "_changed"
+    focuses.touch()
+    before_undo = focuses.revision
+
+    stack.undo(focuses, Focus.from_dict)
+
+    assert focuses.revision == before_undo + 1
+    assert focuses.validate_indexes()
+
+
 def test_single_edit_undo_restores_fields():
     f = _mk_focus(1, "focus_1", cost=10, desc="old")
     focuses = {1: f}
@@ -115,9 +130,6 @@ def test_undo_restores_imported_focus_metadata_without_tk_state(touched_ids):
     focus._rel_dx = 2
     focus._rel_dy = 3
     focus._joint_extra = "joint_trigger = { always = yes }"
-    focus._items = ["canvas-item-before-snapshot"]
-    focus._draw_key = "draw-key-before-snapshot"
-    focus._culled = True
     focuses = {focus.id: focus}
     stack = UndoStack()
     stack.push("edit imported focus", focuses, touched_ids=touched_ids)
@@ -127,9 +139,6 @@ def test_undo_restores_imported_focus_metadata_without_tk_state(touched_ids):
     focus._rel_dx = 20
     focus._rel_dy = 30
     focus._joint_extra = ""
-    focus._items = ["canvas-item-after-snapshot"]
-    focus._draw_key = "draw-key-after-snapshot"
-    focus._culled = False
 
     stack.undo(focuses, Focus.from_dict)
 
@@ -141,9 +150,9 @@ def test_undo_restores_imported_focus_metadata_without_tk_state(touched_ids):
         restored._rel_dy,
         restored._joint_extra,
     ) == (6, 7, 2, 3, "joint_trigger = { always = yes }")
-    assert restored._items == []
-    assert restored._draw_key is None
-    assert restored._culled is False
+    assert not hasattr(restored, "_items")
+    assert not hasattr(restored, "_draw_key")
+    assert not hasattr(restored, "_culled")
 
 
 def test_undo_preserves_imported_joint_focus_export_data():

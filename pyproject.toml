@@ -6,13 +6,13 @@ build-backend = "hatchling.build"
 name = "hoi4cm"
 version = "0.1.0"
 description = "Content Maker for Hearts of Iron 4 — Millennium Dawn Team"
-requires-python = ">=3.9"
+requires-python = ">=3.14"
 # Runs on the stdlib + tkinter alone. Third-party deps are optional extras below.
 dependencies = []
 
 [project.optional-dependencies]
 image = ["Pillow>=9.0"]                              # GFX icon previews (.png/.tga)
-dev = ["pytest>=7.0", "ruff>=0.6", "black>=24.0"]    # tests + linting
+dev = ["pytest>=7.0", "ruff>=0.16", "black>=26.5"]   # tests + linting
 build = ["pyinstaller>=6.0", "Pillow>=9.0"]          # compile standalone executables
 
 [tool.hatch.build.targets.wheel]
@@ -27,7 +27,7 @@ testpaths = ["tests"]
 # are refactored into the package.
 [tool.black]
 line-length = 88
-target-version = ["py39"]
+target-version = ["py314"]
 extend-exclude = "hoi4_content_maker\\.py|^/build/"
 
 [tool.ruff]

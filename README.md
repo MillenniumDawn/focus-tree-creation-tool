@@ -2,7 +2,7 @@
 
 > **A comprehensive GUI toolkit for creating Hearts of Iron IV mod content — no scripting knowledge required.**
 
-![Python](https://img.shields.io/badge/Python-3.9%2B-blue?logo=python)
+![Python](https://img.shields.io/badge/Python-3.14%2B-blue?logo=python)
 ![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
 ![License](https://img.shields.io/badge/License-Proprietary-red)
 ![Version](https://img.shields.io/badge/Version-2.0-gold)
@@ -35,7 +35,7 @@ HOI4 Content Maker is a standalone Python/Tkinter desktop application that lets 
 
 | Requirement | Notes |
 |---|---|
-| **Python 3.9 or newer** | Tested on Python 3.9 – 3.14. |
+| **Python 3.14 or newer** | Tested on Python 3.14. |
 | **tkinter** | Included with most Python installations. See platform-specific notes below. |
 | **Pillow** *(optional)* | Enables GFX icon previews (`.png`, `.tga`). Without it the app still runs, but icons show as placeholders. |
 | **pillow-dds** *(optional)* | Adds `.dds` texture support for icon previews. |

@@ -35,9 +35,12 @@ CREATE TABLE IF NOT EXISTS file_cache (
 """
 
 
-def _db_path(mod_root):
+def database_path(mod_root: str) -> str:
     h = hashlib.sha1(os.path.abspath(mod_root).encode("utf-8")).hexdigest()[:16]
     return os.path.join(STATE_DIR, "scan_cache", f"{h}.db")
+
+
+_db_path = database_path
 
 
 class ScanCache:
@@ -46,7 +49,7 @@ class ScanCache:
     def __init__(self, mod_root):
         self._conn = None
         try:
-            path = _db_path(mod_root)
+            path = database_path(mod_root)
             os.makedirs(os.path.dirname(path), exist_ok=True)
             conn = sqlite3.connect(path)
             conn.execute(_SCHEMA)
@@ -127,4 +130,4 @@ class ScanCache:
             self._conn = None
 
 
-__all__ = ["ScanCache", "STATE_DIR"]
+__all__ = ["ScanCache", "STATE_DIR", "database_path"]

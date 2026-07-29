@@ -42,7 +42,7 @@ Open a GitHub Issue with the label **enhancement**. Please include:
 
 If you have been granted permission to submit code:
 
-- **Python 3.9+ compatible** — no walrus operator (`:=`) or match/case statements; the app targets 3.9–3.14.
+- **Python 3.14+ only** — the app dropped its 3.9 floor, so walrus (`:=`) and match/case are fair game now. No need to hand-write around them.
 - **Modular package** — the GUI lives in `hoi4_content_maker.py`, but shared/foundational code is being moved into the `src/hoi4cm` package (e.g. `hoi4cm.core` for logging, config, and paths). Put reusable, non-GUI logic in the package rather than the monolith.
 - **tkinter only** — no additional GUI frameworks. Third-party packages are limited to optional image support (`Pillow`, `pillow-dds`). All dependencies live in `pyproject.toml` as extras (`image`, `dev`, `build`).
 - **Defensive field access** — always use the `_s()` helper (or `.get("key", "")`) when reading cat/dec fields in generator functions. Fields can be `bool`, `None`, or `str` depending on how they were set.

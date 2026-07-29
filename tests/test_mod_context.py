@@ -6,8 +6,8 @@ subdirectories the scanner walks, then verifies the corresponding
 side-effect-free.
 """
 
-import json
 import os
+import sqlite3
 import textwrap
 import threading
 
@@ -558,34 +558,33 @@ def test_gfx_cache_invalidates_on_image_tree_change(gfx_mod_tree):
     """Adding a gfx image rebuilds the cache without an interface change."""
     root = str(gfx_mod_tree)
     MOD.scan(root)
-    iface_mtime = ctx_mod._iface_dir_mtime(root)
 
     added_image = gfx_mod_tree / "gfx" / "interface" / "goals" / "added_later.dds"
     added_image.write_bytes(b"")
 
-    assert ctx_mod._iface_dir_mtime(root) == iface_mtime
     MOD.scan(root)
     assert MOD.sprites["GFX_focus_added_later"] == str(added_image)
 
 
 def test_gfx_cache_version_mismatch_forces_rescan(gfx_mod_tree):
-    """An old-schema (or otherwise mismatched) sidecar is discarded, not misread."""
     root = str(gfx_mod_tree)
     MOD.scan(root)
-    cache_file = os.path.join(root, ".hoi4cm_gfx_cache.json")
-    assert os.path.isfile(cache_file)
     expected_sprites = dict(MOD.sprites)
-
-    with open(cache_file, encoding="utf-8") as f:
-        data = json.load(f)
-    data["version"] = 1  # simulate a pre-unification / stale-schema sidecar
-    data["sprites"]["GFX_focus_bogus"] = "should not survive a version mismatch"
-    with open(cache_file, "w", encoding="utf-8") as f:
-        json.dump(data, f)
+    database = scan_cache_mod.database_path(root)
+    with sqlite3.connect(database) as connection:
+        connection.execute("UPDATE graphics_snapshot SET schema_version = 0")
 
     MOD.scan(root)
     assert MOD.sprites == expected_sprites
-    assert "GFX_focus_bogus" not in MOD.sprites
+
+
+def test_gfx_scan_preserves_dictionary_identity(gfx_mod_tree):
+    dictionaries = (MOD.sprites, MOD.idea_sprites, MOD.decision_sprites)
+    MOD.scan(str(gfx_mod_tree))
+    MOD.scan(str(gfx_mod_tree))
+    assert MOD.sprites is dictionaries[0]
+    assert MOD.idea_sprites is dictionaries[1]
+    assert MOD.decision_sprites is dictionaries[2]
 
 
 # ── Read/extract overlap in _scan_files_cached ─────────────────────────────

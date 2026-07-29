@@ -114,6 +114,18 @@ or state leaks across tests:
   freshly created focuses never collide with imported ones. Tests that
   create focuses reset it in a fixture (see `test_focus_tree_roundtrip.py`).
 
+## Revision discipline
+
+`FocusDocument` owns focus geometry and bumps a `geometry_revision` counter
+whenever a focus moves (its mutating methods, or an explicit `touch()`).
+UI that caches against that counter recomputes only when it changes:
+`SceneIndex` (canvas hit-testing and culling) rebuilds when
+`FocusDocument.revision` moves, and the minimap's world-bounds cache is keyed
+on `SceneIndex.revision`. The rule: never mutate a focus's coordinates in
+place without going through `FocusDocument` / `touch()`. Skip it and those
+caches keep stale coordinates, so hit-testing and the minimap disagree with
+what's actually drawn until something else forces a rebuild.
+
 ## Threading model (phase 5)
 
 Two things run off the Tk main thread on their own bespoke plumbing: the mod
@@ -177,9 +189,18 @@ the worker runs.
 
 `get_executor()` creates the pool on first use and returns the same
 instance after that. `shutdown_executor()` (`wait=False,
-cancel_futures=True`; `cancel_futures` needs Python 3.9+, this project's
-floor) is wired into `_on_app_close` so pending background work doesn't
-block process exit; it's idempotent and safe to call from tests.
+cancel_futures=True`; `cancel_futures` needs Python 3.9+, well under this
+project's 3.14 floor) is wired into `_on_app_close` so pending background
+work doesn't block process exit; it's idempotent and safe to call from
+tests.
+
+The background pool the modernized UI uses (the mod scan and image decoding)
+is `core/concurrency.py`'s `DaemonThreadPoolExecutor`, handed out through
+`ApplicationLifecycle.executor`. Its workers start as **daemon** threads on
+purpose (`core/concurrency.py:58`). App close is now a graceful lifecycle
+close (resources released through `ui/lifecycle.py`), not the old
+`os._exit`, so a non-daemon worker still draining its queue would keep the
+process alive after the window is gone.
 
 Parsing, building, and export remain thread-agnostic pure functions with no
 opinion on which thread calls them. `run_bg` is what decides that they run

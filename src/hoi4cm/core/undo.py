@@ -22,6 +22,7 @@ _FOCUS_SEMANTIC_METADATA = (
     "_rel_dx",
     "_rel_dy",
     "_joint_extra",
+    "_script_extras",
 )
 
 
@@ -100,8 +101,12 @@ class UndoStack:
         label, kind, payload, id_set = self._stack.pop()
 
         created_ids = [fid for fid in focuses if fid not in id_set]
-        for fid in created_ids:
-            del focuses[fid]
+        delete_many = getattr(focuses, "delete_many", None)
+        if callable(delete_many):
+            delete_many(created_ids, clean_references=False)
+        else:
+            for fid in created_ids:
+                del focuses[fid]
 
         if kind == _FULL:
             # id_set was captured from the same `focuses` dict the snapshot
@@ -111,13 +116,23 @@ class UndoStack:
             snapshot = json.loads(zlib.decompress(payload).decode("utf-8"))
             snapshot = {int(k): v for k, v in snapshot.items()}
             changed_ids = set(snapshot)
-            for fid, fd in snapshot.items():
-                focuses[fid] = focus_factory(fd)
+            restored = [focus_factory(fd) for fd in snapshot.values()]
+            load = getattr(focuses, "load", None)
+            if callable(load):
+                load(restored)
+            else:
+                for focus in restored:
+                    focuses[focus.id] = focus
             return label, changed_ids, set(created_ids)
 
         changed_ids = set()
-        for fid, fd in payload.items():
-            focuses[fid] = focus_factory(fd)
-            changed_ids.add(fid)
+        restored = [focus_factory(fd) for fd in payload.values()]
+        changed_ids.update(focus.id for focus in restored)
+        extend = getattr(focuses, "extend", None)
+        if callable(extend):
+            extend(restored, replace=True)
+        else:
+            for focus in restored:
+                focuses[focus.id] = focus
         removed_ids = set(created_ids)
         return label, changed_ids, removed_ids

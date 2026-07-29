@@ -7,23 +7,128 @@ exclusive links wired. No tkinter, no globals — cross-tree context is passed i
 via ``existing_focuses``.
 """
 
+from __future__ import annotations
+
 import re
+from collections.abc import Iterable
+from copy import deepcopy
 
 from hoi4cm.models import Focus
 from hoi4cm.script import dict_to_raw
 
-from .parse import block_to_str
+from .parse import ParsedFocusTree, block_to_str
+
+_KNOWN_FOCUS_FIELDS = frozenset(
+    {
+        "id",
+        "icon",
+        "text",
+        "x",
+        "y",
+        "relative_position_id",
+        "offset",
+        "cost",
+        "prerequisite",
+        "mutually_exclusive",
+        "search_filters",
+        "allow_branch",
+        "available",
+        "bypass",
+        "cancel",
+        "will_lead_to_war_with",
+        "complete_tooltip",
+        "select_effect",
+        "bypass_effect",
+        "cancel_if_invalid",
+        "continue_if_invalid",
+        "available_if_capitulated",
+        "completion_reward",
+        "ai_will_do",
+        "joint_trigger",
+    }
+)
 
 
-def build_focuses(parsed, tree_idx, *, country_tag="", existing_focuses=()):
+class BuildContext:
+    def __init__(self, existing_focuses: Iterable[Focus] = ()) -> None:
+        self._position_by_name: dict[str, Focus] = {}
+        self._link_id_by_name: dict[str, int] = {}
+        self.add_focuses(existing_focuses)
+
+    def add_focuses(self, focuses: Iterable[Focus]) -> None:
+        for focus in focuses:
+            self._position_by_name.setdefault(focus.name, focus)
+            self._link_id_by_name[focus.name] = focus.id
+
+    def _position_for(self, name: str) -> tuple[int, int] | None:
+        focus = self._position_by_name.get(name)
+        if focus is None:
+            return None
+        return focus.x, focus.y
+
+    def _link_ids(self) -> dict[str, int]:
+        return self._link_id_by_name.copy()
+
+
+def _resolve_positions(
+    raw_pos: dict[str, tuple[int, int, str | None]], context: BuildContext
+) -> dict[str, tuple[int, int]]:
+    resolved: dict[str, tuple[int, int]] = {}
+
+    for start in raw_pos:
+        if start in resolved:
+            continue
+
+        path: list[str] = []
+        seen: set[str] = set()
+        name = start
+
+        while name in raw_pos and name not in resolved and name not in seen:
+            seen.add(name)
+            path.append(name)
+            relative_to = raw_pos[name][2]
+            if relative_to is None:
+                name = ""
+                break
+            name = relative_to
+
+        if name in resolved:
+            position = resolved[name]
+        elif name in seen:
+            position = raw_pos[name][:2]
+        else:
+            position = context._position_for(name) or (0, 0)
+
+        for path_name in reversed(path):
+            x, y, _relative_to = raw_pos[path_name]
+            position = position[0] + x, position[1] + y
+            resolved[path_name] = position
+
+    return resolved
+
+
+def build_focuses(
+    parsed: ParsedFocusTree,
+    tree_idx: int,
+    *,
+    country_tag: str = "",
+    existing_focuses: Iterable[Focus] = (),
+    context: BuildContext | None = None,
+) -> list[Focus]:
     """Return the list of :class:`Focus` objects for one parsed tree.
 
     ``tree_idx`` is the 1-based index of this extra tree. ``country_tag`` is the
     active tag used to apply matching conditional offsets. ``existing_focuses``
     are the already-loaded focuses, used to resolve cross-tree relative
-    positions and prerequisite / mutex references. The caller is responsible for
-    inserting the returned focuses into its own registry.
+    positions and prerequisite / mutex references. Reuse ``context`` across
+    batch calls to index each completed batch incrementally. The caller is
+    responsible for inserting the returned focuses into its own registry.
     """
+    if context is None:
+        context = BuildContext(existing_focuses)
+    else:
+        context.add_focuses(existing_focuses)
+
     raw_rewards = parsed.raw_rewards
     focuses_data = parsed.focuses_data
 
@@ -117,6 +222,13 @@ def build_focuses(parsed, tree_idx, *, country_tag="", existing_focuses=()):
         )
         f._joint_extra = raw_rewards.get((fid_str, "_joint_extra"), "")
         f.offsets = raw_rewards.get((fid_str, "_offsets"), [])
+        extras = {
+            key: deepcopy(value)
+            for key, value in rf.items()
+            if key not in _KNOWN_FOCUS_FIELDS
+        }
+        if extras:
+            f._script_extras = extras
         raw_rw = raw_rewards.get(fid_str, "")
         if raw_rw:
             f.effects = [{"type": "_raw_block", "fields": {"raw": raw_rw}}]
@@ -141,45 +253,17 @@ def build_focuses(parsed, tree_idx, *, country_tag="", existing_focuses=()):
                     raw_pos[fid_s] = (rx + off["x"], ry + off["y"], rel)
                     break  # apply only the first matching offset per focus
 
-    # Cross-tree name lookup, built once — first match wins (mirrors the old
-    # linear scan's semantics) so batch-loading T trees stays O(T+F) here
-    # instead of O(T*F).
-    existing_by_name = {}
-    for cf in existing_focuses:
-        existing_by_name.setdefault(cf.name, cf)
-
     # Resolve relative positions — within this tree first, then cross-tree.
-    def resolve_abs(name, visited=None):
-        if visited is None:
-            visited = set()
-        if name not in raw_pos:
-            return (0, 0)
-        if name in visited:
-            return raw_pos[name][:2]
-        visited.add(name)
-        rx, ry, rel = raw_pos[name]
-        if rel is None:
-            return (rx, ry)
-        if rel in raw_pos:
-            bx, by = resolve_abs(rel, visited)
-            return (bx + rx, by + ry)
-        # Cross-tree: anchor is in a different loaded tree (e.g. main tree focus)
-        cf = existing_by_name.get(rel)
-        if cf is not None:
-            return (cf.x + rx, cf.y + ry)
-        return (rx, ry)
-
+    resolved_positions = _resolve_positions(raw_pos, context)
     for fid_str, fid in name_to_id.items():
-        ax, ay = resolve_abs(fid_str)
+        ax, ay = resolved_positions[fid_str]
         id_to_focus[fid].x = ax
         id_to_focus[fid].y = ay
 
     # Pass 2: link prerequisites and mutex (cross-tree lookups included).
     # Existing focuses first, then the new ones, so new focuses win on a name
     # collision — matching the monolith's insertion-ordered self.focuses.
-    all_name_to_id = {}
-    for cf in existing_focuses:
-        all_name_to_id[cf.name] = cf.id
+    all_name_to_id = context._link_ids()
     for f in new_focuses:
         all_name_to_id[f.name] = f.id
 
@@ -212,4 +296,5 @@ def build_focuses(parsed, tree_idx, *, country_tag="", existing_focuses=()):
                 if mid not in f.mutex:
                     f.mutex.append(mid)
 
+    context.add_focuses(new_focuses)
     return new_focuses

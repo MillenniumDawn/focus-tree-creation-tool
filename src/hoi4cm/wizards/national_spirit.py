@@ -24,7 +24,8 @@ from hoi4cm.core import (
 )
 from hoi4cm.core.image import PIL_OK, PILImage, PILImageTk
 from hoi4cm.core.paths import read_file
-from hoi4cm.mod import MOD, ModContext
+from hoi4cm.mod import MOD
+from hoi4cm.script.syntax import match_brace, parse_script, serialize_block
 from hoi4cm.ui import (
     BG_CARD,
     BG_DARK,
@@ -39,6 +40,9 @@ from hoi4cm.ui import (
     _safe_after,
     _safe_after_idle,
 )
+from hoi4cm.wizards._graphics import browser_folders, collect_image_pairs
+from hoi4cm.wizards._image_loader import TkImageLoader
+from hoi4cm.wizards._shared import notifying_workspace_files
 
 
 def open_national_spirit_wizard(app):
@@ -53,17 +57,17 @@ def open_national_spirit_wizard(app):
     # ── Auto-save on close ─────────────────────────────────────────────
     _sp_autosave = autosave_path("national_spirit.json")
 
-    def _spirit_autosave():
+    def _spirit_autosave(data):
         try:
-            data = {k: v.get() for k, v in _spirit_svars.items() if hasattr(v, "get")}
-            data["modifiers"] = spirit_modifiers[:]
             with open(_sp_autosave, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
         except Exception:
             pass
 
     def _on_spirit_close():
-        threading.Thread(target=_spirit_autosave, daemon=True).start()
+        data = {k: v.get() for k, v in _spirit_svars.items() if hasattr(v, "get")}
+        data["modifiers"] = spirit_modifiers[:]
+        threading.Thread(target=_spirit_autosave, args=(data,), daemon=True).start()
         win.destroy()
 
     win.protocol("WM_DELETE_WINDOW", _on_spirit_close)
@@ -355,6 +359,9 @@ def open_national_spirit_wizard(app):
     # ── Idea GFX picker row  (identical UX to focus GFX picker) ──
     def _open_idea_gfx_browser():
         ideas_root = os.path.join(MOD.root, MOD.path_ideas_gfx) if MOD.loaded else None
+        catalog = (
+            MOD.graphics_catalog if ideas_root and os.path.isdir(ideas_root) else None
+        )
 
         if not MOD.loaded or not ideas_root or not os.path.isdir(ideas_root):
             # Fallback: let user pick a folder manually
@@ -364,23 +371,10 @@ def open_national_spirit_wizard(app):
             if not folder:
                 return
             ideas_root = folder
+            catalog = None
 
         # Build folder list (same logic as focus browser)
-        folders = []
-        try:
-            loose = [
-                f
-                for f in os.listdir(ideas_root)
-                if f.lower().endswith((".dds", ".png", ".tga"))
-            ]
-            if loose:
-                folders.append(("[ideas root]", ideas_root))
-            for entry in sorted(os.listdir(ideas_root)):
-                full = os.path.join(ideas_root, entry)
-                if os.path.isdir(full):
-                    folders.append((entry, full))
-        except Exception:
-            pass
+        folders = browser_folders(ideas_root, "[ideas root]", catalog=catalog)
 
         if not folders:
             messagebox.showinfo(
@@ -396,6 +390,7 @@ def open_national_spirit_wizard(app):
         bwin.geometry("900x580")
         bwin.resizable(True, True)
         bwin.grab_set()
+        image_loader = TkImageLoader(bwin)
 
         panes = tk.Frame(bwin, bg=BG_DARK)
         panes.pack(fill="both", expand=True, padx=8, pady=8)
@@ -638,26 +633,20 @@ def open_national_spirit_wizard(app):
                     lambda e, i=idx: [_select_tile(i), _apply_idea()],
                 )
 
-        def _bg_load_images(pairs_snapshot, indices):
-            for idx in indices:
-                if idx >= len(pairs_snapshot):
-                    break
-                gfx_key, path = pairs_snapshot[idx]
-                if path in _st["img_cache"]:
-                    continue
-                img = None
-                try:
-                    if PIL_OK and os.path.exists(path):
-                        pil = PILImage.open(path).convert("RGBA")
-                        rs = getattr(
-                            PILImage, "LANCZOS", getattr(PILImage, "ANTIALIAS", 1)
-                        )
-                        pil = pil.resize((72, 72), rs)
-                        img = PILImageTk.PhotoImage(pil)
-                except Exception:
-                    pass
-                _st["img_cache"][path] = img
-                _safe_after(bwin, 0, lambda i=idx: _fill_image(i))
+        def _decode_image(item):
+            idx, path = item
+            if not PIL_OK or not os.path.exists(path):
+                return None
+            with PILImage.open(path) as source:
+                pil = source.convert("RGBA")
+            rs = getattr(PILImage, "LANCZOS", getattr(PILImage, "ANTIALIAS", 1))
+            return pil.resize((72, 72), rs)
+
+        def _apply_image(item, img):
+            idx, path = item
+            _st["img_cache"][path] = img
+            if idx < len(_st["pairs"]) and _st["pairs"][idx][1] == path:
+                _fill_image(idx)
 
         def _lazy_fill(*_):
             if not _st["pairs"]:
@@ -680,11 +669,15 @@ def open_national_spirit_wizard(app):
             ]
             if to_load:
                 snap = list(_st["pairs"])
-                threading.Thread(
-                    target=_bg_load_images, args=(snap, to_load), daemon=True
-                ).start()
+                image_loader.submit_many(
+                    ((i, snap[i][1]) for i in to_load if i < len(snap)),
+                    _decode_image,
+                    realizer=lambda pil: PILImageTk.PhotoImage(pil),
+                    apply=_apply_image,
+                )
 
         def _rebuild_grid(pairs):
+            image_loader.invalidate()
             cv.delete("all")
             _st["pairs"] = pairs
             _st["drawn"].clear()
@@ -707,20 +700,12 @@ def open_national_spirit_wizard(app):
             _safe_after_idle(bwin, _lazy_fill)
 
         def _collect_files(folder_path):
-            pairs = []
-            ft = search_var.get().lower()
-            for root_d, dirs, fnames in os.walk(folder_path):
-                dirs.sort()
-                for fname in sorted(fnames):
-                    if not fname.lower().endswith((".dds", ".png", ".tga")):
-                        continue
-                    if ft and ft not in fname.lower():
-                        continue
-                    full = os.path.join(root_d, fname)
-                    stem = os.path.splitext(fname)[0]
-                    gfx_key = "GFX_idea_" + stem
-                    pairs.append((gfx_key, full))
-            return pairs
+            return collect_image_pairs(
+                folder_path,
+                "GFX_idea_",
+                search=search_var.get(),
+                catalog=catalog,
+            )
 
         def _load_folder(folder_path):
             status_lbl.config(text=tr("gfx.scanning", "scanning..."))
@@ -1599,6 +1584,7 @@ def open_national_spirit_wizard(app):
             ideas_path = os.path.join(mod_root, "common", "ideas", f"{sid}.txt")
 
         os.makedirs(os.path.dirname(ideas_path), exist_ok=True)
+        wf = notifying_workspace_files(MOD, mod_root)
 
         # ── SAFE APPEND to ideas file ─────────────────────────────────────
         try:
@@ -1618,18 +1604,14 @@ def open_national_spirit_wizard(app):
                         r"\b" + re.escape(sid) + r"\s*=\s*\{", ideas_block
                     )
                     if m_spirit:
-                        depth = 0
                         spirit_start = m_spirit.start()
                         brace_start = ideas_block.index("{", spirit_start)
-                        spirit_end = brace_start
-                        for ci, ch in enumerate(ideas_block[brace_start:], brace_start):
-                            if ch == "{":
-                                depth += 1
-                            elif ch == "}":
-                                depth -= 1
-                                if depth == 0:
-                                    spirit_end = ci + 1
-                                    break
+                        close_pos = match_brace(ideas_block, brace_start)
+                        spirit_end = (
+                            close_pos + 1
+                            if close_pos < len(ideas_block)
+                            else brace_start
+                        )
                         spirit_block = "\t\t" + ideas_block[
                             spirit_start:spirit_end
                         ].replace("\n", "\n\t\t")
@@ -1641,17 +1623,10 @@ def open_national_spirit_wizard(app):
                         slot_pat = re.compile(r"\b" + re.escape(slot) + r"\s*=\s*\{")
                         sm = slot_pat.search(existing)
                         if sm:
-                            depth2 = 0
                             si2 = existing.index("{", sm.start())
-                            close_pos = si2
-                            for ci2, ch2 in enumerate(existing[si2:], si2):
-                                if ch2 == "{":
-                                    depth2 += 1
-                                elif ch2 == "}":
-                                    depth2 -= 1
-                                    if depth2 == 0:
-                                        close_pos = ci2
-                                        break
+                            close_pos = match_brace(existing, si2)
+                            if close_pos >= len(existing):
+                                close_pos = si2
                             new_existing = (
                                 existing[:close_pos].rstrip()
                                 + "\n\n"
@@ -1667,14 +1642,12 @@ def open_national_spirit_wizard(app):
                     else:
                         new_existing = existing.rstrip() + "\n\n" + ideas_block + "\n"
 
-                    with open(ideas_path, "w", encoding="utf-8") as f:
-                        f.write(new_existing)
+                    wf.write_text(ideas_path, new_existing, encoding="utf-8")
                     rel = os.path.relpath(ideas_path, mod_root)
                     saved.append(rel + "  (spirit appended into existing file)")
             else:
                 # New file — write as-is
-                with open(ideas_path, "w", encoding="utf-8") as f:
-                    f.write(ideas_block)
+                wf.write_text(ideas_path, ideas_block, encoding="utf-8")
                 rel = os.path.relpath(ideas_path, mod_root)
                 saved.append(rel + "  (new file created)")
 
@@ -1702,11 +1675,9 @@ def open_national_spirit_wizard(app):
             to_add = {k: v for k, v in new_entries.items() if k not in existing_keys}
             if to_add:
                 if not os.path.isfile(loc_path):
-                    with open(loc_path, "w", encoding="utf-8-sig") as f:
-                        f.write("l_english:\n")
-                with open(loc_path, "a", encoding="utf-8-sig") as f:
-                    for k, v in to_add.items():
-                        f.write(f' {k}: "{v}"\n')
+                    wf.write_text(loc_path, "l_english:\n", encoding="utf-8-sig")
+                loc_body = "".join(f' {k}: "{v}"\n' for k, v in to_add.items())
+                wf.append_text(loc_path, loc_body, encoding="utf-8-sig")
                 rel = os.path.relpath(loc_path, mod_root)
                 saved.append(rel + f"  (+{len(to_add)} keys)")
             else:
@@ -1769,9 +1740,7 @@ def open_national_spirit_wizard(app):
                 src = read_file(fp)
                 if not src:
                     continue
-                tokens = ModContext._tokenize(src)
-                tokens = ["{"] + tokens + ["}"]
-                parsed, _ = ModContext._parse_block(tokens, 0)
+                parsed = parse_script(src)
                 ideas = parsed.get("ideas", {})
                 if not isinstance(ideas, dict):
                     continue
@@ -1892,41 +1861,7 @@ def open_national_spirit_wizard(app):
         info_lbl.pack(padx=10, anchor="w", pady=(2, 0))
 
         def _block_to_text(blk, depth=0):
-            """Recursively convert a parsed HOI4 block dict to script text.
-            Handles nested dicts, repeated keys (lists), and bools → yes/no."""
-            if isinstance(blk, bool):
-                return "yes" if blk else "no"
-            if not isinstance(blk, dict):
-                return str(blk)
-            lines = []
-            ind = "\t" * depth
-            for k, v in blk.items():
-                if k == "_values":
-                    for val in (v if isinstance(v, list) else [v]):
-                        if isinstance(val, bool):
-                            lines.append(f"{ind}{'yes' if val else 'no'}")
-                        else:
-                            lines.append(f"{ind}{val}")
-                    continue
-                if isinstance(v, bool):
-                    lines.append(f"{ind}{k} = {'yes' if v else 'no'}")
-                elif isinstance(v, list):
-                    for item in v:
-                        if isinstance(item, dict):
-                            lines.append(f"{ind}{k} = {{")
-                            lines.append(_block_to_text(item, depth + 1))
-                            lines.append(f"{ind}}}")
-                        elif isinstance(item, bool):
-                            lines.append(f"{ind}{k} = {'yes' if item else 'no'}")
-                        else:
-                            lines.append(f"{ind}{k} = {item}")
-                elif isinstance(v, dict):
-                    lines.append(f"{ind}{k} = {{")
-                    lines.append(_block_to_text(v, depth + 1))
-                    lines.append(f"{ind}}}")
-                else:
-                    lines.append(f"{ind}{k} = {v}")
-            return "\n".join(lines)
+            return serialize_block(blk, indent="\t" * depth, include_bare_values=True)
 
         def _set_tw(widget, content):
             widget.delete("1.0", "end")
@@ -1940,9 +1875,7 @@ def open_national_spirit_wizard(app):
             spirit_id, slot_key, fp = _filtered[sel[0]]
             try:
                 src = read_file(fp)
-                tokens = ModContext._tokenize(src)
-                tokens = ["{"] + tokens + ["}"]
-                parsed, _ = ModContext._parse_block(tokens, 0)
+                parsed = parse_script(src)
                 ideas = parsed.get("ideas", {})
                 slot_data = ideas.get(slot_key, {})
                 spirit = (

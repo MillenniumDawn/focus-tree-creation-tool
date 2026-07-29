@@ -5,6 +5,7 @@ from hoi4cm.ui.gfx_browser import (
     open_gfx_placement_editor,
     open_universal_gfx_browser,
 )
+from hoi4cm.ui.lifecycle import ApplicationLifecycle
 from hoi4cm.ui.menubar import build_menubar
 from hoi4cm.ui.settings_dialog import open_settings
 from hoi4cm.ui.splash import show_splash
@@ -47,6 +48,7 @@ from hoi4cm.ui.theme import (
     YELLOW,
     YGRID,
 )
+from hoi4cm.ui.thumbnail_grid import ThumbnailItem, VirtualThumbnailGrid
 from hoi4cm.ui.toolbar import build_toolbar_row2
 from hoi4cm.ui.widgets import Tooltip, _safe_after, _safe_after_idle
 
@@ -78,10 +80,13 @@ __all__ = [
     "TEAL",
     "TEXT",
     "TEXT_DIM",
+    "ThumbnailItem",
     "Tooltip",
+    "VirtualThumbnailGrid",
     "XGRID",
     "YELLOW",
     "YGRID",
+    "ApplicationLifecycle",
     "_safe_after",
     "_safe_after_idle",
     "build_menubar",

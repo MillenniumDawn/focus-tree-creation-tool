@@ -191,7 +191,7 @@ def _cluster_axis(values, tolerance_ratio=0.55):
     vals = sorted(set(round(v) for v in values))
     if not vals:
         return {}
-    gaps = [b - a for a, b in zip(vals, vals[1:]) if b - a > 2]
+    gaps = [b - a for a, b in zip(vals, vals[1:], strict=False) if b - a > 2]
     median_gap = sorted(gaps)[len(gaps) // 2] if gaps else 80
     tol = max(10, median_gap * tolerance_ratio)
     clusters = []

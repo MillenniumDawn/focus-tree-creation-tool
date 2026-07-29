@@ -23,6 +23,7 @@ from hoi4cm.core import (
 from hoi4cm.core.image import PIL_OK, PILImage, PILImageTk
 from hoi4cm.core.logger import get_logger
 from hoi4cm.mod import MOD
+from hoi4cm.script.syntax import extract_named_block, find_blocks
 from hoi4cm.ui import (
     BG_CARD,
     BG_DARK,
@@ -42,8 +43,11 @@ from hoi4cm.ui import (
     open_gfx_placement_editor,
     open_universal_gfx_browser,
 )
+from hoi4cm.wizards._graphics import find_catalog_image
+from hoi4cm.wizards._image_loader import TkImageLoader
 from hoi4cm.wizards._shared import (
     _app_img_caches,
+    notifying_workspace_files,
 )
 
 
@@ -2956,17 +2960,9 @@ def open_decision_wizard(app):
         except Exception:
             _dds_supported = False
 
-    def _load_dec_icon(gfx_key, size=24):
-        """Load a decision icon image, returns PhotoImage or None. Cached."""
+    def _decode_dec_icon(gfx_key, size=24):
         if not gfx_key or not PIL_OK:
             return None
-        cache_key = (gfx_key, size)
-        if cache_key in _dec_prev_img_cache:
-            cached = _dec_prev_img_cache[cache_key]
-            if cached is not None:
-                return cached
-            # cached None — retry in case mod was reloaded with new sprites
-        # resolve path
         path = (
             MOD.decision_sprites.get(gfx_key)
             or MOD.idea_sprites.get(gfx_key)
@@ -2979,33 +2975,26 @@ def open_decision_wizard(app):
                     stem = gfx_key[len(pfx) :]
                     break
             if MOD.root:
-                # Check flat subdirs first (fast)
                 for sub in (
                     "gfx/interface/decisions",
                     "gfx/interface/decisions/categories",
                     "gfx/interface",
                     "gfx/interface/ideas",
                 ):
-                    for ext in (".dds", ".tga", ".png"):
-                        p = os.path.join(MOD.root, sub.replace("/", os.sep), stem + ext)
-                        if os.path.isfile(p):
-                            path = p
-                            break
+                    path = find_catalog_image(
+                        MOD.graphics_catalog,
+                        os.path.join(MOD.root, sub.replace("/", os.sep)),
+                        stem,
+                        recursive=False,
+                    )
                     if path:
                         break
-                # Walk all subdirectories of gfx/interface/decisions/ (catches main/, country/ etc.)
                 if not path:
-                    dec_root = os.path.join(MOD.root, "gfx", "interface", "decisions")
-                    if os.path.isdir(dec_root):
-                        for _rd, _ds, _fs in os.walk(dec_root):
-                            for ext in (".dds", ".tga", ".png"):
-                                p = os.path.join(_rd, stem + ext)
-                                if os.path.isfile(p):
-                                    path = p
-                                    break
-                            if path:
-                                break
-        img = None
+                    path = find_catalog_image(
+                        MOD.graphics_catalog,
+                        os.path.join(MOD.root, "gfx", "interface", "decisions"),
+                        stem,
+                    )
         if path:
             candidates = [path]
             # If .dds fails, try .png/.tga with same stem
@@ -3016,31 +3005,37 @@ def open_decision_wizard(app):
                     candidates.append(alt)
             for cpath in candidates:
                 try:
-                    pil = PILImage.open(cpath).convert("RGBA")
+                    with PILImage.open(cpath) as source:
+                        pil = source.convert("RGBA")
                     rs = getattr(PILImage, "LANCZOS", getattr(PILImage, "ANTIALIAS", 1))
-                    pil = pil.resize((size, size), rs)
-                    img = PILImageTk.PhotoImage(pil)
-                    break
+                    return pil.resize((size, size), rs)
                 except Exception as _ico_err:
                     get_logger("ico").warning(f"PIL failed {cpath}: {_ico_err}")
-                    continue
         else:
             get_logger("ico").warning(
                 f"no path for {gfx_key!r}  "
                 f"(decision_sprites={len(MOD.decision_sprites)}, root={bool(MOD.root)})"
             )
-        _dec_prev_img_cache[cache_key] = img
-        return img
+        return None
 
-    def _load_cat_picture(gfx_key, w=64, h=64):
-        """Load a category picture image. Cached."""
+    def _load_dec_icon(gfx_key, size=24):
+        """Load a decision icon image, returns PhotoImage or None. Cached."""
         if not gfx_key or not PIL_OK:
             return None
-        cache_key = (gfx_key, w, h)
+        cache_key = (gfx_key, size)
         if cache_key in _dec_prev_img_cache:
             cached = _dec_prev_img_cache[cache_key]
             if cached is not None:
                 return cached
+            # cached None — retry in case mod was reloaded with new sprites
+        pil = _decode_dec_icon(gfx_key, size)
+        img = PILImageTk.PhotoImage(pil) if pil is not None else None
+        _dec_prev_img_cache[cache_key] = img
+        return img
+
+    def _decode_cat_picture(gfx_key, w=64, h=64):
+        if not gfx_key or not PIL_OK:
+            return None
         # Try key as-is, then with common category prefixes
         path = (
             MOD.decision_sprites.get(gfx_key)
@@ -3074,7 +3069,6 @@ def open_decision_wizard(app):
                         break
                 if path:
                     break
-        img = None
         if path:
             candidates = [path]
             stem_no_ext = os.path.splitext(path)[0]
@@ -3084,17 +3078,29 @@ def open_decision_wizard(app):
                     candidates.append(alt)
             for cpath in candidates:
                 try:
-                    pil = PILImage.open(cpath).convert("RGBA")
+                    with PILImage.open(cpath) as source:
+                        pil = source.convert("RGBA")
                     rs = getattr(PILImage, "LANCZOS", getattr(PILImage, "ANTIALIAS", 1))
                     pw, ph = pil.size
                     ratio = min(w / max(pw, 1), h / max(ph, 1))
-                    pil = pil.resize(
+                    return pil.resize(
                         (max(1, int(pw * ratio)), max(1, int(ph * ratio))), rs
                     )
-                    img = PILImageTk.PhotoImage(pil)
-                    break
                 except Exception:
-                    continue
+                    pass
+        return None
+
+    def _load_cat_picture(gfx_key, w=64, h=64):
+        """Load a category picture image. Cached."""
+        if not gfx_key or not PIL_OK:
+            return None
+        cache_key = (gfx_key, w, h)
+        if cache_key in _dec_prev_img_cache:
+            cached = _dec_prev_img_cache[cache_key]
+            if cached is not None:
+                return cached
+        pil = _decode_cat_picture(gfx_key, w, h)
+        img = PILImageTk.PhotoImage(pil) if pil is not None else None
         _dec_prev_img_cache[cache_key] = img
         return img
 
@@ -3421,26 +3427,26 @@ def open_decision_wizard(app):
                         def _async_cat_pic(
                             key=pic_key, box=pic_box, ph_lbl=ph, refs=panel._img_refs
                         ):
-                            import threading
+                            try:
+                                if not box.winfo_exists():
+                                    return
+                            except Exception:
+                                return
 
-                            def _worker():
-                                img = _load_cat_picture(key, 64, 64)
+                            def _paint(item, img):
+                                if img:
+                                    _dec_prev_img_cache[(key, 64, 64)] = img
+                                    ph_lbl.destroy()
+                                    lbl = tk.Label(box, image=img, bg="#2a3550")
+                                    lbl.pack(expand=True)
+                                    refs.append(img)
 
-                                def _paint():
-                                    if not box.winfo_exists():
-                                        return
-                                    if img:
-                                        ph_lbl.destroy()
-                                        lbl = tk.Label(box, image=img, bg="#2a3550")
-                                        lbl.pack(expand=True)
-                                        refs.append(img)
-
-                                try:
-                                    box.after(0, _paint)
-                                except Exception:
-                                    pass
-
-                            threading.Thread(target=_worker, daemon=True).start()
+                            TkImageLoader(box).submit(
+                                (key, 64, 64),
+                                lambda item: _decode_cat_picture(*item),
+                                realizer=lambda pil: PILImageTk.PhotoImage(pil),
+                                apply=_paint,
+                            )
 
                         win.after(10, _async_cat_pic)
                 if desc_txt:
@@ -3515,99 +3521,26 @@ def open_decision_wizard(app):
                             fb=fallback,
                             refs=panel._img_refs,
                         ):
-                            import threading
-
-                            def _worker():
-                                # Resolve path (same logic as _load_dec_icon)
-                                _path = (
-                                    MOD.decision_sprites.get(key)
-                                    or MOD.idea_sprites.get(key)
-                                    or MOD.sprites.get(key)
-                                )
-                                if not _path:
-                                    _stem = key
-                                    for _pfx in (
-                                        "GFX_decision_category_",
-                                        "GFX_decision_",
-                                        "GFX_idea_",
-                                        "GFX_",
-                                    ):
-                                        if key.startswith(_pfx):
-                                            _stem = key[len(_pfx) :]
-                                            break
-                                    if MOD.root:
-                                        for _sub in (
-                                            "gfx/interface/decisions",
-                                            "gfx/interface/decisions/categories",
-                                            "gfx/interface",
-                                            "gfx/interface/ideas",
-                                        ):
-                                            for _ext in (".dds", ".tga", ".png"):
-                                                _p = os.path.join(
-                                                    MOD.root,
-                                                    _sub.replace("/", os.sep),
-                                                    _stem + _ext,
-                                                )
-                                                if os.path.isfile(_p):
-                                                    _path = _p
-                                                    break
-                                            if _path:
-                                                break
-                                        if not _path:
-                                            _dr = os.path.join(
-                                                MOD.root,
-                                                "gfx",
-                                                "interface",
-                                                "decisions",
-                                            )
-                                            if os.path.isdir(_dr):
-                                                for _rd, _, _fs in os.walk(_dr):
-                                                    for _ext in (
-                                                        ".dds",
-                                                        ".tga",
-                                                        ".png",
-                                                    ):
-                                                        _p = os.path.join(
-                                                            _rd, _stem + _ext
-                                                        )
-                                                        if os.path.isfile(_p):
-                                                            _path = _p
-                                                            break
-                                                    if _path:
-                                                        break
-                                if not _path:
+                            try:
+                                if not box.winfo_exists():
                                     return
-                                # Load PIL image in background (safe), create PhotoImage on main thread
-                                try:
-                                    _pil = PILImage.open(_path).convert("RGBA")
-                                    _rs = getattr(
-                                        PILImage,
-                                        "LANCZOS",
-                                        getattr(PILImage, "ANTIALIAS", 1),
-                                    )
-                                    _pil = _pil.resize((24, 24), _rs)
-                                except Exception:
-                                    return
+                            except Exception:
+                                return
 
-                                def _paint():
-                                    if not box.winfo_exists():
-                                        return
-                                    try:
-                                        img = PILImageTk.PhotoImage(_pil)
-                                        _dec_prev_img_cache[(key, 24)] = img
-                                        fb.destroy()
-                                        lbl = tk.Label(box, image=img, bg="#2a3550")
-                                        lbl.pack(expand=True)
-                                        refs.append(img)
-                                    except Exception:
-                                        pass
+                            def _paint(item, img):
+                                if img:
+                                    _dec_prev_img_cache[(key, 24)] = img
+                                    fb.destroy()
+                                    lbl = tk.Label(box, image=img, bg="#2a3550")
+                                    lbl.pack(expand=True)
+                                    refs.append(img)
 
-                                try:
-                                    box.after(0, _paint)
-                                except Exception:
-                                    pass
-
-                            threading.Thread(target=_worker, daemon=True).start()
+                            TkImageLoader(box).submit(
+                                (key, 24),
+                                lambda item: _decode_dec_icon(*item),
+                                realizer=lambda pil: PILImageTk.PhotoImage(pil),
+                                apply=_paint,
+                            )
 
                         win.after(10, _async_dec_icon)
 
@@ -4011,44 +3944,9 @@ def open_decision_wizard(app):
                 return
 
             # ── Parse the raw decisions text directly (no monkeypatch) ──────
-            def _extract_block2(text, start_pos=0):
-                depth = 0
-                j = start_pos
-                while j < len(text):
-                    if text[j] == "{":
-                        depth += 1
-                    elif text[j] == "}":
-                        depth -= 1
-                        if depth == 0:
-                            return text[start_pos + 1 : j], j
-                    j += 1
-                return text[start_pos + 1 :], len(text) - 1
-
-            def _find_blocks2(text):
-                blocks = []
-                i = 0
-                while i < len(text):
-                    if text[i] == "#":
-                        while i < len(text) and text[i] != "\n":
-                            i += 1
-                        continue
-                    m = _re2.match(r"\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*\{", text[i:])
-                    if m:
-                        name = m.group(1)
-                        brace_pos = i + m.end() - 1
-                        inner, end_j = _extract_block2(text, brace_pos)
-                        blocks.append((name, inner, text[i : end_j + 1]))
-                        i = end_j + 1
-                        continue
-                    i += 1
-                return blocks
-
             def _get_block2(text, key):
-                m = _re2.search(rf"\b{_re2.escape(key)}\s*=\s*\{{", text)
-                if not m:
-                    return None
-                inner, _ = _extract_block2(text, m.end() - 1)
-                return inner.strip()
+                inner = extract_named_block(text, key)
+                return inner.strip() if inner is not None else None
 
             def _get_value2(text, key):
                 m = _re2.search(rf"\b{_re2.escape(key)}\s*=\s*([^\s{{}}#\n]+)", text)
@@ -4065,7 +3963,7 @@ def open_decision_wizard(app):
             dm_decs.clear()
             imported = 0
             try:
-                for cat_name, cat_inner, _ in _find_blocks2(raw):
+                for cat_name, cat_inner, _ in find_blocks(raw):
                     if cat_name in ("add_namespace", "namespace"):
                         continue
                     c = _new_cat()
@@ -4111,7 +4009,7 @@ def open_decision_wizard(app):
                         c["map_zoom"] = zv or "850"
                     dm_cats.append(c)
 
-                    for dec_name, dec_inner, _ in _find_blocks2(cat_inner):
+                    for dec_name, dec_inner, _ in find_blocks(cat_inner):
                         d = _new_dec(c["uid"])
                         d["dec_id"] = dec_name
                         d["loc_name"] = dec_name
@@ -4859,48 +4757,10 @@ def open_decision_wizard(app):
             if _os.path.isfile(_cat_path):
                 MOD.edit_decisions_cat_file = _cat_path
 
-        # ── helper: extract a named block from text, return (inner_text, full_text) ──
-        def _extract_block(text, start_pos=0):
-            """Given text starting at '{', return content between braces."""
-            depth = 0
-            j = start_pos
-            while j < len(text):
-                if text[j] == "{":
-                    depth += 1
-                elif text[j] == "}":
-                    depth -= 1
-                    if depth == 0:
-                        return text[start_pos + 1 : j], j
-                j += 1
-            return text[start_pos + 1 :], len(text) - 1
-
-        def _find_blocks(text):
-            """Find all top-level key = { ... } blocks, skipping comments."""
-            blocks = []
-            i = 0
-            while i < len(text):
-                if text[i] == "#":
-                    while i < len(text) and text[i] != "\n":
-                        i += 1
-                    continue
-                m = _re.match(r"\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*\{", text[i:])
-                if m:
-                    name = m.group(1)
-                    brace_pos = i + m.end() - 1
-                    inner, end_j = _extract_block(text, brace_pos)
-                    blocks.append((name, inner, text[i : end_j + 1]))
-                    i = end_j + 1
-                    continue
-                i += 1
-            return blocks
-
         def _get_block(text, key):
             """Extract inner content of first occurrence of key = { ... } in text."""
-            m = _re.search(rf"\b{_re.escape(key)}\s*=\s*\{{", text)
-            if not m:
-                return None
-            inner, _ = _extract_block(text, m.end() - 1)
-            return inner.strip()
+            inner = extract_named_block(text, key)
+            return inner.strip() if inner is not None else None
 
         def _get_value(text, key):
             """Get scalar value: key = value (not a block)."""
@@ -4960,7 +4820,7 @@ def open_decision_wizard(app):
                 messagebox.showerror("Import Error", str(e), parent=win)
                 continue
 
-            for cat_name, cat_inner, _ in _find_blocks(raw):
+            for cat_name, cat_inner, _ in find_blocks(raw):
                 if cat_name in ("add_namespace", "namespace"):
                     continue
                 c = _new_cat()
@@ -5002,7 +4862,7 @@ def open_decision_wizard(app):
                     c["map_zoom"] = zv or "850"
                 dm_cats.append(c)
 
-                for dec_name, dec_inner, _ in _find_blocks(cat_inner):
+                for dec_name, dec_inner, _ in find_blocks(cat_inner):
                     d = _new_dec(c["uid"])
                     d["dec_id"] = dec_name
                     d["loc_name"] = loc.get(dec_name, dec_name)
@@ -5261,6 +5121,7 @@ def open_decision_wizard(app):
         )
         saved = []
         errs = []
+        wf = notifying_workspace_files(MOD, mod_root)
         # Prefer the imported/user-set edit target so we overwrite the source file in place
         if MOD.edit_decisions_file and os.path.isfile(MOD.edit_decisions_file):
             dec_path = MOD.edit_decisions_file
@@ -5270,8 +5131,7 @@ def open_decision_wizard(app):
             )
         os.makedirs(os.path.dirname(dec_path), exist_ok=True)
         try:
-            with open(dec_path, "w", encoding="utf-8") as f:
-                f.write(_gen_decisions_file())
+            wf.write_text(dec_path, _gen_decisions_file(), encoding="utf-8")
             try:
                 saved.append(os.path.relpath(dec_path, mod_root))
             except ValueError:
@@ -5287,8 +5147,7 @@ def open_decision_wizard(app):
             )
         os.makedirs(os.path.dirname(cat_path), exist_ok=True)
         try:
-            with open(cat_path, "w", encoding="utf-8") as f:
-                f.write(_gen_categories_file())
+            wf.write_text(cat_path, _gen_categories_file(), encoding="utf-8")
             try:
                 saved.append(os.path.relpath(cat_path, mod_root))
             except ValueError:
@@ -5315,8 +5174,7 @@ def open_decision_wizard(app):
                         if m:
                             existing_loc_keys.add(m.group(1))
             else:
-                with open(yml_path, "w", encoding="utf-8-sig") as f:
-                    f.write("l_english:\n")
+                wf.write_text(yml_path, "l_english:\n", encoding="utf-8-sig")
             new_lines = [
                 l
                 for l in _gen_yml().splitlines()
@@ -5330,8 +5188,9 @@ def open_decision_wizard(app):
                     continue
                 to_write.append(ln)
             if to_write:
-                with open(yml_path, "a", encoding="utf-8-sig") as f:
-                    f.write("\n".join(to_write) + "\n")
+                wf.append_text(
+                    yml_path, "\n".join(to_write) + "\n", encoding="utf-8-sig"
+                )
             saved.append(
                 os.path.relpath(yml_path, mod_root) + f"  (+{len(to_write)} keys)"
             )

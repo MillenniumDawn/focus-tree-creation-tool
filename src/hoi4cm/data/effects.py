@@ -68,7 +68,7 @@ def md_resource_cost_hint(amount):
     try:
         cost = round(float(amount) * MD_RESOURCE_COST_PER_UNIT, 3)
         return f"≈ ${cost:.3f}B per resource unit  →  set treasury_change = -{cost:.3f}"
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return ""
 
 

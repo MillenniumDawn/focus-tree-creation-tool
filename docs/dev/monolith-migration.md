@@ -88,6 +88,22 @@
   The `hoi4cm.ui` facade picked up four names this phase: `open_settings`
   (deferred from phase 9), `open_focus_icon_browser`, `build_menubar`, and
   `build_toolbar_row2`.
+- **Application modernization (this round)**: the perf/threading/memory pass
+  pulled a wave of infrastructure out of the monolith and firmed up the
+  round-1 modules. New homes: `core/concurrency.py` (a daemon
+  `ThreadPoolExecutor` so app close is a graceful lifecycle close, not
+  `os._exit`), the document model (`models/document.py`: `FocusDocument`,
+  `TreeDocument`, `EditorWorkspace`), focus-tree `codec.py` / `operations.py`,
+  project save/load (`editor/project_codec.py`), the GFX catalog and its
+  caches (`mod/graphics_catalog.py`, `mod/workspace_cache.py`,
+  `mod/workspace_files.py`), effect/syntax marshalling (`script/effects.py`,
+  `script/syntax.py`), the canvas image pipeline and lifecycle plumbing
+  (`ui/image_broker.py`, `ui/lifecycle.py`, `ui/scene_index.py`,
+  `ui/thumbnail_grid.py`, `ui/focus_list.py`, `ui/canvas_scheduler.py`), and
+  the wizard GFX helpers (`wizards/_graphics.py`, `wizards/_image_loader.py`).
+  See the status table for the module-by-module list, and
+  `architecture.md`'s "Revision discipline" / executor-daemon notes for the
+  two invariants these depend on.
 
 What's left in `hoi4_content_maker.py` today is essentially: the `sys.path`
 shim and import block (lines ~62-152), two Windows-DPI helpers (~155-207),
@@ -168,6 +184,14 @@ needs it via `hoi4cm.core`.
 | `_gfx_browse_files` | was ~3059-3267 (~209) | folded into `open_focus_icon_browser`'s `_browse_flat_folder` helper | **done** (phase 10) |
 | Sidebar builders (`_build_sidebar`, `_build_sidebar_props`, `_build_sidebar_conditions`, `_build_sidebar_code`, `_sb_*` helpers) | ~846-1817 (~970) | n/a | deferred |
 | Undo (`_push_undo`/`_undo`) | ~1561-1588 | `core/undo.py` (`UndoStack`, redesigned, see `performance.md`) | **done** (phase 7) |
+| Background threads / executor | n/a | `core/concurrency.py` (`DaemonThreadPoolExecutor`) | **done** (modernization) |
+| Workspace / focus document model | n/a | `models/document.py` (`FocusDocument`, `TreeDocument`, `EditorWorkspace`) | **done** (modernization) |
+| Focus-tree codec + focus operations | n/a | `focus_tree/codec.py`, `focus_tree/operations.py` | **done** (modernization) |
+| Project `.json` save/load | n/a | `editor/project_codec.py` | **done** (modernization) |
+| GFX catalog + scan/workspace caches + atomic writes | n/a | `mod/graphics_catalog.py`, `mod/workspace_cache.py`, `mod/workspace_files.py` | **done** (modernization) |
+| Effect rendering + Paradox script syntax | n/a | `script/effects.py`, `script/syntax.py` | **done** (modernization) |
+| Canvas image pipeline + lifecycle / scene index / scheduler | n/a | `ui/image_broker.py`, `ui/lifecycle.py`, `ui/scene_index.py`, `ui/thumbnail_grid.py`, `ui/focus_list.py`, `ui/canvas_scheduler.py` | **done** (modernization) |
+| Wizard GFX helpers + async image loader | n/a | `wizards/_graphics.py`, `wizards/_image_loader.py` | **done** (modernization) |
 
 `_import_txt` was worth calling out: it had been a third, independent copy of
 the tokenizer/parser logic that already existed in `focus_tree/parse.py`.

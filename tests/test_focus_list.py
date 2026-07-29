@@ -1,0 +1,104 @@
+import tkinter as tk
+
+import pytest
+
+from hoi4cm.ui.focus_list import (
+    FocusListItem,
+    VirtualFocusList,
+    filter_focus_items,
+    row_pool_size,
+    visible_row_range,
+)
+
+
+def test_filter_preserves_order_and_matches_names_case_insensitively() -> None:
+    items = (
+        FocusListItem(1, "Industrial Effort"),
+        FocusListItem(2, "Army Reform"),
+        FocusListItem(3, "Industrial Expansion"),
+    )
+
+    assert [item.key for item in filter_focus_items(items, "INDUSTRIAL")] == [1, 3]
+    assert filter_focus_items(items, "  army  ") == (items[1],)
+
+
+def test_filter_ignores_empty_query_and_search_placeholder() -> None:
+    items = (FocusListItem(1, "First"), FocusListItem(2, "Second"))
+
+    assert filter_focus_items(items, "  ") == items
+    assert filter_focus_items(items, "Search...") == items
+    assert filter_focus_items(items, "Buscar...", placeholder="Buscar...") == items
+
+
+@pytest.mark.parametrize(
+    "top,height,expected",
+    [
+        (0, 54, range(0, 4)),
+        (27, 54, range(0, 5)),
+        (270, 54, range(8, 14)),
+        (2673, 54, range(97, 100)),
+    ],
+)
+def test_visible_row_range_includes_viewport_and_overscan(
+    top: int, height: int, expected: range
+) -> None:
+    assert visible_row_range(100, 27, top, height, overscan_rows=2) == expected
+
+
+def test_visible_row_range_handles_empty_or_invalid_dimensions() -> None:
+    assert not visible_row_range(0, 27, 0, 100)
+    assert not visible_row_range(10, 0, 0, 100)
+    assert not visible_row_range(10, 27, 0, 0)
+
+
+def test_row_pool_size_covers_partial_row_and_overscan() -> None:
+    assert row_pool_size(54, 27, overscan_rows=2) == 7
+    assert row_pool_size(55, 27, overscan_rows=2) == 8
+    assert row_pool_size(0, 27, overscan_rows=2) == 0
+
+
+def test_tk_list_reuses_bounded_pool_and_updates_only_selected_rows() -> None:
+    try:
+        root = tk.Tk()
+    except tk.TclError:
+        pytest.skip("Tk display is unavailable")
+
+    selected = []
+    try:
+        root.geometry("220x180")
+        focus_list = VirtualFocusList(root, on_select=selected.append)
+        focus_list.pack(fill="both", expand=True)
+        items = [FocusListItem(index, f"Focus {index}") for index in range(100_000)]
+        focus_list.invalidate_structure(items, selected_key=0)
+        root.update()
+        focus_list.refresh()
+
+        pool_size = focus_list.pool_size
+        version = focus_list.structure_version
+        assert focus_list.materialized_count <= pool_size
+        assert pool_size == row_pool_size(
+            focus_list.canvas.winfo_height(),
+            focus_list.row_height,
+            overscan_rows=focus_list.overscan_rows,
+        )
+        focus_list._materialized[0].label.event_generate("<Button-1>")
+        root.update()
+        assert selected == [0]
+
+        assert focus_list.update_selection(1) == 2
+        assert focus_list.structure_version == version
+        assert focus_list.filtered_count == 100_000
+
+        focus_list.canvas.yview_moveto(0.9)
+        focus_list.refresh()
+        assert focus_list.pool_size == pool_size
+        assert focus_list.materialized_count <= pool_size
+        assert focus_list.update_selection(90_000) <= 1
+        assert focus_list.structure_version == version
+
+        focus_list.invalidate_structure(items, query="Focus 99999")
+        focus_list.refresh()
+        assert focus_list.filtered_count == 1
+        assert focus_list.materialized_count == 1
+    finally:
+        root.destroy()

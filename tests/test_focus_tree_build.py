@@ -3,7 +3,7 @@
 import pytest
 from test_focus_tree_parse import WRAPPED
 
-from hoi4cm.focus_tree.build import build_focuses
+from hoi4cm.focus_tree.build import BuildContext, build_focuses
 from hoi4cm.focus_tree.parse import parse_focus_tree
 from hoi4cm.models import Focus
 
@@ -157,3 +157,58 @@ def test_build_name_collision_semantics():
     dependent = by_name["Y_dependent"]
     assert dependent.prereqs == [[new_shared.id]]
     assert new_shared.id != shared_existing.id
+
+
+def test_build_resolves_long_relative_chain_iteratively():
+    focus_blocks = [
+        "\tfocus = { id = CHAIN_0 x = 0 y = 0 }",
+        *[
+            "\tfocus = { "
+            f"id = CHAIN_{index} x = 1 y = 1 "
+            f"relative_position_id = CHAIN_{index - 1} "
+            "}"
+            for index in range(1, 1_101)
+        ],
+    ]
+    source = "focus_tree = {\n\tid = CHAIN_tree\n" + "\n".join(focus_blocks) + "\n}"
+
+    focuses = build_focuses(parse_focus_tree(source, "/tmp/chain.txt"), tree_idx=1)
+
+    assert (focuses[-1].x, focuses[-1].y) == (1_100, 1_100)
+
+
+def test_build_context_updates_first_position_and_last_link_indexes():
+    first_source = (
+        "focus_tree = {\n"
+        "\tid = FIRST_tree\n"
+        "\tfocus = { id = DUP_name x = 1 y = 1 }\n"
+        "\tfocus = { id = DUP_name x = 5 y = 5 }\n"
+        "}\n"
+    )
+    second_source = (
+        "focus_tree = {\n"
+        "\tid = SECOND_tree\n"
+        "\tfocus = {\n"
+        "\t\tid = SECOND_child\n"
+        "\t\tx = 2\n"
+        "\t\ty = 3\n"
+        "\t\trelative_position_id = DUP_name\n"
+        "\t\tprerequisite = { focus = DUP_name }\n"
+        "\t}\n"
+        "}\n"
+    )
+    context = BuildContext()
+    first_batch = build_focuses(
+        parse_focus_tree(first_source, "/tmp/first.txt"),
+        tree_idx=1,
+        context=context,
+    )
+
+    second_batch = build_focuses(
+        parse_focus_tree(second_source, "/tmp/second.txt"),
+        tree_idx=2,
+        context=context,
+    )
+
+    assert (second_batch[0].x, second_batch[0].y) == (3, 4)
+    assert second_batch[0].prereqs == [[first_batch[-1].id]]

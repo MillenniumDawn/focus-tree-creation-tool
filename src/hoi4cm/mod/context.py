@@ -10,14 +10,12 @@ available; without it ``get_image`` returns ``None`` and the rest of the
 app still works.
 """
 
-import hashlib
-import json
 import os
 import re
 import time
-from concurrent.futures import ThreadPoolExecutor
-from typing import Callable, Optional
+from collections.abc import Callable
 
+from hoi4cm.core.concurrency import DaemonThreadPoolExecutor
 from hoi4cm.core.config import cfg_load, cfg_save
 from hoi4cm.core.image import PIL_OK as _PIL_OK
 from hoi4cm.core.image import PILImage as _PILImage
@@ -25,27 +23,17 @@ from hoi4cm.core.image import PILImageTk as _PILImageTk
 from hoi4cm.core.logger import get_logger
 from hoi4cm.core.lru import LRUCache
 from hoi4cm.core.paths import read_file
+from hoi4cm.mod.graphics_catalog import GraphicsCatalog, GraphicsScanConfig
 from hoi4cm.mod.scan_cache import ScanCache
+from hoi4cm.script.syntax import parse_block, parse_script, tokenize
 
 _log = get_logger("mod")
 
 # Bound on the in-memory PhotoImage cache (mirrors the GFX browser's own
-# cache). Each drawn focus pins its own image via Focus._canvas_img, so
+# cache). Each drawn focus pins its image through the canvas image broker, so
 # evicting a cold entry here never blanks something on screen.
 _SPRITE_IMG_CACHE_SIZE = 512
 
-
-# Pre-compiled regexes used by the .gfx-file scanners.
-_SPRITE_BLOCK_RE = re.compile(r"spriteType\s*=\s*\{")
-_SPRITE_NAME_RE = re.compile(r'\bname\s*=\s*"([^"]+)"')
-_SPRITE_TEX_RE = re.compile(r'\btexturefile\s*=\s*"([^"]+)"')
-
-# Image extensions the scanners look for on disk.
-_IMAGE_EXTS = (".dds", ".png", ".tga")
-
-# Bump when the on-disk shape of .hoi4cm_gfx_cache.json changes, so an old
-# sidecar from a previous app version is discarded instead of misread.
-_GFX_CACHE_VERSION = 3
 
 # Pre-compiled regexes used by the ID scanners (compiled once, not per file).
 _ID_RE = re.compile(r"\bid\s*=\s*(\S+)")
@@ -61,47 +49,6 @@ _VARIABLE_RE = re.compile(
 _DECISION_KEYWORDS = frozenset(
     {"category", "target_trigger", "available", "visible", "modifier", "cost"}
 )
-
-
-def _iter_sprite_blocks(text):
-    """Yield (start, end, content) for each top-level ``spriteType = { ... }`` block."""
-    i = 0
-    while i < len(text):
-        m = _SPRITE_BLOCK_RE.search(text, i)
-        if not m:
-            return
-        depth = 1
-        j = m.end()
-        while j < len(text) and depth > 0:
-            if text[j] == "{":
-                depth += 1
-            elif text[j] == "}":
-                depth -= 1
-            j += 1
-        yield m.start(), j, text[m.start() : j]
-        i = j
-
-
-def _iter_image_paths(root_dir):
-    """Yield (filename, abs_path) for every image file under ``root_dir``."""
-    for dirpath, _dirs, files in os.walk(root_dir):
-        for fname in files:
-            if fname.lower().endswith(_IMAGE_EXTS):
-                yield fname, os.path.join(dirpath, fname)
-
-
-def _index_image_files(root_dir, prefix, target):
-    """Walk ``root_dir`` and add every image file to ``target`` as ``prefix + stem``."""
-    for fname, full in _iter_image_paths(root_dir):
-        stem = os.path.splitext(fname)[0]
-        target.setdefault(prefix + stem, full)
-
-
-def _is_under_dir(path, parent):
-    """True if *path* is *parent* itself or lies anywhere beneath it."""
-    path = os.path.abspath(path)
-    parent = os.path.abspath(parent)
-    return path == parent or path.startswith(parent + os.sep)
 
 
 def detect_loc_file(mod_root, raw_text):
@@ -133,53 +80,6 @@ def detect_loc_file(mod_root, raw_text):
     return ""
 
 
-def _iface_dir_mtime(root):
-    """Max mtime across every file under ``root/interface/``, recursively.
-
-    Returns 0 if missing.
-
-    Used with the gfx image signature as the unified gfx-cache invalidation
-    signal. Walked recursively — not just the top-level dir — since
-    decision_sprites parses nested interface/*.gfx too and the sidecar now
-    covers all three derived dicts, not just decision_sprites.
-    """
-    iface = os.path.join(root, "interface")
-    if not os.path.isdir(iface):
-        return 0
-    latest = 0
-    for dirpath, _dirs, files in os.walk(iface):
-        for fn in files:
-            try:
-                latest = max(latest, os.path.getmtime(os.path.join(dirpath, fn)))
-            except OSError:
-                pass
-    return latest
-
-
-def _gfx_image_tree_signature(gfx_root):
-    """Return a stable signature for every supported image below ``gfx_root``."""
-    digest = hashlib.sha256()
-    if not os.path.isdir(gfx_root):
-        digest.update(b"missing")
-        return digest.hexdigest()
-
-    digest.update(b"present\0")
-    for dirpath, dirs, files in os.walk(gfx_root):
-        dirs.sort()
-        for fname in sorted(files):
-            if not fname.lower().endswith(_IMAGE_EXTS):
-                continue
-            path = os.path.join(dirpath, fname)
-            rel_path = os.path.relpath(path, gfx_root).replace(os.sep, "/")
-            try:
-                stat = os.stat(path)
-                signature = f"{rel_path}\0{stat.st_mtime_ns}\0{stat.st_size}\n"
-            except OSError:
-                signature = f"{rel_path}\0unavailable\n"
-            digest.update(signature.encode())
-    return digest.hexdigest()
-
-
 class ModContext:
     """Holds all discovered mod assets: sprites, events, ideas, decisions, etc."""
 
@@ -207,6 +107,7 @@ class ModContext:
         self.idea_sprites = {}  # gfx_name -> abs_path  (ideas GFX)
         self.decision_sprites = {}  # gfx_name -> abs_path  (decisions GFX)
         self.custom_gfx_dirs = []  # user-added extra GFX dirs
+        self.graphics_catalog = GraphicsCatalog()
         self.country_tag_names = {}  # TAG -> display name  e.g. {"SOV": "Soviet Union"}
         self.loc_token_style = (
             "colon"  # "colon" = [TAG:NameWithFlag], "dot" = [TAG.GetName]
@@ -290,69 +191,11 @@ class ModContext:
     # ── HOI4 script tokeniser (same as main parser) ─────────────────
     @staticmethod
     def _tokenize(s):
-        tokens = []
-        i = 0
-        while i < len(s):
-            c = s[i]
-            if c in " \t\n\r":
-                i += 1
-                continue
-            if c in "{}":
-                tokens.append(c)
-                i += 1
-                continue
-            if c == "=":
-                tokens.append("=")
-                i += 1
-                continue
-            if c == "#":
-                while i < len(s) and s[i] != "\n":
-                    i += 1
-                continue
-            if c == '"':
-                j = i + 1
-                while j < len(s) and s[j] != '"':
-                    j += 1
-                tokens.append(s[i + 1 : j])
-                i = j + 1
-                continue
-            j = i
-            while j < len(s) and s[j] not in ' \t\n\r{}="#':
-                j += 1
-            if j > i:
-                tokens.append(s[i:j])
-            i = j
-        return tokens
+        return tokenize(s)
 
     @staticmethod
     def _parse_block(tokens, pos):
-        result = {}
-        pos += 1
-        while pos < len(tokens) and tokens[pos] != "}":
-            key = tokens[pos]
-            pos += 1
-            if pos >= len(tokens):
-                break
-            if tokens[pos] == "=":
-                pos += 1
-                if pos >= len(tokens):
-                    break
-                if tokens[pos] == "{":
-                    val, pos = ModContext._parse_block(tokens, pos)
-                else:
-                    val = tokens[pos]
-                    pos += 1
-                if key in result:
-                    ex = result[key]
-                    if not isinstance(ex, list):
-                        result[key] = [ex]
-                    result[key].append(val)
-                else:
-                    result[key] = val
-            else:
-                if key not in ("", "=", "{", "}"):
-                    result.setdefault("_values", []).append(key)
-        return result, pos + 1
+        return parse_block(tokens, pos)
 
     def _read(self, path):
         return read_file(path)
@@ -402,9 +245,11 @@ class ModContext:
             contrib[to_read[0]] = read_and_extract(to_read[0])
         elif to_read:
             workers = min(8, (os.cpu_count() or 4), len(to_read))
-            with ThreadPoolExecutor(max_workers=workers) as ex:
+            with DaemonThreadPoolExecutor(
+                max_workers=workers, thread_name_prefix="hoi4cm-scan"
+            ) as ex:
                 futures = [ex.submit(read_and_extract, p) for p in to_read]
-                for p, fut in zip(to_read, futures):
+                for p, fut in zip(to_read, futures, strict=True):
                     contrib[p] = fut.result()
 
         if self._cache:
@@ -419,10 +264,7 @@ class ModContext:
     def _parse_text(src):
         """Parse a HOI4 script string into a dict tree."""
         try:
-            tokens = ModContext._tokenize(src)
-            tokens = ["{"] + tokens + ["}"]
-            result, _ = ModContext._parse_block(tokens, 0)
-            return result
+            return parse_script(src)
         except Exception:
             return {}
 
@@ -434,208 +276,42 @@ class ModContext:
             return {}
 
     # ── Scanners ─────────────────────────────────────────────────────
-    @staticmethod
-    def _parse_sprites_from_gfx(text):
-        """Yield (name, tex_lower, rel_path) for every spriteType block in *text*.
-
-        Callers filter on ``tex_lower`` themselves (used to keep only
-        "goals", "ideas", etc.) — unlike the old per-target predicate, this
-        parses each file once regardless of which dicts end up using it.
-        """
-        for _start, _end, block in _iter_sprite_blocks(text):
-            nm = _SPRITE_NAME_RE.search(block)
-            tx = _SPRITE_TEX_RE.search(block)
-            if not (nm and tx):
-                continue
-            tex_raw = tx.group(1).strip().replace("\\\\", "/").replace("\\", "/")
-            yield nm.group(1).strip(), tex_raw.lower(), tex_raw.replace("/", os.sep)
-
-    def _index_interface_gfx(self):
-        """One recursive walk of interface/*.gfx → every spriteType found.
-
-        Replaces three separate walks (two non-recursive ``os.listdir``
-        scans for sprites/idea_sprites, plus decision_sprites' own
-        recursive ``os.walk``) with one. Each entry is
-        ``(name, tex_lower, rel_path, top_level, strict_ext)``:
-
-        - ``top_level`` marks files directly under interface/ (not a
-          subfolder) — only those feed sprites/idea_sprites, matching the
-          old ``os.listdir(iface)`` scan; decision_sprites uses every
-          entry regardless of depth.
-        - ``strict_ext`` is the old case-sensitive ``.gfx`` suffix check
-          used for sprites/idea_sprites, vs. the case-insensitive check
-          decision_sprites always used — a pre-existing inconsistency kept
-          here so output stays byte-identical to before.
-        """
-        entries = []
-        iface = os.path.join(self.root, "interface")
-        if not os.path.isdir(iface):
-            return entries
-        for dirpath, _dirs, files in os.walk(iface):
-            top_level = dirpath == iface
-            for fname in files:
-                if not fname.lower().endswith(".gfx"):
-                    continue
-                strict_ext = fname.endswith(".gfx")
-                content = self._read(os.path.join(dirpath, fname))
-                for name, tex_lower, rel_path in self._parse_sprites_from_gfx(content):
-                    entries.append((name, tex_lower, rel_path, top_level, strict_ext))
-        return entries
-
-    @staticmethod
-    def _images_for_dir(all_images, gfx_root, target_dir):
-        """(fname, full) pairs under *target_dir*, reusing *all_images* when possible.
-
-        *all_images* is the one ``gfx/`` walk shared across all three gfx
-        scan steps. When *target_dir* is nested under *gfx_root* (the
-        default for path_goals/path_ideas_gfx), its images are just a
-        filter over that list. A customised path pointing outside gfx/
-        falls back to its own dedicated walk, matching the old behaviour.
-        """
-        if not os.path.isdir(target_dir):
-            return []
-        if _is_under_dir(target_dir, gfx_root):
-            return [
-                (fname, full)
-                for fname, full in all_images
-                if _is_under_dir(full, target_dir)
-            ]
-        return list(_iter_image_paths(target_dir))
-
-    def _derive_sprites(self, entries, goal_images):
-        """Populate self.sprites (focus icons) from the shared gfx index."""
-        for name, tex_lower, rel_path, top_level, strict_ext in entries:
-            is_goal = "goals" in tex_lower or "focus" in tex_lower
-            if top_level and strict_ext and is_goal:
-                self.sprites[name] = os.path.join(self.root, rel_path)
-        for fname, full in goal_images:
-            stem = os.path.splitext(fname)[0]
-            self.sprites.setdefault("GFX_focus_" + stem, full)
-
-    def _derive_idea_sprites_core(self, entries, idea_images):
-        """Populate self.idea_sprites from interface/*.gfx + the ideas dir.
-
-        custom_gfx_dirs are layered on separately by the caller — they're
-        indexed fresh every scan, not covered by the gfx cache.
-        """
-        for name, tex_lower, rel_path, top_level, strict_ext in entries:
-            is_idea = "ideas" in tex_lower or "idea" in tex_lower
-            if top_level and strict_ext and is_idea:
-                self.idea_sprites[name] = os.path.join(self.root, rel_path)
-        for fname, full in idea_images:
-            stem = os.path.splitext(fname)[0]
-            self.idea_sprites.setdefault("GFX_idea_" + stem, full)
-
-    def _derive_decision_sprites(self, entries, all_images):
-        """Populate self.decision_sprites from every interface/*.gfx sprite
-        plus a classified walk of gfx/ (decisions/ideas/goals-or-focus/else)."""
-        for name, _tex_lower, rel_path, _top_level, _strict_ext in entries:
-            self.decision_sprites[name] = os.path.join(self.root, rel_path)
-        for fname, full in all_images:
-            stem = os.path.splitext(fname)[0]
-            rel = os.path.relpath(full, self.root).replace(os.sep, "/").lower()
-            if "decisions" in rel:
-                keys = (
-                    f"GFX_decision_{stem}",
-                    f"GFX_decision_category_{stem}",
-                )
-                for key in keys:
-                    self.decision_sprites.setdefault(key, full)
-            elif "ideas" in rel:
-                self.decision_sprites.setdefault(f"GFX_idea_{stem}", full)
-            elif "goals" in rel or "focus" in rel:
-                pass  # handled by _derive_sprites
-            else:
-                self.decision_sprites.setdefault(f"GFX_{stem}", full)
-
-    def _read_gfx_cache(self, cache_file, iface_mtime, gfx_signature):
-        """Return the cached {sprites, idea_sprites, decision_sprites} or None."""
-        if not os.path.isfile(cache_file):
-            return None
-        try:
-            with open(cache_file, encoding="utf-8") as f:
-                cached = json.load(f)
-            if cached.get("version") != _GFX_CACHE_VERSION:
-                return None
-            if abs(cached.get("iface_mtime", 0) - iface_mtime) >= 2:
-                return None
-            if cached.get("gfx_signature") != gfx_signature:
-                return None
-            return cached
-        except Exception:
-            return None
-
-    def _write_gfx_cache(self, cache_file, iface_mtime, gfx_signature):
-        try:
-            cache_data = {
-                "version": _GFX_CACHE_VERSION,
-                "iface_mtime": iface_mtime,
-                "gfx_signature": gfx_signature,
-                "sprites": dict(self.sprites),
-                "idea_sprites": dict(self.idea_sprites),
-                "decision_sprites": dict(self.decision_sprites),
-            }
-            with open(cache_file, "w", encoding="utf-8") as f:
-                json.dump(cache_data, f, ensure_ascii=False)
-        except Exception:
-            pass
-
     def _scan_gfx_unified(self):
-        """Build sprites / idea_sprites / decision_sprites from one shared index.
-
-        Previously each ran its own walk: two non-recursive interface/*.gfx
-        scans (goals + ideas) plus a recursive one for decisions, and the
-        gfx/ image tree (up to ~64k files on a large mod) was walked up to
-        three times on top of that. This does one recursive interface/ walk
-        and one gfx/ walk, then derives all three dicts from the results —
-        same merge order/precedence as before (interface/*.gfx entries win
-        over a same-named disk image; only top-level interface/*.gfx files
-        feed sprites/idea_sprites, every one feeds decision_sprites).
-
-        Cached in ``.hoi4cm_gfx_cache.json``, keyed by interface/'s
-        recursive mtime and a signature of every supported image under gfx/.
-        A cache hit skips parsing interface definitions and rebuilding the
-        derived dicts.
-        """
         self.decision_sprites.clear()
         self.idea_sprites.clear()
-        # self.sprites is cleared by scan() itself before any step runs.
+        maps = self.graphics_catalog.refresh(
+            self.root,
+            GraphicsScanConfig(
+                path_goals=self.path_goals,
+                path_ideas_gfx=self.path_ideas_gfx,
+                path_event_pictures=self.path_event_pictures,
+                custom_gfx_dirs=tuple(self.custom_gfx_dirs),
+            ),
+            read_text=self._read,
+        )
+        self.sprites.update(maps.sprites)
+        self.idea_sprites.update(maps.idea_sprites)
+        self.decision_sprites.update(maps.decision_sprites)
 
-        cache_file = os.path.join(self.root, ".hoi4cm_gfx_cache.json")
-        iface_mtime = _iface_dir_mtime(self.root)
-        gfx_root = os.path.join(self.root, "gfx")
-        gfx_signature = _gfx_image_tree_signature(gfx_root)
-        cached = self._read_gfx_cache(cache_file, iface_mtime, gfx_signature)
-        if cached is not None:
-            self.sprites.update(cached.get("sprites", {}))
-            self.idea_sprites.update(cached.get("idea_sprites", {}))
-            self.decision_sprites.update(cached.get("decision_sprites", {}))
-        else:
-            entries = self._index_interface_gfx()
-            all_images = (
-                list(_iter_image_paths(gfx_root)) if os.path.isdir(gfx_root) else []
-            )
+    def note_file_written(self, path):
+        maps = self.graphics_catalog.note_written(path, read_text=self._read)
+        if maps is not None:
+            self._apply_graphics_maps(maps)
 
-            goals_dir = os.path.join(self.root, "gfx", "interface", "goals")
-            if not os.path.isdir(goals_dir):
-                goals_dir = os.path.join(self.root, "gfx", "interface")
-            if os.path.isdir(goals_dir):
-                goal_images = self._images_for_dir(all_images, gfx_root, goals_dir)
-                self._derive_sprites(entries, goal_images)
+    def note_file_deleted(self, path):
+        maps = self.graphics_catalog.note_deleted(path)
+        if maps is not None:
+            self._apply_graphics_maps(maps)
 
-            ideas_dir = os.path.join(self.root, self.path_ideas_gfx)
-            idea_images = self._images_for_dir(all_images, gfx_root, ideas_dir)
-            self._derive_idea_sprites_core(entries, idea_images)
-
-            self._derive_decision_sprites(entries, all_images)
-
-            self._write_gfx_cache(cache_file, iface_mtime, gfx_signature)
-
-        # custom_gfx_dirs are user-added at any time and aren't covered by
-        # the unified cache signature, so index them fresh every scan.
-        for cdir in self.custom_gfx_dirs:
-            if os.path.isdir(cdir):
-                _index_image_files(cdir, "GFX_idea_", self.idea_sprites)
+    def _apply_graphics_maps(self, maps):
+        for target, source in (
+            (self.sprites, maps.sprites),
+            (self.idea_sprites, maps.idea_sprites),
+            (self.decision_sprites, maps.decision_sprites),
+        ):
+            target.clear()
+            target.update(source)
+        self.sprite_imgs.clear()
 
     # ── Per-file extractors (pure text → JSON-serialisable contribution) ──
     @staticmethod
@@ -848,7 +524,7 @@ class ModContext:
         self._img_errors.append(f"LOAD FAILED {gfx_name}: {last_err}")
         return None
 
-    def scan(self, root, progress_cb: Optional[Callable] = None):
+    def scan(self, root, progress_cb: Callable | None = None):
         self.root = root
         self.mod_name = os.path.basename(root)
         self.sprites.clear()

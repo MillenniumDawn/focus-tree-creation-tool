@@ -2,6 +2,54 @@
 
 ---
 
+## Application Modernization — Python Floor Raised to 3.14
+
+**Minimum supported Python is now 3.14, up from 3.9.**
+- `requires-python` in `pyproject.toml` bumped to `>=3.14`. CI's test matrix collapsed
+  from `3.9`/`3.13` to `3.14` only, and the lint job moved off `3.12` to match.
+- `black` now targets `py314` and `ruff` infers the same from `requires-python`, so both
+  apply 3.14-only style — e.g. PEP 758's unparenthesized `except A, B:`. Dev-extra pins
+  bumped to `black>=26.5` and `ruff>=0.16`; older releases either don't know the `py314`
+  target or can't parse the resulting syntax at all.
+- Dropped the last pre-3.10 shim: `_image_loader.py`'s `_QueueItem` runtime alias is a
+  plain `X | Y` union now instead of `typing.Union`.
+- Ruff's B905 (`zip()` without `strict=`) is live under the 3.14 target. Every existing
+  `zip()` call got an explicit `strict=True` or `strict=False` after checking whether the
+  two sequences are guaranteed to be the same length.
+
+---
+
+## Application Modernization — Behavior Changes
+
+The modernization rounds changed a few user-visible behaviors on purpose.
+They are recorded here so they don't get "fixed" back.
+
+### Code-tab apply replaces every editable field
+
+**[BEHAVIOR CHANGE] Applying the Code tab now resets fields you leave out**
+- The old regex patcher only rewrote the fields it recognized and left the
+  rest untouched. The new apply parses the block and rewrites every editable
+  field, so a field you delete from the code is reset to its parser default
+  instead of silently kept. Keep a field by keeping it in the code.
+
+### Focus-sprite scanning honors `path_goals`
+
+**[BEHAVIOR CHANGE] Focus icons are read from your configured goals path**
+- Focus-sprite discovery used to hardcode `gfx/interface/goals`. It now
+  honors the `path_goals` setting, so a mod that keeps focus goal icons
+  somewhere else has them found.
+
+### Quote-aware script parsing
+
+**[BEHAVIOR CHANGE] `#` and `{ }` inside quoted strings now parse correctly**
+- Comments and braces inside a quoted value are no longer treated as real
+  comments or braces, so a value like `"a # b { c }"` parses intact instead
+  of getting truncated. Clausewitz has no string escapes, so a quoted value
+  that ends in a backslash (e.g. `icon = "gfx\interface\"`) no longer swallows
+  its closing quote and derails the rest of the file.
+
+---
+
 ## Session 5 — Shared Focus Tree Position and Viewport Fixes
 
 ### Focus Tree — `_raw_rewards` Regex Missing `shared_focus` Blocks

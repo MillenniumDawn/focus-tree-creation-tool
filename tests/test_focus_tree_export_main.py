@@ -197,6 +197,16 @@ def test_cfp_none_and_no_focuses_defaults_to_zero():
     assert "continuous_focus_position = { x = 0 y = 0 }" in text
 
 
+def test_default_effect_renderer_removes_ui_callback_requirement():
+    focus = Focus(0, 0)
+    focus.name = "TST_effect"
+    focus.effects = [{"type": "add_political_power", "fields": {"amount": "25"}}]
+
+    text = export_main_tree([focus], _info(), focus_lookup={focus.id: focus})
+
+    assert "\t\t\tadd_political_power = 25" in text
+
+
 def test_relative_position_first_match_wins_on_duplicate_names():
     first = Focus(1, 1)
     first.name = "DUP"
@@ -302,6 +312,41 @@ def test_fixture_country_raw_present_verbatim_on_first_export():
     _f, text = _load_and_export_main(raw, path)
     assert "factor    =   0" in text
     assert "original_tag=TST" in text  # no space around '=', preserved verbatim
+
+
+def test_main_tree_roundtrip_preserves_unknown_focus_keys_and_is_idempotent():
+    src = "\n".join(
+        [
+            "focus_tree = {",
+            "\tid = TST_main_tree",
+            "\tcountry = {",
+            "\t\tfactor = 0",
+            "\t\tmodifier = { add = 10 original_tag = TST }",
+            "\t}",
+            "\tcontinuous_focus_position = { x = 20 y = 300 }",
+            "\tfocus = {",
+            "\t\tid = TST_root",
+            "\t\tx = 0",
+            "\t\ty = 0",
+            "\t\tcost = 10",
+            "\t\tsome_unknown_field = mystery",
+            "\t\tanother_unknown = { nested = yes }",
+            "\t\tcompletion_reward = {",
+            "\t\t\tadd_political_power = 50",
+            "\t\t}",
+            "\t}",
+            "}",
+        ]
+    )
+
+    f1, t1 = _load_and_export_main(src)
+    f2, t2 = _load_and_export_main(t1)
+
+    assert t1 == t2
+    assert _summary(f1) == _summary(f2)
+    assert "original_tag" in t1  # country_raw survived
+    assert "some_unknown_field = mystery" in t1
+    assert "another_unknown = {" in t1
 
 
 def test_fixture_content_present():

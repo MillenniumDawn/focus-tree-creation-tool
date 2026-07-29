@@ -20,10 +20,11 @@ the target.
 | The single end-of-batch redraw still walks every loaded focus with no viewport culling | `ui/canvas.py:150` (`_do_redraw`) | Viewport culling | fixed in phase 8 (see the viewport-culling row below for what is/isn't fixed) | not yet measured, needs a display session against the real mod |
 | Main-tree export and the Code-tab preview resolve each focus's `relative_position_id` parent with `next(foc for foc in self.focuses.values() if foc.name == rel_id)`, an O(F) scan per focus, so O(F^2) overall. This is the same shape of bug e693a19 already fixed in `focus_tree/export.py` (used only for extra shared/joint trees) with a name-to-focus map built once; the fix was never ported to the monolith's own main-tree path | `focus_tree/export.py` (`export_main_tree`, the main-tree path `_export` now delegates to), `hoi4_content_maker.py:3686` (`_build_focus_code`) | Build a `name -> Focus` map once per call, same pattern as `focus_tree/export.py` | fixed in phase 4 | not yet measured, needs a display session against the real mod |
 | `_import_txt`/`_import_drawio` parse synchronously on the Tk thread; a large import blocks the UI for the parse duration | `hoi4_content_maker.py:_import_txt`, `hoi4_content_maker.py:_import_drawio` | Move parse (and, for the batch loader, parse+build) off the Tk thread via `ui/tasks.py`'s `run_bg`, marshal the result back via `on_done` | fixed in phase 5 | not yet measured, needs a display session against the real mod |
-| GFX interface tree walked 3x per mod scan (`_scan_gfx` and `_scan_idea_gfx` each call `_scan_interface_gfx`, a top-level `os.listdir` over `interface/`; `_scan_decision_gfx` does its own recursive `os.walk`). Only the decision walk is cached | `mod/context.py:552` (`_scan_gfx_unified`) | One recursive `interface/` walk (`_index_interface_gfx`) and one `gfx/` walk feed all three dicts (`_derive_sprites`, `_derive_idea_sprites_core`, `_derive_decision_sprites`); same merge order/precedence as the three original scanners, pinned down by a characterization test before the rewrite | fixed in phase 6 | cold scan 2128.5ms -> 1051.1ms, warm scan 1425.3ms -> 78.2ms (fixture-replica benchmark, 66k-file synthetic GFX tree, not the real mod; see phase 6 notes) |
+| GFX interface tree walked 3x per mod scan. The first unified cache still walked all directories and statted every image before accepting a warm hit | `mod/graphics_catalog.py` | One `os.scandir` inventory feeds every sprite map and browser query. The persistent workspace snapshot stores relative paths, directory stamps, `.gfx` file stamps, and the image inventory | fixed | old unification: cold 2128.5ms -> 1051.1ms, warm 1425.3ms -> 78.2ms (66k-file synthetic fixture). The workspace snapshot still needs a real-mod measurement |
 | `_scan_files_cached` reads cache-miss files in parallel, then extracts them serially in a follow-up loop | `mod/context.py:341` | Read+extract submitted together per file to one `ThreadPoolExecutor`, so a file's read (GIL released) overlaps another file's extraction; cache put/prune/commit stay on the calling thread since the sqlite connection isn't thread-safe | fixed in phase 6 | not yet measured, needs a display session against the real mod |
 | Undo deep-copied every loaded focus (`copy.deepcopy` of the whole `self.focuses` dict) on every `_push_undo`, 60 entries retained (`deque(maxlen=60)`), then `_undo` did `cv.delete("all")` and rebuilt every focus | `hoi4_content_maker.py:1561` (`_push_undo`/`_undo`) | `core/undo.py`'s `UndoStack`: each push snapshots only the focus ids the caller says it's about to mutate/delete (`touched_ids`), plus a `frozenset` of every id at push time so undo can spot and delete ids the action created without ever snapshotting them. The few call sites that touch most of the tree anyway (draw.io import) fall back to one zlib-compressed full snapshot instead of bounding the set. `_undo` now deletes canvas items only for the ids that came back changed/removed and does one `_redraw()`, no more `cv.delete("all")` | fixed in phase 7 | not yet measured, needs a display session against the real mod |
 | No canvas viewport culling: `_do_redraw` iterates every loaded `Focus` regardless of what's on screen; loading all trees puts ~329k items on the canvas | `ui/canvas.py` (`_do_redraw`, `_draw_focus`, `_draw_lines`) | Viewport rect computed once per redraw (`ui/viewport.py`'s pure `visible_world_rect`/`focus_visible`/`edge_visible`); offscreen focuses never get canvas items (lazy creation), and an already-drawn focus that pans offscreen gets one `itemconfig(state="hidden")` per redraw instead of a full coord/style recompute | fixed in phase 8 | not yet measured, needs a display session against the real mod |
+| A single-focus drag rebuilt every `FocusDocument` index on each snap step (`move()`) and did a full `SceneIndex` rebuild (all edges rasterized) on each throttled line-redraw frame, O(F+E) per drag frame | `models/document.py` (`move`), `ui/scene_index.py` (`rebuild`/`update_focus`), `ui/canvas.py` (`_do_draw_lines_throttled`) | `move()` patches only `occupied_positions`; `SceneIndex.update_focus` patches the moved focus's cell and re-rasterizes only its incident edges; the drag line-redraw calls `update_focus` instead of `ensure`'s full rebuild | fixed | synthetic 2000-focus / 2860-edge tree (Python 3.14): drag-snap step (`move` + scene) median 7.8-8.3ms -> 0.029ms, p95 12-14ms -> 0.05ms, max up to 21ms -> 0.1ms. See the drag-snap note below |
 
 The `_draw_key`/state-key check in `_draw_focus` (`ui/canvas.py:486`) already
 makes an unchanged focus close to free to redraw, but every `_redraw()` call
@@ -50,6 +51,19 @@ below some zoom threshold, instead of the full multi-item card) was
 scoped for phase 8 but not implemented — noted here as future work, since
 lazy item creation already removes the up-front item explosion for the
 zoomed-in case, which was the more common one.
+
+### Drag-snap step
+
+Dragging one focus is the interactive hot path: `_foc_mv` calls
+`FocusDocument.move()` on every grid cell crossed, and the throttled line
+redraw (`_do_draw_lines_throttled`, ~60fps) has to reflect the new position.
+Both used to be O(F+E): `move()` did a full index rebuild, and the redraw did
+a full `SceneIndex.rebuild`. Two changes make the update cost independent of
+the whole tree size: `move()` only x/y touches `occupied_positions`, so it
+patches that one index instead of rebuilding all seven; and
+`SceneIndex.update_focus` moves just the dragged focus between cells and
+re-rasterizes only its incident edges. The resulting work is O(1 + focus
+degree), not O(F+E).
 
 ## GIL guidance
 
@@ -109,10 +123,14 @@ concerns on a single file.
 
 | Cache | Scope | Keyed by | Eviction |
 |---|---|---|---|
-| `ScanCache` (SQLite, `~/.hoi4cm/scan_cache/<hash>.db`) | per-file scan contribution, per domain | `(mtime, size)` | none, though `prune()` drops rows for paths no longer in the mod (no size/age cap) |
-| `.hoi4cm_gfx_cache.json` (sidecar in the mod root) | unified GFX index: `sprites`, `idea_sprites`, and `decision_sprites` together (since phase 6, was decision-only before); schema-versioned (`"version"` key) so an old sidecar is discarded instead of misread | `interface/` directory mtime, recursive (within 2s) | none |
-| `MOD.sprite_imgs` (in-memory `PhotoImage` cache) | one process's lifetime | `(gfx_name, size)` | bounded LRU, 512 entries (`core/lru.py`'s `LRUCache`), still memoizes `None` on load failure so a failed load isn't retried; safe to evict since each drawn focus pins its own image via `Focus._canvas_img` (`ui/canvas.py`), independent of this cache |
-| GFX browser `_st["img_cache"]` (`ui/gfx_browser.py`) | one browser dialog's lifetime | file path | bounded LRU, 512 entries (same `LRUCache`); currently-gridded thumbnails are additionally pinned in `_st["pinned_imgs"]` so an LRU eviction can't blank a tile still on screen — Tk's `image=` option only holds a C-level handle, not a Python reference, so the browser itself has to keep one alive |
+| `WorkspaceCache` graphics snapshot (SQLite, `~/.hoi4cm/scan_cache/<hash>.db`) | relative graphics inventory, sprite declarations, and configured focus/idea views | root identity, graphics path fingerprint, directory `mtime_ns`/`ctime_ns`, `.gfx` file stamps, and image stamps | one snapshot per graphics path configuration; detected stale rows rebuild. A warm load restats the known images, so an in-place image overwrite (same filename) is caught without an explicit refresh |
+| `ScanCache` (same SQLite database) | per-file scan contribution, per domain | `(mtime, size)` | none, though `prune()` drops rows for paths no longer in the mod (no size/age cap) |
+| Canvas `ImageBroker` | one application session | normalized path, file stamp, transform, and catalog generation for zero-stamp assets | bounded LRU; visible renderer bundles own bounded pins and offscreen bundles release them |
+| Browser `ImageBroker` | one browser dialog | normalized path, file stamp, transform, and catalog generation for zero-stamp assets | bounded LRU; the virtual thumbnail grid pins only visible rows plus overscan |
 
-`ScanCache.prune`'s stale-path removal remains its only eviction. Both
-in-memory `PhotoImage` caches were unbounded before phase 8.
+Warm graphics loads stat known directories, `.gfx` files, and the known image
+paths. They do not recursively enumerate directories or reparse `.gfx` files.
+Statting the known images is what catches an in-place overwrite (the directory
+mtime doesn't move when a file's content changes), and it's far cheaper than a
+full rescan. `ScanCache.prune`'s stale-path removal remains its only eviction.
+The image brokers bound decoded Tk images and visible pins independently.
