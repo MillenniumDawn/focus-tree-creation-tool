@@ -143,6 +143,44 @@ def test_structural_change_rebuilds_id_set():
     assert focuses.id_set == frozenset()
 
 
+def test_pure_edits_between_pushes_keep_sharing_id_set():
+    """Geometry-only changes and field edits must not invalidate the cache;
+    invalidating on every mutation would rebuild the set per action again."""
+    focuses = FocusDocument(_mk_focus(i, f"focus_{i}") for i in range(5))
+    stack = UndoStack()
+    stack.push("edit 1", focuses, touched_ids=(1,))
+    first_id_set = focuses.id_set
+
+    focuses.move(1, 3, 4)
+    focuses.touch()
+    focuses.link_prerequisite(2, [1])
+    focuses.rename_prefix("focus", "f_")
+    stack.push("edit 2", focuses, touched_ids=(2,))
+
+    assert focuses.id_set is first_id_set
+    assert stack._stack[0][3] is first_id_set
+    assert stack._stack[1][3] is first_id_set
+
+
+def test_undo_refreshes_id_set_cache():
+    """Undo deletes created ids through the document; the next id_set read
+    must reflect the restored keys, not the stale pre-undo set."""
+    focuses = FocusDocument([_mk_focus(1, "focus_1")])
+    stack = UndoStack()
+
+    stack.push("add focus", focuses, touched_ids=())
+    focuses.add(_mk_focus(2, "focus_2"))
+    stack.undo(focuses, Focus.from_dict)
+    assert focuses.id_set == frozenset({1})
+
+    stack.push("full import", focuses)
+    focuses.clear()
+    focuses.load([_mk_focus(9, "focus_9")])
+    stack.undo(focuses, Focus.from_dict)
+    assert focuses.id_set == frozenset({1})
+    assert focuses.id_set == frozenset(focuses.keys())
+
+
 def test_single_edit_undo_restores_fields():
     f = _mk_focus(1, "focus_1", cost=10, desc="old")
     focuses = {1: f}
