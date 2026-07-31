@@ -37,6 +37,7 @@ class FocusDocument(MutableMapping[int, Focus]):
 
     def __init__(self, focuses: Iterable[Focus] = ()) -> None:
         self._focuses: dict[int, Focus] = {}
+        self._id_set_cache: frozenset[int] | None = None
         self.geometry_revision = 0
         self.names: dict[str, tuple[int, ...]] = {}
         self.first_by_name: dict[str, int] = {}
@@ -54,6 +55,18 @@ class FocusDocument(MutableMapping[int, Focus]):
     @property
     def by_id(self) -> MutableMapping[int, Focus]:
         return self._focuses
+
+    @property
+    def id_set(self) -> frozenset[int]:
+        """All focus ids as a frozenset, cached until ids change.
+
+        Undo entries reference this instead of allocating a fresh set per
+        push, so a long edit sequence on a large tree retains one shared
+        frozenset instead of rebuilding a 20k+ element set per action.
+        """
+        if self._id_set_cache is None:
+            self._id_set_cache = frozenset(self._focuses)
+        return self._id_set_cache
 
     def __getitem__(self, focus_id: int) -> Focus:
         return self._focuses[focus_id]
@@ -77,6 +90,7 @@ class FocusDocument(MutableMapping[int, Focus]):
     def clear(self) -> None:
         if self._focuses:
             self._focuses.clear()
+            self._id_set_cache = None
             self._changed()
         self.rebuild_indexes()
 
@@ -84,6 +98,7 @@ class FocusDocument(MutableMapping[int, Focus]):
         if focus.id in self._focuses and not replace:
             raise KeyError(f"focus id already exists: {focus.id}")
         self._focuses[focus.id] = focus
+        self._id_set_cache = None
         self._changed()
         self.rebuild_indexes()
         return focus
@@ -100,6 +115,7 @@ class FocusDocument(MutableMapping[int, Focus]):
         if not additions:
             return
         self._focuses.update((focus.id, focus) for focus in additions)
+        self._id_set_cache = None
         self._changed()
         self.rebuild_indexes()
 
@@ -201,6 +217,7 @@ class FocusDocument(MutableMapping[int, Focus]):
                 focus.mutex = [other for other in focus.mutex if other not in deleted]
         for focus_id in deleted:
             del self._focuses[focus_id]
+        self._id_set_cache = None
         self._changed()
         self.rebuild_indexes()
         return deleted
@@ -215,6 +232,7 @@ class FocusDocument(MutableMapping[int, Focus]):
         changed = loaded != self._focuses
         self._focuses = loaded
         if changed:
+            self._id_set_cache = None
             self._changed()
         self.rebuild_indexes()
 

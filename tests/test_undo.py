@@ -102,6 +102,47 @@ def test_focus_document_undo_batches_index_rebuilds():
     assert focuses.validate_indexes()
 
 
+def test_pushes_without_structural_change_share_one_id_set():
+    """Pure edits must not allocate a fresh per-action set of every id."""
+    focuses = FocusDocument(_mk_focus(i, f"focus_{i}") for i in range(1000))
+    stack = UndoStack()
+    stack.push("edit 1", focuses, touched_ids=(1,))
+    stack.push("edit 2", focuses, touched_ids=(2,))
+    first_id_set = focuses.id_set
+
+    stack.push("edit 3", focuses, touched_ids=(3,))
+
+    assert focuses.id_set is first_id_set
+    assert stack._stack[0][3] is first_id_set
+    assert stack._stack[1][3] is first_id_set
+    assert stack._stack[2][3] is first_id_set
+
+
+def test_structural_change_rebuilds_id_set():
+    focuses = FocusDocument(_mk_focus(i, f"focus_{i}") for i in range(3))
+    before = focuses.id_set
+
+    focuses.add(_mk_focus(9, "focus_9"))
+
+    assert focuses.id_set is not before
+    assert focuses.id_set == frozenset({0, 1, 2, 9})
+
+    before = focuses.id_set
+    focuses.delete_many((1,))
+    assert focuses.id_set is not before
+    assert focuses.id_set == frozenset({0, 2, 9})
+
+    before = focuses.id_set
+    focuses.load([_mk_focus(7, "focus_7")])
+    assert focuses.id_set is not before
+    assert focuses.id_set == frozenset({7})
+
+    before = focuses.id_set
+    focuses.clear()
+    assert focuses.id_set is not before
+    assert focuses.id_set == frozenset()
+
+
 def test_single_edit_undo_restores_fields():
     f = _mk_focus(1, "focus_1", cost=10, desc="old")
     focuses = {1: f}
