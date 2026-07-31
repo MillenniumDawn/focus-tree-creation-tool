@@ -10,7 +10,7 @@ A standalone Python/Tkinter desktop app for authoring Hearts of Iron IV mod cont
 
 **New code goes in `src/hoi4cm/`. Do not grow the monolith.**
 
-`hoi4_content_maker.py` is down to ~6k lines from its original ~21k. What's left is essentially `class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk)` plus the importers and exporters that haven't been extracted yet (see `docs/dev/monolith-migration.md` for the full status table). When adding or refactoring, extract into a `src/hoi4cm/` module and pair it with a test — don't add features to the monolith. Edits to the monolith should be confined to bug fixes and the wiring needed to call into newly-extracted modules.
+`hoi4_content_maker.py` is down to ~5.7k lines from its original ~21k. What's left is essentially `class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk)` holding the Tk shells: dialogs, wiring, event bindings, and the one-line delegates into extracted modules. The sidebar form is the last big chunk still in the monolith and is deliberately deferred (see `docs/dev/monolith-migration.md` for the full status table and why). When adding or refactoring, extract into a `src/hoi4cm/` module and pair it with a test — don't add features to the monolith. Edits to the monolith should be confined to bug fixes and the wiring needed to call into newly-extracted modules.
 
 ## Commands
 
@@ -30,12 +30,12 @@ CI runs ruff + black and pytest, all on 3.14 (the project's floor).
 
 ## Layout
 
-- **`hoi4_content_maker.py`** — the launch point and (still) most of the app: `App(tk.Tk)` and its remaining importers/exporters/settings. Entry point at the bottom calls `show_splash(_launch)`.
-- **`src/hoi4cm/core/`** — the extracted package: `logger.py`, `config.py`, `paths.py`, re-exported flat from `hoi4cm.core`. This is where new modules land.
+- **`hoi4_content_maker.py`** — the launch point and (still) most of the app: `App(tk.Tk)`, its Tk-shell methods and one-line delegates into extracted modules, and the deferred sidebar form. Entry point at the bottom calls `show_splash(_launch)`.
+- **`src/hoi4cm/`** — the extracted package, organized by domain: `core/` (logger, config, paths, undo, i18n, concurrency, safe file/xml helpers), `models/` (`Focus`, `FocusDocument`, `EditorWorkspace`), `focus_tree/` (parse/build/export, codec, operations, drawio, loc), `ui/` (canvas, splash, menubar, toolbar, settings dialog, gfx browser, image pipeline), `wizards/` (the five authoring wizards + shared helpers), `mod/` (mod context, GFX catalog, scan/workspace caches), `script/` (effects + syntax), `editor/` (project save/load), `data/` (effect/modifier tables). New modules land in the owning subpackage, not a catch-all.
 - **`hoi4_logger.py`** — back-compat shim re-exporting from `hoi4cm.core.logger`. No logic here.
-- **`docs/dev/`**: developer docs, architecture, migration status, performance, testing, wizards. Start at `docs/dev/README.md`.
+- **`docs/dev/`**: developer docs, architecture, migration status, performance, testing, wizards. Start at `docs/dev/README.md`. They carry a maintenance rule: any PR that changes architecture, hot paths, or migration status updates the matching doc in the same PR.
 
-The monolith inserts `src/` onto `sys.path` at startup and imports canonical names straight from the `hoi4cm.core` facade (`from hoi4cm.core import (...)`). There's no more underscore-aliasing layer; the one survivor is `_default_hoi4_mod_dir = default_hoi4_mod_dir`, kept because a couple of call sites still use the old name. When you extract a new module, add the public name to the owning subpackage's `__all__`, and to `core/__init__.py`'s import and `__all__` if the monolith needs it from there. Details in `docs/dev/architecture.md`.
+The monolith inserts `src/` onto `sys.path` at startup and imports canonical names straight from the `hoi4cm.core` facade (`from hoi4cm.core import (...)`), which re-exports the public names of every subpackage (data, focus_tree, models, ui, ...). There's no underscore-aliasing layer left. When you extract a new module, add the public name to the owning subpackage's `__all__`, and to `core/__init__.py`'s import list and `__all__` if the monolith or a wizard needs it via the facade. Details in `docs/dev/architecture.md`.
 
 ## Conventions
 

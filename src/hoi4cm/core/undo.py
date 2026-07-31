@@ -37,6 +37,15 @@ def _snapshot_focus(focus):
     return snapshot
 
 
+def _decode_full(payload: bytes) -> dict[int, dict] | None:
+    """Decompress a full-snapshot blob; None if the payload is corrupt."""
+    try:
+        snapshot = json.loads(zlib.decompress(payload).decode("utf-8"))
+        return {int(k): v for k, v in snapshot.items()}
+    except zlib.error, UnicodeDecodeError, ValueError:
+        return None
+
+
 class UndoStack:
     """A bounded stack of undo entries, each either sparse or a full snapshot.
 
@@ -70,8 +79,15 @@ class UndoStack:
         instead). Pass ``touched_ids=None`` when the touched set isn't known
         or would be "most of the tree anyway" (bulk import/clear): this takes
         a full compressed snapshot instead.
+
+        ``focuses`` may be a plain dict or a ``FocusDocument``; the latter
+        hands out a cached frozenset of its keys so consecutive pushes
+        without structural changes share one object instead of reallocating
+        a set of every id per action.
         """
-        id_set = frozenset(focuses.keys())
+        id_set = getattr(focuses, "id_set", None)
+        if id_set is None:
+            id_set = frozenset(focuses.keys())
         if touched_ids is None:
             blob = zlib.compress(
                 json.dumps(
@@ -100,21 +116,24 @@ class UndoStack:
             return None
         label, kind, payload, id_set = self._stack.pop()
 
-        created_ids = [fid for fid in focuses if fid not in id_set]
-        delete_many = getattr(focuses, "delete_many", None)
-        if callable(delete_many):
-            delete_many(created_ids, clean_references=False)
-        else:
-            for fid in created_ids:
-                del focuses[fid]
-
         if kind == _FULL:
+            # Decode before mutating anything: a corrupt blob (self-written
+            # data, so effectively impossible) drops the entry without
+            # damaging the document.
+            snapshot = _decode_full(payload)
+            if snapshot is None:
+                return None
             # id_set was captured from the same `focuses` dict the snapshot
             # came from, so it's exactly the snapshot's keys: created_ids
             # (current ids missing from id_set) already covers everything
             # that needs removing, there's nothing else to diff.
-            snapshot = json.loads(zlib.decompress(payload).decode("utf-8"))
-            snapshot = {int(k): v for k, v in snapshot.items()}
+            created_ids = [fid for fid in focuses if fid not in id_set]
+            delete_many = getattr(focuses, "delete_many", None)
+            if callable(delete_many):
+                delete_many(created_ids, clean_references=False)
+            else:
+                for fid in created_ids:
+                    del focuses[fid]
             changed_ids = set(snapshot)
             restored = [focus_factory(fd) for fd in snapshot.values()]
             load = getattr(focuses, "load", None)
@@ -124,6 +143,14 @@ class UndoStack:
                 for focus in restored:
                     focuses[focus.id] = focus
             return label, changed_ids, set(created_ids)
+
+        created_ids = [fid for fid in focuses if fid not in id_set]
+        delete_many = getattr(focuses, "delete_many", None)
+        if callable(delete_many):
+            delete_many(created_ids, clean_references=False)
+        else:
+            for fid in created_ids:
+                del focuses[fid]
 
         changed_ids = set()
         restored = [focus_factory(fd) for fd in payload.values()]

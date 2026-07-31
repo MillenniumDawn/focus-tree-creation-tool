@@ -11,9 +11,9 @@ requires-python = ">=3.14"
 dependencies = []
 
 [project.optional-dependencies]
-image = ["Pillow>=9.0"]                              # GFX icon previews (.png/.tga)
-dev = ["pytest>=7.0", "ruff>=0.16", "black>=26.5"]   # tests + linting
-build = ["pyinstaller>=6.0", "Pillow>=9.0"]          # compile standalone executables
+image = ["Pillow>=9.0"]                            # GFX icon previews (.png/.tga)
+dev = ["pytest>=7.0", "ruff>=0.16", "black>=26.5"] # tests + linting
+build = ["pyinstaller>=6.0", "Pillow>=9.0"]        # compile standalone executables
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/hoi4cm"]
