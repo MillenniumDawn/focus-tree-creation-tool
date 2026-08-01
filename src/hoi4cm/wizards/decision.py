@@ -43,6 +43,7 @@ from hoi4cm.ui import (
     open_gfx_placement_editor,
     open_universal_gfx_browser,
 )
+from hoi4cm.wizards import _generators
 from hoi4cm.wizards._graphics import find_catalog_image
 from hoi4cm.wizards._image_loader import TkImageLoader
 from hoi4cm.wizards._shared import (
@@ -4220,359 +4221,51 @@ def open_decision_wizard(app):
     # CODE GENERATION
     # ════════════════════════════════════════════════════════════════════════
     def _gen_scripted_loc():
-        """Generate scripted_localisation defined_text blocks for all decisions/cats."""
-        out = [
-            "# ================================================================",
-            "# FILE: common/scripted_localisation/TAG_scripted_loc.txt",
-            "# ================================================================",
-            "# These defined_text blocks let you reference decision/category names",
-            "# dynamically in localisation via [GetVariableName]",
-            "# ================================================================\n",
-        ]
-        for cat in dm_cats:
-            cid = cat["cat_id"].strip()
-            if not cid:
-                continue
-            out.append("defined_text = {")
-            out.append(f"\tname = GET_{cid}_name")
-            out.append("\ttext = {")
-            out.append(f"\t\tlocalization_key = {cid}")
-            out.append("\t}")
-            out.append("}\n")
-            if cat.get("loc_desc", "").strip():
-                out.append("defined_text = {")
-                out.append(f"\tname = GET_{cid}_desc")
-                out.append("\ttext = {")
-                out.append(f"\t\tlocalization_key = {cid}_desc")
-                out.append("\t}")
-                out.append("}\n")
-            for dec in _decs_for(cat["uid"]):
-                did = dec["dec_id"].strip()
-                if not did:
-                    continue
-                out.append("defined_text = {")
-                out.append(f"\tname = GET_{did}_name")
-                out.append("\ttext = {")
-                out.append(f"\t\tlocalization_key = {did}")
-                out.append("\t}")
-                out.append("}\n")
-                if dec.get("loc_desc", "").strip():
-                    out.append("defined_text = {")
-                    out.append(f"\tname = GET_{did}_desc")
-                    out.append("\ttext = {")
-                    out.append(f"\t\tlocalization_key = {did}_desc")
-                    out.append("\t}")
-                    out.append("}\n")
-        return "\n".join(out)
-
-    def _indent(text, n=1):
-        tab = "\t" * n
-        return "\n".join(tab + l if l.strip() else l for l in text.splitlines())
+        """Generate scripted_localisation defined_text blocks (in _generators.py)."""
+        return _generators.generate_decision_scripted_loc(dm_cats, dm_decs)
 
     def _gen_decision_txt(dec):
-        """Generate a single decision block at 1-tab indent inside its category block.
+        """Generate a single decision block at 1-tab indent.
 
-        Vanilla HOI4 rules learned from real decisions:
-        - Decision body = 1 tab indent
-        - Block content  = 3 tabs (user types relative, we add 3 tabs prefix)
-        - state_target = yes  (for both country AND state targeted via target_array/state_target)
-        - state_target = <scope>  when a specific scope keyword is chosen (any_controlled_state etc)
-        - cancel_trigger / cancel_effect / modifier / remove_effect / remove_trigger /
-          cancel_if_not_visible are NOT gated behind days_remove — they appear whenever set
-        - highlight_states is a raw block the user pastes in
-        - ai_hint_pp_cost is written when custom cost AND the field is non-empty
+        The renderer itself lives in `_generators.py` (headless-testable);
+        this closure only resolves the two widget-only knobs (targeted /
+        cost_type) from the Tk StringVars, then delegates.
         """
-        T1 = "\t"
-        T2 = "\t\t"
-        lines = [f"{T1}{dec['dec_id']} = {{"]
-
-        # ── allowed ──────────────────────────────────────────────────────────
-        if _s(dec["allowed"]):
-            lines.append(f"{T2}allowed = {{\n{_indent(_s(dec['allowed']),3)}\n{T2}}}")
-
-        # ── icon (always second, after allowed) ───────────────────────────────
-        if _s(dec["icon"]):
-            _icon_val = _s(dec["icon"])
-            if _icon_val and not _icon_val.startswith("GFX_"):
-                _icon_val = f"GFX_decision_{_icon_val}"
-            lines.append(f"{T2}icon = {_icon_val}")
-
-        # ── targeting ────────────────────────────────────────────────────────
         tgt_var = _evars.get("targeted")
         targeted = (
             tgt_var.get()
             if isinstance(tgt_var, tk.StringVar)
             else dec.get("targeted", "none")
         )
-        if targeted != "none":
-            if _s(dec["target_root_trigger"]):
-                lines.append(
-                    f"{T2}target_root_trigger = {{\n{_indent(_s(dec['target_root_trigger']),3)}\n{T2}}}"
-                )
-            if _s(dec["target_trigger"]):
-                lines.append(
-                    f"{T2}target_trigger = {{\n{_indent(_s(dec['target_trigger']),3)}\n{T2}}}"
-                )
-            # state_target
-            if targeted == "state":
-                scope = _s(dec.get("state_target_scope", "any"))
-                # vanilla uses "state_target = yes" OR "state_target = <scope>"
-                if scope in ("yes", "any", ""):
-                    lines.append(f"{T2}state_target = yes")
-                else:
-                    lines.append(f"{T2}state_target = {scope}")
-                lines.append(
-                    f"{T2}on_map_mode = {dec.get('on_map_mode','map_and_decisions_view')}"
-                )
-            elif targeted == "country":
-                # country targeted: state_target = yes is NOT used
-                pass
-            # targets list (country tags or state IDs)
-            if _s(dec["targets"]):
-                lines.append(f"{T2}targets = {{ {_s(dec['targets'])} }}")
-            if dec.get("targets_dynamic"):
-                lines.append(f"{T2}targets_dynamic = yes")
-            if dec.get("target_non_existing"):
-                lines.append(f"{T2}target_non_existing = yes")
-            if _s(dec["target_array"]):
-                lines.append(f"{T2}target_array = {_s(dec['target_array'])}")
-                # when using target_array with state_target, always need on_map_mode
-                if targeted == "country" and _s(dec.get("on_map_mode", "")):
-                    lines.append(f"{T2}on_map_mode = {_s(dec['on_map_mode'])}")
-
-        # ── visible / available ──────────────────────────────────────────────
-        if _s(dec["visible"]):
-            lines.append(f"{T2}visible = {{\n{_indent(_s(dec['visible']),3)}\n{T2}}}")
-        if _s(dec["available"]):
-            lines.append(
-                f"{T2}available = {{\n{_indent(_s(dec['available']),3)}\n{T2}}}"
-            )
-
-        # ── highlight_states ─────────────────────────────────────────────────
-        if _s(dec.get("highlight_states", "")):
-            hs = _s(dec["highlight_states"])
-            # user may or may not wrap in highlight_states = { }
-            if not hs.startswith("highlight_states"):
-                lines.append(f"{T2}highlight_states = {{\n{_indent(hs,3)}\n{T2}}}")
-            else:
-                lines.append(_indent(hs, 2))
-
-        # ── on_map_mode (non-targeted) ───────────────────────────────────────
-        # For non-targeted decisions that still use highlight_states + on_map_mode
-        if targeted == "none" and _s(dec.get("on_map_mode", "")):
-            lines.append(f"{T2}on_map_mode = {_s(dec['on_map_mode'])}")
-
-        # ── mission fields ───────────────────────────────────────────────────
-        if dec.get("is_mission"):
-            lines.append(
-                f"{T2}days_mission_timeout = {dec.get('mission_timeout','100')}"
-            )
-            if dec.get("selectable_mission"):
-                lines.append(f"{T2}selectable_mission = yes")
-            if dec.get("is_good"):
-                lines.append(f"{T2}is_good = yes")
-            if _s(dec.get("activation", "")):
-                lines.append(
-                    f"{T2}activation = {{\n{_indent(_s(dec['activation']),3)}\n{T2}}}"
-                )
-
-        # ── cost ─────────────────────────────────────────────────────────────
         cost_type_var = _evars.get("cost_type")
-        ct_val = (
+        cost_type = (
             cost_type_var.get()
             if isinstance(cost_type_var, tk.StringVar)
             else dec.get("cost_type", "pp")
         )
-        if ct_val == "pp":
-            if _s(dec.get("cost", "")):
-                lines.append(f"{T2}cost = {_s(dec['cost'])}")
-        else:  # custom cost
-            if _s(dec.get("ai_hint_pp_cost", "")):
-                lines.append(f"{T2}ai_hint_pp_cost = {_s(dec['ai_hint_pp_cost'])}")
-            if _s(dec.get("custom_cost_trigger", "")):
-                lines.append(
-                    f"{T2}custom_cost_trigger = {{\n{_indent(_s(dec['custom_cost_trigger']),3)}\n{T2}}}"
-                )
-            if _s(dec.get("custom_cost_text", "")):
-                lines.append(f"{T2}custom_cost_text = {_s(dec['custom_cost_text'])}")
-
-        # ── timer ────────────────────────────────────────────────────────────
-        if _s(dec.get("days_remove", "")):
-            lines.append(f"{T2}days_remove = {_s(dec['days_remove'])}")
-        if _s(dec.get("days_re_enable", "")):
-            lines.append(f"{T2}days_re_enable = {_s(dec['days_re_enable'])}")
-        if dec.get("fire_only_once"):
-            lines.append(f"{T2}fire_only_once = yes")
-        if not dec.get("fixed_random_seed", True):
-            lines.append(f"{T2}fixed_random_seed = no")
-
-        # ── war warnings ─────────────────────────────────────────────────────
-        if targeted != "none":
-            if dec.get("war_target_complete"):
-                lines.append(f"{T2}war_with_target_on_complete = yes")
-            if dec.get("war_target_remove"):
-                lines.append(f"{T2}war_with_target_on_remove = yes")
-        else:
-            if _s(dec.get("war_complete_tag", "")):
-                lines.append(
-                    f"{T2}war_with_on_complete = {_s(dec['war_complete_tag'])}"
-                )
-            if _s(dec.get("war_remove_tag", "")):
-                lines.append(f"{T2}war_with_on_remove = {_s(dec['war_remove_tag'])}")
-
-        # ── modifier (NOT gated behind days_remove — can appear standalone) ──
-        if _s(dec.get("modifier", "")):
-            lines.append(f"{T2}modifier = {{\n{_indent(_s(dec['modifier']),3)}\n{T2}}}")
-
-        # ── effects — all ungated (remove_effect, cancel_effect, etc) ────────
-        if _s(dec.get("complete_effect", "")):
-            # Inject log line if not already present (standardizer requirement)
-            ce = _s(dec["complete_effect"])
-            if "log = " not in ce:
-                dec_id = _s(dec["dec_id"])
-                log_line = (
-                    f'\t\t\tlog = "[GetDateText]: [Root.GetName]: Decision {dec_id}"'
-                )
-                ce = log_line + ("\n" + _indent(ce.strip(), 3) if ce.strip() else "")
-            else:
-                ce = _indent(ce.strip(), 3)
-            lines.append(f"{T2}complete_effect = {{\n{ce}\n{T2}}}")
-        elif _s(dec.get("dec_id", "")):
-            # Always emit complete_effect with log even if empty, for standardizer compliance
-            dec_id = _s(dec["dec_id"])
-            lines.append(f"{T2}complete_effect = {{")
-            lines.append(
-                f'\t\t\tlog = "[GetDateText]: [Root.GetName]: Decision {dec_id}"'
-            )
-            lines.append(f"{T2}}}")
-
-        if dec.get("is_mission") and _s(dec.get("timeout_effect", "")):
-            lines.append(
-                f"{T2}timeout_effect = {{\n{_indent(_s(dec['timeout_effect']),3)}\n{T2}}}"
-            )
-
-        if _s(dec.get("remove_effect", "")):
-            re_txt = _s(dec["remove_effect"])
-            if "log = " not in re_txt:
-                dec_id = _s(dec["dec_id"])
-                log_line = (
-                    f'\t\t\tlog = "[GetDateText]: [Root.GetName]: Decision {dec_id}"'
-                )
-                re_txt = log_line + (
-                    "\n" + _indent(re_txt.strip(), 3) if re_txt.strip() else ""
-                )
-            else:
-                re_txt = _indent(re_txt.strip(), 3)
-            lines.append(f"{T2}remove_effect = {{\n{re_txt}\n{T2}}}")
-
-        if _s(dec.get("cancel_trigger", "")):
-            lines.append(
-                f"{T2}cancel_trigger = {{\n{_indent(_s(dec['cancel_trigger']),3)}\n{T2}}}"
-            )
-
-        if _s(dec.get("cancel_effect", "")):
-            lines.append(
-                f"{T2}cancel_effect = {{\n{_indent(_s(dec['cancel_effect']),3)}\n{T2}}}"
-            )
-
-        if dec.get("cancel_if_not_visible"):
-            lines.append(f"{T2}cancel_if_not_visible = yes")
-
-        if _s(dec.get("remove_trigger", "")):
-            lines.append(
-                f"{T2}remove_trigger = {{\n{_indent(_s(dec['remove_trigger']),3)}\n{T2}}}"
-            )
-
-        # ── AI ───────────────────────────────────────────────────────────────
-        if _s(dec.get("ai_will_do", "")):
-            lines.append(
-                f"{T2}ai_will_do = {{\n{_indent(_s(dec['ai_will_do']),3)}\n{T2}}}"
-            )
-
-        if _s(dec.get("priority", "")) not in ("", "1"):
-            lines.append(f"{T2}priority = {_s(dec['priority'])}")
-
-        lines.append(f"{T1}}}")
-        return "\n".join(lines)
+        return _generators.generate_decision_block(
+            dec, targeted=targeted, cost_type=cost_type
+        )
 
     def _gen_decisions_file():
         _collect()
-        out = [
-            "# ================================================================",
-            "# FILE: common/decisions/TAG_decisions.txt",
-            "# ================================================================\n",
-        ]
-        for cat in dm_cats:
-            decs = _decs_for(cat["uid"])
-            if not decs:
-                continue
-            out.append(f"{cat['cat_id']} = {{")
-            for dec in decs:
-                out.append("\n" + _gen_decision_txt(dec))
-            out.append("}\n")
-        result = "\n".join(out)
-        return result
+        tgt_var = _evars.get("targeted")
+        targeted = tgt_var.get() if isinstance(tgt_var, tk.StringVar) else "none"
+        cost_type_var = _evars.get("cost_type")
+        cost_type = (
+            cost_type_var.get() if isinstance(cost_type_var, tk.StringVar) else "pp"
+        )
+        return _generators.generate_decisions_file(
+            dm_cats, dm_decs, targeted=targeted, cost_type=cost_type
+        )
 
     def _gen_categories_file():
         _collect()
-        T1 = "\t"
-        T2 = "\t\t"
-        out = [
-            "# ================================================================",
-            "# FILE: common/decisions/categories/TAG_categories.txt",
-            "# ================================================================\n",
-        ]
-        for cat in dm_cats:
-            out.append(f"{cat['cat_id']} = {{")
-            if _s(cat["allowed"]):
-                out.append(f"{T1}allowed = {{\n{_indent(_s(cat['allowed']),2)}\n{T1}}}")
-            if _s(cat["visible"]):
-                out.append(f"{T1}visible = {{\n{_indent(_s(cat['visible']),2)}\n{T1}}}")
-            if _s(cat["icon"]):
-                out.append(f"{T1}icon = {_s(cat['icon'])}")
-            if _s(cat["picture"]):
-                out.append(f"{T1}picture = {_s(cat['picture'])}")
-            if _s(cat["priority"]) not in ("", "1"):
-                out.append(f"{T1}priority = {_s(cat['priority'])}")
-            if cat.get("visible_when_empty"):
-                out.append(f"{T1}visible_when_empty = yes")
-            if _s(cat.get("scripted_gui", "")):
-                out.append(f"{T1}scripted_gui = {_s(cat['scripted_gui'])}")
-            if _s(cat.get("highlight_states", "")):
-                hs = _s(cat["highlight_states"])
-                if not hs.startswith("highlight_states"):
-                    out.append(f"{T1}highlight_states = {{\n{_indent(hs,2)}\n{T1}}}")
-                else:
-                    out.append(_indent(hs, 1))
-            if cat["on_map_area"]:
-                out.append(f"{T1}on_map_area = {{")
-                out.append(f"{T2}state = {_s(cat.get('map_state',''))}")
-                out.append(f"{T2}name = {_s(cat.get('map_name',''))}")
-                out.append(f"{T2}zoom = {_s(cat.get('map_zoom','850'))}")
-                if _s(cat.get("map_trigger", "")):
-                    out.append(
-                        f"{T2}target_root_trigger = {{\n{_indent(_s(cat['map_trigger']),3)}\n{T2}}}"
-                    )
-                out.append(f"{T1}}}")
-            out.append("}\n")
-        return "\n".join(out)
+        return _generators.generate_decision_categories_file(dm_cats, dm_decs)
 
     def _gen_yml():
         _collect()
-        lines = ["l_english:"]
-        for cat in dm_cats:
-            cid = _s(cat["cat_id"])
-            if cid:
-                lines.append(f' {cid}: "{cat["loc_name"]}"')
-                if _s(cat.get("loc_desc", "")):
-                    lines.append(f' {cid}_desc: "{_s(cat["loc_desc"])}"')
-            for dec in _decs_for(cat["uid"]):
-                did = _s(dec["dec_id"])
-                if did:
-                    lines.append(f' {did}: "{dec["loc_name"]}"')
-                    if _s(dec.get("loc_desc", "")):
-                        lines.append(f' {did}_desc: "{_s(dec["loc_desc"])}"')
-        return "\n".join(lines) + "\n"
+        return _generators.generate_decision_loc_yml(dm_cats, dm_decs)
 
     # ── import / export ───────────────────────────────────────────────────────
     def _browse_mod_decisions():

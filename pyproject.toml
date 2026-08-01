@@ -12,7 +12,12 @@ dependencies = []
 
 [project.optional-dependencies]
 image = ["Pillow>=9.0"]                            # GFX icon previews (.png/.tga)
-dev = ["pytest>=7.0", "ruff>=0.16", "black>=26.5"] # tests + linting
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",   # coverage gate for wizard generators
+    "ruff>=0.16",
+    "black>=26.5",
+]                                                     # tests + linting
 build = ["pyinstaller>=6.0", "Pillow>=9.0"]        # compile standalone executables
 
 [tool.hatch.build.targets.wheel]
@@ -21,6 +26,16 @@ packages = ["src/hoi4cm"]
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
+
+# Per-module coverage gate: new wizard script/loc generators must live in
+# `hoi4cm.wizards._generators` so they can be tested headlessly, and CI
+# enforces a floor on this module (`pytest --cov-fail-under=70`) so
+# extractions cannot land untested (see docs/dev/wizards.md and issue #51).
+[tool.coverage.run]
+source = ["hoi4cm.wizards._generators"]
+
+[tool.coverage.report]
+show_missing = true
 
 # Linting/formatting is scoped to the modular package + tests. The legacy
 # monolith (hoi4_content_maker.py) and build scripts are excluded until they

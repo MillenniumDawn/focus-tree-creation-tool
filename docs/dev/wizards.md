@@ -50,10 +50,31 @@ formatting, ambiguous single-letter names, loop-variable and mutable-default
 lint, late-binding closures, and non-cryptographic random use) so ruff
 still runs clean on the file without a style pass first.
 
-Tests are still owed. None of the five wizard modules have coverage today
-(see `testing.md`'s headless constraint): extracting a wizard did not come
-with a test, unlike the pure modules in `focus_tree/`, `models/`, and
-`core/`. Adding coverage means testing the non-Tk logic inside each wizard
-(id/name validation, gfx lookups, dict-to-script conversion) separately
-from the dialog construction itself, since the dialog construction can't
-run in CI.
+## The generators module
+
+`_generators.py` holds the script/loc renderers that used to live inside
+the `open_*_wizard` closures. Each wizard now resolves only its Tk-widget
+knobs (StringVar/Text reads) and delegates to a module-level pure function
+there, so the rendering logic is testable headlessly (see `testing.md`):
+
+- event: `render_event_txt`, `generate_events_txt`, `generate_event_loc_yml`
+- decision: `generate_decision_block`, `generate_decisions_file`,
+  `generate_decision_categories_file`, `generate_decision_scripted_loc`,
+  `generate_decision_loc_yml`
+- national spirit: `build_national_spirit_output`
+- dynamic modifier: `parse_dyn_mod_lines`, `build_dyn_mod_output`
+- additional income: `build_income_spirit_snippet`
+
+These are the extraction target the original "Tests are still owed" note
+pointed at. They have dedicated headless tests under
+`tests/test_wizard_generators_*.py`, and CI enforces a coverage floor on
+`hoi4cm.wizards._generators` (see `pyproject.toml`'s `[tool.coverage]` and
+`.github/workflows/ci.yml`). New script/loc generation should go into
+`_generators.py` with a test, not back into the closures.
+
+Tests are still owed for the rest of the wizard logic (id/name validation,
+gfx lookups, dialog state wiring). Those are Tk-coupled: testing them
+means exercising the non-Tk logic separately from the dialog construction
+itself, since the dialog construction can't run in CI. The script/loc
+generators, which carry the loc-export and mod-file writing risk the
+extraction was meant to de-risk, are now covered.

@@ -40,6 +40,7 @@ from hoi4cm.ui import (
     _safe_after,
     _safe_after_idle,
 )
+from hoi4cm.wizards._generators import build_national_spirit_output
 from hoi4cm.wizards._graphics import browser_folders, collect_image_pairs
 from hoi4cm.wizards._image_loader import TkImageLoader
 from hoi4cm.wizards._shared import notifying_workspace_files
@@ -1162,99 +1163,31 @@ def open_national_spirit_wizard(app):
     _field(tr("spirit.field.ai_will_do", "ai_will_do:"), v_ai)
 
     # ── Output builder ────────────────────────────────────────────────
+    # Headless generator lives in _generators.py (issue #51).
     def _build_output():
-        sid = v_id.get().strip() or "TAG_my_spirit"
-        namekey = v_name_key.get().strip() or sid
-        pic = v_picture.get().strip() or (f"GFX_idea_{sid}")
-        slot = v_slot.get().strip() or "country"
-        cost = v_cost.get().strip()
-        removal = v_removal.get().strip()
-        loc_n = v_loc_name.get().strip()
-        loc_d = v_loc_desc.get().strip()
-        ai_f = v_ai.get().strip()
-
         def _tri(t):
             return t.get("1.0", "end").strip()
 
-        allowed = _tri(t_allowed)
-        available = _tri(t_available)
-        cancel = _tri(t_cancel)
-        visible = _tri(t_visible)
-        on_add = _tri(t_on_add)
-        on_remove = _tri(t_on_remove)
-        rule = _tri(t_rule)
-        extra = t_extra.get("1.0", "end").strip()
-
-        def _block(name, body, indent="\t\t\t"):
-            lines = [f"{indent}{name} = {{"]
-            for ln in body.splitlines():
-                if ln.strip():
-                    lines.append(f"{indent}\t{ln.strip()}")
-            lines.append(f"{indent}}}")
-            return lines
-
-        out = []
-        out.append("# ============================================================")
-        out.append(f"# FILE: common/ideas/{sid}.txt")
-        out.append("# ============================================================")
-        out.append("")
-        out.append("ideas = {")
-        out.append(f"\t{slot} = {{")
-        out.append(f"\t\t{sid} = {{")
-        if namekey != sid:
-            out.append(f"\t\t\tname = {namekey}")
-        out.append(f"\t\t\tpicture = {pic}")
-        if slot == "country":
-            out.append("\t\t\tallowed_civil_war = { always = yes }")
-        if cost:
-            out.append(f"\t\t\tcost = {cost}")
-        if removal:
-            out.append(f"\t\t\tremoval_cost = {removal}")
-        if allowed:
-            out += _block("allowed", allowed)
-        if available:
-            out += _block("available", available)
-        if visible:
-            out += _block("visible", visible)
-        if cancel:
-            out += _block("cancel", cancel)
-        if on_add:
-            out += _block("on_add", on_add)
-        if on_remove:
-            out += _block("on_remove", on_remove)
-        if rule:
-            out += _block("rule", rule)
-
-        # Collect all modifiers
-        all_mods = list(spirit_modifiers)
-        if extra:
-            for ln in extra.splitlines():
-                ln = ln.strip()
-                if ln and not ln.startswith("#") and "=" in ln:
-                    parts = ln.split("=", 1)
-                    all_mods.append(
-                        {"key": parts[0].strip(), "value": parts[1].strip()}
-                    )
-        if all_mods:
-            out.append("\t\t\tmodifier = {")
-            for m in all_mods:
-                out.append("\t\t\t\t{} = {}".format(m["key"], m["value"]))
-            out.append("\t\t\t}")
-
-        if ai_f and ai_f != "0":
-            out.append(f"\t\t\tai_will_do = {{ factor = {ai_f} }}")
-
-        out.append("\t\t}")
-        out.append("\t}")
-        out.append("}")
-        out.append("")
-        out.append("# ============================================================")
-        out.append(f"# LOCALISATION  localisation/english/{sid}_l_english.yml")
-        out.append("# ============================================================")
-        out.append("")
-        out.append(f' {sid}: "{loc_n}"')
-        out.append(f' {sid}_desc: "{loc_d}"')
-        return "\n".join(out)
+        return build_national_spirit_output(
+            mod_id=v_id.get(),
+            name_key=v_name_key.get(),
+            picture=v_picture.get(),
+            slot=v_slot.get(),
+            cost=v_cost.get(),
+            removal_cost=v_removal.get(),
+            loc_name=v_loc_name.get(),
+            loc_desc=v_loc_desc.get(),
+            ai_factor=v_ai.get(),
+            allowed=_tri(t_allowed),
+            available=_tri(t_available),
+            cancel=_tri(t_cancel),
+            visible=_tri(t_visible),
+            on_add=_tri(t_on_add),
+            on_remove=_tri(t_on_remove),
+            rule=_tri(t_rule),
+            extra_modifiers=t_extra.get("1.0", "end").strip(),
+            modifiers=spirit_modifiers,
+        )
 
     def _refresh_preview(*_):
         """Rebuild preview from form fields (no-op in edit mode or raw override)."""
