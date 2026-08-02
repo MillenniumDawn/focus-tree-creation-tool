@@ -265,6 +265,36 @@ def test_get_image_failure_is_memoized_not_retried(mod_tree):
     assert MOD.sprite_imgs[key] is None
 
 
+def test_note_file_written_evicts_only_the_affected_sprite(mod_tree):
+    """An incremental graphics update drops just the changed names from the
+    decoded-image LRU instead of flushing it wholesale."""
+    MOD.scan(str(mod_tree))
+    affected_key = ("GFX_focus_USA_first_focus", (64, 64))
+    unrelated_key = ("GFX_does_not_exist", (64, 64))
+    MOD.get_image(affected_key[0])
+    MOD.get_image(unrelated_key[0])
+    assert affected_key in MOD.sprite_imgs
+    assert unrelated_key in MOD.sprite_imgs
+
+    image = mod_tree / "gfx" / "interface" / "goals" / "USA_first_focus.dds"
+    image.write_bytes(b"overwritten with more bytes")
+    MOD.note_file_written(str(image))
+
+    assert affected_key not in MOD.sprite_imgs
+    assert unrelated_key in MOD.sprite_imgs
+
+
+def test_note_file_written_removes_deleted_sprite_name(mod_tree):
+    MOD.scan(str(mod_tree))
+    assert "GFX_focus_USA_first_focus" in MOD.sprites
+
+    image = mod_tree / "gfx" / "interface" / "goals" / "USA_first_focus.dds"
+    image.unlink()
+    MOD.note_file_deleted(str(image))
+
+    assert "GFX_focus_USA_first_focus" not in MOD.sprites
+
+
 def test_scan_dedups_ids_across_files(tmp_path):
     """The same focus ID in two files must appear once, in first-seen order."""
     nf = tmp_path / "common" / "national_focus"
@@ -538,14 +568,16 @@ def test_gfx_cache_invalidates_on_interface_mtime_change(gfx_mod_tree):
     assert "GFX_focus_extra_from_iface" in MOD.sprites
 
     goals_gfx = gfx_mod_tree / "interface" / "goals.gfx"
-    goals_gfx.write_text(textwrap.dedent("""
+    goals_gfx.write_text(
+        textwrap.dedent("""
             spriteTypes = {
                 spriteType = {
                     name = "GFX_focus_added_later"
                     texturefile = "gfx/interface/goals/added_later.dds"
                 }
             }
-            """).lstrip("\n"))
+            """).lstrip("\n")
+    )
     st = goals_gfx.stat()
     os.utime(goals_gfx, (st.st_atime, st.st_mtime + 10))
 

@@ -50,5 +50,11 @@ class LRUCache:
     def clear(self):
         self._data.clear()
 
+    def evict(self, predicate):
+        """Drop every key for which *predicate* returns True."""
+        stale = [key for key in self._data if predicate(key)]
+        for key in stale:
+            del self._data[key]
+
 
 __all__ = ["LRUCache"]

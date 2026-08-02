@@ -289,7 +289,7 @@ def test_refresh_removes_legacy_sidecar_only_from_root(graphics_tree):
 def test_absolute_texturefile_snapshot_is_not_cached(graphics_tree):
     abs_target = graphics_tree / "external" / "goals" / "abs_focus.dds"
     gfx_text = (
-        'spriteType = { name = "GFX_focus_abs" ' f'texturefile = "{abs_target}" }}\n'
+        f'spriteType = {{ name = "GFX_focus_abs" texturefile = "{abs_target}" }}\n'
     )
     (graphics_tree / "interface" / "abs.gfx").write_text(gfx_text)
 
@@ -370,6 +370,337 @@ def test_note_written_reparses_only_changed_gfx_file(graphics_tree, monkeypatch)
     maps = catalog.note_written(str(gfx_file), read_text=tracked_read)
 
     assert maps is not None
-    assert "GFX_focus_declared" not in maps.sprites
-    assert maps.sprites["GFX_focus_changed"].endswith("goals/changed.dds")
+    # Incremental maps name only the changed entry, not the whole catalog.
+    assert maps.sprites == {
+        "GFX_focus_changed": str(
+            graphics_tree / "gfx" / "interface" / "goals" / "changed.dds"
+        )
+    }
+    assert maps.removed_sprites == ("GFX_focus_declared",)
     assert reads == [str(gfx_file)]
+
+
+class _AppliedMaps:
+    """Accumulates incremental maps the way ModContext applies them."""
+
+    def __init__(self, sprites, idea_sprites, decision_sprites):
+        self.sprites = dict(sprites)
+        self.idea_sprites = dict(idea_sprites)
+        self.decision_sprites = dict(decision_sprites)
+
+    def apply(self, maps):
+        for target, source, removed in (
+            (self.sprites, maps.sprites, maps.removed_sprites),
+            (self.idea_sprites, maps.idea_sprites, maps.removed_idea_sprites),
+            (
+                self.decision_sprites,
+                maps.decision_sprites,
+                maps.removed_decision_sprites,
+            ),
+        ):
+            for name in removed:
+                target.pop(name, None)
+            target.update(source)
+
+
+def _assert_incremental_matches_refresh(graphics_tree, config, applied):
+    fresh = GraphicsCatalog()
+    maps = fresh.refresh(str(graphics_tree), config, read_text=read_file)
+    assert applied.sprites == maps.sprites
+    assert applied.idea_sprites == maps.idea_sprites
+    assert applied.decision_sprites == maps.decision_sprites
+
+
+def test_incremental_updates_match_full_refresh(graphics_tree):
+    config = _config()
+    catalog = GraphicsCatalog()
+    maps = catalog.refresh(str(graphics_tree), config, read_text=read_file)
+    applied = _AppliedMaps(maps.sprites, maps.idea_sprites, maps.decision_sprites)
+
+    def written(rel, content=b"data"):
+        path = graphics_tree / rel
+        path.write_bytes(content)
+        result = catalog.note_written(str(path), read_text=read_file)
+        assert result is not None
+        applied.apply(result)
+        _assert_incremental_matches_refresh(graphics_tree, config, applied)
+        return path
+
+    # new goal image, then an in-place overwrite
+    goal = written("gfx/interface/goals/incremental.dds")
+    written("gfx/interface/goals/incremental.dds", b"overwritten with more bytes")
+
+    # new .gfx file declaring the sprite, then an append to it
+    gfx = written(
+        "interface/incremental.gfx",
+        b'spriteType = { name = "GFX_focus_incremental" '
+        b'texturefile = "gfx/interface/goals/incremental.dds" }\n',
+    )
+    written(
+        "interface/incremental.gfx",
+        b'spriteType = { name = "GFX_focus_incremental" '
+        b'texturefile = "gfx/interface/goals/incremental.dds" }\n'
+        b'spriteType = { name = "GFX_focus_second" '
+        b'texturefile = "gfx/interface/goals/second.dds" }\n',
+    )
+
+    # rename the declaration: the old name falls back to the disk-derived claim
+    written(
+        "interface/incremental.gfx",
+        b'spriteType = { name = "GFX_focus_renamed" '
+        b'texturefile = "gfx/interface/goals/incremental.dds" }\n'
+        b'spriteType = { name = "GFX_focus_second" '
+        b'texturefile = "gfx/interface/goals/second.dds" }\n',
+    )
+
+    # delete the image: declared names stay, the disk-derived one goes
+    goal.unlink()
+    applied.apply(catalog.note_deleted(str(goal)))
+    _assert_incremental_matches_refresh(graphics_tree, config, applied)
+
+    # delete the .gfx: both declared names go
+    gfx.unlink()
+    applied.apply(catalog.note_deleted(str(gfx)))
+    _assert_incremental_matches_refresh(graphics_tree, config, applied)
+
+
+def test_incremental_idea_claim_prefers_ideas_dir_over_custom_dir(
+    graphics_tree, tmp_path
+):
+    custom = tmp_path / "external_custom"
+    custom.mkdir()
+    config = _config(custom_gfx_dirs=(str(custom),))
+    catalog = GraphicsCatalog()
+    maps = catalog.refresh(str(graphics_tree), config, read_text=read_file)
+    applied = _AppliedMaps(maps.sprites, maps.idea_sprites, maps.decision_sprites)
+
+    custom_image = custom / "collide.dds"
+    custom_image.write_bytes(b"custom")
+    applied.apply(catalog.note_written(str(custom_image), read_text=read_file))
+    assert applied.idea_sprites["GFX_idea_collide"] == str(custom_image)
+
+    ideas_image = graphics_tree / "gfx" / "interface" / "ideas" / "collide.dds"
+    ideas_image.write_bytes(b"ideas")
+    applied.apply(catalog.note_written(str(ideas_image), read_text=read_file))
+    # the configured ideas root beats custom dirs, even when written second
+    assert applied.idea_sprites["GFX_idea_collide"] == str(ideas_image)
+    _assert_incremental_matches_refresh(graphics_tree, config, applied)
+
+
+def test_deleting_first_same_stem_image_reclaims_the_name(graphics_tree):
+    config = _config()
+    catalog = GraphicsCatalog()
+    maps = catalog.refresh(str(graphics_tree), config, read_text=read_file)
+    applied = _AppliedMaps(maps.sprites, maps.idea_sprites, maps.decision_sprites)
+
+    goals = graphics_tree / "gfx" / "interface" / "goals"
+    sub = goals / "sub"
+    sub.mkdir()
+    top = goals / "dup.dds"
+    top.write_bytes(b"top")
+    applied.apply(catalog.note_written(str(top), read_text=read_file))
+    sibling = sub / "dup.dds"
+    sibling.write_bytes(b"sub")
+    applied.apply(catalog.note_written(str(sibling), read_text=read_file))
+    assert applied.sprites["GFX_focus_dup"] == str(top)
+
+    top.unlink()
+    applied.apply(catalog.note_deleted(str(top)))
+    assert applied.sprites["GFX_focus_dup"] == str(sibling)
+    _assert_incremental_matches_refresh(graphics_tree, config, applied)
+
+
+def test_snapshot_store_is_deferred_until_flush(graphics_tree):
+    catalog = GraphicsCatalog()
+    catalog.refresh(str(graphics_tree), _config(), read_text=read_file)
+    added = graphics_tree / "gfx" / "interface" / "goals" / "deferred.dds"
+    added.write_bytes(b"deferred")
+    catalog.note_written(str(added), read_text=read_file)
+
+    # the write is not persisted per-file: a fresh catalog still rescans
+    fresh = GraphicsCatalog()
+    fresh.refresh(str(graphics_tree), _config(), read_text=read_file)
+    assert fresh.last_metrics.cache_status == "miss"
+
+    catalog.flush_cache()
+    fresh = GraphicsCatalog()
+    fresh.refresh(str(graphics_tree), _config(), read_text=read_file)
+    assert fresh.last_metrics.cache_status == "hit"
+    assert fresh.resolve("GFX_focus_deferred") is not None
+
+
+def test_refresh_flushes_pending_writes(graphics_tree):
+    catalog = GraphicsCatalog()
+    catalog.refresh(str(graphics_tree), _config(), read_text=read_file)
+    added = graphics_tree / "gfx" / "interface" / "goals" / "pending.dds"
+    added.write_bytes(b"pending")
+    catalog.note_written(str(added), read_text=read_file)
+
+    catalog.refresh(str(graphics_tree), _config(), read_text=read_file)
+    fresh = GraphicsCatalog()
+    fresh.refresh(str(graphics_tree), _config(), read_text=read_file)
+    assert fresh.last_metrics.cache_status == "hit"
+    assert fresh.resolve("GFX_focus_pending") is not None
+
+
+def test_note_written_reports_declared_names_for_eviction(graphics_tree):
+    catalog = GraphicsCatalog()
+    catalog.refresh(str(graphics_tree), _config(), read_text=read_file)
+    goal = graphics_tree / "gfx" / "interface" / "goals" / "declared.dds"
+    goal.write_bytes(b"new bytes")
+
+    maps = catalog.note_written(str(goal), read_text=read_file)
+
+    # the declaration texture changed on disk, so its name must be evicted
+    assert maps is not None
+    assert "GFX_focus_declared" in maps.sprites
+    assert "GFX_focus_disk_focus" not in maps.sprites
+
+
+def test_duplicate_name_across_gfx_files_last_file_wins(graphics_tree):
+    """Duplicate declarations across files resolve in write order.
+
+    A fresh full refresh derives in scandir order, which is arbitrary, so this
+    test pins the incremental contract directly instead of comparing maps.
+    """
+    config = _config()
+    catalog = GraphicsCatalog()
+    maps = catalog.refresh(str(graphics_tree), config, read_text=read_file)
+    applied = _AppliedMaps(maps.sprites, maps.idea_sprites, maps.decision_sprites)
+
+    def declare(rel, name, texture):
+        path = graphics_tree / rel
+        path.write_text(
+            f'spriteType = {{ name = "{name}" texturefile = "{texture}" }}\n'
+        )
+        applied.apply(catalog.note_written(str(path), read_text=read_file))
+        return path
+
+    first = declare("interface/dup_a.gfx", "GFX_focus_dup", "gfx/interface/goals/a.dds")
+    second = declare(
+        "interface/dup_b.gfx", "GFX_focus_dup", "gfx/interface/goals/b.dds"
+    )
+    assert applied.sprites["GFX_focus_dup"] == str(
+        graphics_tree / "gfx" / "interface" / "goals" / "b.dds"
+    )
+
+    # rewriting the EARLIER file must not displace the later file's declaration
+    first.write_text(
+        'spriteType = { name = "GFX_focus_dup" '
+        'texturefile = "gfx/interface/goals/a2.dds" }\n'
+    )
+    applied.apply(catalog.note_written(str(first), read_text=read_file))
+    assert applied.sprites["GFX_focus_dup"] == str(
+        graphics_tree / "gfx" / "interface" / "goals" / "b.dds"
+    )
+
+    # deleting the LATER file resurfaces the earlier file's declaration
+    second.unlink()
+    applied.apply(catalog.note_deleted(str(second)))
+    assert applied.sprites["GFX_focus_dup"] == str(
+        graphics_tree / "gfx" / "interface" / "goals" / "a2.dds"
+    )
+
+
+def test_note_written_ignores_untracked_files(graphics_tree):
+    catalog = GraphicsCatalog()
+    catalog.refresh(str(graphics_tree), _config(), read_text=read_file)
+
+    outside = graphics_tree / "gfx" / "not_under_interface.gfx"
+    outside.write_text(
+        'spriteType = { name = "GFX_focus_outside" '
+        'texturefile = "gfx/interface/goals/x.dds" }\n'
+    )
+    assert catalog.note_written(str(outside), read_text=read_file) is None
+    assert catalog.resolve("GFX_focus_outside") is None
+
+    text = graphics_tree / "gfx" / "interface" / "goals" / "notes.txt"
+    text.write_text("not an image")
+    assert catalog.note_written(str(text), read_text=read_file) is None
+
+
+def test_note_written_before_any_refresh_is_ignored(graphics_tree):
+    catalog = GraphicsCatalog()
+    image = graphics_tree / "gfx" / "interface" / "goals" / "x.dds"
+    image.write_bytes(b"x")
+    assert catalog.note_written(str(image), read_text=read_file) is None
+
+
+def test_incremental_fuzz_matches_full_refresh(graphics_tree, tmp_path):
+    """A seeded random write/delete sequence must never diverge from a fresh
+    full refresh. Names stay unique per file so the full derive's arbitrary
+    scandir order can't flip a last-wins duplicate (pinned separately above)."""
+    import random
+
+    rng = random.Random(20260802)
+    custom = tmp_path / "external_custom"
+    custom.mkdir()
+    config = _config(custom_gfx_dirs=(str(custom),))
+    catalog = GraphicsCatalog()
+    maps = catalog.refresh(str(graphics_tree), config, read_text=read_file)
+    applied = _AppliedMaps(maps.sprites, maps.idea_sprites, maps.decision_sprites)
+
+    roots = [
+        graphics_tree / "gfx" / "interface" / "goals",
+        graphics_tree / "gfx" / "interface" / "ideas",
+        graphics_tree / "gfx" / "decisions",
+        graphics_tree / "gfx" / "misc",
+        custom,
+    ]
+    gfx_dir = graphics_tree / "interface"
+    images = {}  # path -> content, so deletes/overwrites hit real files
+    gfx_files = {}  # path -> [(name, texture), ...]
+    name_counter = 0
+
+    def check():
+        fresh = GraphicsCatalog()
+        maps = fresh.refresh(str(graphics_tree), config, read_text=read_file)
+        assert applied.sprites == maps.sprites
+        assert applied.idea_sprites == maps.idea_sprites
+        assert applied.decision_sprites == maps.decision_sprites
+
+    for _ in range(120):
+        roll = rng.random()
+        if roll < 0.4:  # write an image (sometimes overwriting)
+            root = rng.choice(roots)
+            name = f"img_{rng.randrange(8)}"
+            path = root / f"{name}.dds"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(f"content {rng.randrange(10**9)}".encode())
+            images[str(path)] = True
+            applied.apply(catalog.note_written(str(path), read_text=read_file))
+        elif roll < 0.6:  # delete an image
+            if not images:
+                continue
+            path = rng.choice(list(images))
+            del images[path]
+            os.unlink(path)
+            applied.apply(catalog.note_deleted(path))
+        else:  # rewrite or create a .gfx file
+            if gfx_files and rng.random() < 0.5:
+                path = rng.choice(list(gfx_files))
+                declarations = gfx_files[path]
+                keep = [
+                    d for d in declarations if rng.random() < 0.6
+                ]  # partial rewrite
+            else:
+                path = str(gfx_dir / f"fuzz_{rng.randrange(4)}.gfx")
+                keep = []
+            additions = [
+                (
+                    f"GFX_fuzz_{name_counter + index}",
+                    f"gfx/interface/goals/goal_{rng.randrange(4)}.dds",
+                )
+                for index in range(rng.randrange(4))
+            ]
+            name_counter += len(additions)
+            declarations = keep + additions
+            gfx_files[path] = declarations
+            text = "".join(
+                f'spriteType = {{ name = "{name}" texturefile = "{tex}" }}\n'
+                for name, tex in declarations
+            )
+            with open(path, "w") as stream:
+                stream.write(text)
+            applied.apply(catalog.note_written(path, read_text=read_file))
+        check()

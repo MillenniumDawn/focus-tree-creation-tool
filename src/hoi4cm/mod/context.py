@@ -187,6 +187,9 @@ class ModContext:
             }
         )
         cfg_save(out)
+        # Pending graphics-snapshot patches (note_file_written / _deleted) are
+        # persisted here and at the next mod refresh, not on every write.
+        self.graphics_catalog.flush_cache()
 
     # ── HOI4 script tokeniser (same as main parser) ─────────────────
     @staticmethod
@@ -304,14 +307,26 @@ class ModContext:
             self._apply_graphics_maps(maps)
 
     def _apply_graphics_maps(self, maps):
-        for target, source in (
-            (self.sprites, maps.sprites),
-            (self.idea_sprites, maps.idea_sprites),
-            (self.decision_sprites, maps.decision_sprites),
+        for target, source, removed in (
+            (self.sprites, maps.sprites, maps.removed_sprites),
+            (self.idea_sprites, maps.idea_sprites, maps.removed_idea_sprites),
+            (
+                self.decision_sprites,
+                maps.decision_sprites,
+                maps.removed_decision_sprites,
+            ),
         ):
-            target.clear()
+            for name in removed:
+                target.pop(name, None)
             target.update(source)
-        self.sprite_imgs.clear()
+        # Incremental maps name only the sprites whose backing file changed;
+        # evict just those decoded images instead of flushing the whole LRU.
+        changed = set(maps.sprites)
+        changed.update(maps.removed_sprites)
+        changed.update(maps.removed_idea_sprites)
+        changed.update(maps.removed_decision_sprites)
+        if changed:
+            self.sprite_imgs.evict(lambda key: key[0] in changed)
 
     # ── Per-file extractors (pure text → JSON-serialisable contribution) ──
     @staticmethod
