@@ -69,13 +69,13 @@ if _os.path.isdir(_SRC) and _SRC not in _sys.path:
 from hoi4_logger import log, log_startup
 from hoi4cm.core import (
     EFFECT_CATS,
+    BuildContext,
     EmptyDrawioGraphError,
     EmptyFocusTreeError,
     Focus,
     UndoStack,
     add_error,
     apply_focus_code,
-    BuildContext,
     build_drawio_focuses,
     build_focus_name_lookup,
     build_focuses,
@@ -83,8 +83,8 @@ from hoi4cm.core import (
     drawio_to_focus_data,
     export_focus_tree,
     export_main_tree,
-    group_focuses_by_tree,
     get_error_entries,
+    group_focuses_by_tree,
     install_excepthook,
     parse_drawio_graph,
     parse_focus_tree,
@@ -98,16 +98,7 @@ from hoi4cm.core import (
 from hoi4cm.editor import read_project, write_project
 from hoi4cm.mod import MOD, detect_loc_file
 from hoi4cm.models import EditorWorkspace, TreeDocument, TreeMetadata
-from hoi4cm.ui.canvas import CanvasMixin
-from hoi4cm.ui.focus_list import FocusListItem, VirtualFocusList
-from hoi4cm.ui.mod_loading import ModLoadingMixin
-from hoi4cm.ui.effects_panel import EffectsMixin
-from hoi4cm.ui.settings_dialog import open_settings
-from hoi4cm.ui.gfx_browser import open_focus_icon_browser
-from hoi4cm.ui.menubar import build_menubar
-from hoi4cm.ui.toolbar import build_toolbar_row2
 from hoi4cm.ui import (
-    ApplicationLifecycle,
     BG_CARD,
     BG_DARK,
     BG_PANEL,
@@ -123,12 +114,28 @@ from hoi4cm.ui import (
     TEXT,
     TEXT_DIM,
     YELLOW,
+    ApplicationLifecycle,
     Tooltip,
     _safe_after,
     make_progress,
     progress_modal,
     run_bg,
 )
+from hoi4cm.ui.canvas import CanvasMixin
+from hoi4cm.ui.checklist import (
+    ChecklistItem,
+    VirtualChecklist,
+    apply_select_mode,
+    default_tree_type,
+    is_loadable,
+)
+from hoi4cm.ui.effects_panel import EffectsMixin
+from hoi4cm.ui.focus_list import FocusListItem, VirtualFocusList
+from hoi4cm.ui.gfx_browser import open_focus_icon_browser
+from hoi4cm.ui.menubar import build_menubar
+from hoi4cm.ui.mod_loading import ModLoadingMixin
+from hoi4cm.ui.settings_dialog import open_settings
+from hoi4cm.ui.toolbar import build_toolbar_row2
 from hoi4cm.wizards import _shared as _wiz_shared
 from hoi4cm.wizards import (
     open_additional_income_wizard,
@@ -137,6 +144,7 @@ from hoi4cm.wizards import (
     open_event_wizard,
     open_national_spirit_wizard,
 )
+
 log_startup()
 
 # Re-import os/sys for the rest of the file (the _os/_sys aliases above
@@ -504,18 +512,22 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
         lp_ent.insert(0, tr("common.search_placeholder", "Search..."))
         lp_ent.bind(
             "<FocusIn>",
-            lambda e: (lp_ent.delete(0, "end"), lp_ent.config(fg=TEXT))
-            if lp_ent.get() == tr("common.search_placeholder", "Search...")
-            else None,
+            lambda e: (
+                (lp_ent.delete(0, "end"), lp_ent.config(fg=TEXT))
+                if lp_ent.get() == tr("common.search_placeholder", "Search...")
+                else None
+            ),
         )
         lp_ent.bind(
             "<FocusOut>",
             lambda e: (
-                lp_ent.insert(0, tr("common.search_placeholder", "Search...")),
-                lp_ent.config(fg=TEXT_DIM),
-            )
-            if not lp_ent.get()
-            else None,
+                (
+                    lp_ent.insert(0, tr("common.search_placeholder", "Search...")),
+                    lp_ent.config(fg=TEXT_DIM),
+                )
+                if not lp_ent.get()
+                else None
+            ),
         )
         self._lp_search_var.trace_add(
             "write", lambda *_: self._refresh_focus_list_debounced()
@@ -585,15 +597,17 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
             )
             self.after(
                 3000,
-                lambda: self._errlog_btn.config(
-                    text=tr(
-                        "error_log.badge_log_count", "! Log ({count})", count=count
-                    ),
-                    fg="#f87171",
-                    bg="#450a0a",
-                )
-                if count > 0
-                else None,
+                lambda: (
+                    self._errlog_btn.config(
+                        text=tr(
+                            "error_log.badge_log_count", "! Log ({count})", count=count
+                        ),
+                        fg="#f87171",
+                        bg="#450a0a",
+                    )
+                    if count > 0
+                    else None
+                ),
             )
 
     def _show_error_log(self):
@@ -1389,7 +1403,6 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
             ),
         }.get(label, label)
 
-
     def _build_sidebar_conditions(self, p, _make_scroll_panel):
         # ── TAB 3: Conditions ──────────────────────────────────────────
         cond_frm = _make_scroll_panel(p)
@@ -1666,11 +1679,6 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
         self._tab_host.pack_forget()
         self._sb_none.pack(fill="both", expand=True)
 
-
-
-
-
-
     def _flash_added(self, label):
         """Confirm an add in the browser status line and the main hint bar."""
         msg = tr("focus.effects.added_one", "Added: {name}", name=label)
@@ -1682,41 +1690,13 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
             pass
         self._hint(msg)
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
     # ── MOUSE EVENTS ────────────────────────────────────────────
-
-
-
-
-
-
 
     # ── SIDEBAR RESIZE SASH ─────────────────────────────────────
 
     # ════════════════════════════════════════════════════════════════
     # MOD LOADING
     # ════════════════════════════════════════════════════════════════
-
-
-
-
 
     # ── GFX Picker sidebar widget ────────────────────────────────────
     def _sb_gfx_picker(self):
@@ -1837,9 +1817,11 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
             _safe_after(
                 self,
                 150,
-                lambda: _popup[0].destroy()
-                if _popup[0] and _popup[0].winfo_exists()
-                else None,
+                lambda: (
+                    _popup[0].destroy()
+                    if _popup[0] and _popup[0].winfo_exists()
+                    else None
+                ),
             )
             _popup[0] = None
 
@@ -1912,13 +1894,6 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
     def _sash_rl(self, e):
         pass
 
-
-
-
-
-
-
-
     # ── SELECTION ───────────────────────────────────────────────
     def _on_icon_change(self, *_):
         if not self.selected:
@@ -1960,7 +1935,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
             f.available_if_capitulated = self._fv_cap.get()
             self._save_offsets_to_focus()
             self.focuses.touch()
-        except (ValueError, Exception):
+        except ValueError, Exception:
             pass
 
     def _select(self, f):
@@ -2170,8 +2145,6 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
                 padx=3,
             ).pack(side="right")
 
-
-
     def _view_code(self):
         """Pop up a window to view AND edit the HOI4 script for the selected focus."""
         f = self.selected
@@ -2377,7 +2350,6 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
             "comment", foreground="#22c55e", font=("Courier", 10, "italic")
         )
         txt.tag_configure("str_val", foreground="#f97316")
-
 
         # Precompute line-start offsets once so each match's line/col is an
         # O(log n) bisect instead of four O(n) string scans.
@@ -2763,9 +2735,15 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
         ):
             return
         del_ids = {fid for fid in self._multi_sel if fid in self.focuses}
-        touched_ids = del_ids | set().union(
-            *(self.focuses.reverse_prerequisites.get(fid, set()) for fid in del_ids)
-        ) | set().union(*(self.focuses.reverse_mutex.get(fid, set()) for fid in del_ids))
+        touched_ids = (
+            del_ids
+            | set().union(
+                *(self.focuses.reverse_prerequisites.get(fid, set()) for fid in del_ids)
+            )
+            | set().union(
+                *(self.focuses.reverse_mutex.get(fid, set()) for fid in del_ids)
+            )
+        )
         self._push_undo("delete selected", touched_ids=touched_ids)
         for fid in del_ids:
             self.cv.delete("F" + str(fid))
@@ -2897,9 +2875,12 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
         se.insert(0, tr("focus.prereq.filter_placeholder", "Filter focuses..."))
         se.bind(
             "<FocusIn>",
-            lambda e: se.delete(0, "end")
-            if se.get() == tr("focus.prereq.filter_placeholder", "Filter focuses...")
-            else None,
+            lambda e: (
+                se.delete(0, "end")
+                if se.get()
+                == tr("focus.prereq.filter_placeholder", "Filter focuses...")
+                else None
+            ),
         )
         se.bind(
             "<FocusOut>",
@@ -2997,7 +2978,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
                     pass
             t = tk.Toplevel(win)
             t.wm_overrideredirect(True)
-            t.geometry(f"+{e.x_root+12}+{e.y_root-8}")
+            t.geometry(f"+{e.x_root + 12}+{e.y_root - 8}")
             tk.Label(
                 t,
                 text=f.name,
@@ -3221,9 +3202,6 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
     def _add_effect(self):
         # Legacy entry point — effects are now added via the browser popup.
         self._open_effect_browser()
-
-
-
 
     # ── IMPORT .TXT ─────────────────────────────────────────────
 
@@ -3868,7 +3846,9 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
 
         import_generation = getattr(self, "_import_generation", 0) + 1
         self._import_generation = import_generation
-        modal = progress_modal(self, tr("dialog.import.title", "Import"), determinate=False)
+        modal = progress_modal(
+            self, tr("dialog.import.title", "Import"), determinate=False
+        )
 
         # Parse + build are the expensive, pure-CPU steps (no Tk, no self) —
         # they run on a worker thread; everything that touches MOD/toolbar
@@ -4001,8 +3981,6 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
                 1 for t in self._extra_trees[: tree_idx - 1] if t["type"] == "joint"
             )
             return ("J" if n == 0 else f"J{n + 1}"), _JOINT_COLS[n % len(_JOINT_COLS)]
-
-
 
     def _install_extra_tree(self, raw, path, tree_type):
         """Parse raw focus-tree text, register the tree, and build its focuses.
@@ -4439,146 +4417,51 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
             font=("Helvetica", 8, "bold"),
         ).pack(side="right", padx=20)
 
-        # Scrollable file list
+        # Scrollable checklist. Rows are pooled and recycled (ui/checklist.py),
+        # so ~790 candidate files cost ~2 dozen widget rows, not ~5,500.
         frm = tk.Frame(win, bg=BG_DARK)
         frm.pack(fill="both", expand=True, padx=10, pady=4)
-        sb = tk.Scrollbar(frm, orient="vertical")
-        sb.pack(side="right", fill="y")
-        list_canvas = tk.Canvas(
-            frm, bg=BG_DARK, highlightthickness=0, yscrollcommand=sb.set
-        )
-        list_canvas.pack(side="left", fill="both", expand=True)
-        sb.config(command=list_canvas.yview)
-        inner = tk.Frame(list_canvas, bg=BG_DARK)
-        inner_win = list_canvas.create_window((0, 0), window=inner, anchor="nw")
-        inner.bind(
-            "<Configure>",
-            lambda e: (
-                list_canvas.configure(scrollregion=list_canvas.bbox("all")),
-                list_canvas.itemconfig(inner_win, width=list_canvas.winfo_width()),
-            ),
-        )
-        list_canvas.bind(
-            "<Configure>", lambda e: list_canvas.itemconfig(inner_win, width=e.width)
-        )
-        list_canvas.bind(
-            "<MouseWheel>",
-            lambda e: list_canvas.yview_scroll(int(-1 * (e.delta / 120)), "units"),
-        )
 
-        # Row data: list of (filepath, BooleanVar checked, StringVar type)
         rows = []
         for fp in all_files:
             fname = os.path.basename(fp)
             already = os.path.normpath(fp) in loaded_paths
             # Default type based on filename prefix convention
-            def_type = "shared"
-            m = __import__("re").match(r"^(\d+)_", fname)
-            if m:
-                n = int(m.group(1))
-                if n >= 5:
-                    def_type = "main"
-                else:
-                    def_type = "shared"
-            chk_var = tk.BooleanVar(value=(not already and def_type != "main"))
-            type_var = tk.StringVar(value=def_type)
-            rows.append((fp, chk_var, type_var, already))
-
-            row_f = tk.Frame(
-                inner,
-                bg=BG_CARD if not already else "#1a1f2e",
-                highlightthickness=1,
-                highlightbackground=BORDER_G,
+            def_type = default_tree_type(fname)
+            rows.append(
+                ChecklistItem(
+                    key=fp,
+                    name=fname,
+                    already=already,
+                    checked=tk.BooleanVar(value=(not already and def_type != "main")),
+                    type_var=tk.StringVar(value=def_type),
+                )
             )
-            row_f.pack(fill="x", padx=2, pady=1)
 
-            chk = tk.Checkbutton(
-                row_f,
-                variable=chk_var,
-                bg=row_f.cget("bg"),
-                fg=TEXT,
-                selectcolor=BG_DARK,
-                activebackground=row_f.cget("bg"),
-                relief="flat",
-            )
-            chk.pack(side="left", padx=4)
-            if already:
-                chk.config(state="disabled")
-
-            name_lbl = tk.Label(
-                row_f,
-                text=fname,
-                bg=row_f.cget("bg"),
-                fg=TEXT_DIM if already else TEXT,
-                font=("Courier", 8),
-                anchor="w",
-            )
-            name_lbl.pack(side="left", fill="x", expand=True, padx=2)
-            if already:
-                tk.Label(
-                    row_f,
-                    text=tr("load_all.loaded_marker", " (loaded)"),
-                    bg=row_f.cget("bg"),
-                    fg="#4ade80",
-                    font=("Helvetica", 8, "italic"),
-                ).pack(side="left")
-
-            # Type selector
-            type_f = tk.Frame(row_f, bg=row_f.cget("bg"))
-            type_f.pack(side="right", padx=4)
-            for lbl, val, col in [
+        checklist = VirtualChecklist(
+            frm,
+            type_choices=[
                 (tr("load_all.type.main", "Main"), "main", TEXT_DIM),
                 (tr("load_all.type.shared", "Shared"), "shared", "#f59e0b"),
                 (tr("load_all.type.joint", "Joint"), "joint", "#a855f7"),
-            ]:
-                tk.Radiobutton(
-                    type_f,
-                    text=lbl,
-                    variable=type_var,
-                    value=val,
-                    bg=row_f.cget("bg"),
-                    fg=col,
-                    selectcolor=BG_DARK,
-                    activebackground=row_f.cget("bg"),
-                    font=("Helvetica", 8),
-                    relief="flat",
-                ).pack(side="left")
-            if already:
-                for w in type_f.winfo_children():
-                    w.config(state="disabled")
-
-        # Select/deselect all helpers
-        def _sel_all():
-            for _, cv2, tv, already in rows:
-                if not already and tv.get() != "main":
-                    cv2.set(True)
-
-        def _desel_all():
-            for _, cv2, _, _ in rows:
-                cv2.set(False)
-
-        def _sel_shared():
-            for _, cv2, tv, already in rows:
-                if not already:
-                    cv2.set(tv.get() == "shared")
-
-        def _sel_joint():
-            for _, cv2, tv, already in rows:
-                if not already:
-                    cv2.set(tv.get() == "joint")
+            ],
+            loaded_marker=tr("load_all.loaded_marker", " (loaded)"),
+        )
+        checklist.pack(fill="both", expand=True)
+        checklist.set_items(rows)
 
         ctrl = tk.Frame(win, bg=BG_DARK)
         ctrl.pack(fill="x", padx=10, pady=(2, 0))
-        for lbl, cmd in [
-            (tr("load_all.select_all_extra", "All Shared+Joint"), _sel_all),
-            (tr("common.none", "None"), _desel_all),
-            (tr("load_all.shared_only", "Shared only"), _sel_shared),
-            (tr("load_all.joint_only", "Joint only"), _sel_joint),
+        for lbl, mode in [
+            (tr("load_all.select_all_extra", "All Shared+Joint"), "all"),
+            (tr("common.none", "None"), "none"),
+            (tr("load_all.shared_only", "Shared only"), "shared"),
+            (tr("load_all.joint_only", "Joint only"), "joint"),
         ]:
             tk.Button(
                 ctrl,
                 text=lbl,
-                command=cmd,
+                command=lambda m=mode: apply_select_mode(rows, m),
                 bg=BG_CARD,
                 fg=TEXT_DIM,
                 font=("Helvetica", 8),
@@ -4594,9 +4477,9 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
 
         def _do_load():
             to_load = [
-                (fp, tv.get())
-                for fp, cv2, tv, already in rows
-                if cv2.get() and not already and tv.get() != "main"
+                (item.key, item.type_var.get())
+                for item in rows
+                if is_loadable(item)
             ]
             if not to_load:
                 messagebox.showwarning(
@@ -4803,11 +4686,11 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
         main_extras = self.workspace.main_tree.extras
         try:
             cfp_x = int(self._cfp_x_var.get())
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             cfp_x = getattr(self, "_cfp_x", None)
         try:
             cfp_y = int(self._cfp_y_var.get())
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             cfp_y = getattr(self, "_cfp_y", None)
         meta = TreeMetadata(
             tree_id=self._tree_id.get(),
@@ -4982,7 +4865,6 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
 
     # ── EXPORT ──────────────────────────────────────────────────
 
-
     def _apply_md_visibility(self):
         """Show/hide MD effect categories based on whether MD is detected."""
         md_cats = {
@@ -5001,7 +4883,6 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
             EFFECT_CATS[:] = base_cats + sorted(md_cats)
         else:
             EFFECT_CATS[:] = base_cats
-
 
     def _open_settings(self):
         """Settings panel — GFX paths, MD detection, extra dirs."""
@@ -5124,11 +5005,6 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
             self._left_panel_visible = True
             if hasattr(self, "_lp_collapse_btn"):
                 self._lp_collapse_btn.config(text="◀")
-
-
-
-
-
 
     # ─────────────────── DUPLICATE FOCUS ─────────────────────────
     def _duplicate_focus(self):
@@ -5294,9 +5170,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
                     tr("bulk_rename.from_empty", "From prefix cannot be empty."),
                 )
                 return
-            renamed_ids = {
-                f.id for f in self.focuses.values() if f.name.startswith(fr)
-            }
+            renamed_ids = {f.id for f in self.focuses.values() if f.name.startswith(fr)}
             self._push_undo("bulk_rename", touched_ids=renamed_ids)
             n = len({f.name for f in self.focuses.values() if f.name.startswith(fr)})
             self.focuses.rename_prefix(fr, to)
@@ -5645,7 +5519,7 @@ if __name__ == "__main__":
         W, H = 1440, 880
         sw = app.winfo_screenwidth()
         sh = app.winfo_screenheight()
-        app.geometry(f"{W}x{H}+{(sw-W)//2}+{(sh-H)//2}")
+        app.geometry(f"{W}x{H}+{(sw - W) // 2}+{(sh - H) // 2}")
         log.info(f"_launch: geometry set to {W}x{H}, entering mainloop...")
         app.mainloop()
         log.info("_launch: mainloop exited")

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import tkinter as tk
+from abc import ABC, abstractmethod
 from collections.abc import Callable, Hashable, Sequence
 from dataclasses import dataclass
 from math import ceil, floor
+from typing import Protocol
 
 from hoi4cm.ui.theme import BG_PANEL, BLUE, TEXT_DIM
 
@@ -133,27 +135,35 @@ class _FocusRow:
         self.apply_selection(self.selected)
 
 
-class VirtualFocusList(tk.Frame):
+class _PooledRow(Protocol):
+    """A row widget a pooled list can place on its canvas."""
+
+    frame: tk.Frame
+
+
+class _PooledList[T: _PooledRow](tk.Frame, ABC):
+    """Canvas list that recycles a bounded pool of row widgets.
+
+    Subclasses build rows via _make_row() and bind/release them via
+    _render()/_unrender(). set_items() feeds the data; refresh() repaints
+    only the rows intersecting the viewport.
+    """
+
     def __init__(
         self,
         master,
         *,
-        on_select: Callable[[Hashable], None],
-        row_height: int = 27,
-        overscan_rows: int = 2,
-        background: str = BG_PANEL,
+        row_height: int,
+        overscan_rows: int,
+        background: str,
     ) -> None:
         super().__init__(master, bg=background)
         self.row_height = row_height
         self.overscan_rows = overscan_rows
-        self._on_select = on_select
-        self._items: tuple[FocusListItem, ...] = ()
-        self._selected_key: Hashable | None = None
-        self._rows: list[_FocusRow] = []
+        self._items: tuple = ()
+        self._rows: list[T] = []
         self._row_windows: list[int] = []
-        self._materialized: dict[Hashable, _FocusRow] = {}
         self._refresh_job = None
-        self._structure_version = 0
 
         self.canvas = tk.Canvas(
             self,
@@ -175,44 +185,14 @@ class VirtualFocusList(tk.Frame):
         return len(self._items)
 
     @property
-    def materialized_count(self) -> int:
-        return len(self._materialized)
-
-    @property
     def pool_size(self) -> int:
         return len(self._rows)
 
-    @property
-    def structure_version(self) -> int:
-        return self._structure_version
-
-    def invalidate_structure(
-        self,
-        items: Sequence[FocusListItem],
-        *,
-        query: str = "",
-        placeholder: str = "Search...",
-        selected_key: Hashable | None = None,
-    ) -> None:
-        self._items = filter_focus_items(items, query, placeholder=placeholder)
-        self._selected_key = selected_key
-        self._structure_version += 1
+    def set_items(self, items: Sequence) -> None:
+        self._items = tuple(items)
         height = len(self._items) * self.row_height
         self.canvas.configure(scrollregion=(0, 0, 0, height))
         self._schedule_refresh()
-
-    def update_selection(self, selected_key: Hashable | None) -> int:
-        old_key = self._selected_key
-        if old_key == selected_key:
-            return 0
-        self._selected_key = selected_key
-        touched = 0
-        for key in {old_key, selected_key}:
-            row = self._materialized.get(key)
-            if row is not None:
-                row.apply_selection(key == selected_key)
-                touched += 1
-        return touched
 
     def refresh(self) -> None:
         self._refresh_job = None
@@ -228,20 +208,30 @@ class VirtualFocusList(tk.Frame):
             viewport_height,
             overscan_rows=self.overscan_rows,
         )
-        self._materialized.clear()
         width = self.canvas.winfo_width()
         for slot, row in enumerate(self._rows):
             window = self._row_windows[slot]
             if slot >= len(visible):
-                row.key = None
+                self._unrender(row)
                 self.canvas.itemconfigure(window, state="hidden")
                 continue
             index = visible.start + slot
             item = self._items[index]
-            row.show(item, selected=item.key == self._selected_key)
-            self._materialized[item.key] = row
+            self._render(row, item, index)
             self.canvas.coords(window, 0, index * self.row_height)
             self.canvas.itemconfigure(window, width=width, state="normal")
+
+    @abstractmethod
+    def _make_row(self) -> T:
+        """Create one pooled row widget for the canvas."""
+
+    @abstractmethod
+    def _render(self, row: T, item, index: int) -> None:
+        """Bind row to item at the given list index."""
+
+    @abstractmethod
+    def _unrender(self, row: T) -> None:
+        """Release a row that scrolled out of the viewport."""
 
     def _resize_pool(self, viewport_height: int) -> None:
         wanted = row_pool_size(
@@ -250,7 +240,7 @@ class VirtualFocusList(tk.Frame):
             overscan_rows=self.overscan_rows,
         )
         while len(self._rows) < wanted:
-            row = _FocusRow(self.canvas, self._on_select)
+            row = self._make_row()
             window = self.canvas.create_window(
                 0,
                 0,
@@ -274,11 +264,11 @@ class VirtualFocusList(tk.Frame):
         if self._refresh_job is None:
             self._refresh_job = self.after_idle(self.refresh)
 
-    def _set_scrollbar(self, first: str, last: str) -> None:
+    def _set_scrollbar(self, first: float, last: float) -> None:
         self.scrollbar.set(first, last)
         self._schedule_refresh()
 
-    def _scrollbar(self, *args: str) -> None:
+    def _scrollbar(self, *args: float) -> None:
         self.canvas.yview(*args)
         self._schedule_refresh()
 
@@ -295,6 +285,75 @@ class VirtualFocusList(tk.Frame):
             return
         self.after_cancel(self._refresh_job)
         self._refresh_job = None
+
+
+class VirtualFocusList(_PooledList[_FocusRow]):
+    def __init__(
+        self,
+        master,
+        *,
+        on_select: Callable[[Hashable], None],
+        row_height: int = 27,
+        overscan_rows: int = 2,
+        background: str = BG_PANEL,
+    ) -> None:
+        self._on_select = on_select
+        self._selected_key: Hashable | None = None
+        self._materialized: dict[Hashable, _FocusRow] = {}
+        self._structure_version = 0
+        super().__init__(
+            master,
+            row_height=row_height,
+            overscan_rows=overscan_rows,
+            background=background,
+        )
+
+    @property
+    def materialized_count(self) -> int:
+        return len(self._materialized)
+
+    @property
+    def structure_version(self) -> int:
+        return self._structure_version
+
+    def invalidate_structure(
+        self,
+        items: Sequence[FocusListItem],
+        *,
+        query: str = "",
+        placeholder: str = "Search...",
+        selected_key: Hashable | None = None,
+    ) -> None:
+        self._selected_key = selected_key
+        self._structure_version += 1
+        self.set_items(filter_focus_items(items, query, placeholder=placeholder))
+
+    def update_selection(self, selected_key: Hashable | None) -> int:
+        old_key = self._selected_key
+        if old_key == selected_key:
+            return 0
+        self._selected_key = selected_key
+        touched = 0
+        for key in {old_key, selected_key}:
+            row = self._materialized.get(key)
+            if row is not None:
+                row.apply_selection(key == selected_key)
+                touched += 1
+        return touched
+
+    def refresh(self) -> None:
+        self._materialized.clear()
+        super().refresh()
+
+    def _make_row(self) -> _FocusRow:
+        return _FocusRow(self.canvas, self._on_select)
+
+    def _render(self, row: _FocusRow, item, index: int) -> None:
+        row.show(item, selected=item.key == self._selected_key)
+        self._materialized[item.key] = row
+
+    def _unrender(self, row: _FocusRow) -> None:
+        row.key = None
 
 
 __all__ = [
