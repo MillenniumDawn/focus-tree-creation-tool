@@ -1,8 +1,8 @@
-"""Headless-skipped tests for CanvasMixin's viewport culling.
+"""Tests for CanvasMixin's viewport culling.
 
-Needs a real Tk display to create canvas items, so CI (no python3-tk/Xvfb,
-see testing.md) skips this whole module. Run locally on a dev machine with
-a display to exercise it.
+Needs a real Tk display to create canvas items (CI supplies one via Xvfb,
+see testing.md); the shared `tk_root` fixture skips the module on a
+headless dev box.
 """
 
 import tkinter as tk
@@ -18,14 +18,10 @@ NEAR_RECT = (490.0, 490.0, 510.0, 510.0)
 
 
 @pytest.fixture
-def tk_root():
-    try:
-        root = tk.Tk()
-    except tk.TclError:
-        pytest.skip("no display")
-    root.withdraw()
-    yield root
-    root.destroy()
+def tk_root(tk_root):
+    """Hidden root: these tests drive canvas items, not real geometry."""
+    tk_root.withdraw()
+    return tk_root
 
 
 class _FakeApp(CanvasMixin):

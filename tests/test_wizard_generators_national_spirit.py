@@ -1,5 +1,7 @@
 """Headless tests for the national-spirit wizard's script builder."""
 
+import pytest
+
 from hoi4cm.wizards._generators import build_national_spirit_output
 
 
@@ -72,12 +74,84 @@ def test_build_national_spirit_parses_extra_modifier_lines():
             "# comment\n"
             "stability_factor = 0.1\n"
             "war_support_factor = -0.1\n"
-            "blank_line_below\n"
+            "no_equals_sign\n"
         ),
     )
     assert "modifier = {" in out
     assert "stability_factor = 0.1" in out
     assert "war_support_factor = -0.1" in out
+    # Comments and lines without a `key = value` pair are dropped.
+    assert "# comment" not in out
+    assert "no_equals_sign" not in out
+
+
+def test_build_national_spirit_merges_list_and_text_modifiers():
+    out = build_national_spirit_output(
+        mod_id="TAG_s",
+        modifiers=[{"key": "stability_factor", "value": "0.05"}],
+        extra_modifiers="war_support_factor = 0.1",
+    )
+    assert out.count("modifier = {") == 1
+    assert "\t\t\t\tstability_factor = 0.05" in out
+    assert "\t\t\t\twar_support_factor = 0.1" in out
+
+
+def test_build_national_spirit_omits_modifier_block_when_empty():
+    assert "modifier = {" not in build_national_spirit_output(mod_id="TAG_s")
+
+
+@pytest.mark.parametrize("field", ["visible", "on_add", "on_remove", "rule"])
+def test_build_national_spirit_emits_each_optional_block(field):
+    out = build_national_spirit_output(mod_id="TAG_s", **{field: "always = yes"})
+    assert f"\t\t\t{field} = {{\n\t\t\t\talways = yes\n\t\t\t}}" in out
+    assert f"{field} = {{" not in build_national_spirit_output(mod_id="TAG_s")
+
+
+def test_build_national_spirit_uses_explicit_picture_over_default():
+    out = build_national_spirit_output(mod_id="TAG_s", picture="GFX_idea_custom")
+    assert "picture = GFX_idea_custom" in out
+
+
+def test_build_national_spirit_golden_block():
+    # Locks nesting depth and field order inside `ideas = { country = { ... } }`.
+    out = build_national_spirit_output(
+        mod_id="TAG_s",
+        cost="50",
+        loc_name="N",
+        loc_desc="D",
+        on_add="add_stability = 0.1",
+        modifiers=[{"key": "stability_factor", "value": "0.05"}],
+    )
+    assert out == "\n".join(
+        [
+            "# ============================================================",
+            "# FILE: common/ideas/TAG_s.txt",
+            "# ============================================================",
+            "",
+            "ideas = {",
+            "\tcountry = {",
+            "\t\tTAG_s = {",
+            "\t\t\tpicture = GFX_idea_TAG_s",
+            "\t\t\tallowed_civil_war = { always = yes }",
+            "\t\t\tcost = 50",
+            "\t\t\ton_add = {",
+            "\t\t\t\tadd_stability = 0.1",
+            "\t\t\t}",
+            "\t\t\tmodifier = {",
+            "\t\t\t\tstability_factor = 0.05",
+            "\t\t\t}",
+            "\t\t}",
+            "\t}",
+            "}",
+            "",
+            "# ============================================================",
+            "# LOCALISATION  localisation/english/TAG_s_l_english.yml",
+            "# ============================================================",
+            "",
+            ' TAG_s: "N"',
+            ' TAG_s_desc: "D"',
+        ]
+    )
 
 
 def test_build_national_spirit_emits_cost_and_removal():

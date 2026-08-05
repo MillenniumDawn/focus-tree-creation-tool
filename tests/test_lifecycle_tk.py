@@ -1,23 +1,28 @@
 from __future__ import annotations
 
-import tkinter as tk
-
-import pytest
-
 from hoi4cm.ui.lifecycle import ApplicationLifecycle
 
 
-def test_close_cancels_delayed_tk_callback_before_destroy() -> None:
-    try:
-        root = tk.Tk()
-    except tk.TclError:
-        pytest.skip("no display")
-    root.withdraw()
-    lifecycle = ApplicationLifecycle(root)
+def test_delayed_tk_callback_fires_on_the_real_event_loop(tk_root) -> None:
+    # Control for the cancel test below: without close(), one update() pass
+    # is enough for a due callback to run.
+    tk_root.withdraw()
+    lifecycle = ApplicationLifecycle(tk_root)
     called: list[bool] = []
-    lifecycle.after(root, 1, lambda: called.append(True))
+    lifecycle.after(tk_root, 0, lambda: called.append(True))
+
+    tk_root.update()
+
+    assert called == [True]
+
+
+def test_close_cancels_delayed_tk_callback(tk_root) -> None:
+    tk_root.withdraw()
+    lifecycle = ApplicationLifecycle(tk_root)
+    called: list[bool] = []
+    lifecycle.after(tk_root, 0, lambda: called.append(True))
 
     lifecycle.close()
-    root.destroy()
+    tk_root.update()
 
     assert called == []

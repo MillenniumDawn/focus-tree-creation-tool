@@ -29,6 +29,10 @@ jobs:
       fail-fast: false
       matrix:
         python-version: ['3.14']
+    env:
+      # Turns "no display" from a silent skip into a failure, so a broken
+      # Xvfb can't quietly drop every widget test (tests/conftest.py).
+      HOI4CM_REQUIRE_TK: '1'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -37,12 +41,18 @@ jobs:
       - name: Install dev dependencies
         run: pip install ".[dev]"
       - name: Run tests
-        run: pytest
+        # Xvfb gives the Tk widget tests a display; without it they skip.
+        run: >
+          xvfb-run -a pytest
+          --cov
+          --cov-report=term-missing
+          --cov-fail-under=35
       - name: Coverage gate (wizard generators)
         # Per-module floor on `hoi4cm.wizards._generators` keeps new
-        # script/loc extractions tested (see docs/dev/wizards.md).
+        # script/loc extractions tested (see docs/dev/wizards.md). No Xvfb
+        # here on purpose: these tests must stay headless.
         run: >
           pytest tests/test_wizard_generators_*.py
           --cov=hoi4cm.wizards._generators
-          --cov-fail-under=70
+          --cov-fail-under=95
           --cov-report=term-missing

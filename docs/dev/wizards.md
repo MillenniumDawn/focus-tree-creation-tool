@@ -67,14 +67,20 @@ there, so the rendering logic is testable headlessly (see `testing.md`):
 
 These are the extraction target the original "Tests are still owed" note
 pointed at. They have dedicated headless tests under
-`tests/test_wizard_generators_*.py`, and CI enforces a coverage floor on
+`tests/test_wizard_generators_*.py`, and CI enforces a 95% floor on
 `hoi4cm.wizards._generators` (see `pyproject.toml`'s `[tool.coverage]` and
 `.github/workflows/ci.yml`). New script/loc generation should go into
 `_generators.py` with a test, not back into the closures.
 
+Each generator carries a golden test that asserts the whole rendered block,
+not just that a field appears somewhere in it. Field order is load-bearing
+in a few places (`icon` sits between `allowed` and `visible`; the blank
+line before an event's `immediate` block matches the MD file convention),
+and substring assertions can't see any of it. Add fields to the golden when
+you add them to a generator.
+
 Tests are still owed for the rest of the wizard logic (id/name validation,
-gfx lookups, dialog state wiring). Those are Tk-coupled: testing them
-means exercising the non-Tk logic separately from the dialog construction
-itself, since the dialog construction can't run in CI. The script/loc
-generators, which carry the loc-export and mod-file writing risk the
-extraction was meant to de-risk, are now covered.
+gfx lookups, dialog state wiring). Those are Tk-coupled: testing them means
+exercising the non-Tk logic separately from the dialog construction itself.
+The script/loc generators, which carry the loc-export and mod-file writing
+risk the extraction was meant to de-risk, are now covered.

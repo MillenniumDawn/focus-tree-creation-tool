@@ -27,15 +27,23 @@ packages = ["src/hoi4cm"]
 pythonpath = ["src"]
 testpaths = ["tests"]
 
-# Per-module coverage gate: new wizard script/loc generators must live in
-# `hoi4cm.wizards._generators` so they can be tested headlessly, and CI
-# enforces a floor on this module (`pytest --cov-fail-under=70`) so
-# extractions cannot land untested (see docs/dev/wizards.md and issue #51).
+# `pytest --cov` measures the whole package. CI runs it twice: once over
+# `hoi4cm` with a floor that stops the package sliding backwards, and once
+# over `hoi4cm.wizards._generators` alone, so new wizard script/loc
+# generators can't land untested (see docs/dev/wizards.md and issue #51).
 [tool.coverage.run]
-source = ["hoi4cm.wizards._generators"]
+source = ["hoi4cm"]
+branch = true
 
 [tool.coverage.report]
 show_missing = true
+skip_covered = true
+exclude_also = [
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "class .*\\(Protocol\\):",
+    "@abstractmethod",
+]
 
 # Linting/formatting is scoped to the modular package + tests. The legacy
 # monolith (hoi4_content_maker.py) and build scripts are excluded until they
