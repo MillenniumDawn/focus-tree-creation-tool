@@ -568,16 +568,14 @@ def test_gfx_cache_invalidates_on_interface_mtime_change(gfx_mod_tree):
     assert "GFX_focus_extra_from_iface" in MOD.sprites
 
     goals_gfx = gfx_mod_tree / "interface" / "goals.gfx"
-    goals_gfx.write_text(
-        textwrap.dedent("""
+    goals_gfx.write_text(textwrap.dedent("""
             spriteTypes = {
                 spriteType = {
                     name = "GFX_focus_added_later"
                     texturefile = "gfx/interface/goals/added_later.dds"
                 }
             }
-            """).lstrip("\n")
-    )
+            """).lstrip("\n"))
     st = goals_gfx.stat()
     os.utime(goals_gfx, (st.st_atime, st.st_mtime + 10))
 
