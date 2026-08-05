@@ -208,23 +208,76 @@ class GraphicsMaps:
     sprites: dict[str, str] = field(default_factory=dict)
     idea_sprites: dict[str, str] = field(default_factory=dict)
     decision_sprites: dict[str, str] = field(default_factory=dict)
+    # refresh() returns complete maps and empty removed lists. Incremental
+    # updates (note_written / note_deleted) return only the names whose entry
+    # changed, with dropped names listed per family; consumers apply them with
+    # update + pop, never clear-and-replace.
+    removed_sprites: tuple[str, ...] = ()
+    removed_idea_sprites: tuple[str, ...] = ()
+    removed_decision_sprites: tuple[str, ...] = ()
+
+
+@dataclass
+class _MapDelta:
+    """Names an incremental update must re-apply or drop, per family."""
+
+    upsert: dict[str, set[str]] = field(
+        default_factory=lambda: {"sprites": set(), "ideas": set(), "decisions": set()}
+    )
+    remove: dict[str, set[str]] = field(
+        default_factory=lambda: {"sprites": set(), "ideas": set(), "decisions": set()}
+    )
+
+
+@dataclass(frozen=True)
+class _ImageClaims:
+    """Sprite-map names one image record would derive, per family.
+
+    Idea claims carry a priority: the configured ideas root beats custom dirs,
+    matching the order the full derive used to iterate them.
+    """
+
+    sprites: tuple[str, ...] = ()
+    ideas: tuple[tuple[tuple[int, ...], str], ...] = ()
+    decisions: tuple[str, ...] = ()
 
 
 class GraphicsCatalog:
     def __init__(self) -> None:
         self.generation = 0
         self.last_metrics = GraphicsMetrics()
-        self._image_stamps: dict[PathReference, FileStamp] = {}
         self._install_snapshot(GraphicsSnapshot((), (), (), (), ()))
         self._source_roots: dict[str, str] = {}
         self._scan_roots: dict[str, str] = {}
         self._sprite_refs: dict[str, PathReference] = {}
         self._idea_refs: dict[str, PathReference] = {}
         self._decision_refs: dict[str, PathReference] = {}
+        # Disk-derived names (GFX_focus_*, GFX_idea_*, ...) that would exist
+        # even when a .gfx declaration currently shadows them, so a removed
+        # declaration can restore them without rescanning every image.
+        self._sprite_claims: dict[str, PathReference] = {}
+        self._idea_claims: dict[str, tuple[tuple[int, ...], PathReference]] = {}
+        self._decision_claims: dict[str, PathReference] = {}
+        # Declaration name -> count, per resolved texture path: the names whose
+        # decoded image goes stale when that file is rewritten in place.
+        self._declared_names_by_texture: dict[str, dict[str, int]] = {}
+        # name -> (file position, gfx file) of the last declaration of name,
+        # so an edited .gfx file knows in O(1) whether it still has the last
+        # word or must defer to a later file.
+        self._last_declarer: dict[str, tuple[int, PathReference]] = {}
+        self._file_order: dict[PathReference, int] = {}
         self._root = ""
         self._config = GraphicsScanConfig("", "")
+        self._goals_root = ""
+        self._ideas_root = ""
+        self._gfx_root = ""
+        self._custom_roots: tuple[str, ...] = ()
         self._root_identity = ""
         self._config_fingerprint = ""
+        # Set when an incremental update patched the in-memory state; the
+        # SQLite snapshot is re-stored at the next refresh or flush_cache(),
+        # not on every write.
+        self._cache_dirty = False
 
     def refresh(
         self,
@@ -234,6 +287,7 @@ class GraphicsCatalog:
         read_text: Callable[[str], str],
     ) -> GraphicsMaps:
         self.last_metrics = GraphicsMetrics()
+        self._flush_cache()
         root = os.path.abspath(root)
         source_roots = self._source_roots_for(root, config)
         root_identity = _root_identity(root)
@@ -248,13 +302,7 @@ class GraphicsCatalog:
         snapshot = self._load_snapshot(cached_data, source_roots)
         if snapshot is None:
             snapshot = self._scan_snapshot(root, config, source_roots, read_text)
-            if snapshot.cacheable:
-                cache.store_graphics(
-                    snapshot.to_data(),
-                    schema_version=_CACHE_VERSION,
-                    root_identity=root_identity,
-                    config_fingerprint=config_fingerprint,
-                )
+            self._cache_dirty = True
         else:
             self.last_metrics.cache_status = "hit"
 
@@ -264,15 +312,27 @@ class GraphicsCatalog:
         self._scan_roots = self._extra_scan_roots(root, config)
         self._root = root
         self._config = config
+        self._goals_root = _configured_path(root, config.path_goals)
+        if not os.path.isdir(self._goals_root):
+            self._goals_root = os.path.join(root, "gfx", "interface")
+        self._ideas_root = _configured_path(root, config.path_ideas_gfx)
+        self._gfx_root = os.path.join(root, "gfx")
+        self._custom_roots = tuple(
+            os.path.abspath(path) for path in config.custom_gfx_dirs
+        )
         self._root_identity = root_identity
         self._config_fingerprint = config_fingerprint
         self._derive_references(root, config)
         _remove_legacy_sidecar(root)
+        if self._cache_dirty:
+            self._flush_cache()
         return self._materialize_maps()
 
     def _install_snapshot(self, snapshot: GraphicsSnapshot) -> None:
         self._snapshot = snapshot
-        self._image_stamps = {record.path: record.stamp for record in snapshot.images}
+        self._directories = {record.path: record for record in snapshot.directories}
+        self._images = {record.path: record for record in snapshot.images}
+        self._gfx_files = {record.path: record for record in snapshot.gfx_files}
 
     def note_written(
         self, path: str, *, read_text: Callable[[str], str]
@@ -292,34 +352,34 @@ class GraphicsCatalog:
         except OSError:
             return self.note_deleted(absolute_path)
 
-        images = list(self._snapshot.images)
-        gfx_files = list(self._snapshot.gfx_files)
         if suffix_lower in _IMAGE_EXTENSIONS:
-            images = _replace_or_append(
-                images, ImageRecord(reference, _stamp_from_stat(path_stat))
+            self._update_directories(absolute_path)
+            delta = self._apply_image_record(
+                reference, ImageRecord(reference, _stamp_from_stat(path_stat))
             )
         elif self._is_interface_file(absolute_path):
             interface_root = os.path.join(self._root, "interface")
-            gfx_files = _replace_or_append(
-                gfx_files,
-                GfxFileRecord(
-                    reference,
-                    _stamp_from_stat(path_stat),
-                    tuple(
-                        _parse_declarations(
-                            read_text(absolute_path),
-                            top_level=os.path.normcase(os.path.dirname(absolute_path))
-                            == os.path.normcase(interface_root),
-                            strict_extension=os.path.basename(absolute_path).endswith(
-                                ".gfx"
-                            ),
-                        )
-                    ),
+            record = GfxFileRecord(
+                reference,
+                _stamp_from_stat(path_stat),
+                tuple(
+                    _parse_declarations(
+                        read_text(absolute_path),
+                        top_level=os.path.normcase(os.path.dirname(absolute_path))
+                        == os.path.normcase(interface_root),
+                        strict_extension=os.path.basename(absolute_path).endswith(
+                            ".gfx"
+                        ),
+                    )
                 ),
             )
+            self._update_directories(absolute_path)
+            delta = self._apply_gfx_record(reference, record)
         else:
             return None
-        return self._replace_snapshot(absolute_path, images, gfx_files)
+        self.generation += 1
+        self._cache_dirty = True
+        return self._materialize_delta(delta)
 
     def note_deleted(self, path: str) -> GraphicsMaps | None:
         if not self._root:
@@ -328,17 +388,72 @@ class GraphicsCatalog:
         reference = self._reference_for_path(absolute_path)
         if reference is None:
             return None
-        images = [
-            record for record in self._snapshot.images if record.path != reference
-        ]
-        gfx_files = [
-            record for record in self._snapshot.gfx_files if record.path != reference
-        ]
-        if len(images) == len(self._snapshot.images) and len(gfx_files) == len(
-            self._snapshot.gfx_files
-        ):
+        image_record = self._images.pop(reference, None)
+        gfx_record = self._gfx_files.pop(reference, None)
+        if image_record is None and gfx_record is None:
             return None
-        return self._replace_snapshot(absolute_path, images, gfx_files)
+        self._file_order.pop(reference, None)
+        self._update_directories(absolute_path)
+        delta = _MapDelta()
+        if image_record is not None:
+            self._unclaim_image(image_record, absolute_path, delta)
+            for name in self._declared_names_at(absolute_path):
+                if self._ref_resolves_to(self._sprite_refs.get(name), absolute_path):
+                    delta.upsert["sprites"].add(name)
+                if self._ref_resolves_to(self._idea_refs.get(name), absolute_path):
+                    delta.upsert["ideas"].add(name)
+                if self._ref_resolves_to(self._decision_refs.get(name), absolute_path):
+                    delta.upsert["decisions"].add(name)
+        if gfx_record is not None:
+            for declaration in gfx_record.declarations:
+                self._unindex_declaration(declaration)
+                last = self._last_declarer.get(declaration.name)
+                if last is not None and last[1] == reference:
+                    self._remove_declared_name(declaration.name, declaration, delta)
+        self.generation += 1
+        self._cache_dirty = True
+        return self._materialize_delta(delta)
+
+    def flush_cache(self) -> None:
+        """Persist the patched snapshot if it changed since the last store."""
+        self._flush_cache()
+
+    def _flush_cache(self) -> None:
+        if not self._cache_dirty:
+            return
+        self._cache_dirty = False
+        if not self._root:
+            return
+        snapshot = self._snapshot_for_store()
+        if not snapshot.cacheable:
+            return
+        WorkspaceCache(scan_cache.database_path(self._root)).store_graphics(
+            snapshot.to_data(),
+            schema_version=_CACHE_VERSION,
+            root_identity=self._root_identity,
+            config_fingerprint=self._config_fingerprint,
+        )
+
+    def _snapshot_for_store(self) -> GraphicsSnapshot:
+        goals_root = self._goals_root
+        ideas_root = self._ideas_root
+        return GraphicsSnapshot(
+            directories=tuple(self._directories.values()),
+            images=tuple(self._images.values()),
+            gfx_files=tuple(self._gfx_files.values()),
+            goal_images=tuple(
+                record.path
+                for record in self._images.values()
+                if goals_root
+                and _is_under(record.path.resolve(self._source_roots), goals_root)
+            ),
+            idea_images=tuple(
+                record.path
+                for record in self._images.values()
+                if ideas_root
+                and _is_under(record.path.resolve(self._source_roots), ideas_root)
+            ),
+        )
 
     def resolve(self, gfx_name: str, *, family: str = "sprites") -> AssetRef | None:
         references = {
@@ -365,7 +480,7 @@ class GraphicsCatalog:
         search_text = search.casefold().strip()
         assets: list[tuple[str, AssetRef]] = []
         seen_paths: set[str] = set()
-        for record in self._snapshot.images:
+        for record in self._images.values():
             try:
                 absolute_path = record.path.resolve(self._source_roots)
             except KeyError:
@@ -397,47 +512,300 @@ class GraphicsCatalog:
             self._source_roots
         )
 
-    def _replace_snapshot(
-        self,
-        changed_path: str,
-        images: list[ImageRecord],
-        gfx_files: list[GfxFileRecord],
-    ) -> GraphicsMaps:
-        directories = self._updated_directories(changed_path)
-        goals_root = _configured_path(self._root, self._config.path_goals)
-        if not os.path.isdir(goals_root):
-            goals_root = os.path.join(self._root, "gfx", "interface")
-        ideas_root = _configured_path(self._root, self._config.path_ideas_gfx)
-        self.generation += 1
-        self._install_snapshot(
-            GraphicsSnapshot(
-                directories=directories,
-                images=tuple(images),
-                gfx_files=tuple(gfx_files),
-                goal_images=tuple(
-                    record.path
-                    for record in images
-                    if _is_under(record.path.resolve(self._source_roots), goals_root)
-                ),
-                idea_images=tuple(
-                    record.path
-                    for record in images
-                    if _is_under(record.path.resolve(self._source_roots), ideas_root)
-                ),
-            )
-        )
-        self._derive_references(self._root, self._config)
-        if self._snapshot.cacheable:
-            WorkspaceCache(scan_cache.database_path(self._root)).store_graphics(
-                self._snapshot.to_data(),
-                schema_version=_CACHE_VERSION,
-                root_identity=self._root_identity,
-                config_fingerprint=self._config_fingerprint,
-            )
-        return self._materialize_maps()
+    def _apply_image_record(
+        self, reference: PathReference, record: ImageRecord
+    ) -> _MapDelta:
+        self._images[reference] = record
+        delta = _MapDelta()
+        absolute_path = record.path.resolve(self._source_roots)
+        self._apply_image_claims(record, absolute_path, delta)
+        for name in self._declared_names_at(absolute_path):
+            if self._ref_resolves_to(self._sprite_refs.get(name), absolute_path):
+                delta.upsert["sprites"].add(name)
+            if self._ref_resolves_to(self._idea_refs.get(name), absolute_path):
+                delta.upsert["ideas"].add(name)
+            if self._ref_resolves_to(self._decision_refs.get(name), absolute_path):
+                delta.upsert["decisions"].add(name)
+        return delta
 
-    def _updated_directories(self, changed_path: str) -> tuple[DirectoryRecord, ...]:
-        records = {record.path: record for record in self._snapshot.directories}
+    def _apply_gfx_record(
+        self, reference: PathReference, record: GfxFileRecord
+    ) -> _MapDelta:
+        delta = _MapDelta()
+        old_record = self._gfx_files.get(reference)
+        old_by_name = (
+            {declaration.name: declaration for declaration in old_record.declarations}
+            if old_record is not None
+            else {}
+        )
+        new_by_name = {
+            declaration.name: declaration for declaration in record.declarations
+        }
+        self._gfx_files[reference] = record
+        position = self._file_order.get(reference)
+        if position is None:
+            position = max(self._file_order.values(), default=-1) + 1
+            self._file_order[reference] = position
+
+        for name, old_declaration in old_by_name.items():
+            self._unindex_declaration(old_declaration)
+            if name in new_by_name:
+                continue
+            last = self._last_declarer.get(name)
+            if last is not None and last[1] == reference:
+                self._remove_declared_name(name, old_declaration, delta)
+        for name, new_declaration in new_by_name.items():
+            self._index_declaration(new_declaration)
+            old_declaration = old_by_name.get(name)
+            if old_declaration is not None:
+                # A re-declared name can switch families (texture path, or the
+                # top-level/strict flags that gate the sprite maps).
+                for family in _declaration_families(old_declaration):
+                    if (
+                        family not in _declaration_families(new_declaration)
+                        and self._refs_for(family).get(name)
+                        == old_declaration.texture_path
+                    ):
+                        del self._refs_for(family)[name]
+                        delta.remove[family].add(name)
+            last = self._last_declarer.get(name)
+            if (
+                last is not None
+                and last[1] != reference
+                and self._file_order.get(last[1], -1) >= position
+            ):
+                continue  # a later file still has the last word on this name
+            old_texture = (
+                old_declaration.texture_path if old_declaration is not None else None
+            )
+            families_changed = old_declaration is not None and set(
+                _declaration_families(old_declaration)
+            ) != set(_declaration_families(new_declaration))
+            for family in _declaration_families(new_declaration):
+                self._refs_for(family)[name] = new_declaration.texture_path
+                if old_texture != new_declaration.texture_path or families_changed:
+                    # Only names whose entry actually changed need re-applying;
+                    # a same-texture rewrite leaves the decoded image valid.
+                    delta.upsert[family].add(name)
+            self._last_declarer[name] = (position, reference)
+        return delta
+
+    def _remove_declared_name(
+        self, name: str, old_declaration: SpriteDeclaration, delta: _MapDelta
+    ) -> None:
+        for family in _declaration_families(old_declaration):
+            refs = self._refs_for(family)
+            if refs.get(name) == old_declaration.texture_path:
+                del refs[name]
+                delta.remove[family].add(name)
+        # Another file may still declare the name; last-wins like the full
+        # derive. Otherwise the disk-derived claim (if any) can surface.
+        winner = None
+        winner_position = -1
+        for file_ref, gfx_record in self._gfx_files.items():
+            file_position = self._file_order.get(file_ref, 0)
+            for declaration in gfx_record.declarations:
+                if declaration.name == name and file_position > winner_position:
+                    winner = (file_position, file_ref, declaration)
+                    winner_position = file_position
+        if winner is None:
+            self._last_declarer.pop(name, None)
+            self._unshadow(name, delta)
+        else:
+            winner_position, file_ref, declaration = winner
+            self._last_declarer[name] = (winner_position, file_ref)
+            for family in _declaration_families(declaration):
+                self._refs_for(family)[name] = declaration.texture_path
+                delta.upsert[family].add(name)
+
+    def _unshadow(self, name: str, delta: _MapDelta) -> None:
+        claim = self._sprite_claims.get(name)
+        if claim is not None:
+            self._sprite_refs.setdefault(name, claim)
+            delta.upsert["sprites"].add(name)
+        claim = self._idea_claims.get(name)
+        if claim is not None:
+            self._idea_refs.setdefault(name, claim[1])
+            delta.upsert["ideas"].add(name)
+        claim = self._decision_claims.get(name)
+        if claim is not None:
+            self._decision_refs.setdefault(name, claim)
+            delta.upsert["decisions"].add(name)
+
+    def _unclaim_image(
+        self, record: ImageRecord, absolute_path: str, delta: _MapDelta
+    ) -> None:
+        claims = self._claim_names_for(record, absolute_path)
+        removed: list[tuple[str, str]] = []
+        for name in claims.sprites:
+            if self._sprite_claims.get(name) == record.path:
+                del self._sprite_claims[name]
+                if self._sprite_refs.get(name) == record.path:
+                    del self._sprite_refs[name]
+                    delta.remove["sprites"].add(name)
+                    removed.append(("sprites", name))
+        for _priority, name in claims.ideas:
+            claim = self._idea_claims.get(name)
+            if claim is not None and claim[1] == record.path:
+                del self._idea_claims[name]
+                if self._idea_refs.get(name) == record.path:
+                    del self._idea_refs[name]
+                    delta.remove["ideas"].add(name)
+                    removed.append(("ideas", name))
+        for name in claims.decisions:
+            if self._decision_claims.get(name) == record.path:
+                del self._decision_claims[name]
+                if self._decision_refs.get(name) == record.path:
+                    del self._decision_refs[name]
+                    delta.remove["decisions"].add(name)
+                    removed.append(("decisions", name))
+        if not removed:
+            return
+        # A sibling with the same stem may now win the dropped names.
+        stem = Path(record.path.relative_path).stem
+        for candidate in self._images.values():
+            if Path(candidate.path.relative_path).stem != stem:
+                continue
+            try:
+                candidate_path = candidate.path.resolve(self._source_roots)
+            except KeyError:
+                continue
+            self._apply_image_claims(candidate, candidate_path)
+        for family, name in removed:
+            if self._refs_for(family).get(name) is not None:
+                delta.upsert[family].add(name)
+
+    def _apply_image_claims(
+        self, record: ImageRecord, absolute_path: str, delta: _MapDelta | None = None
+    ) -> None:
+        claims = self._claim_names_for(record, absolute_path)
+        for name in claims.sprites:
+            self._claim_sprite(name, record.path)
+            if delta is not None:
+                delta.upsert["sprites"].add(name)
+        for priority, name in claims.ideas:
+            self._claim_idea(name, priority, record.path)
+            if delta is not None:
+                delta.upsert["ideas"].add(name)
+        for name in claims.decisions:
+            self._claim_decision(name, record.path)
+            if delta is not None:
+                delta.upsert["decisions"].add(name)
+
+    def _claim_sprite(self, name: str, path: PathReference) -> None:
+        if name in self._sprite_claims:
+            return
+        self._sprite_claims[name] = path
+        self._sprite_refs.setdefault(name, path)
+
+    def _claim_idea(
+        self, name: str, priority: tuple[int, ...], path: PathReference
+    ) -> None:
+        existing = self._idea_claims.get(name)
+        if existing is not None and existing[0] <= priority:
+            return
+        old_path = existing[1] if existing is not None else None
+        self._idea_claims[name] = (priority, path)
+        if old_path is not None and self._idea_refs.get(name) == old_path:
+            self._idea_refs[name] = path
+        else:
+            self._idea_refs.setdefault(name, path)
+
+    def _claim_decision(self, name: str, path: PathReference) -> None:
+        if name in self._decision_claims:
+            return
+        self._decision_claims[name] = path
+        self._decision_refs.setdefault(name, path)
+
+    def _claim_names_for(self, record: ImageRecord, absolute_path: str) -> _ImageClaims:
+        stem = Path(record.path.relative_path).stem
+        sprites = []
+        ideas = []
+        decisions = []
+        if self._goals_root and _is_under(absolute_path, self._goals_root):
+            sprites.append(f"GFX_focus_{stem}")
+        if self._ideas_root and _is_under(absolute_path, self._ideas_root):
+            ideas.append(((2,), f"GFX_idea_{stem}"))
+        for index, custom_root in enumerate(self._custom_roots):
+            if _is_under(absolute_path, custom_root):
+                ideas.append(((3, index), f"GFX_idea_{stem}"))
+                break
+        if self._gfx_root and _is_under(absolute_path, self._gfx_root):
+            relative = (
+                os.path.relpath(absolute_path, self._root).replace(os.sep, "/").lower()
+            )
+            if "decisions" in relative:
+                decisions.append(f"GFX_decision_{stem}")
+                decisions.append(f"GFX_decision_category_{stem}")
+            elif "ideas" in relative:
+                decisions.append(f"GFX_idea_{stem}")
+            elif "goals" not in relative and "focus" not in relative:
+                decisions.append(f"GFX_{stem}")
+        return _ImageClaims(tuple(sprites), tuple(ideas), tuple(decisions))
+
+    def _index_declaration(self, declaration: SpriteDeclaration) -> None:
+        key = self._texture_key(declaration)
+        counts = self._declared_names_by_texture.setdefault(key, {})
+        counts[declaration.name] = counts.get(declaration.name, 0) + 1
+
+    def _unindex_declaration(self, declaration: SpriteDeclaration) -> None:
+        key = self._texture_key(declaration)
+        counts = self._declared_names_by_texture.get(key)
+        if counts is None:
+            return
+        count = counts.get(declaration.name, 0) - 1
+        if count > 0:
+            counts[declaration.name] = count
+        else:
+            counts.pop(declaration.name, None)
+            if not counts:
+                self._declared_names_by_texture.pop(key, None)
+
+    def _texture_key(self, declaration: SpriteDeclaration) -> str:
+        return _absolute_key(declaration.texture_path.resolve(self._source_roots))
+
+    def _declared_names_at(self, absolute_path: str) -> set[str]:
+        names = set()
+        for key in _absolute_candidates(absolute_path):
+            names.update(self._declared_names_by_texture.get(key, ()))
+        return names
+
+    def _ref_resolves_to(self, ref: PathReference | None, absolute_path: str) -> bool:
+        if ref is None:
+            return False
+        try:
+            resolved = ref.resolve(self._source_roots)
+        except KeyError:
+            return False
+        return _absolute_key(resolved) == _absolute_key(absolute_path)
+
+    def _materialize_delta(self, delta: _MapDelta) -> GraphicsMaps:
+        def resolve_family(refs, names):
+            return {
+                name: refs[name].resolve(self._source_roots)
+                for name in names
+                if name in refs
+            }
+
+        return GraphicsMaps(
+            sprites=resolve_family(self._sprite_refs, delta.upsert["sprites"]),
+            idea_sprites=resolve_family(self._idea_refs, delta.upsert["ideas"]),
+            decision_sprites=resolve_family(
+                self._decision_refs, delta.upsert["decisions"]
+            ),
+            removed_sprites=tuple(sorted(delta.remove["sprites"])),
+            removed_idea_sprites=tuple(sorted(delta.remove["ideas"])),
+            removed_decision_sprites=tuple(sorted(delta.remove["decisions"])),
+        )
+
+    def _refs_for(self, family: str) -> dict[str, PathReference]:
+        return {
+            "sprites": self._sprite_refs,
+            "ideas": self._idea_refs,
+            "decisions": self._decision_refs,
+        }[family]
+
+    def _update_directories(self, changed_path: str) -> None:
         directory = os.path.dirname(changed_path)
         while True:
             reference = self._reference_for_path(directory)
@@ -451,33 +819,13 @@ class GraphicsCatalog:
                 record = DirectoryRecord(
                     reference, True, _stamp_from_stat(directory_stat)
                 )
-            records[reference] = record
+            self._directories[reference] = record
             parent = os.path.dirname(directory)
             if parent == directory:
                 break
             directory = parent
-        return tuple(records.values())
 
     def _reference_for_path(self, path: str) -> PathReference | None:
-        records = (
-            *(record.path for record in self._snapshot.images),
-            *(record.path for record in self._snapshot.gfx_files),
-            *(record.path for record in self._snapshot.directories),
-        )
-        matches = []
-        for record in records:
-            try:
-                record_path = record.resolve(self._source_roots)
-            except KeyError:
-                continue
-            if _is_under(path, record_path):
-                matches.append((len(record_path), record))
-        if matches:
-            _length, record = max(matches, key=lambda item: item[0])
-            return _reference_for(
-                record.source_id, self._source_roots[record.source_id], path
-            )
-
         candidates = sorted(
             self._scan_roots.items(),
             key=lambda item: len(item[1]),
@@ -492,9 +840,9 @@ class GraphicsCatalog:
 
     def _stamp_for_path(self, path: PathReference) -> FileStamp:
         for candidate in _image_candidates(path):
-            stamp = self._image_stamps.get(candidate)
-            if stamp is not None:
-                return stamp
+            record = self._images.get(candidate)
+            if record is not None:
+                return record.stamp
         return FileStamp(0, 0, 0)
 
     def _is_interface_file(self, path: str) -> bool:
@@ -724,73 +1072,46 @@ class GraphicsCatalog:
         scan(scan_root, top_level=True)
 
     def _derive_references(self, root: str, config: GraphicsScanConfig) -> None:
-        declarations = (
-            declaration
-            for gfx_file in self._snapshot.gfx_files
-            for declaration in gfx_file.declarations
-        )
-        declaration_list = tuple(declarations)
         self._sprite_refs = {}
         self._idea_refs = {}
         self._decision_refs = {}
-
-        for declaration in declaration_list:
-            if (
-                declaration.top_level
-                and declaration.strict_extension
-                and (
-                    "goals" in declaration.texture_path_lower
-                    or "focus" in declaration.texture_path_lower
-                )
-            ):
-                self._sprite_refs[declaration.name] = declaration.texture_path
-            if (
-                declaration.top_level
-                and declaration.strict_extension
-                and (
-                    "ideas" in declaration.texture_path_lower
-                    or "idea" in declaration.texture_path_lower
-                )
-            ):
-                self._idea_refs[declaration.name] = declaration.texture_path
-            self._decision_refs[declaration.name] = declaration.texture_path
-
-        for path in self._snapshot.goal_images:
-            stem = Path(path.relative_path).stem
-            self._sprite_refs.setdefault(f"GFX_focus_{stem}", path)
-        for path in self._snapshot.idea_images:
-            stem = Path(path.relative_path).stem
-            self._idea_refs.setdefault(f"GFX_idea_{stem}", path)
-        for index in range(len(config.custom_gfx_dirs)):
-            custom_root = os.path.abspath(config.custom_gfx_dirs[index])
-            for record in self._snapshot.images:
-                try:
-                    full_path = record.path.resolve(self._source_roots)
-                except KeyError:
-                    continue
-                if _is_under(full_path, custom_root):
-                    stem = Path(record.path.relative_path).stem
-                    self._idea_refs.setdefault(f"GFX_idea_{stem}", record.path)
-
-        gfx_root = os.path.join(root, "gfx")
-        for record in self._snapshot.images:
+        sprite_claims: dict[str, PathReference] = {}
+        idea_claims: dict[str, tuple[tuple[int, ...], PathReference]] = {}
+        decision_claims: dict[str, PathReference] = {}
+        for record in self._images.values():
             try:
                 full_path = record.path.resolve(self._source_roots)
             except KeyError:
                 continue
-            if not _is_under(full_path, gfx_root):
-                continue
-            stem = Path(record.path.relative_path).stem
-            relative = os.path.relpath(full_path, root).replace(os.sep, "/").lower()
-            if "decisions" in relative:
-                self._decision_refs.setdefault(f"GFX_decision_{stem}", record.path)
-                self._decision_refs.setdefault(
-                    f"GFX_decision_category_{stem}", record.path
-                )
-            elif "ideas" in relative:
-                self._decision_refs.setdefault(f"GFX_idea_{stem}", record.path)
-            elif "goals" not in relative and "focus" not in relative:
-                self._decision_refs.setdefault(f"GFX_{stem}", record.path)
+            claims = self._claim_names_for(record, full_path)
+            for name in claims.sprites:
+                sprite_claims.setdefault(name, record.path)
+            for priority, name in claims.ideas:
+                existing = idea_claims.get(name)
+                if existing is None or priority < existing[0]:
+                    idea_claims[name] = (priority, record.path)
+            for name in claims.decisions:
+                decision_claims.setdefault(name, record.path)
+        self._sprite_claims = sprite_claims
+        self._idea_claims = idea_claims
+        self._decision_claims = decision_claims
+        self._declared_names_by_texture = {}
+        self._last_declarer = {}
+        self._file_order = {}
+        for position, (file_ref, gfx_record) in enumerate(self._gfx_files.items()):
+            self._file_order[file_ref] = position
+            for declaration in gfx_record.declarations:
+                self._last_declarer[declaration.name] = (position, file_ref)
+                self._index_declaration(declaration)
+                for family in _declaration_families(declaration):
+                    self._refs_for(family)[declaration.name] = declaration.texture_path
+        # Declared entries win; disk-derived claims only fill gaps.
+        for name, path in sprite_claims.items():
+            self._sprite_refs.setdefault(name, path)
+        for name, (_priority, path) in idea_claims.items():
+            self._idea_refs.setdefault(name, path)
+        for name, path in decision_claims.items():
+            self._decision_refs.setdefault(name, path)
 
     def _materialize_maps(self) -> GraphicsMaps:
         return GraphicsMaps(
@@ -835,26 +1156,45 @@ class GraphicsCatalog:
         goals_root = _configured_path(root, config.path_goals)
         if not os.path.isdir(goals_root):
             goals_root = os.path.join(root, "gfx", "interface")
-        roots = {
-            "goals": goals_root,
-            "ideas": _configured_path(root, config.path_ideas_gfx),
-        }
+        candidates = [
+            ("goals", goals_root),
+            ("ideas", _configured_path(root, config.path_ideas_gfx)),
+        ]
         if config.path_event_pictures:
-            roots["events"] = _configured_path(root, config.path_event_pictures)
-        roots.update(
-            {
-                f"custom:{index}": os.path.abspath(path)
-                for index, path in enumerate(config.custom_gfx_dirs)
-            }
-        )
-        return {
-            source_id: scan_root
-            for source_id, scan_root in roots.items()
-            if not any(
-                _is_under(scan_root, existing)
-                for existing in (interface_root, gfx_root)
+            candidates.append(
+                ("events", _configured_path(root, config.path_event_pictures))
             )
-        }
+        candidates.extend(
+            (f"custom:{index}", os.path.abspath(path))
+            for index, path in enumerate(config.custom_gfx_dirs)
+        )
+        # Mirrors the scan-skip in _scan_snapshot: a root nested inside an
+        # already-scanned root is scanned under that outer root, never on its
+        # own, so _reference_for_path must not attribute paths to it either.
+        scanned = [interface_root, gfx_root]
+        roots = {}
+        for source_id, scan_root in candidates:
+            if any(_is_under(scan_root, existing) for existing in scanned):
+                continue
+            roots[source_id] = scan_root
+            scanned.append(scan_root)
+        return roots
+
+
+def _declaration_families(declaration: SpriteDeclaration) -> tuple[str, ...]:
+    families = ["decisions"]
+    if declaration.top_level and declaration.strict_extension:
+        if (
+            "goals" in declaration.texture_path_lower
+            or "focus" in declaration.texture_path_lower
+        ):
+            families.append("sprites")
+        if (
+            "ideas" in declaration.texture_path_lower
+            or "idea" in declaration.texture_path_lower
+        ):
+            families.append("ideas")
+    return tuple(families)
 
 
 def _parse_declarations(
@@ -925,13 +1265,18 @@ def _image_candidates(path: PathReference) -> tuple[PathReference, ...]:
     )
 
 
-def _replace_or_append(records, replacement):
-    for index, record in enumerate(records):
-        if record.path == replacement.path:
-            records[index] = replacement
-            return records
-    records.append(replacement)
-    return records
+def _absolute_key(path: str) -> str:
+    return os.path.normcase(os.path.abspath(path))
+
+
+def _absolute_candidates(path: str) -> tuple[str, ...]:
+    keys = [_absolute_key(path)]
+    stem = os.path.splitext(path)[0]
+    if path.lower().endswith(".dds"):
+        keys.extend(_absolute_key(stem + extension) for extension in (".png", ".tga"))
+    else:
+        keys.append(_absolute_key(stem + ".dds"))
+    return tuple(keys)
 
 
 def _configured_path(root: str, configured_path: str) -> str:
