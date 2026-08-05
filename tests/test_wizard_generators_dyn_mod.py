@@ -7,13 +7,18 @@ from hoi4cm.wizards._generators import (
 )
 
 
-def test_parse_dyn_mod_line_three_field_form():
+def test_parse_dyn_mod_line_two_field_form():
     modifier, var, tooltip = _parse_dyn_mod_line(
         "political_power_factor = AM_var_pp_factor_tt"
     )
     assert modifier == "political_power_factor"
     assert var == "AM_var_pp_factor_tt"
     assert tooltip == ""
+
+
+def test_parse_dyn_mod_line_keeps_extra_equals_in_the_tooltip():
+    modifier, var, tooltip = _parse_dyn_mod_line("a = b = c = d")
+    assert (modifier, var, tooltip) == ("a", "b", "c = d")
 
 
 def test_parse_dyn_mod_line_three_field_form_with_tooltip():
@@ -138,3 +143,44 @@ def test_build_dyn_mod_output_empty_mods_omits_variable_section():
     out = build_dyn_mod_output(mod_id="TAG_x", mods_raw="")
     assert "Variable modifiers" not in out
     assert "Tooltip keys for each modifier stat" not in out
+
+
+def test_build_dyn_mod_output_skips_commented_constant_lines():
+    out = build_dyn_mod_output(
+        mod_id="TAG_x", const="# skip me\nconsumer_goods_factor = 0.05"
+    )
+    assert "\tconsumer_goods_factor = 0.05" in out
+    assert "skip me" not in out
+
+
+def test_build_dyn_mod_output_golden_definition_block():
+    # The definition block's order (scope, icon, enable, variables, consts)
+    # is what a mod file needs; substring checks can't see it.
+    out = build_dyn_mod_output(
+        mod_id="TAG_x",
+        icon="GFX_idea_x",
+        enable="has_war = yes",
+        mods_raw="stability_factor = AM_stab = stab_tt",
+        const="consumer_goods_factor = 0.05",
+    )
+    definition = out.split("\n\n\n")[0]
+    assert definition == "\n".join(
+        [
+            "# ============================================================",
+            "# FILE: common/dynamic_modifiers/TAG_x.txt",
+            "# ============================================================",
+            "",
+            "TAG_x = {",
+            "\ticon = GFX_idea_x",
+            "\tenable = {",
+            "\t\thas_war = yes",
+            "\t}",
+            "",
+            "\t# Variable modifiers — read daily from variables",
+            "\tstability_factor = AM_stab",
+            "",
+            "\t# Constant modifiers",
+            "\tconsumer_goods_factor = 0.05",
+            "}",
+        ]
+    )

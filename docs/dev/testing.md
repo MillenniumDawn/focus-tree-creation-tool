@@ -3,7 +3,33 @@
 Run `pytest --collect-only -q` to list the tests under `tests/`.
 `pyproject.toml`'s `[tool.pytest.ini_options]` puts `src/` on `pythonpath`
 and scopes `testpaths` to `tests/`, so `pytest` from the repo root just
-works. No `conftest.py`; fixtures live in the file that uses them.
+works. `tests/conftest.py` holds exactly one fixture, `tk_root` (see "The
+headless constraint"); everything else lives in the file that uses it.
+
+## Coverage
+
+`pytest --cov` measures the whole `hoi4cm` package with branch coverage on
+(`[tool.coverage.run]` in `pyproject.toml`), so no `--cov=` argument is
+needed for the normal case. `pytest --cov --cov-report=term-missing` prints
+the per-module gaps.
+
+CI gates it twice:
+
+- The full run carries `--cov-fail-under=35`, a backstop against a large
+  untested addition. It's a floor, not a target: raise it as coverage
+  climbs.
+- `pytest tests/test_wizard_generators_*.py --cov=hoi4cm.wizards._generators
+  --cov-fail-under=95` keeps the wizard script/loc renderers near-fully
+  covered, and runs without Xvfb on purpose so they can't quietly grow a
+  Tk dependency.
+
+The package number (~37% with a display, ~35% without) is dominated by the
+Tk dialog modules that no test constructs: `wizards/decision.py`,
+`event.py`, `national_spirit.py` and `dyn_mod.py` are 1-2%, and
+`ui/settings_dialog.py`, `ui/menubar.py`, `ui/toolbar.py`,
+`ui/mod_loading.py` and `ui/splash.py` are all under 10%. Everything pure
+is 82-100%. Extracting logic out of those closures (the `_generators.py`
+pattern) is what moves the number; chasing the percentage directly is not.
 
 ## Fixture / isolation patterns
 
@@ -33,14 +59,14 @@ here today:
   first, plus that structural fields and known content survive. Its
   `reset_counter` fixture saves and restores `Focus._next` around each test
   so ID assignment doesn't depend on test order.
-- **Skip if no display.** `tests/test_canvas_tk.py`'s `tk_root` fixture
-  tries `tk.Tk()` and calls `pytest.skip("no display")` on `tk.TclError`,
-  so it runs for real on a dev machine but skips cleanly in CI (see "The
-  headless constraint" below). It drives `CanvasMixin` directly against a
-  bare `tk.Canvas`, through a minimal fake host exposing only the
+- **The shared `tk_root` fixture.** `tests/conftest.py` builds a `tk.Tk()`
+  and destroys it after the test, skipping when no display is reachable
+  (see "The headless constraint" below). `tests/test_canvas_tk.py`
+  overrides it to `withdraw()` the window, since it drives `CanvasMixin`
+  against a bare `tk.Canvas` through a minimal fake host exposing only the
   attributes `_draw_focus` touches (`cv`, `focuses`, `offset`, `zoom`,
-  `selected`, `_multi_sel`, `mutex_mode`, `mutex_src`, `_get_tree_badge`),
-  instead of constructing a real `App`.
+  `selected`, `_multi_sel`, `mutex_mode`, `mutex_src`, `_get_tree_badge`)
+  rather than a real `App`, and never needs real geometry.
 
 ## Golden-fixture tests for the focus-tree pipeline
 
@@ -114,29 +140,37 @@ regression, so it was documented rather than reverted.
 
 ## The headless constraint
 
-CI's `test` job (`.github/workflows/ci.yml`) runs on plain `ubuntu-latest`
-with no `python3-tk` install and no Xvfb, so it has neither a display nor a
-guaranteed-working `tkinter` import. Nothing that opens a real Tk window
-can run there. In practice: every pure
-module (`focus_tree/`, `models/`, `script/`, `mod/`, `data/`, all of
-`core/`, plus `ui/viewport.py`) has real test coverage, as does the wizard
+CI's `test` job (`.github/workflows/ci.yml`) runs the suite under
+`xvfb-run -a`, so widget tests do get a display there. `tkinter` itself
+imports fine on `actions/setup-python`'s CPython; the display was the only
+thing missing, and Xvfb supplies it.
+
+The job also sets `HOI4CM_REQUIRE_TK=1`, which turns `tk_root`'s "no
+display" skip into a failure. Without that, a broken Xvfb would take every
+widget test out of the run and still report green: before Xvfb landed, 18
+tests skipped in CI and nobody saw it. Locally the variable is unset, so a
+headless dev box still skips cleanly.
+
+Widget tests are still the expensive kind, so the split stands: put logic
+in a pure function and test it headlessly wherever that's possible. Every
+pure module (`focus_tree/`, `models/`, `script/`, `mod/`, `data/`, all of
+`core/`, plus `ui/viewport.py`) has real coverage, as does the wizard
 script/loc generator module `wizards/_generators.py` (via
-`tests/test_wizard_generators_*.py`; CI enforces a floor on it). The close-path
-dependencies the wizards lean on now have headless tests too: the daemon
-executor (`core/concurrency.py`, `tests/test_concurrency.py`), the graphics
-snapshot cache (`mod/workspace_cache.py`, `tests/test_workspace_cache.py`),
-and `ui/widgets.py`'s `_safe_after`/`_safe_after_idle`
-(`tests/test_safe_after.py`). The rest of `wizards/` plus most of `ui/`
-still has none. `tests/test_ui_smoke.py` is one
-exception that proves the rule: it imports `hoi4cm.ui`/`hoi4cm.ui.theme`
-and asserts on plain data (theme constants are hex strings, `BORDER` is
-exported) without ever instantiating a `Tk()` root or starting a mainloop.
-`tests/test_canvas_tk.py` is the other: it does instantiate a real `Tk()`
-and drive real canvas items, but skips itself in CI via the `tk_root`
-fixture above rather than pretending to be headless-safe. That's the
-ceiling for what a headless test can check on the UI side today. Anything
-that needs a real widget, geometry, or event binding beyond what
-`test_canvas_tk.py` covers is manual-only.
+`tests/test_wizard_generators_*.py`, at 99%). The close-path dependencies
+the wizards lean on are covered too: the daemon executor
+(`core/concurrency.py`, `tests/test_concurrency.py`), the graphics snapshot
+cache (`mod/workspace_cache.py`, `tests/test_workspace_cache.py`), and
+`ui/widgets.py`'s `_safe_after`/`_safe_after_idle`
+(`tests/test_safe_after.py`). The virtualized list sizing is split the same
+way: `visible_row_range`/`row_pool_size` are pure and carry the
+"pool always holds every visible row" property test, while the widget
+behavior around them (`tests/test_checklist.py`,
+`tests/test_focus_list.py`, `tests/test_thumbnail_grid.py`) needs a root.
+
+What still has no test at all is widget construction: the dialog bodies in
+`wizards/` and most of `ui/` (`settings_dialog.py`, `menubar.py`,
+`toolbar.py`, `mod_loading.py`, `gfx_browser.py`, `splash.py`). Those are
+manual-only, per the checklists below.
 
 ## Manual verification
 

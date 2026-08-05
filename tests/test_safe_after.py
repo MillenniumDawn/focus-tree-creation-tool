@@ -13,28 +13,53 @@ from hoi4cm.ui.widgets import _safe_after, _safe_after_idle
 
 
 class FakeWidget:
-    def __init__(self, exists=True, fail_after=False):
+    """Stand-in for a Tk widget; `after`/`after_idle` fire straight away.
+
+    A destroyed widget reports `winfo_exists() == 0` like Tk does;
+    `exists_raises=True` covers the rarer case where the lookup itself
+    blows up. `defer=True` queues the guarded callback instead of running
+    it, so a test can destroy the widget between scheduling and firing,
+    which is the race the wrappers exist for.
+    """
+
+    def __init__(self, exists=True, fail_after=False, defer=False, exists_raises=False):
         self._exists = exists
         self._fail_after = fail_after
+        self._defer = defer
+        self._exists_raises = exists_raises
         self.scheduled = []
         self.calls = []
 
     def winfo_exists(self):
-        if not self._exists:
+        if self._exists_raises:
             raise _tkinter.TclError("bad window path name")
-        return self._exists
+        return 1 if self._exists else 0
+
+    def destroy(self):
+        self._exists = False
+
+    def fire(self):
+        for guarded in self.calls:
+            guarded()
+        self.calls.clear()
+
+    def _run(self, fn):
+        if self._defer:
+            self.calls.append(fn)
+        else:
+            fn()
 
     def after(self, ms, fn):
         if self._fail_after:
             raise _tkinter.TclError("invalid command name")
         self.scheduled.append(("after", ms, fn))
-        fn()
+        self._run(fn)
 
     def after_idle(self, fn):
         if self._fail_after:
             raise _tkinter.TclError("invalid command name")
         self.scheduled.append(("idle", fn))
-        fn()
+        self._run(fn)
 
 
 def test_safe_after_runs_fn_when_widget_exists():
@@ -44,7 +69,36 @@ def test_safe_after_runs_fn_when_widget_exists():
     _safe_after(widget, 100, lambda: calls.append("ran"))
 
     assert calls == ["ran"]
-    assert widget.scheduled == [("after", 100, widget.scheduled[0][2])]
+
+
+def test_safe_after_schedules_with_the_requested_delay():
+    widget = FakeWidget()
+
+    _safe_after(widget, 100, lambda: None)
+
+    assert [(kind, ms) for kind, ms, _fn in widget.scheduled] == [("after", 100)]
+
+
+def test_safe_after_skips_fn_when_widget_dies_before_the_callback_fires():
+    widget = FakeWidget(defer=True)
+    calls = []
+
+    _safe_after(widget, 100, lambda: calls.append("ran"))
+    widget.destroy()
+    widget.fire()
+
+    assert calls == []
+
+
+def test_safe_after_idle_skips_fn_when_widget_dies_before_the_callback_fires():
+    widget = FakeWidget(defer=True)
+    calls = []
+
+    _safe_after_idle(widget, lambda: calls.append("ran"))
+    widget.destroy()
+    widget.fire()
+
+    assert calls == []
 
 
 def test_safe_after_idle_runs_fn_when_widget_exists():
@@ -67,6 +121,24 @@ def test_safe_after_skips_fn_when_widget_destroyed():
 
 def test_safe_after_idle_skips_fn_when_widget_destroyed():
     widget = FakeWidget(exists=False)
+    calls = []
+
+    _safe_after_idle(widget, lambda: calls.append("ran"))
+
+    assert calls == []
+
+
+def test_safe_after_skips_fn_when_the_exists_check_raises():
+    widget = FakeWidget(exists_raises=True)
+    calls = []
+
+    _safe_after(widget, 100, lambda: calls.append("ran"))
+
+    assert calls == []
+
+
+def test_safe_after_idle_skips_fn_when_the_exists_check_raises():
+    widget = FakeWidget(exists_raises=True)
     calls = []
 
     _safe_after_idle(widget, lambda: calls.append("ran"))

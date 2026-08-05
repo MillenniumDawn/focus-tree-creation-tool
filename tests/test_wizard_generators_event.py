@@ -115,10 +115,23 @@ def test_render_event_txt_does_not_inject_log_when_user_already_has_one():
     assert 'log = "custom"' in out
 
 
-def test_render_event_txt_emits_mtth_days_and_months():
+def test_render_event_txt_emits_mtth_days_only():
     out = render_event_txt(_make_event(mtth_days="30", mtth_months=""))
-    assert "\tmean_time_to_happen = {" in out
-    assert "\t\tdays = 30" in out
+    assert "\tmean_time_to_happen = {\n\t\tdays = 30\n\t}" in out
+
+
+def test_render_event_txt_emits_mtth_months_only():
+    out = render_event_txt(_make_event(mtth_days="", mtth_months="6"))
+    assert "\tmean_time_to_happen = {\n\t\tmonths = 6\n\t}" in out
+
+
+def test_render_event_txt_emits_both_mtth_units():
+    out = render_event_txt(_make_event(mtth_days="30", mtth_months="6"))
+    assert "\tmean_time_to_happen = {\n\t\tdays = 30\n\t\tmonths = 6\n\t}" in out
+
+
+def test_render_event_txt_omits_mtth_when_unset():
+    assert "mean_time_to_happen" not in render_event_txt(_make_event())
 
 
 def test_render_event_txt_emits_major_and_fire_once_and_hidden_flags():
@@ -215,20 +228,87 @@ def test_generate_event_loc_yml_empty_returns_empty_string():
 
 
 @pytest.mark.parametrize(
-    "override,expected_substr",
+    "flag,line",
     [
-        ({"major": True}, "\tmajor = yes"),
-        ({"fire_once": True}, "\tfire_only_once = yes"),
-        ({"hidden": True}, "\thidden = yes"),
-        ({"triggered": False}, "is_triggered_only"),
+        ("major", "\tmajor = yes"),
+        ("fire_once", "\tfire_only_once = yes"),
+        ("hidden", "\thidden = yes"),
+        ("triggered", "\tis_triggered_only = yes"),
     ],
 )
-def test_render_event_txt_flag_matrix(override, expected_substr):
-    event = _make_event(**override)
-    out = render_event_txt(event)
-    # When triggered=False we expect "is_triggered_only" to be absent, so
-    # the assertion flips in that case; handle both branches.
-    if "triggered" in override and not override["triggered"]:
-        assert "is_triggered_only" not in out
-    else:
-        assert expected_substr in out
+def test_render_event_txt_emits_each_flag_only_when_set(flag, line):
+    assert line in render_event_txt(_make_event(**{flag: True}))
+    assert line not in render_event_txt(_make_event(**{flag: False}))
+
+
+def test_render_event_txt_golden_block():
+    # Locks header order, the blank line before `immediate`, and where the
+    # injected option log lands; substring assertions can't see any of that.
+    out = render_event_txt(
+        _make_event(
+            eid="ns.1",
+            picture="GFX_x",
+            fire_once=True,
+            trigger_code="has_war = yes",
+            mtth_days="30",
+            immediate="add_stability = 0.05",
+            options=[
+                {
+                    "name": "ns.1.a",
+                    "text": "A",
+                    "effects": "add_political_power = 10",
+                    "ai_chance": "75",
+                },
+                {"name": "ns.1.b", "text": "B", "effects": "", "ai_chance": "1"},
+            ],
+        )
+    )
+    assert out == "\n".join(
+        [
+            "country_event = {",
+            "\tid = ns.1",
+            "\ttitle = ns.1.t",
+            "\tdesc = ns.1.d",
+            "\tpicture = GFX_x",
+            "\tfire_only_once = yes",
+            "\tis_triggered_only = yes",
+            "\ttrigger = {",
+            "\t\thas_war = yes",
+            "\t}",
+            "\tmean_time_to_happen = {",
+            "\t\tdays = 30",
+            "\t}",
+            "",
+            "\timmediate = {",
+            "\t\tadd_stability = 0.05",
+            "\t}",
+            "",
+            "\toption = {",
+            "\t\tname = ns.1.a",
+            '\t\tlog = "[GetDateText]: [This.GetName]: ns.1.a executed"',
+            "\t\tadd_political_power = 10",
+            "\t\tai_chance = { base = 75 }",
+            "\t}",
+            "\toption = {",
+            "\t\tname = ns.1.b",
+            "\t\tai_chance = { base = 1 }",
+            "\t}",
+            "}",
+        ]
+    )
+
+
+def test_render_event_txt_defaults_missing_option_keys():
+    out = render_event_txt(_make_event(options=[{}]))
+    assert "\t\tname = opt" in out
+    assert "\t\tai_chance = { base = 1 }" in out
+
+
+def test_generate_events_txt_keeps_first_seen_namespace_order():
+    events = [
+        _make_event(eid="beta.1"),
+        _make_event(eid="alpha.1"),
+        _make_event(eid="beta.2"),
+    ]
+    out = generate_events_txt(events)
+    assert out.index("add_namespace = beta") < out.index("add_namespace = alpha")

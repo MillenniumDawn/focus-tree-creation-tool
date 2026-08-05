@@ -1,6 +1,9 @@
 """Headless tests for the decision-wizard script/loc generators."""
 
+import pytest
+
 from hoi4cm.wizards._generators import (
+    _strip_val,
     generate_decision_block,
     generate_decision_categories_file,
     generate_decision_loc_yml,
@@ -301,3 +304,261 @@ def test_generate_decisions_file_skips_empty_cat():
     out = generate_decisions_file(cats, decs)
     assert "CAT_ONE = {" in out
     assert "CAT_EMPTY" not in out
+
+
+@pytest.mark.parametrize(
+    "field,keyword",
+    [
+        ("allowed", "allowed"),
+        ("visible", "visible"),
+        ("available", "available"),
+        ("modifier", "modifier"),
+        ("cancel_trigger", "cancel_trigger"),
+        ("cancel_effect", "cancel_effect"),
+        ("remove_trigger", "remove_trigger"),
+        ("ai_will_do", "ai_will_do"),
+    ],
+)
+def test_decision_block_wraps_free_text_fields_at_three_tabs(field, keyword):
+    out = generate_decision_block(_dec(**{field: "always = yes"}))
+    assert f"\t\t{keyword} = {{\n\t\t\talways = yes\n\t\t}}" in out
+
+
+def test_decision_block_omits_unset_free_text_fields():
+    out = generate_decision_block(_dec(ai_will_do=""))
+    for keyword in (
+        "allowed",
+        "visible",
+        "available",
+        "modifier",
+        "cancel_trigger",
+        "cancel_effect",
+        "remove_trigger",
+        "ai_will_do",
+    ):
+        assert f"{keyword} = {{" not in out
+
+
+def test_decision_block_priority_omitted_at_default():
+    assert "priority" not in generate_decision_block(_dec(priority="1"))
+    assert "\t\tpriority = 10" in generate_decision_block(_dec(priority="10"))
+
+
+def test_decision_block_complete_effect_keeps_a_user_written_log():
+    out = generate_decision_block(
+        _dec(complete_effect='log = "mine"\nadd_political_power = 1')
+    )
+    # The wizard injects a log line only when the user hasn't written one.
+    assert out.count("log = ") == 1
+    assert '\t\t\tlog = "mine"' in out
+
+
+def test_decision_block_remove_effect_keeps_a_user_written_log():
+    out = generate_decision_block(_dec(remove_effect='log = "mine"\nadd_stability = 1'))
+    assert out.count("log = ") == 2  # the injected complete_effect one, plus the user's
+    assert '\t\t\tlog = "mine"' in out
+
+
+def test_decision_block_blank_dec_id_emits_no_complete_effect():
+    out = generate_decision_block(_dec(dec_id="   "))
+    assert "complete_effect" not in out
+
+
+def test_decision_block_mission_activation_and_timeout_effect():
+    out = generate_decision_block(
+        _dec(
+            is_mission=True,
+            activation="has_war = yes",
+            timeout_effect="add_stability = -0.1",
+        )
+    )
+    assert "\t\tactivation = {\n\t\t\thas_war = yes\n\t\t}" in out
+    assert "\t\ttimeout_effect = {\n\t\t\tadd_stability = -0.1\n\t\t}" in out
+
+
+def test_decision_block_timeout_effect_needs_the_mission_flag():
+    out = generate_decision_block(_dec(is_mission=False, timeout_effect="x = 1"))
+    assert "timeout_effect" not in out
+
+
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        ("highlight_states = { state = 1 }", "\t\thighlight_states = { state = 1 }"),
+        ("state = 1", "\t\thighlight_states = {\n\t\t\tstate = 1\n\t\t}"),
+    ],
+)
+def test_decision_block_highlight_states_wraps_only_bare_bodies(raw, expected):
+    assert expected in generate_decision_block(_dec(highlight_states=raw))
+
+
+def test_decision_block_state_target_scope_passed_through():
+    out = generate_decision_block(
+        _dec(targeted="state", state_target_scope="controlled"), targeted="state"
+    )
+    assert "\t\tstate_target = controlled" in out
+
+
+def test_decision_block_targeted_flags_and_trigger():
+    out = generate_decision_block(
+        _dec(
+            targeted="country",
+            target_trigger="is_puppet = no",
+            targets_dynamic=True,
+            target_non_existing=True,
+        ),
+        targeted="country",
+    )
+    assert "\t\ttarget_trigger = {\n\t\t\tis_puppet = no\n\t\t}" in out
+    assert "\t\ttargets_dynamic = yes" in out
+    assert "\t\ttarget_non_existing = yes" in out
+
+
+def test_decision_block_targeting_fields_ignored_when_not_targeted():
+    out = generate_decision_block(
+        _dec(
+            targets="123",
+            targets_dynamic=True,
+            target_non_existing=True,
+            target_array="TAG",
+            target_trigger="is_puppet = no",
+        )
+    )
+    for keyword in (
+        "targets",
+        "targets_dynamic",
+        "target_non_existing",
+        "target_array",
+        "target_trigger",
+        "state_target",
+    ):
+        assert keyword not in out
+
+
+def test_decision_block_defaults_match_explicit_none_and_pp():
+    explicit = generate_decision_block(_dec(), targeted="none", cost_type="pp")
+    assert generate_decision_block(_dec()) == explicit
+
+
+def test_decision_block_golden_field_order():
+    # Locks the emitted order, which substring assertions can't: `icon` sits
+    # between `allowed` and `visible`, and `priority` closes the block.
+    out = generate_decision_block(
+        _dec(
+            icon="my_icon",
+            allowed="always = yes",
+            visible="has_war = no",
+            available="has_political_power > 25",
+            days_remove="30",
+            fire_only_once=True,
+            complete_effect="add_political_power = 50",
+            ai_will_do="factor = 5",
+            priority="10",
+            on_map_mode="",
+        )
+    )
+    assert out == "\n".join(
+        [
+            "\tTAG_decision = {",
+            "\t\tallowed = {",
+            "\t\t\talways = yes",
+            "\t\t}",
+            "\t\ticon = GFX_decision_my_icon",
+            "\t\tvisible = {",
+            "\t\t\thas_war = no",
+            "\t\t}",
+            "\t\tavailable = {",
+            "\t\t\thas_political_power > 25",
+            "\t\t}",
+            "\t\tcost = 25",
+            "\t\tdays_remove = 30",
+            "\t\tfire_only_once = yes",
+            "\t\tcomplete_effect = {",
+            '\t\t\tlog = "[GetDateText]: [Root.GetName]: Decision TAG_decision"',
+            "\t\t\tadd_political_power = 50",
+            "\t\t}",
+            "\t\tai_will_do = {",
+            "\t\t\tfactor = 5",
+            "\t\t}",
+            "\t\tpriority = 10",
+            "\t}",
+        ]
+    )
+
+
+def test_generate_decision_scripted_loc_emits_desc_blocks_only_when_described():
+    out = generate_decision_scripted_loc(
+        [_cat(loc_desc="Cat desc")], [_dec(loc_desc="Dec desc")]
+    )
+    assert "name = GET_TAG_cat_desc" in out
+    assert "localization_key = TAG_cat_desc" in out
+    assert "name = GET_TAG_decision_desc" in out
+
+    bare = generate_decision_scripted_loc([_cat()], [_dec()])
+    assert "_desc" not in bare
+
+
+def test_generate_decision_scripted_loc_skips_blank_dec_id():
+    out = generate_decision_scripted_loc([_cat()], [_dec(dec_id="  ")])
+    assert "GET_TAG_cat_name" in out  # the category still renders
+    assert "GET_TAG_decision" not in out
+
+
+def test_generate_decision_categories_file_emits_optional_scalars():
+    cats = [
+        _cat(
+            picture="GFX_pic",
+            priority="5",
+            visible_when_empty=True,
+            scripted_gui="my_gui",
+        )
+    ]
+    out = generate_decision_categories_file(cats, [])
+    assert "\tpicture = GFX_pic" in out
+    assert "\tpriority = 5" in out
+    assert "\tvisible_when_empty = yes" in out
+    assert "\tscripted_gui = my_gui" in out
+
+
+def test_generate_decision_categories_file_priority_omitted_at_default():
+    out = generate_decision_categories_file([_cat(priority="1")], [])
+    assert "priority" not in out
+
+
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        ("highlight_states = { state = 1 }", "\thighlight_states = { state = 1 }"),
+        ("state = 1", "\thighlight_states = {\n\t\tstate = 1\n\t}"),
+    ],
+)
+def test_generate_decision_categories_file_highlight_states(raw, expected):
+    cats = [_cat(highlight_states=raw)]
+    assert expected in generate_decision_categories_file(cats, [])
+
+
+def test_generate_decision_categories_file_on_map_area_trigger():
+    cats = [_cat(on_map_area=True, map_trigger="is_puppet = no")]
+    out = generate_decision_categories_file(cats, [])
+    assert "\t\ttarget_root_trigger = {\n\t\t\tis_puppet = no\n\t\t}" in out
+
+
+def test_generate_decision_loc_yml_skips_blank_ids():
+    out = generate_decision_loc_yml([_cat(cat_id="  ")], [_dec(dec_id="  ")])
+    assert out == "l_english:\n"
+
+
+@pytest.mark.parametrize(
+    "value,expected",
+    [
+        (None, ""),
+        (True, ""),
+        (False, ""),
+        (42, "42"),
+        ("  spaced  ", "spaced"),
+    ],
+)
+def test_strip_val_normalizes_form_values(value, expected):
+    # Tk vars hand back bools and ints as well as strings; a bool must not
+    # render as the literal "True".
+    assert _strip_val(value) == expected
