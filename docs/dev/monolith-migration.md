@@ -104,6 +104,18 @@
   See the status table for the module-by-module list, and
   `architecture.md`'s "Revision discipline" / executor-daemon notes for the
   two invariants these depend on.
+- **#31**: the "Load All Trees" checklist dialog's per-file row loop (~7 Tk
+  widgets per candidate file, ~5,500 for a ~790-file mod) moved to
+  `ui/checklist.py`'s `VirtualChecklist`, a pooled row list over a scrolling
+  canvas. It reuses `_PooledList`, a base class factored out of
+  `VirtualFocusList` (`ui/focus_list.py`) for this extraction. The
+  filename-prefix convention, select-mode presets, and batch-load filter
+  came out as plain functions alongside it: `default_tree_type`,
+  `apply_select_mode`, `is_loadable`, plus the `ChecklistItem` row struct.
+  `_load_all_trees` itself (the directory scan, file walk, and dialog
+  wiring) stays a Tk shell in the monolith; only the row rendering and
+  selection logic moved. See `performance.md`'s "Checklist dialog for Load
+  All Trees" row for the perf fix this was.
 
 What's left in `hoi4_content_maker.py` today is essentially: the `sys.path`
 shim and import block (lines ~62-152), two Windows-DPI helpers (~155-207),
@@ -192,6 +204,7 @@ needs it via `hoi4cm.core`.
 | Effect rendering + Paradox script syntax | n/a | `script/effects.py`, `script/syntax.py` | **done** (modernization) |
 | Canvas image pipeline + lifecycle / scene index / scheduler | n/a | `ui/image_broker.py`, `ui/lifecycle.py`, `ui/scene_index.py`, `ui/thumbnail_grid.py`, `ui/focus_list.py`, `ui/canvas_scheduler.py` | **done** (modernization) |
 | Wizard GFX helpers + async image loader | n/a | `wizards/_graphics.py`, `wizards/_image_loader.py` | **done** (modernization) |
+| `_load_all_trees` row-building loop | ~4327-4638 (~312, was ~4349-4755/407) | `ui/checklist.py` (`VirtualChecklist`, `ChecklistItem`, `apply_select_mode`, `default_tree_type`, `is_loadable`), reusing `_PooledList` factored out of `ui/focus_list.py` | **done** (#31), dialog shell stays in `_load_all_trees` |
 
 `_import_txt` was worth calling out: it had been a third, independent copy of
 the tokenizer/parser logic that already existed in `focus_tree/parse.py`.
