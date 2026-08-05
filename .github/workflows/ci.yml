@@ -38,3 +38,11 @@ jobs:
         run: pip install ".[dev]"
       - name: Run tests
         run: pytest
+      - name: Coverage gate (wizard generators)
+        # Per-module floor on `hoi4cm.wizards._generators` keeps new
+        # script/loc extractions tested (see docs/dev/wizards.md).
+        run: >
+          pytest tests/test_wizard_generators_*.py
+          --cov=hoi4cm.wizards._generators
+          --cov-fail-under=70
+          --cov-report=term-missing

@@ -24,6 +24,7 @@ from hoi4cm.ui import (
     TEXT,
     TEXT_DIM,
 )
+from hoi4cm.wizards import _generators
 from hoi4cm.wizards._shared import _LOC_KEY_RE
 
 
@@ -539,23 +540,13 @@ def open_additional_income_wizard(app):
             output_lines.append(
                 "── Spirit Code Snippet (paste into your ideas file) ──"
             )
-            snippet = (
-                f"\t{idea_id} = {{\n"
-                f"\t\tname = {idea_id}\n"
-                f"\t\tallowed_civil_war = {{ always = yes }}\n"
-                f"\t\tpicture = GFX_idea_{idea_id}\n"
-                f"\t\tcancel = {{\n"
-                f"\t\t\tNOT = {{ original_tag = {country_tag} }}\n"
-                f"\t\t}}\n"
-                f"\t\tmodifier = {{\n"
-                f"\t\t\tcustom_modifier_tooltip = {tooltip_key}\n"
-                f"\t\t}}\n"
-                f"\t}}\n"
-                f"\n"
-                f"\t# Localisation needed:\n"
-                f'\t# {idea_id}: "{spirit_name}"\n'
-                f'\t# {idea_id}_desc: "{spirit_desc}"\n'
-                f'\t# {tooltip_key}: "$$[?{variable_name}|+3] from §Y${idea_id}$§!\\n"'
+            snippet = _generators.build_income_spirit_snippet(
+                idea_id=idea_id,
+                country_tag=country_tag,
+                variable_name=variable_name,
+                tooltip_key=tooltip_key,
+                spirit_name=spirit_name,
+                spirit_desc=spirit_desc,
             )
             output_lines.append(snippet)
 

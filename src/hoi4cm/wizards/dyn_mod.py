@@ -34,6 +34,7 @@ from hoi4cm.ui import (
     _safe_after,
     _safe_after_idle,
 )
+from hoi4cm.wizards._generators import build_dyn_mod_output
 from hoi4cm.wizards._graphics import browser_folders, collect_image_pairs
 from hoi4cm.wizards._image_loader import TkImageLoader
 from hoi4cm.wizards._shared import notifying_workspace_files
@@ -930,114 +931,21 @@ def open_dyn_mod_wizard(app):
     _dm_edit_btn.config(command=_dm_toggle_edit)
     _dm_save_raw_btn.config(command=_dm_save_raw)
 
+    # Real builder + line parser live in _generators.py (headless-testable).
     def _parse_mod_line(ln):
-        """Parse 'modifier_key = var_name = tooltip_key' or 'modifier_key = var_name'"""
-        parts = [p.strip() for p in ln.split("=", 2)]
-        modifier = parts[0] if len(parts) > 0 else ""
-        var = parts[1] if len(parts) > 1 else ""
-        tooltip = parts[2] if len(parts) > 2 else ""
-        return modifier, var, tooltip
+        return _parse_mod_line_pure(ln)
 
     def _build_output():
-        mid = v_id.get().strip() or "TAG_my_dynamic_modifier"
-        scope = v_scope.get().strip()
-        icon = v_icon.get().strip()
-        enable = v_enable.get("1.0", "end").strip()
-        mods_raw = v_mods.get("1.0", "end").strip()
-        const = v_const.get("1.0", "end").strip()
-        name = v_loc_name.get().strip()
-        desc = v_loc_desc.get().strip()
-
-        mod_entries = []
-        for ln in mods_raw.splitlines():
-            ln = ln.strip()
-            if ln and not ln.startswith("#"):
-                modifier, var, tooltip = _parse_mod_line(ln)
-                if modifier and var:
-                    mod_entries.append((modifier, var, tooltip))
-
-        # ── FILE 1: common/dynamic_modifiers/mid.txt ─────────
-        dm = [
-            "# ============================================================",
-            f"# FILE: common/dynamic_modifiers/{mid}.txt",
-            "# ============================================================",
-            "",
-            f"{mid} = {{",
-        ]
-        if scope != "country":
-            dm.append(f"\tscope = {scope}")
-        if icon:
-            dm.append(f"\ticon = {icon}")
-        if enable:
-            dm.append("\tenable = {")
-            for ln in enable.splitlines():
-                if ln.strip():
-                    dm.append(f"\t\t{ln.strip()}")
-            dm.append("\t}")
-        dm.append("")
-        if mod_entries:
-            dm.append("\t# Variable modifiers — read daily from variables")
-            for modifier, var, _ in mod_entries:
-                dm.append(f"\t{modifier} = {var}")
-        if const:
-            dm.append("")
-            dm.append("\t# Constant modifiers")
-            for ln in const.splitlines():
-                ln = ln.strip()
-                if ln and not ln.startswith("#"):
-                    dm.append(f"\t{ln}")
-        dm.append("}")
-        dm.append("")
-
-        # ── FILE 2: Focus snippet showing modern usage ────────
-        dm += [
-            "",
-            "# ============================================================",
-            "# FOCUS SNIPPET — modern add_to_variable pattern",
-            "# Use this inside completion_reward = { }",
-            "# ============================================================",
-            "",
-            "\t\tcompletion_reward = {",
-            "\t\t\t# Show player which dynamic modifier is being changed",
-            "\t\t\t# Use adds_dynamic_modifier_tt if this focus also calls add_dynamic_modifier",
-            "\t\t\t# Use modifies_dynamic_modifier_tt if only changing variables (no add_dynamic_modifier)",
-            "\t\t\tcustom_effect_tooltip = {",
-            "\t\t\t\tlocalization_key = modifies_dynamic_modifier_tt",
-            f"\t\t\t\tMODIFIER = {mid}",
-            "\t\t\t}",
-        ]
-        for modifier, var, tooltip in mod_entries:
-            if tooltip:
-                dm.append(
-                    f"\t\t\tadd_to_variable = {{ {var} = 0.05 tooltip = {tooltip} }}"
-                )
-            else:
-                dm.append(f"\t\t\tadd_to_variable = {{ {var} = 0.05 }}")
-        dm += ["\t\t}", ""]
-
-        # ── FILE 3: Localisation ──────────────────────────────
-        dm += [
-            "",
-            "# ============================================================",
-            "# LOCALISATION — paste into localisation/english/TAG_l_english.yml",
-            "# File must be UTF-8-BOM encoded",
-            "# ============================================================",
-            "",
-            f' {mid}: "{name}"',
-            f' {mid}_desc: "{desc}"',
-            ' modifies_dynamic_modifier_tt: "Modifies $MODIFIER$"',
-            ' adds_dynamic_modifier_tt: "Adds $MODIFIER$ which grants:"  # for activation focuses',
-        ]
-        if mod_entries:
-            dm.append("")
-            dm.append(" # Tooltip keys for each modifier stat:")
-            for modifier, var, tooltip in mod_entries:
-                if tooltip:
-                    dm.append(
-                        f' {tooltip}: "PLACEHOLDER — describe the {modifier} change"'
-                    )
-
-        return "\n".join(dm)
+        return build_dyn_mod_output(
+            mod_id=v_id.get(),
+            scope=v_scope.get(),
+            icon=v_icon.get(),
+            enable=v_enable.get("1.0", "end"),
+            mods_raw=v_mods.get("1.0", "end"),
+            const=v_const.get("1.0", "end"),
+            loc_name=v_loc_name.get(),
+            loc_desc=v_loc_desc.get(),
+        )
 
     def _preview(*_):
         if _dm_edit_mode[0]:

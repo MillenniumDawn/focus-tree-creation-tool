@@ -119,8 +119,15 @@ with no `python3-tk` install and no Xvfb, so it has neither a display nor a
 guaranteed-working `tkinter` import. Nothing that opens a real Tk window
 can run there. In practice: every pure
 module (`focus_tree/`, `models/`, `script/`, `mod/`, `data/`, all of
-`core/`, plus `ui/viewport.py`) has real test coverage, and every wizard in
-`wizards/` plus most of `ui/` has none. `tests/test_ui_smoke.py` is one
+`core/`, plus `ui/viewport.py`) has real test coverage, as does the wizard
+script/loc generator module `wizards/_generators.py` (via
+`tests/test_wizard_generators_*.py`; CI enforces a floor on it). The close-path
+dependencies the wizards lean on now have headless tests too: the daemon
+executor (`core/concurrency.py`, `tests/test_concurrency.py`), the graphics
+snapshot cache (`mod/workspace_cache.py`, `tests/test_workspace_cache.py`),
+and `ui/widgets.py`'s `_safe_after`/`_safe_after_idle`
+(`tests/test_safe_after.py`). The rest of `wizards/` plus most of `ui/`
+still has none. `tests/test_ui_smoke.py` is one
 exception that proves the rule: it imports `hoi4cm.ui`/`hoi4cm.ui.theme`
 and asserts on plain data (theme constants are hex strings, `BORDER` is
 exported) without ever instantiating a `Tk()` root or starting a mainloop.
