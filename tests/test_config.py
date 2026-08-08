@@ -88,3 +88,21 @@ def test_sidebar_refresh_skip_flag_registered_and_honored(monkeypatch):
     # A saved False is honored (allow_falsy) so the optimization can be disabled.
     monkeypatch.setattr(ctx_mod, "cfg_load", lambda: {"sidebar_refresh_skip": False})
     assert ctx_mod.ModContext().sidebar_refresh_skip is False
+
+
+def test_sidebar_refresh_skip_roundtrips_through_save_config(monkeypatch):
+    """save_config persists the flag and a fresh context reloads it."""
+    from hoi4cm.mod import context as ctx_mod
+
+    saved = {}
+    monkeypatch.setattr(ctx_mod, "cfg_save", lambda data: saved.update(data))
+    monkeypatch.setattr(ctx_mod, "cfg_load", lambda: dict(saved))
+    monkeypatch.setattr(ctx_mod.GraphicsCatalog, "flush_cache", lambda self: None)
+
+    c = ctx_mod.ModContext()
+    c.sidebar_refresh_skip = False
+    c.save_config()
+    assert saved["sidebar_refresh_skip"] is False
+
+    c2 = ctx_mod.ModContext()
+    assert c2.sidebar_refresh_skip is False
