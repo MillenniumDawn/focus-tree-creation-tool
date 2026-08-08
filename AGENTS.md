@@ -48,4 +48,4 @@ The monolith inserts `src/` onto `sys.path` at startup and imports canonical nam
 
 ## Releases
 
-Pushing a tag matching `v*` triggers `release.yml`: the version is the tag name (`github.ref_name`), it builds Win/macOS/Linux executables, and publishes a Release with them attached. Executables are never committed.
+`ci.yml` is the only workflow. Every push and PR runs lint, test, then the Win/macOS/Linux build matrix. Pushing a tag matching `v*` runs that same gate and adds the `release` job, which publishes a Release with the three binaries and a `SHA256SUMS.txt` attached; the version is the tag name (`github.ref_name`). Executables are never committed. Build deps are hash-pinned in `build/requirements.txt`, regenerated with `uv pip compile --generate-hashes --universal --extra build pyproject.toml -o build/requirements.txt`.
