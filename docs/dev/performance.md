@@ -89,6 +89,14 @@ because no live-edit path calls a refresh: `_live_eff_field`,
 `_live_eff_text` and the raw-block `<KeyRelease>` handler write straight into
 the effect dict and leave the widgets alone.
 
+"What the section renders" is the whole rule, and it reaches past the
+selected focus. Prerequisite and mutex rows show the *target* focus's name
+resolved through `self.focuses` (`_ref_name`), so those signatures hold the
+resolved names, not the raw ids. Keying them on ids would leave a row stuck
+on `?some_id` after a load supplies the focus it points at, since the id
+never changed. Anything new added to a section has to go into its signature
+too, or the section silently stops updating for it.
+
 ## GIL guidance
 
 Threads in this codebase buy UI responsiveness and I/O overlap, not

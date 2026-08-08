@@ -2061,11 +2061,15 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
             focus_name_lookup=build_focus_name_lookup(self.focuses.values()),
         )
 
+    def _ref_name(self, fid):
+        """Display name for a referenced focus id, or ?id while unresolved."""
+        return self.focuses[fid].name if fid in self.focuses else f"?{fid}"
+
     def _refresh_prereqs(self):
         groups = self.selected.prereqs if self.selected else []
         sig = (
             getattr(self.selected, "id", None),
-            tuple(tuple(g) for g in groups),
+            tuple(tuple(self._ref_name(p) for p in g) for g in groups),
         )
         if MOD.sidebar_refresh_skip and getattr(self, "_prereqs_sig", None) == sig:
             return
@@ -2082,9 +2086,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
             ).pack(anchor="w")
             return
         for gi, grp in enumerate(self.selected.prereqs):
-            names = [
-                self.focuses[p].name if p in self.focuses else f"?{p}" for p in grp
-            ]
+            names = [self._ref_name(p) for p in grp]
             row = tk.Frame(
                 self._prereq_box,
                 bg=BG_CARD,
@@ -2115,7 +2117,10 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
 
     def _refresh_mutex(self):
         mutex = self.selected.mutex if self.selected else []
-        sig = (getattr(self.selected, "id", None), tuple(mutex))
+        sig = (
+            getattr(self.selected, "id", None),
+            tuple(self._ref_name(m) for m in mutex),
+        )
         if MOD.sidebar_refresh_skip and getattr(self, "_mutex_sig", None) == sig:
             return
         self._mutex_sig = sig
@@ -2131,7 +2136,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
             ).pack(anchor="w")
             return
         for i, mid in enumerate(self.selected.mutex):
-            name = self.focuses[mid].name if mid in self.focuses else f"?{mid}"
+            name = self._ref_name(mid)
             row = tk.Frame(
                 self._mutex_box,
                 bg=BG_CARD,
