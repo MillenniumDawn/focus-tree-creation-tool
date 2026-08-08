@@ -53,3 +53,21 @@ def test_startup_does_not_import_wizard_modules():
     line = next(x for x in result.stdout.splitlines() if x.startswith("WIZARDS:"))
     loaded = [m for m in line.removeprefix("WIZARDS:").split(",") if m]
     assert loaded == ["hoi4cm.wizards._shared"], loaded
+
+
+def test_lazy_wizards_are_declared_as_pyinstaller_hiddenimports():
+    """The lazy `__getattr__` leaves no static edge for PyInstaller to follow.
+
+    Without an explicit hiddenimports entry the wizard modules are dropped
+    from the frozen build and every wizard menu item raises at runtime — a
+    failure the build job cannot see, since the binary still links.
+    """
+    import hoi4cm.wizards as wizards
+
+    spec = (Path(__file__).resolve().parent.parent / "build" / "build.py").read_text()
+    missing = [
+        mod
+        for mod in wizards._WIZARD_MODULES.values()
+        if f"'hoi4cm.wizards.{mod}'" not in spec
+    ]
+    assert not missing, missing
