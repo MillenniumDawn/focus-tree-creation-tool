@@ -98,6 +98,7 @@ class ModContext:
         self.loaded = False
         self.use_cache = True  # SQLite per-file scan cache (disable in tests)
         self._cache = None  # active ScanCache during a scan(), else None
+        self.sidebar_refresh_skip = True  # skip rebuild when sidebar data unchanged
         self.is_md = False  # True when Millennium Dawn is detected
         self.mod_name = ""  # basename of mod root
         self._status = ""
@@ -160,6 +161,7 @@ class ModContext:
         ("country_tag_names", "country_tag_names", True),
         ("loc_token_style", "loc_token_style", True),
         ("is_md_override", "is_md", False),
+        ("sidebar_refresh_skip", "sidebar_refresh_skip", True),
     )
 
     def _load_config(self):
@@ -235,11 +237,9 @@ class ModContext:
             except OSError:
                 sig = (0.0, 0)
             sigs[p] = sig
-            cached = self._cache.get(domain, p, *sig) if self._cache else None
-            if cached is not None:
-                contrib[p] = cached
-            else:
-                to_read.append(p)
+        if self._cache:
+            contrib.update(self._cache.get_many(domain, sigs))
+        to_read = [p for p in paths if p not in contrib]
 
         def read_and_extract(p):
             return extract_fn(self._read(p))
@@ -256,8 +256,10 @@ class ModContext:
                     contrib[p] = fut.result()
 
         if self._cache:
-            for p in to_read:
-                self._cache.put(domain, p, sigs[p][0], sigs[p][1], contrib[p])
+            self._cache.put_many(
+                domain,
+                [(p, sigs[p][0], sigs[p][1], contrib[p]) for p in to_read],
+            )
             self._cache.prune(domain, paths)
             self._cache.commit()
 

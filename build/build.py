@@ -90,6 +90,11 @@ a = Analysis(
         'hoi4_logger',
         'hoi4cm', 'hoi4cm.core', 'hoi4cm.core.logger',
         'hoi4cm.core.config', 'hoi4cm.core.paths', 'logging.handlers',
+        # hoi4cm.wizards resolves these through a module-level __getattr__,
+        # so there is no static edge for PyInstaller to follow.
+        'hoi4cm.wizards.national_spirit', 'hoi4cm.wizards.decision',
+        'hoi4cm.wizards.dyn_mod', 'hoi4cm.wizards.additional_income',
+        'hoi4cm.wizards.event',
         'tkinter', 'tkinter.ttk', 'tkinter.messagebox',
         'tkinter.filedialog', 'tkinter.font', 'tkinter.scrolledtext',
         'PIL', 'PIL.Image', 'PIL.ImageTk',

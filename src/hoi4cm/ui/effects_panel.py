@@ -29,6 +29,28 @@ from hoi4cm.ui import (
 )
 
 
+def _effects_signature(focus, effects):
+    """Value signature of a focus's effects for the refresh-skip.
+
+    Covers the focus id plus every type and field pair the cards render, so
+    two signatures can only match when a rebuild would draw the same thing.
+    Object ids are deliberately not part of it: CPython reuses addresses, so
+    a freed focus's id comes back on an unrelated one and skips a rebuild
+    that was needed. Values go in as `repr` so the signature holds no
+    reference to the live dicts an in-place edit would mutate under it.
+    """
+    return (
+        getattr(focus, "id", None),
+        tuple(
+            (
+                eff.get("type"),
+                tuple(sorted((k, repr(v)) for k, v in eff.get("fields", {}).items())),
+            )
+            for eff in effects
+        ),
+    )
+
+
 class EffectsMixin:
     """Effects tab, effect browser and parameter-form for :class:`App`."""
 
@@ -466,10 +488,19 @@ class EffectsMixin:
         self._focus_list_cache.invalidate()
         self._invalidate_focus_list_structure()
 
-    def _refresh_effects(self):
+    def _refresh_effects(self, force=False):
+        effects = self.selected.effects if self.selected else []
+        sig = _effects_signature(self.selected, effects)
+        if (
+            not force
+            and MOD.sidebar_refresh_skip
+            and getattr(self, "_effects_sig", None) == sig
+        ):
+            return
+        self._effects_sig = sig
         for w in self._eff_box.winfo_children():
             w.destroy()
-        if not self.selected or not self.selected.effects:
+        if not effects:
             tk.Label(
                 self._eff_box,
                 text=tr("common.none", "None"),

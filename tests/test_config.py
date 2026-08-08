@@ -75,3 +75,34 @@ def test_cfg_save_sets_owner_only_perms(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "CONFIG_PATH", str(p))
     config.cfg_save({"a": 1})
     assert (os.stat(str(p)).st_mode & 0o077) == 0
+
+
+def test_sidebar_refresh_skip_flag_registered_and_honored(monkeypatch):
+    from hoi4cm.mod import context as ctx_mod
+
+    attrs = dict((k, a) for k, a, _ in ctx_mod.ModContext._PERSISTED_ATTRS)
+    assert attrs["sidebar_refresh_skip"] == "sidebar_refresh_skip"
+    # Default on when the config key is absent.
+    monkeypatch.setattr(ctx_mod, "cfg_load", lambda: {})
+    assert ctx_mod.ModContext().sidebar_refresh_skip is True
+    # A saved False is honored (allow_falsy) so the optimization can be disabled.
+    monkeypatch.setattr(ctx_mod, "cfg_load", lambda: {"sidebar_refresh_skip": False})
+    assert ctx_mod.ModContext().sidebar_refresh_skip is False
+
+
+def test_sidebar_refresh_skip_roundtrips_through_save_config(monkeypatch):
+    """save_config persists the flag and a fresh context reloads it."""
+    from hoi4cm.mod import context as ctx_mod
+
+    saved = {}
+    monkeypatch.setattr(ctx_mod, "cfg_save", lambda data: saved.update(data))
+    monkeypatch.setattr(ctx_mod, "cfg_load", lambda: dict(saved))
+    monkeypatch.setattr(ctx_mod.GraphicsCatalog, "flush_cache", lambda self: None)
+
+    c = ctx_mod.ModContext()
+    c.sidebar_refresh_skip = False
+    c.save_config()
+    assert saved["sidebar_refresh_skip"] is False
+
+    c2 = ctx_mod.ModContext()
+    assert c2.sidebar_refresh_skip is False

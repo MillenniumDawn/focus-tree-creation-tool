@@ -30,7 +30,10 @@
   per-file cache backing warm reloads.
 - **`wizards/`**: the five `open_*_wizard(app)` entry points (decision,
   event, national spirit, dynamic modifier, additional income) plus
-  `_shared.py` for cross-wizard state. See `wizards.md`.
+  `_shared.py` for cross-wizard state. The package `__init__` resolves the
+  five names through a module-level `__getattr__`, so importing one wizard
+  doesn't load the other four; keep it that way when adding a sixth. See
+  `wizards.md`.
 - **`ui/`**: Tk-facing code: `CanvasMixin`, `EffectsMixin`,
   `ModLoadingMixin` (the three mixins `App` is built from), `gfx_browser.py`
   (the universal GFX picker, the drag-to-place GFX editor, and the

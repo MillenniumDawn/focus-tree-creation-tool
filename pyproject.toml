@@ -23,8 +23,10 @@ build = ["pyinstaller>=6.0", "Pillow>=9.0"]        # compile standalone executab
 [tool.hatch.build.targets.wheel]
 packages = ["src/hoi4cm"]
 
+# The repo root is on the path so tests can import the monolith; CI runs bare
+# `pytest`, which (unlike `python -m pytest`) does not add the cwd itself.
 [tool.pytest.ini_options]
-pythonpath = ["src"]
+pythonpath = ["src", "."]
 testpaths = ["tests"]
 
 # `pytest --cov` measures the whole package. CI runs it twice: once over
