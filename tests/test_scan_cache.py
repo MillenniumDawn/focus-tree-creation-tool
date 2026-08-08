@@ -138,3 +138,15 @@ def test_get_many_skips_corrupt_json(cache):
     conn.commit()
     assert cache.get_many("focus", {"/x/bad.txt": (1.0, 1)}) == {}
     assert cache.get("focus", "/x/bad.txt", 1.0, 1) is None
+
+
+def test_get_many_skips_none_contribution(cache):
+    """A cached None contribution must be treated as a miss, not served.
+
+    Matches ``get``'s contract where None means "not cached" so the caller
+    re-reads the file rather than propagating a None contribution.
+    """
+    cache.put_many("focus", [("/x/a.txt", 1.0, 1, None)])
+    cache.commit()
+    assert cache.get_many("focus", {"/x/a.txt": (1.0, 1)}) == {}
+    assert cache.get("focus", "/x/a.txt", 1.0, 1) is None

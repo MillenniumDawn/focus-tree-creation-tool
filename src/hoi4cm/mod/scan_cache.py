@@ -103,9 +103,12 @@ class ScanCache:
                 if c_size != size or abs(c_mtime - mtime) > 1e-6:
                     continue
                 try:
-                    hits[path] = json.loads(data)
+                    value = json.loads(data)
                 except Exception:
                     continue
+                if value is None:
+                    continue
+                hits[path] = value
             return hits
         except Exception:
             return {}

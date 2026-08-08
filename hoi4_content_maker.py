@@ -4486,7 +4486,9 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
 
         def _do_load():
             to_load = [
-                (item.key, item.type_var.get()) for item in rows if is_loadable(item)
+                (item.key, item.type_var.get())
+                for item in rows
+                if is_loadable(item)
             ]
             if not to_load:
                 messagebox.showwarning(
