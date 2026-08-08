@@ -690,9 +690,9 @@ class ModLoadingMixin:
                     menu.add_command(
                         label=name, command=lambda n=name: self._set_gfx(n)
                     )
-        # Rebuild effect cards if open (they may have mod-aware dropdowns)
+        # Rebuild effect cards if open (they may have mod-aware dropdowns).
         if self.selected:
-            self._refresh_effects()
+            self._refresh_effects(force=True)
 
     def _apply_md_additional_income(
         self, idea_id, variable_name, amount, tooltip_key, formula_type="fixed"

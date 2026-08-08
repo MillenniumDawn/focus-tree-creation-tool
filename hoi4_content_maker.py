@@ -136,14 +136,6 @@ from hoi4cm.ui.menubar import build_menubar
 from hoi4cm.ui.mod_loading import ModLoadingMixin
 from hoi4cm.ui.settings_dialog import open_settings
 from hoi4cm.ui.toolbar import build_toolbar_row2
-from hoi4cm.wizards import _shared as _wiz_shared
-from hoi4cm.wizards import (
-    open_additional_income_wizard,
-    open_decision_wizard,
-    open_dyn_mod_wizard,
-    open_event_wizard,
-    open_national_spirit_wizard,
-)
 
 log_startup()
 
@@ -268,6 +260,8 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
             self.destroy()
 
     def _close_app_caches(self):
+        from hoi4cm.wizards import _shared as _wiz_shared
+
         MOD.sprite_imgs.clear()
         for cache in _wiz_shared._app_img_caches:
             cache.clear()
@@ -1248,12 +1242,16 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
         """Rebuild the OFFSETS UI rows from f.offsets. Clears and repopulates _offset_box."""
         if f is None:
             f = self.selected
+        offsets = getattr(f, "offsets", []) if f else []
+        sig = tuple((o.get("x"), o.get("y"), o.get("trigger")) for o in offsets)
+        if getattr(self, "_offsets_sig", None) == sig:
+            return
+        self._offsets_sig = sig
         for w in self._offset_box.winfo_children():
             w.destroy()
         self._offset_entries = []
         if not f:
             return
-        offsets = getattr(f, "offsets", [])
         if not offsets:
             tk.Label(
                 self._offset_box,
@@ -2061,9 +2059,14 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
         )
 
     def _refresh_prereqs(self):
+        groups = self.selected.prereqs if self.selected else []
+        sig = tuple(tuple(g) for g in groups)
+        if getattr(self, "_prereqs_sig", None) == sig:
+            return
+        self._prereqs_sig = sig
         for w in self._prereq_box.winfo_children():
             w.destroy()
-        if not self.selected or not self.selected.prereqs:
+        if not groups:
             tk.Label(
                 self._prereq_box,
                 text=tr("common.none", "None"),
@@ -2105,9 +2108,14 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
             ).pack(side="right")
 
     def _refresh_mutex(self):
+        mutex = self.selected.mutex if self.selected else []
+        sig = tuple(mutex)
+        if getattr(self, "_mutex_sig", None) == sig:
+            return
+        self._mutex_sig = sig
         for w in self._mutex_box.winfo_children():
             w.destroy()
-        if not self.selected or not self.selected.mutex:
+        if not mutex:
             tk.Label(
                 self._mutex_box,
                 text=tr("common.none", "None"),
@@ -4889,22 +4897,32 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
 
     def _additional_income_wizard(self):
         """Open the MD Additional Income wizard."""
+        from hoi4cm.wizards import open_additional_income_wizard
+
         open_additional_income_wizard(self)
 
     def _national_spirit_wizard(self):
         """Open the National Spirit/Ideas builder wizard."""
+        from hoi4cm.wizards import open_national_spirit_wizard
+
         open_national_spirit_wizard(self)
 
     def _dyn_mod_wizard(self):
         """Open the Dynamic Modifier wizard."""
+        from hoi4cm.wizards import open_dyn_mod_wizard
+
         open_dyn_mod_wizard(self)
 
     def _decision_wizard(self):
         """Open the Decision Maker wizard."""
+        from hoi4cm.wizards import open_decision_wizard
+
         open_decision_wizard(self)
 
     def _event_wizard(self):
         """Open the Event Maker wizard."""
+        from hoi4cm.wizards import open_event_wizard
+
         open_event_wizard(self)
 
     def _update_statusbar(self):

@@ -81,6 +81,35 @@ class ScanCache:
         except Exception:
             return None
 
+    def get_many(self, domain, sigs):
+        """Return cached contributions for *sigs* ({path: (mtime, size)}).
+
+        One SELECT per domain instead of one per path. Only paths whose sig
+        matches the cache are returned.
+        """
+        if not self._conn or not sigs:
+            return {}
+        try:
+            rows = self._conn.execute(
+                "SELECT path, mtime, size, data FROM file_cache WHERE domain=?",
+                (domain,),
+            ).fetchall()
+            hits = {}
+            for path, c_mtime, c_size, data in rows:
+                sig = sigs.get(path)
+                if sig is None:
+                    continue
+                mtime, size = sig
+                if c_size != size or abs(c_mtime - mtime) > 1e-6:
+                    continue
+                try:
+                    hits[path] = json.loads(data)
+                except Exception:
+                    continue
+            return hits
+        except Exception:
+            return {}
+
     def put(self, domain, path, mtime, size, data):
         if not self._conn:
             return
@@ -89,6 +118,22 @@ class ScanCache:
                 "INSERT OR REPLACE INTO file_cache "
                 "(domain, path, mtime, size, data) VALUES (?, ?, ?, ?, ?)",
                 (domain, path, mtime, size, json.dumps(data, ensure_ascii=False)),
+            )
+        except Exception:
+            pass
+
+    def put_many(self, domain, items):
+        """Insert/replace several (path, mtime, size, data) rows in one statement."""
+        if not self._conn or not items:
+            return
+        try:
+            self._conn.executemany(
+                "INSERT OR REPLACE INTO file_cache "
+                "(domain, path, mtime, size, data) VALUES (?, ?, ?, ?, ?)",
+                [
+                    (domain, path, mtime, size, json.dumps(data, ensure_ascii=False))
+                    for path, mtime, size, data in items
+                ],
             )
         except Exception:
             pass

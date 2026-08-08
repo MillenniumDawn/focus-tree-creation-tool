@@ -466,10 +466,21 @@ class EffectsMixin:
         self._focus_list_cache.invalidate()
         self._invalidate_focus_list_structure()
 
-    def _refresh_effects(self):
+    def _refresh_effects(self, force=False):
+        effects = self.selected.effects if self.selected else []
+        sig = (
+            id(self.selected),
+            tuple(
+                (id(eff), eff.get("type"), tuple(sorted(eff.get("fields", {}).keys())))
+                for eff in effects
+            ),
+        )
+        if not force and getattr(self, "_effects_sig", None) == sig:
+            return
+        self._effects_sig = sig
         for w in self._eff_box.winfo_children():
             w.destroy()
-        if not self.selected or not self.selected.effects:
+        if not effects:
             tk.Label(
                 self._eff_box,
                 text=tr("common.none", "None"),

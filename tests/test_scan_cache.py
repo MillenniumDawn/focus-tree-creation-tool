@@ -26,6 +26,43 @@ def test_put_get_roundtrip(cache):
     assert cache.get("focus", "/x/a.txt", 100.0, 5) == {"ids": ["A", "B"]}
 
 
+def test_put_many_get_many_roundtrip(cache):
+    cache.put_many(
+        "focus",
+        [
+            ("/x/a.txt", 100.0, 5, {"ids": ["A"]}),
+            ("/x/b.txt", 200.0, 7, {"ids": ["B"]}),
+        ],
+    )
+    cache.commit()
+    hits = cache.get_many("focus", {"/x/a.txt": (100.0, 5), "/x/b.txt": (200.0, 7)})
+    assert hits == {"/x/a.txt": {"ids": ["A"]}, "/x/b.txt": {"ids": ["B"]}}
+
+
+def test_get_many_skips_missing_and_stale(cache):
+    cache.put_many(
+        "focus",
+        [
+            ("/x/a.txt", 100.0, 5, {"ids": ["A"]}),
+            ("/x/b.txt", 200.0, 7, {"ids": ["B"]}),
+        ],
+    )
+    cache.commit()
+    # a.txt stale (size changed), b.txt missing from sigs, c.txt not cached.
+    hits = cache.get_many("focus", {"/x/a.txt": (100.0, 6), "/x/c.txt": (1.0, 1)})
+    assert hits == {}
+
+
+def test_get_many_empty_sigs(cache):
+    assert cache.get_many("focus", {}) == {}
+
+
+def test_put_many_empty(cache):
+    cache.put_many("focus", [])
+    cache.commit()
+    assert cache.get_many("focus", {"/x/a.txt": (1.0, 1)}) == {}
+
+
 def test_get_miss_returns_none(cache):
     assert cache.get("focus", "/x/nope.txt", 1.0, 1) is None
 

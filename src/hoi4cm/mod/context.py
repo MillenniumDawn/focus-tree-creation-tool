@@ -235,11 +235,9 @@ class ModContext:
             except OSError:
                 sig = (0.0, 0)
             sigs[p] = sig
-            cached = self._cache.get(domain, p, *sig) if self._cache else None
-            if cached is not None:
-                contrib[p] = cached
-            else:
-                to_read.append(p)
+        if self._cache:
+            contrib.update(self._cache.get_many(domain, sigs))
+        to_read = [p for p in paths if p not in contrib]
 
         def read_and_extract(p):
             return extract_fn(self._read(p))
@@ -256,8 +254,10 @@ class ModContext:
                     contrib[p] = fut.result()
 
         if self._cache:
-            for p in to_read:
-                self._cache.put(domain, p, sigs[p][0], sigs[p][1], contrib[p])
+            self._cache.put_many(
+                domain,
+                [(p, sigs[p][0], sigs[p][1], contrib[p]) for p in to_read],
+            )
             self._cache.prune(domain, paths)
             self._cache.commit()
 
