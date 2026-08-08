@@ -30,17 +30,22 @@ from hoi4cm.ui import (
 
 
 def _effects_signature(focus, effects):
-    """Structural signature of a focus's effects for the refresh-skip.
+    """Value signature of a focus's effects for the refresh-skip.
 
-    Includes the focus object id and, per effect, the object id, type, and
-    field keys — but NOT field values. So a live-edit to a value keeps the
-    signature stable (no spurious rebuild), while add/remove/undo (new
-    objects) or a new field key (add-field) changes it and forces a rebuild.
+    Covers the focus id plus every type and field pair the cards render, so
+    two signatures can only match when a rebuild would draw the same thing.
+    Object ids are deliberately not part of it: CPython reuses addresses, so
+    a freed focus's id comes back on an unrelated one and skips a rebuild
+    that was needed. Values go in as `repr` so the signature holds no
+    reference to the live dicts an in-place edit would mutate under it.
     """
     return (
-        id(focus),
+        getattr(focus, "id", None),
         tuple(
-            (id(eff), eff.get("type"), tuple(sorted(eff.get("fields", {}).keys())))
+            (
+                eff.get("type"),
+                tuple(sorted((k, repr(v)) for k, v in eff.get("fields", {}).items())),
+            )
             for eff in effects
         ),
     )

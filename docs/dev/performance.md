@@ -26,6 +26,9 @@ the target.
 | No canvas viewport culling: `_do_redraw` iterates every loaded `Focus` regardless of what's on screen; loading all trees puts ~329k items on the canvas | `ui/canvas.py` (`_do_redraw`, `_draw_focus`, `_draw_lines`) | Viewport rect computed once per redraw (`ui/viewport.py`'s pure `visible_world_rect`/`focus_visible`/`edge_visible`); offscreen focuses never get canvas items (lazy creation), and an already-drawn focus that pans offscreen gets one `itemconfig(state="hidden")` per redraw instead of a full coord/style recompute | fixed in phase 8 | not yet measured, needs a display session against the real mod |
 | A single-focus drag rebuilt every `FocusDocument` index on each snap step (`move()`) and did a full `SceneIndex` rebuild (all edges rasterized) on each throttled line-redraw frame, O(F+E) per drag frame | `models/document.py` (`move`), `ui/scene_index.py` (`rebuild`/`update_focus`), `ui/canvas.py` (`_do_draw_lines_throttled`) | `move()` patches only `occupied_positions`; `SceneIndex.update_focus` patches the moved focus's cell and re-rasterizes only its incident edges; the drag line-redraw calls `update_focus` instead of `ensure`'s full rebuild | fixed | synthetic 2000-focus / 2860-edge tree (Python 3.14): drag-snap step (`move` + scene) median 7.8-8.3ms -> 0.029ms, p95 12-14ms -> 0.05ms, max up to 21ms -> 0.1ms. See the drag-snap note below |
 | Every wizard file write rebuilt the whole graphics state: image/gfx list copies, two full goal/idea `_is_under` passes, a full `_derive_references`, a 64k-entry `_image_stamps` rebuild, a whole-snapshot SQLite store, and a flush of the decoded-image LRU | `mod/graphics_catalog.py` (`note_written`/`note_deleted`), `mod/context.py` (`_apply_graphics_maps`) | `note_written`/`note_deleted` patch `PathReference`-keyed dicts in place, re-derive only the affected sprite-map entries (per-file declaration diffs plus disk-derived claims), defer the SQLite store to the next refresh or shutdown, and evict only the changed names from the decoded-image LRU | fixed in issue #29 | 50k-image synthetic tree (Python 3.14): in-place image overwrite 1609ms -> 0.07ms, new image 1607ms -> 0.06ms, `.gfx` append+write 1324ms -> 0.84ms, image delete 3216ms -> 77ms. A reload after writes now pays the deferred store once (~0.7s) instead of once per write |
+| Every launch imported all five wizards and `_wiz_shared` at monolith import time, pulling in their data tables whether or not a wizard is ever opened | `hoi4_content_maker.py` (module header) | Imports moved into the five `_*_wizard` callbacks and `_close_app_caches`, so a wizard module loads on first use | fixed in issue #34 | not yet measured, needs a display session against the real mod |
+| `_scan_files_cached` did one `SELECT` per file against `ScanCache` and one `INSERT OR REPLACE` per miss, so a domain covering the reference mod's ~790 focus files paid ~790 round trips | `mod/context.py` (`_scan_files_cached`), `mod/scan_cache.py` (`get_many`/`put_many`) | `get_many` pulls a domain's rows in one `SELECT` and matches them against the caller's `{path: (mtime, size)}` map; `put_many` writes the misses with one `executemany`. `prune` already holds the table to the current path set, so the whole-domain read stays proportional to the mod | fixed in issue #34 | not yet measured, needs a display session against the real mod |
+| `_populate` tore down and recreated the offsets, prerequisites, mutex and effects sidebar sections on every call, even when the focus's data was unchanged. Saving a focus re-populates, so a save on a focus with a dozen effects rebuilt every card | `hoi4_content_maker.py` (`_refresh_offsets`, `_refresh_prereqs`, `_refresh_mutex`), `ui/effects_panel.py` (`_refresh_effects`) | Each section caches a signature of what it last rendered and returns early on a match, gated on `MOD.sidebar_refresh_skip`. `_refresh_effects(force=True)` bypasses it after a mod load, since effect cards carry mod-aware dropdowns | fixed in issue #34 | not yet measured, needs a display session against the real mod |
 
 The `_draw_key`/state-key check in `_draw_focus` (`ui/canvas.py:486`) already
 makes an unchanged focus close to free to redraw, but every `_redraw()` call
@@ -65,6 +68,26 @@ patches that one index instead of rebuilding all seven; and
 `SceneIndex.update_focus` moves just the dragged focus between cells and
 re-rasterizes only its incident edges. The resulting work is O(1 + focus
 degree), not O(F+E).
+
+### Sidebar refresh signatures
+
+The four sidebar sections skip their rebuild when the signature of what they
+last rendered still matches. Those signatures are keyed on the focus's own
+`id` plus every value the section draws, never on `id()` of the focus or of
+an effect dict. CPython hands a freed object's address straight back to the
+next object of that size, so an identity-keyed signature aliases across a
+tree reload: focus B lands on freed focus A's address, matches A's stale
+signature, and the section keeps A's widgets. That is not cosmetic, since
+`_save_offsets_to_focus` reads the offset widgets back into
+`self.selected.offsets` and would write A's unsaved edit into B.
+
+Keying on rendered values instead makes the skip safe by construction: two
+signatures can only match when a rebuild would draw the same thing. Effect
+field values go in as `repr`, so the signature holds no reference to the live
+dicts that a live edit mutates in place. Nothing is lost by including values,
+because no live-edit path calls a refresh: `_live_eff_field`,
+`_live_eff_text` and the raw-block `<KeyRelease>` handler write straight into
+the effect dict and leave the widgets alone.
 
 ## GIL guidance
 
@@ -128,6 +151,7 @@ concerns on a single file.
 | `ScanCache` (same SQLite database) | per-file scan contribution, per domain | `(mtime, size)` | none, though `prune()` drops rows for paths no longer in the mod (no size/age cap) |
 | Canvas `ImageBroker` | one application session | normalized path, file stamp, transform, and catalog generation for zero-stamp assets | bounded LRU; visible renderer bundles own bounded pins and offscreen bundles release them |
 | Browser `ImageBroker` | one browser dialog | normalized path, file stamp, transform, and catalog generation for zero-stamp assets | bounded LRU; the virtual thumbnail grid pins only visible rows plus overscan |
+| Sidebar section signatures (`_offsets_sig`, `_prereqs_sig`, `_mutex_sig`, `_effects_sig`) | one `App` instance | focus `id` plus every value the section renders | replaced on each rebuild |
 
 Warm graphics loads stat known directories, `.gfx` files, and the known image
 paths. They do not recursively enumerate directories or reparse `.gfx` files.

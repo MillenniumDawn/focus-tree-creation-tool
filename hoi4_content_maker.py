@@ -1244,7 +1244,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
             f = self.selected
         offsets = getattr(f, "offsets", []) if f else []
         sig = (
-            id(f),
+            getattr(f, "id", None),
             tuple((o.get("x"), o.get("y"), o.get("trigger")) for o in offsets),
         )
         if MOD.sidebar_refresh_skip and getattr(self, "_offsets_sig", None) == sig:
@@ -2063,7 +2063,10 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
 
     def _refresh_prereqs(self):
         groups = self.selected.prereqs if self.selected else []
-        sig = (id(self.selected), tuple(tuple(g) for g in groups))
+        sig = (
+            getattr(self.selected, "id", None),
+            tuple(tuple(g) for g in groups),
+        )
         if MOD.sidebar_refresh_skip and getattr(self, "_prereqs_sig", None) == sig:
             return
         self._prereqs_sig = sig
@@ -2112,7 +2115,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
 
     def _refresh_mutex(self):
         mutex = self.selected.mutex if self.selected else []
-        sig = (id(self.selected), tuple(mutex))
+        sig = (getattr(self.selected, "id", None), tuple(mutex))
         if MOD.sidebar_refresh_skip and getattr(self, "_mutex_sig", None) == sig:
             return
         self._mutex_sig = sig
