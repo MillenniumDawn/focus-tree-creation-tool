@@ -126,7 +126,9 @@ exe = EXE(
 )
 """
     spec_path = os.path.join(SCRIPT_DIR, "hoi4_content_maker_build.spec")
-    with open(spec_path, "w") as f:
+    # PyInstaller compiles the spec as UTF-8 (PEP 263). Windows would otherwise
+    # write it as cp1252 and choke on the em-dash below.
+    with open(spec_path, "w", encoding="utf-8") as f:
         f.write(spec_content)
     return spec_path
 

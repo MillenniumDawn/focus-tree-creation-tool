@@ -68,6 +68,8 @@ jobs:
     permissions:
       contents: read
     strategy:
+      # One platform breaking shouldn't hide whether the other two are fine.
+      fail-fast: false
       matrix:
         include:
           - os: windows-latest
