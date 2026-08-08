@@ -29,6 +29,23 @@ from hoi4cm.ui import (
 )
 
 
+def _effects_signature(focus, effects):
+    """Structural signature of a focus's effects for the refresh-skip.
+
+    Includes the focus object id and, per effect, the object id, type, and
+    field keys — but NOT field values. So a live-edit to a value keeps the
+    signature stable (no spurious rebuild), while add/remove/undo (new
+    objects) or a new field key (add-field) changes it and forces a rebuild.
+    """
+    return (
+        id(focus),
+        tuple(
+            (id(eff), eff.get("type"), tuple(sorted(eff.get("fields", {}).keys())))
+            for eff in effects
+        ),
+    )
+
+
 class EffectsMixin:
     """Effects tab, effect browser and parameter-form for :class:`App`."""
 
@@ -468,13 +485,7 @@ class EffectsMixin:
 
     def _refresh_effects(self, force=False):
         effects = self.selected.effects if self.selected else []
-        sig = (
-            id(self.selected),
-            tuple(
-                (id(eff), eff.get("type"), tuple(sorted(eff.get("fields", {}).keys())))
-                for eff in effects
-            ),
-        )
+        sig = _effects_signature(self.selected, effects)
         if (
             not force
             and MOD.sidebar_refresh_skip

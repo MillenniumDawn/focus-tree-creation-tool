@@ -121,5 +121,20 @@ def test_disabled_cache_never_raises(tmp_path, monkeypatch):
     assert not c.enabled
     c.put("d", "/a", 1.0, 1, {"x": 1})  # no-op, no raise
     assert c.get("d", "/a", 1.0, 1) is None
+    c.put_many("d", [("/a", 1.0, 1, {"x": 1})])  # no-op, no raise
+    assert c.get_many("d", {"/a": (1.0, 1)}) == {}
     c.prune("d", [])
     c.close()
+
+
+def test_get_many_skips_corrupt_json(cache):
+    """A row whose data is not valid JSON must be skipped, not raise."""
+    conn = cache._conn
+    conn.execute(
+        "INSERT OR REPLACE INTO file_cache "
+        "(domain, path, mtime, size, data) VALUES (?, ?, ?, ?, ?)",
+        ("focus", "/x/bad.txt", 1.0, 1, "{not json"),
+    )
+    conn.commit()
+    assert cache.get_many("focus", {"/x/bad.txt": (1.0, 1)}) == {}
+    assert cache.get("focus", "/x/bad.txt", 1.0, 1) is None
