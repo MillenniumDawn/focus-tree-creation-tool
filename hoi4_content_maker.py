@@ -1243,7 +1243,10 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
         if f is None:
             f = self.selected
         offsets = getattr(f, "offsets", []) if f else []
-        sig = tuple((o.get("x"), o.get("y"), o.get("trigger")) for o in offsets)
+        sig = (
+            id(f),
+            tuple((o.get("x"), o.get("y"), o.get("trigger")) for o in offsets),
+        )
         if MOD.sidebar_refresh_skip and getattr(self, "_offsets_sig", None) == sig:
             return
         self._offsets_sig = sig
@@ -2060,7 +2063,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
 
     def _refresh_prereqs(self):
         groups = self.selected.prereqs if self.selected else []
-        sig = tuple(tuple(g) for g in groups)
+        sig = (id(self.selected), tuple(tuple(g) for g in groups))
         if MOD.sidebar_refresh_skip and getattr(self, "_prereqs_sig", None) == sig:
             return
         self._prereqs_sig = sig
@@ -2109,7 +2112,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
 
     def _refresh_mutex(self):
         mutex = self.selected.mutex if self.selected else []
-        sig = tuple(mutex)
+        sig = (id(self.selected), tuple(mutex))
         if MOD.sidebar_refresh_skip and getattr(self, "_mutex_sig", None) == sig:
             return
         self._mutex_sig = sig
@@ -4486,9 +4489,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
 
         def _do_load():
             to_load = [
-                (item.key, item.type_var.get())
-                for item in rows
-                if is_loadable(item)
+                (item.key, item.type_var.get()) for item in rows if is_loadable(item)
             ]
             if not to_load:
                 messagebox.showwarning(
