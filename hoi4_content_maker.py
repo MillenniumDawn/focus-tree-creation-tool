@@ -4478,9 +4478,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
 
         def _do_load():
             to_load = [
-                (item.key, item.type_var.get())
-                for item in rows
-                if is_loadable(item)
+                (item.key, item.type_var.get()) for item in rows if is_loadable(item)
             ]
             if not to_load:
                 messagebox.showwarning(
@@ -4969,9 +4967,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
                     f.name,
                     has_effects=bool(f.effects),
                     has_broken_prerequisite=any(
-                        pid not in self.focuses
-                        for group in f.prereqs
-                        for pid in group
+                        pid not in self.focuses for group in f.prereqs for pid in group
                     ),
                 )
                 for f in self.focuses.values()

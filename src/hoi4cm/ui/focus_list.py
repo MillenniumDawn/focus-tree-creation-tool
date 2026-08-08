@@ -138,7 +138,9 @@ class _FocusRow:
         color = (
             "#ef4444"
             if item.has_broken_prerequisite
-            else "#22c55e" if item.has_effects else "#fbbf24"
+            else "#22c55e"
+            if item.has_effects
+            else "#fbbf24"
         )
         self.dot.configure(fg=color)
         self.apply_selection(selected)
