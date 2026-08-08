@@ -3,6 +3,7 @@ import pytest
 from hoi4cm.ui.focus_list import (
     HOVER_BG,
     SELECTED_BG,
+    FocusListCache,
     FocusListItem,
     VirtualFocusList,
     filter_focus_items,
@@ -35,6 +36,68 @@ def test_filter_matches_via_precomputed_lowercase_name() -> None:
     item = FocusListItem(1, "Industrial Effort")
     assert item.name_lower == "industrial effort"
     assert filter_focus_items((item,), "INDUSTRIAL") == (item,)
+
+
+class _FakeDoc:
+    def __init__(self, revision: int) -> None:
+        self.revision = revision
+
+
+def test_focus_list_cache_rebuilds_only_on_document_change() -> None:
+    cache = FocusListCache()
+    doc = _FakeDoc(0)
+    calls = 0
+
+    def build():
+        nonlocal calls
+        calls += 1
+        return [FocusListItem(1, "A")]
+
+    assert cache.get(doc, build) == (FocusListItem(1, "A"),)
+    assert calls == 1
+    # Same doc, same revision: cached, no rebuild.
+    assert cache.get(doc, build) == (FocusListItem(1, "A"),)
+    assert calls == 1
+
+    # Revision bump: rebuild.
+    doc.revision = 1
+    assert cache.get(doc, build) == (FocusListItem(1, "A"),)
+    assert calls == 2
+
+
+def test_focus_list_cache_rebuilds_on_document_swap_at_same_revision() -> None:
+    # A project load swaps in a fresh FocusDocument that also starts at
+    # revision 0; the cache must not serve stale items from the old doc.
+    cache = FocusListCache()
+    old_doc = _FakeDoc(0)
+    new_doc = _FakeDoc(0)
+    calls = 0
+
+    def build():
+        nonlocal calls
+        calls += 1
+        return [FocusListItem(calls, f"item-{calls}")]
+
+    assert cache.get(old_doc, build) == (FocusListItem(1, "item-1"),)
+    assert cache.get(new_doc, build) == (FocusListItem(2, "item-2"),)
+    assert calls == 2
+
+
+def test_focus_list_cache_invalidate_forces_rebuild() -> None:
+    cache = FocusListCache()
+    doc = _FakeDoc(0)
+    calls = 0
+
+    def build():
+        nonlocal calls
+        calls += 1
+        return [FocusListItem(calls, f"item-{calls}")]
+
+    assert cache.get(doc, build) == (FocusListItem(1, "item-1"),)
+    assert calls == 1
+    cache.invalidate()
+    assert cache.get(doc, build) == (FocusListItem(2, "item-2"),)
+    assert calls == 2
 
 
 @pytest.mark.parametrize(

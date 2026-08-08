@@ -463,6 +463,8 @@ class EffectsMixin:
             fields = {fn: dv for fn, _, dv, _ in defn.get("fields", [])}
         self.selected.effects.append({"type": etype, "fields": dict(fields)})
         self._refresh_effects()
+        self._focus_list_cache.invalidate()
+        self._invalidate_focus_list_structure()
 
     def _refresh_effects(self):
         for w in self._eff_box.winfo_children():
@@ -794,6 +796,8 @@ class EffectsMixin:
             return
         self.selected.effects.pop(idx)
         self._refresh_effects()
+        self._focus_list_cache.invalidate()
+        self._invalidate_focus_list_structure()
 
     def _live_eff_field(self, idx, fname, var):
         if self.selected and idx < len(self.selected.effects):

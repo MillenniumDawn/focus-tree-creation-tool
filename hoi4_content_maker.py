@@ -130,7 +130,7 @@ from hoi4cm.ui.checklist import (
     is_loadable,
 )
 from hoi4cm.ui.effects_panel import EffectsMixin
-from hoi4cm.ui.focus_list import FocusListItem, VirtualFocusList
+from hoi4cm.ui.focus_list import FocusListCache, FocusListItem, VirtualFocusList
 from hoi4cm.ui.gfx_browser import open_focus_icon_browser
 from hoi4cm.ui.menubar import build_menubar
 from hoi4cm.ui.mod_loading import ModLoadingMixin
@@ -540,6 +540,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
             on_select=self._select_focus_from_list,
             background=BG_PANEL,
         )
+        self._focus_list_cache = FocusListCache()
         self._focus_list.pack(fill="both", expand=True)
         tk.Frame(self._left_panel, bg=BORDER_G, width=1).place(
             relx=1, rely=0, relheight=1, x=-1
@@ -4960,9 +4961,9 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
             return
         # Rebuild the item tuple only when the document structure changes;
         # search keystrokes just re-filter the cached tuple.
-        revision = self.focuses.revision
-        if getattr(self, "_focus_list_items_rev", None) != revision:
-            self._focus_list_items = tuple(
+        self._focus_list_items = self._focus_list_cache.get(
+            self.focuses,
+            lambda: (
                 FocusListItem(
                     f.id,
                     f.name,
@@ -4974,8 +4975,8 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
                     ),
                 )
                 for f in self.focuses.values()
-            )
-            self._focus_list_items_rev = revision
+            ),
+        )
         query = self._lp_search_var.get() if hasattr(self, "_lp_search_var") else ""
         placeholder = tr("common.search_placeholder", "Search...")
         selected_id = self.selected.id if self.selected else None
