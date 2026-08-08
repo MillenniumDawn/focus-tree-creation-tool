@@ -98,6 +98,7 @@ class ModContext:
         self.loaded = False
         self.use_cache = True  # SQLite per-file scan cache (disable in tests)
         self._cache = None  # active ScanCache during a scan(), else None
+        self.sidebar_refresh_skip = True  # skip rebuild when sidebar data unchanged
         self.is_md = False  # True when Millennium Dawn is detected
         self.mod_name = ""  # basename of mod root
         self._status = ""
@@ -160,6 +161,7 @@ class ModContext:
         ("country_tag_names", "country_tag_names", True),
         ("loc_token_style", "loc_token_style", True),
         ("is_md_override", "is_md", False),
+        ("sidebar_refresh_skip", "sidebar_refresh_skip", True),
     )
 
     def _load_config(self):

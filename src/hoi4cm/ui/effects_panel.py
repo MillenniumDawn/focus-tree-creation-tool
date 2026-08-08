@@ -475,7 +475,11 @@ class EffectsMixin:
                 for eff in effects
             ),
         )
-        if not force and getattr(self, "_effects_sig", None) == sig:
+        if (
+            not force
+            and MOD.sidebar_refresh_skip
+            and getattr(self, "_effects_sig", None) == sig
+        ):
             return
         self._effects_sig = sig
         for w in self._eff_box.winfo_children():
