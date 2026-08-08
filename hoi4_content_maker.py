@@ -4958,22 +4958,29 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
         self._lp_search_job = None
         if not hasattr(self, "_focus_list"):
             return
-        items = [
-            FocusListItem(
-                f.id,
-                f.name,
-                has_effects=bool(f.effects),
-                has_broken_prerequisite=any(
-                    pid not in self.focuses for group in f.prereqs for pid in group
-                ),
+        # Rebuild the item tuple only when the document structure changes;
+        # search keystrokes just re-filter the cached tuple.
+        revision = self.focuses.revision
+        if getattr(self, "_focus_list_items_rev", None) != revision:
+            self._focus_list_items = tuple(
+                FocusListItem(
+                    f.id,
+                    f.name,
+                    has_effects=bool(f.effects),
+                    has_broken_prerequisite=any(
+                        pid not in self.focuses
+                        for group in f.prereqs
+                        for pid in group
+                    ),
+                )
+                for f in self.focuses.values()
             )
-            for f in self.focuses.values()
-        ]
+            self._focus_list_items_rev = revision
         query = self._lp_search_var.get() if hasattr(self, "_lp_search_var") else ""
         placeholder = tr("common.search_placeholder", "Search...")
         selected_id = self.selected.id if self.selected else None
         self._focus_list.invalidate_structure(
-            items,
+            self._focus_list_items,
             query=query,
             placeholder=placeholder,
             selected_key=selected_id,

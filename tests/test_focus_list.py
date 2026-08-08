@@ -31,6 +31,12 @@ def test_filter_ignores_empty_query_and_search_placeholder() -> None:
     assert filter_focus_items(items, "Buscar...", placeholder="Buscar...") == items
 
 
+def test_filter_matches_via_precomputed_lowercase_name() -> None:
+    item = FocusListItem(1, "Industrial Effort")
+    assert item.name_lower == "industrial effort"
+    assert filter_focus_items((item,), "INDUSTRIAL") == (item,)
+
+
 @pytest.mark.parametrize(
     "top,height,expected",
     [
