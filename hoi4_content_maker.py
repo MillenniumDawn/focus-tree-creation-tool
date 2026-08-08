@@ -130,7 +130,7 @@ from hoi4cm.ui.checklist import (
     is_loadable,
 )
 from hoi4cm.ui.effects_panel import EffectsMixin
-from hoi4cm.ui.focus_list import FocusListItem, VirtualFocusList
+from hoi4cm.ui.focus_list import FocusListCache, FocusListItem, VirtualFocusList
 from hoi4cm.ui.gfx_browser import open_focus_icon_browser
 from hoi4cm.ui.menubar import build_menubar
 from hoi4cm.ui.mod_loading import ModLoadingMixin
@@ -540,6 +540,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
             on_select=self._select_focus_from_list,
             background=BG_PANEL,
         )
+        self._focus_list_cache = FocusListCache()
         self._focus_list.pack(fill="both", expand=True)
         tk.Frame(self._left_panel, bg=BORDER_G, width=1).place(
             relx=1, rely=0, relheight=1, x=-1
@@ -4477,9 +4478,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
 
         def _do_load():
             to_load = [
-                (item.key, item.type_var.get())
-                for item in rows
-                if is_loadable(item)
+                (item.key, item.type_var.get()) for item in rows if is_loadable(item)
             ]
             if not to_load:
                 messagebox.showwarning(
@@ -4958,22 +4957,27 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
         self._lp_search_job = None
         if not hasattr(self, "_focus_list"):
             return
-        items = [
-            FocusListItem(
-                f.id,
-                f.name,
-                has_effects=bool(f.effects),
-                has_broken_prerequisite=any(
-                    pid not in self.focuses for group in f.prereqs for pid in group
-                ),
-            )
-            for f in self.focuses.values()
-        ]
+        # Rebuild the item tuple only when the document structure changes;
+        # search keystrokes just re-filter the cached tuple.
+        self._focus_list_items = self._focus_list_cache.get(
+            self.focuses,
+            lambda: (
+                FocusListItem(
+                    f.id,
+                    f.name,
+                    has_effects=bool(f.effects),
+                    has_broken_prerequisite=any(
+                        pid not in self.focuses for group in f.prereqs for pid in group
+                    ),
+                )
+                for f in self.focuses.values()
+            ),
+        )
         query = self._lp_search_var.get() if hasattr(self, "_lp_search_var") else ""
         placeholder = tr("common.search_placeholder", "Search...")
         selected_id = self.selected.id if self.selected else None
         self._focus_list.invalidate_structure(
-            items,
+            self._focus_list_items,
             query=query,
             placeholder=placeholder,
             selected_key=selected_id,

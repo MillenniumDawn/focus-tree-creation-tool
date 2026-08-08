@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import tkinter as tk
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Hashable, Sequence
-from dataclasses import dataclass
+from collections.abc import Callable, Hashable, Iterable, Sequence
+from dataclasses import dataclass, field
 from math import ceil, floor
 from typing import Protocol
 
@@ -20,6 +20,39 @@ class FocusListItem:
     name: str
     has_effects: bool = False
     has_broken_prerequisite: bool = False
+    name_lower: str = field(init=False, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "name_lower", self.name.lower())
+
+
+class FocusListCache:
+    """Caches the item tuple against a document's identity and revision.
+
+    A project load swaps in a fresh FocusDocument that also starts at
+    revision 0, so the cache keys on object identity as well as revision.
+    """
+
+    def __init__(self) -> None:
+        self._doc: object = None
+        self._revision: int | None = None
+        self._items: tuple[FocusListItem, ...] = ()
+
+    def get(
+        self,
+        doc,
+        build: Callable[[], Iterable[FocusListItem]],
+    ) -> tuple[FocusListItem, ...]:
+        if self._doc is not doc or self._revision != doc.revision:
+            self._items = tuple(build())
+            self._doc = doc
+            self._revision = doc.revision
+        return self._items
+
+    def invalidate(self) -> None:
+        """Force the next get() to rebuild, e.g. after a direct effects edit."""
+        self._doc = None
+        self._revision = None
 
 
 def filter_focus_items(
@@ -32,7 +65,7 @@ def filter_focus_items(
     if not normalized or normalized == placeholder:
         return tuple(items)
     normalized = normalized.lower()
-    return tuple(item for item in items if normalized in item.name.lower())
+    return tuple(item for item in items if normalized in item.name_lower)
 
 
 def visible_row_range(
@@ -357,6 +390,7 @@ class VirtualFocusList(_PooledList[_FocusRow]):
 
 
 __all__ = [
+    "FocusListCache",
     "FocusListItem",
     "VirtualFocusList",
     "filter_focus_items",
