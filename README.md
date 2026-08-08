@@ -80,8 +80,9 @@ Download the latest release for your platform from the [Releases](../../releases
 Just download and run — no Python installation required.
 
 > Executables are not committed to the repository. Each tagged release is built by CI
-> (`.github/workflows/release.yml`) and the binaries are attached to the
-> [Releases](../../releases) page.
+> (`.github/workflows/ci.yml`), which runs the tests and linters first, and the binaries
+> are attached to the [Releases](../../releases) page along with a `SHA256SUMS.txt` you
+> can check them against.
 
 ### Option 2: Run from source
 
@@ -113,7 +114,9 @@ black --check .        # formatting
 checkout with no install. Tests live under `tests/`. Ruff and Black are scoped to the
 `src/hoi4cm` package and `tests/` (the legacy monolith is excluded for now).
 
-CI runs the same checks on every pull request (`.github/workflows/ci.yml`).
+CI runs the same checks on every pull request, then builds the three executables
+(`.github/workflows/ci.yml`). A `v*` tag runs that whole gate and publishes the binaries
+to Releases, so a release can't skip the tests.
 
 ---
 
@@ -245,13 +248,14 @@ CHANGELOG.md
 BUILD_INSTRUCTIONS.md       ← how to compile executables
 build/
   build.py                  ← cross-platform build script
+  requirements.txt          ← hash-pinned build deps (pyinstaller, Pillow)
   build.bat                 ← Windows-only build script (legacy)
   build_encrypted.bat       ← Windows-only encrypted build (legacy)
   hoi4_content_maker.spec   ← PyInstaller spec (Windows)
   generate_icon.py          ← generates app icons (.ico, .png)
   version_info.txt          ← Windows file properties metadata
 .github/workflows/
-  release.yml               ← CI: build + publish executables to Releases on tag push
+  ci.yml                    ← CI: lint, test, build; publishes to Releases on tag push
 docs/
   FOCUS_TREE.md             ← Focus Tree Editor deep-dive
   DECISION_MAKER.md         ← Decision Maker deep-dive

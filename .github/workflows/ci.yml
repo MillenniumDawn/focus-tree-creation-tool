@@ -4,7 +4,11 @@ on:
   pull_request:
   push:
     branches: [main]
+    tags: ['v*']
 
+# Least privilege: read by default. Only `release`, the one job gated on a v*
+# tag, gets write. Everything before it, including the build that runs arbitrary
+# project build code across three runners, stays read-only.
 permissions:
   contents: read
 
@@ -12,8 +16,8 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: '3.14'
       - name: Install dev dependencies
@@ -34,8 +38,8 @@ jobs:
       # Xvfb can't quietly drop every widget test (tests/conftest.py).
       HOI4CM_REQUIRE_TK: '1'
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install dev dependencies
@@ -56,3 +60,107 @@ jobs:
           --cov=hoi4cm.wizards._generators
           --cov-fail-under=95
           --cov-report=term-missing
+
+  # Runs on every push and PR, not just tags, so a PyInstaller break shows up
+  # in the PR that caused it instead of at tag time.
+  build:
+    needs: [lint, test]
+    permissions:
+      contents: read
+    strategy:
+      # One platform breaking shouldn't hide whether the other two are fine.
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            artifact_name: HOI4ContentMaker.exe
+          - os: macos-latest
+            artifact_name: HOI4ContentMaker-mac
+          - os: ubuntu-latest
+            artifact_name: HOI4ContentMaker-linux
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.14'
+
+      - name: Install tkinter (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y python3-tk
+
+      - name: Install build dependencies
+        # Hash-pinned closure of the `build` extra (build/requirements.txt).
+        # The project itself is not installed: build.py hands PyInstaller
+        # `pathex=[root, src]`, so hoi4cm resolves from the checkout.
+        run: pip install --require-hashes -r build/requirements.txt
+
+      - name: Build executable
+        run: python build/build.py
+
+      - name: Make executable (Linux/macOS)
+        if: runner.os != 'Windows'
+        run: chmod +x "${{ matrix.artifact_name }}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: ${{ matrix.artifact_name }}
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Checksum the binaries
+        working-directory: artifacts
+        run: sha256sum HOI4ContentMaker.exe HOI4ContentMaker-mac HOI4ContentMaker-linux > SHA256SUMS.txt
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: HOI4 Content Maker ${{ github.ref_name }}
+          body: |
+            ## HOI4 Content Maker ${{ github.ref_name }}
+
+            ### Downloads
+            | Platform | File |
+            |----------|------|
+            | Windows | `HOI4ContentMaker.exe` |
+            | macOS | `HOI4ContentMaker-mac` |
+            | Linux | `HOI4ContentMaker-linux` |
+
+            ### Running
+            - **Windows**: Double-click `HOI4ContentMaker.exe`
+            - **macOS**: `chmod +x HOI4ContentMaker-mac && ./HOI4ContentMaker-mac`
+            - **Linux**: `chmod +x HOI4ContentMaker-linux && ./HOI4ContentMaker-linux`
+
+            No Python installation required.
+
+            ### Verifying
+            `SHA256SUMS.txt` has the SHA-256 of each binary. Put it next to the
+            download and check it:
+
+            - **Linux**: `sha256sum --ignore-missing -c SHA256SUMS.txt`
+            - **macOS**: `shasum -a 256 -c SHA256SUMS.txt` (it will complain about
+              the two files you didn't download)
+            - **Windows**: `certutil -hashfile HOI4ContentMaker.exe SHA256`, then
+              compare against the matching line.
+          files: |
+            artifacts/HOI4ContentMaker.exe
+            artifacts/HOI4ContentMaker-mac
+            artifacts/HOI4ContentMaker-linux
+            artifacts/SHA256SUMS.txt
+          draft: false
+          prerelease: false

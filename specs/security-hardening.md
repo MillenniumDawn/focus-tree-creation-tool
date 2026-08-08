@@ -101,6 +101,13 @@ which is fine for best-effort recovery.
 
 ## CI / supply chain (`.github/workflows/release.yml`)
 
+> Follow-up, issue #54: `release.yml` is gone. `ci.yml` is now the one workflow:
+> lint and test on every push and PR, then the three-platform build, then a
+> `release` job gated on `startsWith(github.ref, 'refs/tags/v')`. A tag can no
+> longer publish binaries that skipped pytest, ruff, and black. CI's own actions
+> are pinned to the same SHAs listed below, build deps come from a hash-pinned
+> `build/requirements.txt`, and every release carries `SHA256SUMS.txt`.
+
 - Least privilege. The workflow granted `contents: write` to every job, including
   `build`, which runs arbitrary project build code across three runners. Now the
   default is `contents: read`, `build` is explicitly read-only, and only the
@@ -130,9 +137,12 @@ would grow the monolith. Left as a documented follow-up.
 
 ## Residual risk (not fixed here)
 
-- The build resolves `pyinstaller`/`Pillow` from PyPI with open lower bounds and
-  no hashes. Released binaries are unsigned and shipped without checksums. Both
-  are release-pipeline changes deferred to avoid churn on that path.
+- Released binaries are unsigned. Signing needs certificates and repo secrets, so
+  it stays out of scope. The open lower bounds and missing checksums were closed
+  by issue #54 (see the CI section). What remains on that path is
+  `build/build.py`'s `ensure_package()`, which would `pip install` an unpinned
+  pyinstaller or Pillow if the import were missing. It never fires in CI, because
+  the workflow installs the hash-pinned set first.
 - Log files and the config are written with the default umask apart from the
   config's `0600`. They hold only local paths, not secrets.
 

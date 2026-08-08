@@ -74,8 +74,9 @@ ruff check .
 black --check .
 ```
 
-CI (`.github/workflows/ci.yml`) runs these on every pull request. The legacy monolith is
-excluded from linting until it is refactored into the package.
+CI (`.github/workflows/ci.yml`) runs these on every pull request, and a tagged release
+runs the same jobs before it builds anything. The legacy monolith is excluded from
+linting until it is refactored into the package.
 
 ---
 
