@@ -50,8 +50,7 @@ def generate_icon():
     ensure_package("Pillow", "PIL")
 
     gen_script = os.path.join(SCRIPT_DIR, "generate_icon.py")
-    run([sys.executable, gen_script, "--all-formats"],
-        cwd=SCRIPT_DIR)
+    run([sys.executable, gen_script, "--all-formats"], cwd=SCRIPT_DIR)
 
 
 def write_spec():
@@ -190,13 +189,20 @@ def main():
     spec_path = write_spec()
 
     try:
-        run([
-            sys.executable, "-m", "PyInstaller",
-            spec_path,
-            "--clean", "--noconfirm",
-            "--distpath", ROOT_DIR,
-            "--workpath", build_tmp,
-        ])
+        run(
+            [
+                sys.executable,
+                "-m",
+                "PyInstaller",
+                spec_path,
+                "--clean",
+                "--noconfirm",
+                "--distpath",
+                ROOT_DIR,
+                "--workpath",
+                build_tmp,
+            ]
+        )
     except subprocess.CalledProcessError:
         print()
         print("=" * 55)

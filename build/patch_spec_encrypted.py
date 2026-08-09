@@ -3,6 +3,7 @@ patch_spec_encrypted.py
 Called by build_encrypted.bat to generate an AES-encrypted spec file.
 Do NOT run this directly — use build_encrypted.bat instead.
 """
+
 import os
 import sys
 
@@ -10,7 +11,7 @@ import sys
 ENCRYPTION_KEY = "HOI4CM_BLAZER_2025"
 # ───────────────────────────────────────────────────────────────────────
 
-spec_in  = os.path.join(os.path.dirname(__file__), "hoi4_content_maker.spec")
+spec_in = os.path.join(os.path.dirname(__file__), "hoi4_content_maker.spec")
 spec_out = os.path.join(os.path.dirname(__file__), "hoi4_content_maker_enc.spec")
 
 try:

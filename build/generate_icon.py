@@ -15,21 +15,21 @@ import math
 import os
 
 # ── Colour palette (watermelon) ───────────────────────────────────────────────
-GREEN_DARK   = (28,  88,  28)   # outer rind
-GREEN_LIGHT  = (80, 160,  50)   # rind stripes
-WHITE_RIND   = (220, 242, 205)  # inner white rind
-FLESH        = (210,  38,  38)  # red flesh
-SEED         = (22,   14,   6)  # seeds
+GREEN_DARK = (28, 88, 28)  # outer rind
+GREEN_LIGHT = (80, 160, 50)  # rind stripes
+WHITE_RIND = (220, 242, 205)  # inner white rind
+FLESH = (210, 38, 38)  # red flesh
+SEED = (22, 14, 6)  # seeds
 
 
 def make_frame(size):
     """Draw one watermelon cross-section frame at the given pixel size."""
-    img  = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
 
     pad = max(1, size // 14)
-    r   = size - 1
-    cx  = cy = size // 2
+    r = size - 1
+    cx = cy = size // 2
 
     # ── 1. Outer dark-green circle (rind) ─────────────────────────────────────
     draw.ellipse([pad, pad, r - pad, r - pad], fill=GREEN_DARK)
@@ -38,11 +38,14 @@ def make_frame(size):
     rind_w = max(2, size // 7)
     if size >= 24:
         num_stripes = 3 if size >= 48 else 2
-        stripe_w    = max(1, rind_w // (num_stripes * 2 + 1))
+        stripe_w = max(1, rind_w // (num_stripes * 2 + 1))
         for i in range(num_stripes):
             offset = pad + stripe_w * (2 * i + 1)
-            draw.ellipse([offset, offset, r - offset, r - offset],
-                         outline=GREEN_LIGHT, width=max(1, stripe_w))
+            draw.ellipse(
+                [offset, offset, r - offset, r - offset],
+                outline=GREEN_LIGHT,
+                width=max(1, stripe_w),
+            )
 
     # ── 3. White inner-rind ring ───────────────────────────────────────────────
     wi = pad + rind_w
@@ -55,10 +58,10 @@ def make_frame(size):
 
     # ── 5. Seeds (only for sizes >= 32) ───────────────────────────────────────
     if size >= 32:
-        flesh_r = cx - fi          # radius of the flesh circle
-        seed_r  = flesh_r * 0.55   # orbit radius for seeds
-        sw      = max(1, size // 22)   # seed half-width
-        sh      = max(2, size // 14)   # seed half-height
+        flesh_r = cx - fi  # radius of the flesh circle
+        seed_r = flesh_r * 0.55  # orbit radius for seeds
+        sw = max(1, size // 22)  # seed half-width
+        sh = max(2, size // 14)  # seed half-height
 
         # 5 seeds at evenly-spaced angles; fewer at smaller sizes
         angles = [-90, -18, 54, 126, 198]
@@ -67,10 +70,9 @@ def make_frame(size):
 
         for deg in angles:
             rad = math.radians(deg)
-            sx  = int(cx + math.cos(rad) * seed_r)
-            sy  = int(cy + math.sin(rad) * seed_r)
-            draw.ellipse([sx - sw, sy - sh // 2,
-                          sx + sw, sy + sh // 2], fill=SEED)
+            sx = int(cx + math.cos(rad) * seed_r)
+            sy = int(cy + math.sin(rad) * seed_r)
+            draw.ellipse([sx - sw, sy - sh // 2, sx + sw, sy + sh // 2], fill=SEED)
 
     return img
 
@@ -80,16 +82,16 @@ def main():
 
     all_formats = "--all-formats" in _sys.argv
 
-    sizes  = [256, 128, 64, 48, 32, 16]
+    sizes = [256, 128, 64, 48, 32, 16]
     frames = [make_frame(s) for s in sizes]
 
     # Always generate .ico (Windows)
     ico_out = "icon.ico"
     frames[0].save(
         ico_out,
-        format        = "ICO",
-        sizes         = [(s, s) for s in sizes],
-        append_images = frames[1:],
+        format="ICO",
+        sizes=[(s, s) for s in sizes],
+        append_images=frames[1:],
     )
     kb = os.path.getsize(ico_out) / 1024
     print(f"[generate_icon] Created {ico_out}  ({kb:.1f} KB)  —  sizes: {sizes}")
