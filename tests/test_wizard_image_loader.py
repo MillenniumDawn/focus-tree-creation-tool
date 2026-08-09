@@ -23,6 +23,14 @@ class FakeOwner:
     def after_cancel(self, identifier: object) -> None:
         self.cancelled.append(identifier)
 
+    def bind(
+        self,
+        sequence: str,
+        callback: Callable[[object], None],
+        add: str | None = None,
+    ) -> object:
+        return None
+
     def run_next(self) -> None:
         self.callbacks.pop(0)()
 
@@ -77,10 +85,14 @@ def test_invalidated_callback_is_not_realized_or_applied() -> None:
         gate.wait(timeout=2)
         return object()
 
+    def realize(decoded: object) -> object:
+        realized.append(decoded)
+        return decoded
+
     loader.submit(
         "image",
         decode,
-        realizer=lambda image: realized.append(image) or image,
+        realizer=realize,
         apply=lambda item, image: applied.append(image),
     )
     loader.invalidate()
@@ -105,10 +117,14 @@ def test_destroyed_owner_drops_queued_callback() -> None:
         decoded.set()
         return object()
 
+    def realize(decoded: object) -> object:
+        realized.append(decoded)
+        return decoded
+
     loader.submit(
         "image",
         decode,
-        realizer=lambda image: realized.append(image) or image,
+        realizer=realize,
         apply=lambda item, image: applied.append(image),
     )
     assert decoded.wait(timeout=2)

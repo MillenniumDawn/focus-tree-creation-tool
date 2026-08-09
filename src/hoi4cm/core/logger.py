@@ -59,16 +59,16 @@ def get_logger(name):
 
 def log_startup():
     log.info("=== HOI4 Content Maker starting ===")
-    log.info(f"Python {sys.version}")
-    log.info(f"Platform: {sys.platform}")
-    log.info(f"DISPLAY={os.environ.get('DISPLAY', '(unset)')}")
+    log.info("Python %s", sys.version)
+    log.info("Platform: %s", sys.platform)
+    log.info("DISPLAY=%s", os.environ.get("DISPLAY", "(unset)"))
 
 
 # ── In-memory error buffer ───────────────────────────────────────────
 # Single shared list so the excepthook and the GUI error log read the same
 # entries. Entries are (HH:MM:SS, message) tuples — the shape the Tk viewer
 # expects. The core is the sole writer.
-_error_entries = []
+_error_entries: list[tuple[str, str]] = []
 _error_callback = None
 
 

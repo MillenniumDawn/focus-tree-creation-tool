@@ -102,8 +102,8 @@ class VirtualThumbnailGrid(tk.Frame):
         self._live: dict[int, tuple[int, int, int]] = {}
         self._selected_index: int | None = None
         self._generation = 0
-        self._refresh_job = None
-        self._poll_job = None
+        self._refresh_job: str | None = None
+        self._poll_job: str | None = None
         self._broker = ImageBroker(
             get_executor(self),
             generation=lambda: self._generation,
@@ -239,9 +239,7 @@ class VirtualThumbnailGrid(tk.Frame):
             item.path,
             transform=self._transform,
             owner=owner,
-            callback=lambda photo, i=index, g=self._generation: self._show_image(
-                i, g, photo
-            ),
+            callback=self._image_callback(index, self._generation),
         )
         if image is not None:
             self._show_image(index, self._generation, image)
@@ -275,15 +273,22 @@ class VirtualThumbnailGrid(tk.Frame):
             stamp = FileStamp(0, 0, 0)
         return AssetRef("absolute", item.path, stamp, self._generation)
 
+    def _image_callback(self, index: int, generation: int) -> Callable[[object], None]:
+        return lambda photo: self._show_image(index, generation, photo)
+
+    def _click(self, index: int) -> Callable[[object], None]:
+        return lambda _event: self.select(index)
+
+    def _activate_click(self, index: int) -> Callable[[object], None]:
+        return lambda _event: self._activate(index)
+
     def _bind_items(self, index: int) -> None:
         for canvas_id in self._live[index]:
-            self.canvas.tag_bind(
-                canvas_id, "<Button-1>", lambda _event, i=index: self.select(i)
-            )
+            self.canvas.tag_bind(canvas_id, "<Button-1>", self._click(index))
             self.canvas.tag_bind(
                 canvas_id,
                 "<Double-Button-1>",
-                lambda _event, i=index: self._activate(i),
+                self._activate_click(index),
             )
 
     def _activate(self, index: int) -> None:
@@ -319,7 +324,7 @@ class VirtualThumbnailGrid(tk.Frame):
         if self._refresh_job is None:
             self._refresh_job = self.after_idle(self.refresh)
 
-    def _set_scrollbar(self, first: str, last: str) -> None:
+    def _set_scrollbar(self, first: float, last: float) -> None:
         self._scrollbar_widget.set(first, last)
         self._schedule_refresh()
 

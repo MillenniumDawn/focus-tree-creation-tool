@@ -27,7 +27,11 @@ def _run_in_subprocess(code):
     repo_root = str(Path(__file__).resolve().parent.parent)
     env = {**os.environ, "PYTHONPATH": os.pathsep.join([repo_root, *sys.path])}
     return subprocess.run(
-        [sys.executable, "-c", code], capture_output=True, text=True, env=env
+        [sys.executable, "-c", code],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=True,
     )
 
 

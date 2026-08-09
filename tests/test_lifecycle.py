@@ -4,13 +4,24 @@ import threading
 import time
 from collections.abc import Callable
 from concurrent.futures import Executor, Future
+from typing import cast
 
-from hoi4cm.ui.lifecycle import ApplicationLifecycle, DaemonThreadPoolExecutor
+from hoi4cm.ui.lifecycle import (
+    ApplicationLifecycle,
+    DaemonThreadPoolExecutor,
+    TclInterpreter,
+)
+
+
+class _FakeTk:
+    def call(self, *args: object) -> object:
+        return ()
 
 
 class FakeTkOwner:
     def __init__(self) -> None:
         self.exists = True
+        self.tk = cast(TclInterpreter, _FakeTk())
         self.callbacks: dict[object, Callable[[], None]] = {}
         self.cancelled: list[object] = []
 
@@ -25,6 +36,14 @@ class FakeTkOwner:
 
     def winfo_exists(self) -> int:
         return int(self.exists)
+
+    def bind(
+        self,
+        sequence: str,
+        callback: Callable[[object], None],
+        add: str | None = None,
+    ) -> object:
+        return None
 
 
 class FakeExecutor(Executor):

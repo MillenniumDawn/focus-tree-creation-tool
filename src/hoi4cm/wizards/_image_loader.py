@@ -5,6 +5,7 @@ import threading
 import tkinter as tk
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
+from functools import partial
 from typing import Protocol, TypeVar
 
 from hoi4cm.ui.lifecycle import find_lifecycle
@@ -100,7 +101,7 @@ class TkImageLoader:
                         generation,
                         decoded,
                         realizer,
-                        lambda image, value=item: apply(value, image),
+                        partial(apply, item),
                     )
                 )
             self._results.put(_BatchDone(generation))

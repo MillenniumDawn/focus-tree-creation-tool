@@ -13,7 +13,7 @@ def group_focuses_by_tree(focuses: Iterable[Focus]) -> dict[int, list[Focus]]:
 
 
 def build_focus_name_lookup(focuses: Iterable[Focus]) -> dict[str, Focus]:
-    lookup = {}
+    lookup: dict[str, Focus] = {}
     for focus in focuses:
         lookup.setdefault(focus.name, focus)
     return lookup

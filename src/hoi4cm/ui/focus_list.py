@@ -9,6 +9,13 @@ from typing import Protocol
 
 from hoi4cm.ui.theme import BG_PANEL, BLUE, TEXT_DIM
 
+
+class _Revisioned(Protocol):
+    """Minimal shape the cache keys on: a document with a revision counter."""
+
+    revision: int
+
+
 SELECTED_BG = "#1e2d4a"
 SELECTED_FG = "#93c5fd"
 HOVER_BG = "#253550"
@@ -34,13 +41,13 @@ class FocusListCache:
     """
 
     def __init__(self) -> None:
-        self._doc: object = None
+        self._doc: _Revisioned | None = None
         self._revision: int | None = None
         self._items: tuple[FocusListItem, ...] = ()
 
     def get(
         self,
-        doc,
+        doc: _Revisioned,
         build: Callable[[], Iterable[FocusListItem]],
     ) -> tuple[FocusListItem, ...]:
         if self._doc is not doc or self._revision != doc.revision:
@@ -196,7 +203,7 @@ class _PooledList[T: _PooledRow](tk.Frame, ABC):
         self._items: tuple = ()
         self._rows: list[T] = []
         self._row_windows: list[int] = []
-        self._refresh_job = None
+        self._refresh_job: str | None = None
 
         self.canvas = tk.Canvas(
             self,
@@ -301,7 +308,7 @@ class _PooledList[T: _PooledRow](tk.Frame, ABC):
         self.scrollbar.set(first, last)
         self._schedule_refresh()
 
-    def _scrollbar(self, *args: float) -> None:
+    def _scrollbar(self, *args: str) -> None:
         self.canvas.yview(*args)
         self._schedule_refresh()
 

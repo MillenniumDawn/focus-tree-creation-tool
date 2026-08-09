@@ -11,14 +11,17 @@ requires-python = ">=3.14"
 dependencies = []
 
 [project.optional-dependencies]
-image = ["Pillow>=9.0"]                            # GFX icon previews (.png/.tga)
+image = ["Pillow>=9.0"] # GFX icon previews (.png/.tga)
 dev = [
-    "pytest>=7.0",
-    "pytest-cov>=4.0",   # coverage gate for wizard generators
-    "ruff>=0.16",
-    "black>=26.5",
-]                                                     # tests + linting
-build = ["pyinstaller>=6.0", "Pillow>=9.0"]        # compile standalone executables
+  "pytest>=7.0",
+  "pytest-cov>=4.0", # coverage gate for wizard generators
+  "ruff>=0.16",
+  "black>=26.5",
+  "mypy>=1.10",
+  "pylint>=3.2",
+  "pre-commit>=3.5",
+] # tests + linting
+build = ["pyinstaller>=6.0", "Pillow>=9.0"] # compile standalone executables
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/hoi4cm"]
@@ -41,10 +44,10 @@ branch = true
 show_missing = true
 skip_covered = true
 exclude_also = [
-    "if TYPE_CHECKING:",
-    "raise NotImplementedError",
-    "class .*\\(Protocol\\):",
-    "@abstractmethod",
+  "if TYPE_CHECKING:",
+  "raise NotImplementedError",
+  "class .*\\(Protocol\\):",
+  "@abstractmethod",
 ]
 
 # Linting/formatting is scoped to the modular package + tests. The legacy
@@ -61,3 +64,89 @@ extend-exclude = ["hoi4_content_maker.py", "build"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B"]
+
+# Type checking is scoped to the modular package + tests, same as ruff/black.
+# The monolith and build scripts stay out until they are refactored into the
+# package. `mypy_path` puts src/ on the search path so tests can import hoi4cm.
+[tool.mypy]
+python_version = "3.14"
+mypy_path = ["src"]
+files = ["src/hoi4cm", "tests"]
+# The monolith and build scripts stay out until refactored. The PEP 758 files
+# (unparenthesized `except A, B:`) are excluded too: mypy 2.3.0 can't parse that
+# syntax yet, even though it's valid Python 3.14. Tracked in issue #68.
+exclude = [
+  "hoi4_content_maker.py",
+  "build",
+  "src/hoi4cm/core/undo.py",
+  "src/hoi4cm/data/effects.py",
+  "src/hoi4cm/mod/workspace_cache.py",
+  "src/hoi4cm/ui/lifecycle.py",
+  "src/hoi4cm/wizards/_image_loader.py",
+  "src/hoi4cm/mod/graphics_catalog.py",
+  "tests/test_i18n.py",
+]
+warn_unused_configs = true
+
+# Pillow is an optional extra and pytest is only a dev dependency; both may be
+# absent when mypy runs, so treat their imports as untyped rather than failing.
+[[tool.mypy.overrides]]
+module = ["PIL.*", "pytest"]
+ignore_missing_imports = true
+
+# Pylint is a light gate on top of ruff/black. The disabled checks are either
+# redundant with ruff/black (line length, f-strings, unused vars, reimports,
+# dangerous defaults), too noisy for this codebase (naming, docstrings,
+# too-many-*), or false positives on Tk/dataclass/mixin patterns (no-member,
+# unused-argument on event callbacks, import-error on optional deps).
+[tool.pylint]
+max-line-length = 88
+fail-under = 8.0
+disable = [
+  "C0103", # invalid-name
+  "C0104", # disallowed-name
+  "C0114", # missing-module-docstring
+  "C0115", # missing-class-docstring
+  "C0116", # missing-function-docstring
+  "C0208", # use-sequence-for-iteration
+  "C0209", # consider-using-f-string (ruff UP032)
+  "C0301", # line-too-long (black)
+  "C0302", # too-many-lines
+  "C0325", # unnecessary-paren
+  "C0415", # import-outside-top-level
+  "C1803", # use-implicit-booleaness-not-comparison
+  "C2801", # unnecessary-dunder-call
+  "E0401", # import-error (optional deps)
+  "E0601", # used-before-assignment (false positive on except blocks)
+  "E0602", # undefined-variable (ruff F821)
+  "E0603", # undefined-all-variable
+  "E1101", # no-member (dataclass/mixin/Tk false positives)
+  "R0402", # consider-using-from-import
+  "R0801", # duplicate-code
+  "R0901", # too-many-ancestors
+  "R0902", # too-many-instance-attributes
+  "R0903", # too-few-public-methods
+  "R0904", # too-many-public-methods
+  "R0911", # too-many-return-statements
+  "R0912", # too-many-branches
+  "R0913", # too-many-arguments
+  "R0914", # too-many-locals
+  "R0915", # too-many-statements
+  "R0917", # too-many-positional-arguments
+  "R1702", # too-many-nested-blocks
+  "R1705", # no-else-return
+  "R1716", # chained-comparison
+  "R1735", # use-dict-literal
+  "W0102", # dangerous-default-value (ruff B006)
+  "W0104", # pointless-statement
+  "W0108", # unnecessary-lambda
+  "W0212", # protected-access
+  "W0221", # arguments-differ
+  "W0404", # reimported (ruff F811)
+  "W0603", # global-statement
+  "W0612", # unused-variable (ruff F841)
+  "W0613", # unused-argument (Tk event callbacks)
+  "W0621", # redefined-outer-name (pytest fixtures)
+  "W0640", # cell-var-from-loop
+  "W0718", # broad-exception-caught
+]

@@ -14,6 +14,7 @@ def test_ui_import_before_core_facade_has_no_cycle():
         capture_output=True,
         text=True,
         env=env,
+        check=True,
     )
 
     assert result.returncode == 0, result.stderr

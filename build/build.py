@@ -9,9 +9,9 @@ Works on Windows, macOS, and Linux.
 """
 
 import os
+import shutil
 import subprocess
 import sys
-import shutil
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR = os.path.dirname(SCRIPT_DIR)
@@ -65,7 +65,7 @@ def write_spec():
     elif sys.platform == "darwin":
         png = os.path.join(SCRIPT_DIR, "icon.png")
         if os.path.exists(png):
-            icon_line = f"    icon=os.path.join(SCRIPT_DIR, 'icon.png'),"
+            icon_line = "    icon=os.path.join(SCRIPT_DIR, 'icon.png'),"
     # Linux ELF executables don't support embedded icons — skip
 
     source_path = SOURCE.replace("\\", "/")
@@ -225,7 +225,7 @@ def main():
         size_mb = os.path.getsize(final_out) / (1024 * 1024)
         print()
         print("=" * 55)
-        print(f"  Build SUCCESSFUL")
+        print("  Build SUCCESSFUL")
         print(f"  Output: {output_name}  ({size_mb:.1f} MB)")
         print("=" * 55)
         print()

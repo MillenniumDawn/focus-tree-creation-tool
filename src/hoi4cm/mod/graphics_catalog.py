@@ -532,6 +532,7 @@ class GraphicsCatalog:
         self, reference: PathReference, record: GfxFileRecord
     ) -> _MapDelta:
         delta = _MapDelta()
+        old_declaration: SpriteDeclaration | None
         old_record = self._gfx_files.get(reference)
         old_by_name = (
             {declaration.name: declaration for declaration in old_record.declarations}
@@ -619,17 +620,17 @@ class GraphicsCatalog:
                 delta.upsert[family].add(name)
 
     def _unshadow(self, name: str, delta: _MapDelta) -> None:
-        claim = self._sprite_claims.get(name)
-        if claim is not None:
-            self._sprite_refs.setdefault(name, claim)
+        sprite_claim = self._sprite_claims.get(name)
+        if sprite_claim is not None:
+            self._sprite_refs.setdefault(name, sprite_claim)
             delta.upsert["sprites"].add(name)
-        claim = self._idea_claims.get(name)
-        if claim is not None:
-            self._idea_refs.setdefault(name, claim[1])
+        idea_claim = self._idea_claims.get(name)
+        if idea_claim is not None:
+            self._idea_refs.setdefault(name, idea_claim[1])
             delta.upsert["ideas"].add(name)
-        claim = self._decision_claims.get(name)
-        if claim is not None:
-            self._decision_refs.setdefault(name, claim)
+        decision_claim = self._decision_claims.get(name)
+        if decision_claim is not None:
+            self._decision_refs.setdefault(name, decision_claim)
             delta.upsert["decisions"].add(name)
 
     def _unclaim_image(
@@ -719,9 +720,9 @@ class GraphicsCatalog:
 
     def _claim_names_for(self, record: ImageRecord, absolute_path: str) -> _ImageClaims:
         stem = Path(record.path.relative_path).stem
-        sprites = []
-        ideas = []
-        decisions = []
+        sprites: list[str] = []
+        ideas: list[tuple[tuple[int, ...], str]] = []
+        decisions: list[str] = []
         if self._goals_root and _is_under(absolute_path, self._goals_root):
             sprites.append(f"GFX_focus_{stem}")
         if self._ideas_root and _is_under(absolute_path, self._ideas_root):
@@ -765,7 +766,7 @@ class GraphicsCatalog:
         return _absolute_key(declaration.texture_path.resolve(self._source_roots))
 
     def _declared_names_at(self, absolute_path: str) -> set[str]:
-        names = set()
+        names: set[str] = set()
         for key in _absolute_candidates(absolute_path):
             names.update(self._declared_names_by_texture.get(key, ()))
         return names
@@ -881,28 +882,28 @@ class GraphicsCatalog:
             if _stamp_from_stat(stat) != record.stamp:
                 current = False
 
-        for record in snapshot.gfx_files:
+        for gfx_record in snapshot.gfx_files:
             self.last_metrics.gfx_file_stats += 1
             try:
-                stat = os.stat(record.path.resolve(source_roots))
+                stat = os.stat(gfx_record.path.resolve(source_roots))
             except KeyError, OSError:
                 current = False
                 continue
-            if _stamp_from_stat(stat) != record.stamp:
+            if _stamp_from_stat(stat) != gfx_record.stamp:
                 current = False
 
         # Stat the known image paths too. Directory mtimes don't change when a
         # file is overwritten in place, so an image edit that keeps the same
         # name would otherwise leave a stale FileStamp — and that stamp is the
         # thumbnail cache key. Restatting is cheaper than a full rescan.
-        for record in snapshot.images:
+        for image_record in snapshot.images:
             self.last_metrics.image_stats += 1
             try:
-                stat = os.stat(record.path.resolve(source_roots))
+                stat = os.stat(image_record.path.resolve(source_roots))
             except KeyError, OSError:
                 current = False
                 continue
-            if _stamp_from_stat(stat) != record.stamp:
+            if _stamp_from_stat(stat) != image_record.stamp:
                 current = False
         return current
 
