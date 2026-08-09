@@ -279,8 +279,8 @@ class GraphicsCatalog:
         # SQLite snapshot is re-stored at the next refresh or flush_cache(),
         # not on every write.
         self._cache_dirty = False
-        self._image_query_keys = ()
-        self._image_query_refs = ()
+        self._image_query_keys: tuple[str, ...] = ()
+        self._image_query_refs: tuple[PathReference, ...] = ()
 
     def refresh(
         self,
@@ -486,7 +486,9 @@ class GraphicsCatalog:
         search_text = search.casefold().strip()
         keys = self._image_query_keys
         if under_path is None:
-            key_refs = zip(keys, self._image_query_refs, strict=True)
+            key_refs: Iterable[tuple[str, PathReference]] = zip(
+                keys, self._image_query_refs, strict=True
+            )
         else:
             start, end = _path_prefix_range(under_path)
             start_index = bisect.bisect_left(keys, start)
@@ -515,26 +517,23 @@ class GraphicsCatalog:
         return tuple(assets)
 
     def _rebuild_image_query_index(self) -> None:
-        image_keys: list[str] = []
-        image_refs: list[PathReference] = []
-        entries: list[tuple[str, PathReference]] = []
+        # Single-pass dict dedupe keeps the rebuild O(n) instead of the
+        # previous sort + linear walk. `setdefault` drops duplicate keys
+        # while preserving first-seen order; sort once at the end.
+        seen: dict[str, PathReference] = {}
         for record in self._images.values():
             try:
-                entries.append(
-                    (_query_key(record.path.resolve(self._source_roots)), record.path)
-                )
+                key = _query_key(record.path.resolve(self._source_roots))
             except KeyError:
                 continue
-        entries.sort(key=lambda item: item[0])
-        seen: set[str] = set()
-        for key, ref in entries:
-            if key in seen:
-                continue
-            seen.add(key)
-            image_keys.append(key)
-            image_refs.append(ref)
-        self._image_query_keys = tuple(image_keys)
-        self._image_query_refs = tuple(image_refs)
+            seen.setdefault(key, record.path)
+        if not seen:
+            self._image_query_keys = ()
+            self._image_query_refs = ()
+            return
+        ordered = sorted(seen.items())
+        self._image_query_keys = tuple(item[0] for item in ordered)
+        self._image_query_refs = tuple(item[1] for item in ordered)
 
     def path_for(self, asset: AssetRef) -> str:
         return PathReference(asset.source_id, asset.relative_path).resolve(
