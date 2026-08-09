@@ -29,7 +29,7 @@ I18N_LANGS = {
     "zh_CN": "简体中文",
 }
 I18N_LANG = None
-I18N_STRINGS = {}
+I18N_STRINGS: dict[str, str] = {}
 
 
 def _project_root():
@@ -85,7 +85,7 @@ def get_language():
     return I18N_LANG
 
 
-def tr(key, default=None, **kwargs):
+def tr(key: str, default: str | None = None, **kwargs: object) -> str:
     """Resolve a translation key. Falls back to *default* then the key itself."""
     text = I18N_STRINGS.get(key, default if default is not None else key)
     try:

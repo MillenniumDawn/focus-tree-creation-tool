@@ -5,6 +5,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from math import floor
 
+from hoi4cm.models.focus import Focus
+
 
 @dataclass(frozen=True)
 class SceneEdge:
@@ -31,7 +33,7 @@ class SceneIndex:
         self._edge_bounds: list[tuple[float, float, float, float]] = []
         self._edges_by_focus: dict[int, list[int]] = {}
 
-    def rebuild(self, focuses: Mapping[int, object]) -> None:
+    def rebuild(self, focuses: Mapping[int, Focus]) -> None:
         focus_cells: dict[tuple[int, int], list[int]] = defaultdict(list)
         focus_order: dict[int, int] = {}
         positions: dict[int, tuple[float, float]] = {}
@@ -76,7 +78,7 @@ class SceneIndex:
         self.revision += 1
 
     def _place_edge(
-        self, index: int, edge: SceneEdge, focuses: Mapping[int, object]
+        self, index: int, edge: SceneEdge, focuses: Mapping[int, Focus]
     ) -> None:
         source = focuses[edge.source_id]
         target = focuses[edge.target_id]
@@ -114,7 +116,7 @@ class SceneIndex:
                 else:
                     del self._edge_cells[(cell_x, cell_y)]
 
-    def ensure(self, focuses: Mapping[int, object], *, validate: bool) -> bool:
+    def ensure(self, focuses: Mapping[int, Focus], *, validate: bool) -> bool:
         document_revision = getattr(focuses, "revision", None)
         changed = document_revision != self._document_revision
         if validate and not changed:
@@ -124,7 +126,7 @@ class SceneIndex:
             return True
         return False
 
-    def update_focus(self, focuses: Mapping[int, object], focus_id: int) -> None:
+    def update_focus(self, focuses: Mapping[int, Focus], focus_id: int) -> None:
         """Apply a single focus's geometry move without a full rebuild.
 
         Caller contract: only *focus_id*'s x/y changed since the last rebuild
@@ -195,7 +197,7 @@ class SceneIndex:
         return self._edges
 
     @staticmethod
-    def signature(focuses: Mapping[int, object]) -> tuple[object, ...]:
+    def signature(focuses: Mapping[int, Focus]) -> tuple[object, ...]:
         return tuple(
             (
                 focus_id,

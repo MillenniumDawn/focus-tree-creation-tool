@@ -13,7 +13,10 @@ __all__ = ["render_effect"]
 def render_effect(eff: Mapping[str, object]) -> str:
     """Render a single effect as HOI4 code (3-tab indent, in completion_reward)."""
     t = eff.get("type", "")
-    f = eff.get("fields", {})
+    if not isinstance(t, str):
+        t = ""
+    fields = eff.get("fields", {})
+    f: Mapping[str, object] = fields if isinstance(fields, Mapping) else {}
     IND = "\t\t\t"
 
     def block(name, pairs):
@@ -34,14 +37,16 @@ def render_effect(eff: Mapping[str, object]) -> str:
                 ("category", g("category", "infantry_weapons")),
             ],
         ),
-        "add_popularity": lambda: block(
-            "add_popularity",
-            [
-                ("ideology", g("ideology", "democratic")),
-                ("popularity", g("popularity", "0.05")),
-            ],
-        )
-        + f"\n{IND}recalculate_party = yes",
+        "add_popularity": lambda: (
+            block(
+                "add_popularity",
+                [
+                    ("ideology", g("ideology", "democratic")),
+                    ("popularity", g("popularity", "0.05")),
+                ],
+            )
+            + f"\n{IND}recalculate_party = yes"
+        ),
         "set_politics": lambda: block(
             "set_politics",
             [
@@ -125,18 +130,18 @@ def render_effect(eff: Mapping[str, object]) -> str:
         "create_unit": lambda: (
             f"{IND}create_unit = {{\n"
             f'{IND}\tdivision = "name = \\"'
-            f"{g('division_name','1st Infantry Division')}"
+            f"{g('division_name', '1st Infantry Division')}"
             f'\\" '
             f'division_template = \\"'
-            f"{g('division_template','Infantry Division')}"
+            f"{g('division_template', 'Infantry Division')}"
             f'\\" '
-            f"start_experience_factor = {g('start_experience_factor','0.2')}\"\n"
-            f"{IND}\towner = {g('owner','ROOT')}\n"
+            f'start_experience_factor = {g("start_experience_factor", "0.2")}"\n'
+            f"{IND}\towner = {g('owner', 'ROOT')}\n"
             f"{IND}}}"
         ),
         "set_technology": lambda: (
-            f'{IND}set_technology = {{ {g("tech_id","infantry_weapons1")} = '
-            f'{"1" if g("researched","yes") == "yes" else "0"} }}'
+            f"{IND}set_technology = {{ {g('tech_id', 'infantry_weapons1')} = "
+            f"{'1' if g('researched', 'yes') == 'yes' else '0'} }}"
         ),
         "modify_timed_idea": lambda: block(
             "modify_timed_idea",
@@ -148,7 +153,7 @@ def render_effect(eff: Mapping[str, object]) -> str:
         ),
         "division_template": lambda: (
             f"{IND}division_template = {{\n"
-            f'{IND}\tname = "{g("name","Infantry Division")}"\n'
+            f'{IND}\tname = "{g("name", "Infantry Division")}"\n'
             f"{IND}\tregiments = {{\n"
             + "\n".join(
                 f"{IND}\t\t{ln.strip()}"
@@ -160,85 +165,84 @@ def render_effect(eff: Mapping[str, object]) -> str:
             + f"\n{IND}\t}}\n"
             f"{IND}}}"
         ),
-        "load_oob": lambda: f'{IND}load_oob = "{g("file","TAG_1936")}"',
-        "set_oob": lambda: f'{IND}set_oob = "{g("file","TAG_1936")}"',
+        "load_oob": lambda: f'{IND}load_oob = "{g("file", "TAG_1936")}"',
+        "set_oob": lambda: f'{IND}set_oob = "{g("file", "TAG_1936")}"',
         "log": lambda: f'{IND}log = "{g("text")}"',
         "set_variable": lambda: (
-            f'{IND}set_variable = {{ {g("var","my_var")} = {g("value","0")} }}'
+            f"{IND}set_variable = {{ {g('var', 'my_var')} = {g('value', '0')} }}"
         ),
         "force_update_dynamic_modifier": lambda: (
             f"{IND}force_update_dynamic_modifier = yes"
         ),
         "unlock_decision_category_tooltip": lambda: (
-            f"{IND}unlock_decision_category_tooltip = "
-            f'{g("category","TAG_decisions")}'
+            f"{IND}unlock_decision_category_tooltip = {g('category', 'TAG_decisions')}"
         ),
         "unlock_decision_tooltip": lambda: (
-            f'{IND}unlock_decision_tooltip = {g("decision","TAG_decision")}'
+            f"{IND}unlock_decision_tooltip = {g('decision', 'TAG_decision')}"
         ),
         "ingame_update_setup": lambda: f"{IND}ingame_update_setup = yes",
         # MD scripted effects
         "md_modify_treasury": lambda: (
             f"{IND}set_temp_variable = {{ "
-            f"treasury_change = {g('amount','-10.00')} }}\n"
+            f"treasury_change = {g('amount', '-10.00')} }}\n"
             f"{IND}modify_treasury_effect = yes"
         ),
         "md_modify_debt": lambda: (
-            f"{IND}set_temp_variable = {{ debt_change = {g('amount','0.1')} }}\n"
+            f"{IND}set_temp_variable = {{ debt_change = {g('amount', '0.1')} }}\n"
             f"{IND}modify_debt_effect = yes"
         ),
         "md_modify_international_investment": lambda: (
             f"{IND}set_temp_variable = {{ "
-            f"int_investment_change = {g('amount','0.1')} }}\n"
+            f"int_investment_change = {g('amount', '0.1')} }}\n"
             f"{IND}modify_international_investment_effect = yes"
         ),
         "md_modify_corporate_tax": lambda: (
-            f"{IND}set_temp_variable = {{ corp_change = {g('amount','2')} }}\n"
+            f"{IND}set_temp_variable = {{ corp_change = {g('amount', '2')} }}\n"
             f"{IND}modify_corporate_tax_rate_effect = yes"
         ),
         "md_modify_population_tax": lambda: (
-            f"{IND}set_temp_variable = {{ pop_change = {g('amount','2')} }}\n"
+            f"{IND}set_temp_variable = {{ pop_change = {g('amount', '2')} }}\n"
             f"{IND}modify_population_tax_rate_effect = yes"
         ),
         "md_flat_productivity": lambda: (
             f"{IND}set_temp_variable = {{ "
-            f"temp_productivity_change = {g('amount','0.025')} }}\n"
+            f"temp_productivity_change = {g('amount', '0.025')} }}\n"
             f"{IND}flat_productivity_change_effect = yes"
         ),
-        "md_economic_cycle": lambda: f"{IND}{g('cycle','stable_growth')} = yes",
+        "md_economic_cycle": lambda: f"{IND}{g('cycle', 'stable_growth')} = yes",
         "md_gov_spending": lambda: (
-            f"{IND}{g('action','increase_social_spending')} = yes"
+            f"{IND}{g('action', 'increase_social_spending')} = yes"
         ),
         "md_build_random": lambda: (
             f"{IND}set_temp_variable = {{ "
-            f"treasury_change = {g('treasury_change','-7.50')} }}\n"
+            f"treasury_change = {g('treasury_change', '-7.50')} }}\n"
             f"{IND}modify_treasury_effect = yes\n"
-            f"{IND}{g('effect','one_random_industrial_complex')} = yes"
+            f"{IND}{g('effect', 'one_random_industrial_complex')} = yes"
         ),
         "md_enrichment_facility": lambda: (
-            f"{IND}set_temp_variable = {{ temp_change = {g('count','1')} }}\n"
+            f"{IND}set_temp_variable = {{ temp_change = {g('count', '1')} }}\n"
             f"{IND}build_enrichment_facilities_effect = yes"
         ),
         "md_battery_park": lambda: (
-            f"{IND}set_temp_variable = {{ temp_change = {g('count','1')} }}\n"
+            f"{IND}set_temp_variable = {{ temp_change = {g('count', '1')} }}\n"
             f"{IND}build_battery_park_effect = yes"
         ),
         "md_coalition_add": lambda: (
-            f"{IND}set_temp_variable = {{ add_col_one = {g('party_index','5')} }}\n"
+            f"{IND}set_temp_variable = {{ add_col_one = {g('party_index', '5')} }}\n"
             f"{IND}add_coalition_members_effect = yes"
         ),
         "md_coalition_remove": lambda: (
             f"{IND}set_temp_variable = {{ "
-            f"remove_col_one = {g('party_index','5')} }}\n"
+            f"remove_col_one = {g('party_index', '5')} }}\n"
             f"{IND}remove_coalition_members_effect = yes"
         ),
         "md_domestic_influence": lambda: (
-            f"{IND}set_temp_variable = {{ percent_change = {g('percent','10')} }}\n"
+            f"{IND}set_temp_variable = {{ percent_change = {g('percent', '10')} }}\n"
             f"{IND}change_domestic_influence_percentage = yes"
         ),
         "md_eurosceptic_all": lambda: (
             f"{IND}set_temp_variable = {{ "
-            f"modify_eurosceptic = {g('amount','-0.05')} }}\n"
+            f"modify_eurosceptic = {g('amount', '-0.05')} }}\n"
             f"{IND}EU_eurosceptic_change = yes"
         ),
         # MD Budget — individual yes-call entries
@@ -246,24 +250,16 @@ def render_effect(eff: Mapping[str, object]) -> str:
         "decrease_centralization": lambda: f"{IND}decrease_centralization = yes",
         "increase_social_spending": lambda: f"{IND}increase_social_spending = yes",
         "decrease_social_spending": lambda: f"{IND}decrease_social_spending = yes",
-        "increase_education_budget": lambda: (f"{IND}increase_education_budget = yes"),
-        "decrease_education_budget": lambda: (f"{IND}decrease_education_budget = yes"),
-        "increase_healthcare_budget": lambda: (
-            f"{IND}increase_healthcare_budget = yes"
-        ),
-        "decrease_healthcare_budget": lambda: (
-            f"{IND}decrease_healthcare_budget = yes"
-        ),
+        "increase_education_budget": lambda: f"{IND}increase_education_budget = yes",
+        "decrease_education_budget": lambda: f"{IND}decrease_education_budget = yes",
+        "increase_healthcare_budget": lambda: f"{IND}increase_healthcare_budget = yes",
+        "decrease_healthcare_budget": lambda: f"{IND}decrease_healthcare_budget = yes",
         "increase_policing_budget": lambda: f"{IND}increase_policing_budget = yes",
         "decrease_policing_budget": lambda: f"{IND}decrease_policing_budget = yes",
         "increase_exports": lambda: f"{IND}increase_exports = yes",
         "decrease_exports": lambda: f"{IND}decrease_exports = yes",
-        "increase_military_spending": lambda: (
-            f"{IND}increase_military_spending = yes"
-        ),
-        "decrease_military_spending": lambda: (
-            f"{IND}decrease_military_spending = yes"
-        ),
+        "increase_military_spending": lambda: f"{IND}increase_military_spending = yes",
+        "decrease_military_spending": lambda: f"{IND}decrease_military_spending = yes",
         "increase_economic_growth": lambda: f"{IND}increase_economic_growth = yes",
         "decrease_economic_growth": lambda: f"{IND}decrease_economic_growth = yes",
         "increase_corruption": lambda: f"{IND}increase_corruption = yes",
@@ -323,7 +319,7 @@ def render_effect(eff: Mapping[str, object]) -> str:
     }
     if t in _FACTION_OPINIONS:
         return (
-            f"{IND}set_temp_variable = {{ temp_opinion = {g('opinion','5')} }}\n"
+            f"{IND}set_temp_variable = {{ temp_opinion = {g('opinion', '5')} }}\n"
             f"{IND}{t} = yes"
         )
 
@@ -347,13 +343,15 @@ def render_effect(eff: Mapping[str, object]) -> str:
     if t in ("hidden_effect", "effect_tooltip"):
         raw = g("raw", "").strip()
         if not raw and "_list" in f:
-            raw = "\n".join(
-                f"{IND}\t{ik} = {iv}"
-                for item in f["_list"]
-                if isinstance(item, dict)
-                for ik, iv in item.items()
-                if not str(ik).startswith("_")
-            )
+            items = f["_list"]
+            if isinstance(items, list):
+                raw = "\n".join(
+                    f"{IND}\t{ik} = {iv}"
+                    for item in items
+                    if isinstance(item, dict)
+                    for ik, iv in item.items()
+                    if not str(ik).startswith("_")
+                )
         inner = "\n".join(f"{IND}\t{ln}" for ln in raw.splitlines())
         return f"{IND}{t} = {{\n{inner}\n{IND}}}"
 
@@ -381,45 +379,44 @@ def render_effect(eff: Mapping[str, object]) -> str:
         "modulo_temp_variable",
     }
     if t in _VAR_TWO_FIELD:
-        return f"{IND}{t} = {{ {g('var','my_var')} = {g('value','1')} }}"
+        return f"{IND}{t} = {{ {g('var', 'my_var')} = {g('value', '1')} }}"
 
     if t == "set_temp_variable":
         return (
             f"{IND}set_temp_variable = {{ "
-            f"{g('var','my_temp_var')} = {g('value','1')} }}"
+            f"{g('var', 'my_temp_var')} = {g('value', '1')} }}"
         )
 
     # single-arg variable ops (no block needed)
     if t in ("round_variable", "clear_variable"):
-        return f"{IND}{t} = {g('var','my_var')}"
+        return f"{IND}{t} = {g('var', 'my_var')}"
     if t in ("round_temp_variable",):
-        return f"{IND}{t} = {g('var','my_temp_var')}"
+        return f"{IND}{t} = {g('var', 'my_temp_var')}"
 
     # clamp = { var = { min = X max = Y } }
     if t == "clamp_variable":
         return (
-            f"{IND}clamp_variable = {{ {g('var','my_var')} = {{ "
-            f"min = {g('min','0')} max = {g('max','100')} }} }}"
+            f"{IND}clamp_variable = {{ {g('var', 'my_var')} = {{ "
+            f"min = {g('min', '0')} max = {g('max', '100')} }} }}"
         )
     if t == "clamp_temp_variable":
         return (
-            f"{IND}clamp_temp_variable = {{ {g('var','my_temp_var')} = {{ "
-            f"min = {g('min','0')} max = {g('max','100')} }} }}"
+            f"{IND}clamp_temp_variable = {{ {g('var', 'my_temp_var')} = {{ "
+            f"min = {g('min', '0')} max = {g('max', '100')} }} }}"
         )
 
     # set_variable_to_random / randomize_variable = { var = { max = X } }
     if t in ("set_variable_to_random", "randomize_variable"):
-        return f"{IND}{t} = {{ {g('var','my_var')} = {{ max = {g('max','10')} }} }}"
+        return f"{IND}{t} = {{ {g('var', 'my_var')} = {{ max = {g('max', '10')} }} }}"
     if t in ("set_temp_variable_to_random", "randomize_temp_variable"):
         return (
-            f"{IND}{t} = {{ {g('var','my_temp_var')} = {{ "
-            f"max = {g('max','10')} }} }}"
+            f"{IND}{t} = {{ {g('var', 'my_temp_var')} = {{ max = {g('max', '10')} }} }}"
         )
 
     if t == "add_dynamic_modifier":
         out = [
             f"{IND}add_dynamic_modifier = {{",
-            f"{IND}\tmodifier = {g('modifier','TAG_modifier')}",
+            f"{IND}\tmodifier = {g('modifier', 'TAG_modifier')}",
         ]
         sc = g("scope", "").strip()
         dy = g("days", "").strip()
@@ -451,7 +448,7 @@ def render_effect(eff: Mapping[str, object]) -> str:
     if t == "remove_dynamic_modifier":
         return (
             f"{IND}remove_dynamic_modifier = {{\n"
-            f"{IND}\tmodifier = {g('modifier','TAG_modifier')}\n"
+            f"{IND}\tmodifier = {g('modifier', 'TAG_modifier')}\n"
             f"{IND}}}"
         )
 
@@ -479,17 +476,17 @@ def render_effect(eff: Mapping[str, object]) -> str:
             return (
                 f"{IND}custom_effect_tooltip = {{\n"
                 f"{IND}\tlocalization_key = {loc_key}\n"
-                f"{IND}\tMODIFIER = {g('MODIFIER','TAG_modifier')}\n"
+                f"{IND}\tMODIFIER = {g('MODIFIER', 'TAG_modifier')}\n"
                 f"{IND}}}"
             )
-        return f"{IND}custom_effect_tooltip = {g('tooltip','my_tooltip_key')}"
+        return f"{IND}custom_effect_tooltip = {g('tooltip', 'my_tooltip_key')}"
 
     if t in (
         "md_small_expenditure",
         "md_medium_expenditure",
         "md_large_expenditure",
     ):
-        return f"{IND}{t.replace('md_','')} = yes"
+        return f"{IND}{t.replace('md_', '')} = yes"
 
     if t == "md_build_state":
         effect = g("effect", "one_state_industrial_complex")
@@ -520,85 +517,85 @@ def render_effect(eff: Mapping[str, object]) -> str:
 
     if t == "md_party_popularity":
         return (
-            f"{IND}set_temp_variable = {{ party_index = {g('party_index','2')} }}\n"
+            f"{IND}set_temp_variable = {{ party_index = {g('party_index', '2')} }}\n"
             f"{IND}set_temp_variable = {{ "
-            f"party_popularity_increase = {g('amount','0.10')} }}\n"
+            f"party_popularity_increase = {g('amount', '0.10')} }}\n"
             f"{IND}add_relative_party_popularity = yes"
         )
 
     if t == "md_change_ruling_party":
         return (
             f"{IND}set_temp_variable = {{ "
-            f"rul_party_temp = {g('rul_party_temp','2')} }}\n"
+            f"rul_party_temp = {g('rul_party_temp', '2')} }}\n"
             f"{IND}change_ruling_party_effect = yes\n"
             f"{IND}set_politics = {{\n"
-            f"{IND}\truling_party = {g('ruling_party','western')}\n"
-            f"{IND}\telections_allowed = {g('elections_allowed','no')}\n"
+            f"{IND}\truling_party = {g('ruling_party', 'western')}\n"
+            f"{IND}\telections_allowed = {g('elections_allowed', 'no')}\n"
             f"{IND}}}"
         )
 
     if t == "md_ban_party":
         return (
-            f"{IND}set_temp_variable = {{ party_index = {g('party_index','1')} }}\n"
+            f"{IND}set_temp_variable = {{ party_index = {g('party_index', '1')} }}\n"
             f"{IND}ban_party_scripted_call = yes"
         )
 
     if t == "md_unban_party":
         return (
-            f"{IND}set_temp_variable = {{ party_index = {g('party_index','1')} }}\n"
+            f"{IND}set_temp_variable = {{ party_index = {g('party_index', '1')} }}\n"
             f"{IND}unban_party_scripted_call = yes"
         )
 
     if t == "md_pp_loss":
-        return f"{IND}{g('duration','lose_pp_for_month')} = yes"
+        return f"{IND}{g('duration', 'lose_pp_for_month')} = yes"
 
     if t == "md_faction_opinion":
         return (
-            f"{IND}set_temp_variable = {{ temp_opinion = {g('opinion','5')} }}\n"
-            f"{IND}{g('faction','change_the_military_opinion')} = yes"
+            f"{IND}set_temp_variable = {{ temp_opinion = {g('opinion', '5')} }}\n"
+            f"{IND}{g('faction', 'change_the_military_opinion')} = yes"
         )
 
     if t == "md_influence_country":
         return (
-            f"{IND}set_temp_variable = {{ percent_change = {g('percent','5')} }}\n"
+            f"{IND}set_temp_variable = {{ percent_change = {g('percent', '5')} }}\n"
             f"{IND}set_temp_variable = {{ tag_index = ROOT }}\n"
             f"{IND}set_temp_variable = {{ "
-            f"influence_target = {g('target','GER')} }}\n"
+            f"influence_target = {g('target', 'GER')} }}\n"
             f"{IND}change_influence_percentage = yes"
         )
 
     if t == "md_eurosceptic_target":
         return (
             f"{IND}set_temp_variable = {{ "
-            f"modify_eurosceptic = {g('amount','0.05')} }}\n"
+            f"modify_eurosceptic = {g('amount', '0.05')} }}\n"
             f"{IND}set_temp_variable = {{ "
-            f"modify_eurosceptic_target = {g('target','GER')} }}\n"
+            f"modify_eurosceptic_target = {g('target', 'GER')} }}\n"
             f"{IND}eurosceptic_change = yes"
         )
 
     if t == "md_cart_strength":
         return (
             f"{IND}set_temp_variable = {{ "
-            f"cart_strength_change = {g('strength','2')} }}\n"
+            f"cart_strength_change = {g('strength', '2')} }}\n"
             f"{IND}set_temp_variable = {{ "
-            f"cart_influence_change = {g('influence','2')} }}\n"
+            f"cart_influence_change = {g('influence', '2')} }}\n"
             f"{IND}modify_cartel_variables_effect = yes"
         )
 
     if t == "md_relative_party_popularity":
         return (
-            f"{IND}set_temp_variable = {{ party_index = {g('party_index','1')} }}\n"
+            f"{IND}set_temp_variable = {{ party_index = {g('party_index', '1')} }}\n"
             f"{IND}set_temp_variable = {{ "
-            f"party_popularity_increase = {g('amount','0.02')} }}\n"
+            f"party_popularity_increase = {g('amount', '0.02')} }}\n"
             f"{IND}set_temp_variable = {{ "
-            f"temp_outlook_increase = {g('temp_outlook_increase','0.02')} }}\n"
+            f"temp_outlook_increase = {g('temp_outlook_increase', '0.02')} }}\n"
             f"{IND}add_relative_party_popularity = yes"
         )
 
     if t.startswith("md_modifier_"):
         return (
             f"{IND}# MD MODIFIER (place inside idea modifier block):\n"
-            f"{IND}# {g('modifier','')} = {g('value','0.05')}"
+            f"{IND}# {g('modifier', '')} = {g('value', '0.05')}"
         )
 
     # ── Scope / if / else blocks ───────────────────────────────
@@ -722,7 +719,6 @@ def render_effect(eff: Mapping[str, object]) -> str:
         return [f"{T}{k} = {v}"]
 
     if t in _SCOPE_TYPES:
-
         out = [f"{IND}{t} = {{"]
         limit_raw = str(g("limit", "")).strip()
         if limit_raw:
@@ -767,6 +763,8 @@ def render_effect(eff: Mapping[str, object]) -> str:
 
     # ── Generic fallback ───────────────────────────────────────
     defn = EFFECT_DEFS.get(t, {})
+    if not isinstance(defn, Mapping):
+        defn = {}
     fl = defn.get("fields", [])
     fname = fl[0][0] if fl else None
     if fname and len(fl) == 1:

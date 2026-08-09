@@ -167,6 +167,7 @@ class ImageBroker:
         )
         cache_key = _cache_key(key)
         on_owner_thread = threading.get_ident() == self._owner_thread
+        pending: _Pending | None
         with self._lock:
             if self._closed:
                 return None
@@ -196,11 +197,7 @@ class ImageBroker:
                 self._pending[key] = pending
                 future = self._executor.submit(self._decode, key)
                 pending.future = future
-                future.add_done_callback(
-                    lambda completed, image_key=key: self._queue_result(
-                        image_key, completed
-                    )
-                )
+                future.add_done_callback(self._queue_result_callback(key))
             pending.subscribers[owner] = _Subscriber(asset.generation, callback)
             self._owner_requests[owner] = key
         return None
@@ -255,6 +252,11 @@ class ImageBroker:
             drained += 1
             self._finish(key, decoded, realized=realized)
         return drained
+
+    def _queue_result_callback(
+        self, key: _ImageKey
+    ) -> Callable[[Future[object | None]], None]:
+        return lambda completed: self._queue_result(key, completed)
 
     def _decode(self, key: _ImageKey) -> object | None:
         try:

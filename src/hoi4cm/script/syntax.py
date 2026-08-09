@@ -86,6 +86,7 @@ def tokenize(source: str) -> list[str]:
 def parse_block(tokens: Sequence[str], position: int) -> tuple[dict[str, object], int]:
     """Parse a brace block, collecting duplicate keys into ordered lists."""
     result: dict[str, object] = {}
+    value: object
     position += 1
     while position < len(tokens) and tokens[position] != "}":
         key = tokens[position]

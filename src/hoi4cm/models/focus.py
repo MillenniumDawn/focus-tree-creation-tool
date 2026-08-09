@@ -6,6 +6,17 @@ class Focus:
 
     _next = 0
 
+    # Set only when a focus is built from a parsed file; used to preserve the
+    # original coordinates across edits. Declared here (no default) so mypy
+    # knows they exist while `hasattr` still reports them absent on fresh
+    # focuses.
+    _raw_gx: int | None
+    _raw_gy: int | None
+    _rel_dx: int | None
+    _rel_dy: int | None
+    _joint_extra: str
+    _script_extras: dict[str, object] | None
+
     def __init__(self, x=0, y=0):
         Focus._next += 1
         self.id = Focus._next
@@ -14,7 +25,7 @@ class Focus:
         self.gfx = "GFX_goal_generic_political_pressure"
         self.x = x
         self.y = y
-        self.cost = 10
+        self.cost: int | float = 10
         self.desc = ""
         self.effects = []  # [{"type":str,"fields":{name:val}}]
         self.prereqs = []  # [[fid,...]] AND of OR-groups

@@ -22,11 +22,15 @@ pytest                          # full suite (src/ is on the path via pyproject)
 pytest tests/test_config.py::test_cfg_save_merges_existing_keys   # single test
 ruff check .                    # lint
 black --check .                 # formatting
+mypy                            # type check (src/hoi4cm + tests)
+pylint src/hoi4cm tests         # lint (light gate on top of ruff/black)
+pre-commit run --all-files      # run all hooks once
+pre-commit install              # run hooks on every commit
 
 python build/build.py           # standalone exe (after pip install ".[build]")
 ```
 
-CI runs ruff + black and pytest, all on 3.14 (the project's floor).
+CI runs ruff, black, mypy, pylint and pytest, all on 3.14 (the project's floor).
 
 ## Layout
 
@@ -39,7 +43,7 @@ The monolith inserts `src/` onto `sys.path` at startup and imports canonical nam
 
 ## Conventions
 
-- **Lint scope:** ruff (`E,F,W,I,UP,B`) and black (line-length 88) cover `src/hoi4cm/` and `tests/` only — the monolith and `build/` are excluded. Packaged code must pass both; in the monolith, match the existing style by hand.
+- **Lint scope:** ruff (`E,F,W,I,UP,B`), black (line-length 88), mypy and pylint cover `src/hoi4cm/` and `tests/` only — the monolith and `build/` are excluded. Packaged code must pass all four; in the monolith, match the existing style by hand. Config lives in `pyproject.toml` (`[tool.ruff]`, `[tool.black]`, `[tool.mypy]`, `[tool.pylint]`); `.pre-commit-config.yaml` wires them into pre-commit. Pylint's `disable` list is deliberate: it drops checks ruff/black already cover and false positives on Tk/dataclass/mixin patterns, so it stays a light gate.
 - **Logging, not print.** `get_logger("name")` for a `HOI4CM.<name>` child. User-facing errors go through `add_error()` so they reach the in-app error log.
 - **Tolerant file reads.** Mod files have mixed encodings — read them via `read_file`, never bare `open(...).read()`.
 - **Preserve user data on round-trips.** Parse→export of an existing file must not drop fields. Test round-trips when touching the parser or exporters.

@@ -5,11 +5,15 @@ import threading
 from collections.abc import Callable
 from concurrent.futures import Executor, Future
 from dataclasses import dataclass
+from typing import Any, ParamSpec, TypeVar
+
+_P = ParamSpec("_P")
+_T = TypeVar("_T")
 
 
 @dataclass(frozen=True)
 class _WorkItem:
-    future: Future[object]
+    future: Future[Any]
     work: Callable[[], object]
 
 
@@ -25,13 +29,13 @@ class DaemonThreadPoolExecutor(Executor):
         self._shutdown = False
 
     def submit(
-        self, fn: Callable[..., object], /, *args: object, **kwargs: object
-    ) -> Future[object]:
+        self, fn: Callable[_P, _T], /, *args: _P.args, **kwargs: _P.kwargs
+    ) -> Future[_T]:
         with self._lock:
             if self._shutdown:
                 raise RuntimeError("cannot schedule new futures after shutdown")
             self._start_workers_locked()
-            future: Future[object] = Future()
+            future: Future[_T] = Future()
             self._queue.put(_WorkItem(future, lambda: fn(*args, **kwargs)))
             return future
 

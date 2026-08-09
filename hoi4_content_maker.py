@@ -1937,7 +1937,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
             f.available_if_capitulated = self._fv_cap.get()
             self._save_offsets_to_focus()
             self.focuses.touch()
-        except ValueError, Exception:
+        except Exception:
             pass
 
     def _select(self, f):

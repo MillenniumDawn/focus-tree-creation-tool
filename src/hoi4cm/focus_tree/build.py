@@ -167,7 +167,8 @@ def build_focuses(
         aiblock = rf.get("ai_will_do", {})
         if isinstance(aiblock, dict):
             try:
-                f.ai_will_do = int(float(aiblock.get("factor", aiblock.get("base", 1))))
+                factor = aiblock.get("factor", aiblock.get("base", 1))
+                f.ai_will_do = int(float(factor)) if factor is not None else 1
             except Exception:
                 f.ai_will_do = 1
             f.ai_will_do_raw = dict_to_raw(aiblock)

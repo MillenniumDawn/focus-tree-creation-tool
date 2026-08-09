@@ -4,6 +4,7 @@ import re
 import tkinter as tk
 from collections.abc import Hashable, Sequence
 from dataclasses import dataclass
+from typing import Literal
 
 from hoi4cm.ui.focus_list import _PooledList
 from hoi4cm.ui.theme import BG_CARD, BG_DARK, BORDER_G, TEXT, TEXT_DIM
@@ -115,7 +116,7 @@ class _ChecklistRow:
             )
             btn.pack(side="left")
             self.type_buttons.append(btn)
-        self._palette = [
+        self._palette: list[tk.Widget] = [
             self.frame,
             self.checkbox,
             self.name_label,
@@ -128,7 +129,7 @@ class _ChecklistRow:
         self.key = item.key
         bg = LOADED_BG if item.already else BG_CARD
         self._set_background(bg)
-        state = "disabled" if item.already else "normal"
+        state: Literal["disabled", "normal"] = "disabled" if item.already else "normal"
         self.checkbox.config(variable=item.checked, state=state)
         self.name_label.config(text=item.name, fg=TEXT_DIM if item.already else TEXT)
         self.marker.config(text=self._loaded_marker if item.already else "")
@@ -140,7 +141,7 @@ class _ChecklistRow:
 
     def _set_background(self, color: str) -> None:
         for widget in self._palette:
-            widget.configure(bg=color)
+            widget["bg"] = color
 
 
 class VirtualChecklist(_PooledList):

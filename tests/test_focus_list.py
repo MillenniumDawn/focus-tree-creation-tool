@@ -1,3 +1,5 @@
+from collections.abc import Hashable
+
 import pytest
 
 from hoi4cm.ui.focus_list import (
@@ -158,7 +160,7 @@ def test_pool_always_holds_every_visible_row(
 
 
 def test_tk_list_reuses_bounded_pool_and_updates_only_selected_rows(tk_root) -> None:
-    selected = []
+    selected: list[Hashable] = []
     tk_root.geometry("220x180")
     focus_list = VirtualFocusList(tk_root, on_select=selected.append)
     focus_list.pack(fill="both", expand=True)

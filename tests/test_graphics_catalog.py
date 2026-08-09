@@ -700,7 +700,7 @@ def test_incremental_fuzz_matches_full_refresh(graphics_tree, tmp_path):
                 f'spriteType = {{ name = "{name}" texturefile = "{tex}" }}\n'
                 for name, tex in declarations
             )
-            with open(path, "w") as stream:
+            with open(path, "w", encoding="utf-8") as stream:
                 stream.write(text)
             applied.apply(catalog.note_written(path, read_text=read_file))
         check()

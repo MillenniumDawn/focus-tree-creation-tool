@@ -40,7 +40,7 @@ def test_inflight_requests_are_deduplicated_by_stamp_and_transform() -> None:
             realizer=lambda image: image,
             pillow_available=True,
         )
-        results = []
+        results: list[object] = []
         broker.request(_asset(), "/tmp/icon.png", owner="a", callback=results.append)
         broker.request(_asset(), "/tmp/icon.png", owner="b", callback=results.append)
         gate.set()
@@ -86,8 +86,8 @@ def test_changed_stamp_or_transform_starts_distinct_work() -> None:
 def test_stale_generation_is_not_realized_or_delivered() -> None:
     generation = 1
     gate = threading.Event()
-    realized = []
-    delivered = []
+    realized: list[object] = []
+    delivered: list[object] = []
 
     def decode(path: str, transform: ImageTransform) -> object:
         gate.wait(timeout=2)
@@ -114,8 +114,8 @@ def test_new_generation_does_not_reuse_stale_inflight_decode() -> None:
     generation = 1
     gate = threading.Event()
     decode_count = 0
-    old_results = []
-    new_results = []
+    old_results: list[object] = []
+    new_results: list[object] = []
 
     def decode(path: str, transform: ImageTransform) -> object:
         nonlocal decode_count
@@ -253,7 +253,7 @@ def test_release_cancels_queued_decode() -> None:
 
 
 def test_failed_decode_delivers_none_to_subscribers() -> None:
-    delivered = []
+    delivered: list[object] = []
 
     def decode(path: str, transform: ImageTransform) -> object:
         raise OSError("boom")
@@ -271,7 +271,7 @@ def test_failed_decode_delivers_none_to_subscribers() -> None:
 
         # A later request for the same failed asset is served from the cache
         # and still delivers None rather than hanging on a placeholder.
-        cached = []
+        cached: list[object] = []
         broker.request(_asset(), "/tmp/icon.png", owner="b", callback=cached.append)
         broker.drain()
 
@@ -362,7 +362,7 @@ def test_missing_pillow_does_not_submit_or_realize() -> None:
 
 def test_close_drops_inflight_owner_callback_without_waiting() -> None:
     gate = threading.Event()
-    delivered = []
+    delivered: list[object] = []
 
     def decode(path: str, transform: ImageTransform) -> object:
         gate.wait(timeout=2)

@@ -1,0 +1,39 @@
+# Pre-commit hooks. Install with `pre-commit install`; run all with
+# `pre-commit run --all-files`. Config lives in pyproject.toml (ruff, black,
+# mypy, pylint all read it), so the hooks here are thin wrappers.
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-ast
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.0
+    hooks:
+      - id: ruff
+        args: [--fix]
+
+  - repo: https://github.com/psf/black-pre-commit-mirror
+    rev: 26.5.1
+    hooks:
+      - id: black
+        # Files are passed explicitly by pre-commit, which bypasses black's
+        # --extend-exclude; --force-exclude makes it honor the monolith/build
+        # exclusions (matched against the relative paths pre-commit passes).
+        args: [--force-exclude, 'hoi4_content_maker\.py|build/']
+
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v2.3.0
+    hooks:
+      - id: mypy
+        args: [--config-file=pyproject.toml]
+
+  - repo: https://github.com/PyCQA/pylint
+    rev: v4.0.6
+    hooks:
+      - id: pylint

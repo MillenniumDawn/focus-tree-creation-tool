@@ -9,9 +9,9 @@ Works on Windows, macOS, and Linux.
 """
 
 import os
+import shutil
 import subprocess
 import sys
-import shutil
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR = os.path.dirname(SCRIPT_DIR)
@@ -50,8 +50,7 @@ def generate_icon():
     ensure_package("Pillow", "PIL")
 
     gen_script = os.path.join(SCRIPT_DIR, "generate_icon.py")
-    run([sys.executable, gen_script, "--all-formats"],
-        cwd=SCRIPT_DIR)
+    run([sys.executable, gen_script, "--all-formats"], cwd=SCRIPT_DIR)
 
 
 def write_spec():
@@ -65,7 +64,7 @@ def write_spec():
     elif sys.platform == "darwin":
         png = os.path.join(SCRIPT_DIR, "icon.png")
         if os.path.exists(png):
-            icon_line = f"    icon=os.path.join(SCRIPT_DIR, 'icon.png'),"
+            icon_line = "    icon=os.path.join(SCRIPT_DIR, 'icon.png'),"
     # Linux ELF executables don't support embedded icons — skip
 
     source_path = SOURCE.replace("\\", "/")
@@ -190,13 +189,20 @@ def main():
     spec_path = write_spec()
 
     try:
-        run([
-            sys.executable, "-m", "PyInstaller",
-            spec_path,
-            "--clean", "--noconfirm",
-            "--distpath", ROOT_DIR,
-            "--workpath", build_tmp,
-        ])
+        run(
+            [
+                sys.executable,
+                "-m",
+                "PyInstaller",
+                spec_path,
+                "--clean",
+                "--noconfirm",
+                "--distpath",
+                ROOT_DIR,
+                "--workpath",
+                build_tmp,
+            ]
+        )
     except subprocess.CalledProcessError:
         print()
         print("=" * 55)
@@ -225,7 +231,7 @@ def main():
         size_mb = os.path.getsize(final_out) / (1024 * 1024)
         print()
         print("=" * 55)
-        print(f"  Build SUCCESSFUL")
+        print("  Build SUCCESSFUL")
         print(f"  Output: {output_name}  ({size_mb:.1f} MB)")
         print("=" * 55)
         print()
