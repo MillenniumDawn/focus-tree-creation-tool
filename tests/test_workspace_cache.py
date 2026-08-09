@@ -81,8 +81,10 @@ def test_corrupt_json_degrades_to_none(tmp_path):
     # Corrupt the stored JSON directly in the db.
     import sqlite3
 
-    with sqlite3.connect(tmp_path / "state" / "cache.db") as conn:
+    conn = sqlite3.connect(tmp_path / "state" / "cache.db")
+    with conn:
         conn.execute("UPDATE graphics_snapshot SET data = 'not-json'")
+    conn.close()
     assert (
         cache.load_graphics(
             schema_version=1, root_identity="root-1", config_fingerprint="fp"
@@ -117,3 +119,18 @@ def test_store_non_jsonable_degrades_without_raising(tmp_path, monkeypatch):
         )
         is None
     )
+
+
+def test_store_load_does_not_leak_connection(cache):
+    import gc
+    import warnings
+
+    cache.store_graphics(
+        {"a": 1}, schema_version=1, root_identity="root-1", config_fingerprint="fp"
+    )
+    cache.load_graphics(
+        schema_version=1, root_identity="root-1", config_fingerprint="fp"
+    )
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", ResourceWarning)
+        gc.collect()

@@ -48,6 +48,7 @@ class ScanCache:
 
     def __init__(self, mod_root):
         self._conn = None
+        conn = None
         try:
             path = database_path(mod_root)
             os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -56,6 +57,8 @@ class ScanCache:
             conn.commit()
             self._conn = conn
         except Exception as e:  # pragma: no cover - depends on FS/db state
+            if conn is not None:
+                conn.close()
             _log.warning("scan cache disabled (open failed): %s", e)
             self._conn = None
 

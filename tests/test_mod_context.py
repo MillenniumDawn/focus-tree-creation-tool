@@ -601,8 +601,10 @@ def test_gfx_cache_version_mismatch_forces_rescan(gfx_mod_tree):
     MOD.scan(root)
     expected_sprites = dict(MOD.sprites)
     database = scan_cache_mod.database_path(root)
-    with sqlite3.connect(database) as connection:
+    connection = sqlite3.connect(database)
+    with connection:
         connection.execute("UPDATE graphics_snapshot SET schema_version = 0")
+    connection.close()
 
     MOD.scan(root)
     assert MOD.sprites == expected_sprites

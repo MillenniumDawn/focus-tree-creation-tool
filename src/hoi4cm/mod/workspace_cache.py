@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import contextlib
 import json
 import sqlite3
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from pathlib import Path
 
 from hoi4cm.core.logger import get_logger
@@ -31,7 +32,7 @@ class WorkspaceCache:
         config_fingerprint: str,
     ) -> dict[str, object] | None:
         try:
-            with self._connect() as connection:
+            with self._connection() as connection:
                 row = connection.execute(
                     "SELECT schema_version, root_identity, data "
                     "FROM graphics_snapshot WHERE config_fingerprint = ?",
@@ -59,7 +60,7 @@ class WorkspaceCache:
     ) -> None:
         try:
             encoded = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
-            with self._connect() as connection:
+            with self._connection() as connection:
                 connection.execute(
                     "INSERT OR REPLACE INTO graphics_snapshot "
                     "(config_fingerprint, schema_version, root_identity, data) "
@@ -73,6 +74,15 @@ class WorkspaceCache:
                 )
         except (OSError, TypeError, ValueError, sqlite3.Error) as error:
             _log.debug("graphics cache write failed: %s", error)
+
+    @contextlib.contextmanager
+    def _connection(self) -> Iterator[sqlite3.Connection]:
+        connection = self._connect()
+        try:
+            with connection:
+                yield connection
+        finally:
+            connection.close()
 
     def _connect(self) -> sqlite3.Connection:
         self._database_path.parent.mkdir(parents=True, exist_ok=True)
