@@ -127,6 +127,24 @@ def test_disabled_cache_never_raises(tmp_path, monkeypatch):
     c.close()
 
 
+def test_disabled_cache_does_not_leak_connection(tmp_path, monkeypatch):
+    """The half-opened connection on a corrupt DB must be closed, not leaked."""
+    import gc
+    import warnings
+
+    monkeypatch.setattr(sc, "STATE_DIR", str(tmp_path / "state"))
+    db = sc._db_path(str(tmp_path / "mod"))
+    os.makedirs(os.path.dirname(db), exist_ok=True)
+    with open(db, "wb") as f:
+        f.write(b"this is not a sqlite database")
+    c = sc.ScanCache(str(tmp_path / "mod"))
+    assert not c.enabled
+    c.close()
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", ResourceWarning)
+        gc.collect()
+
+
 def test_get_many_skips_corrupt_json(cache):
     """A row whose data is not valid JSON must be skipped, not raise."""
     conn = cache._conn

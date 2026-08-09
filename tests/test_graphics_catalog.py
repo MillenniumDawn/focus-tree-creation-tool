@@ -190,8 +190,10 @@ def test_cached_graphics_paths_are_relative(graphics_tree):
     catalog.refresh(str(graphics_tree), _config(), read_text=read_file)
 
     database = scan_cache.database_path(str(graphics_tree))
-    with sqlite3.connect(database) as connection:
+    connection = sqlite3.connect(database)
+    with connection:
         encoded = connection.execute("SELECT data FROM graphics_snapshot").fetchone()[0]
+    connection.close()
     assert str(graphics_tree) not in encoded
     data = json.loads(encoded)
     assert all(
@@ -264,8 +266,10 @@ def test_corrupt_graphics_snapshot_degrades_to_rescan(graphics_tree):
     first = GraphicsCatalog()
     expected = first.refresh(str(graphics_tree), _config(), read_text=read_file)
     database = scan_cache.database_path(str(graphics_tree))
-    with sqlite3.connect(database) as connection:
+    connection = sqlite3.connect(database)
+    with connection:
         connection.execute("UPDATE graphics_snapshot SET data = ?", ("{",))
+    connection.close()
 
     second = GraphicsCatalog()
     actual = second.refresh(str(graphics_tree), _config(), read_text=read_file)
