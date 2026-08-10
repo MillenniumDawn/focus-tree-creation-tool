@@ -6,6 +6,7 @@ A missed field here silently drops an edit on focus switch.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -13,6 +14,17 @@ from .focus import Focus
 
 _DEFAULT_GFX = "GFX_goal_generic_political_pressure"
 _DEFAULT_SEARCH = "FOCUS_FILTER_POLITICAL"
+_AI_BASE_RE = re.compile(r"^\s*base\s*=\s*([\d.]+)", re.MULTILINE)
+_AI_FACTOR_RE = re.compile(r"^\s*factor\s*=\s*([\d.]+)", re.MULTILINE)
+
+
+def parse_ai_will_do(raw_ai: str) -> int:
+    """Top-level numeric ai_will_do value from a raw block body.
+
+    Accepts either ``base`` (MD top-level) or ``factor`` (modifier blocks).
+    """
+    match = _AI_BASE_RE.search(raw_ai) or _AI_FACTOR_RE.search(raw_ai)
+    return int(float(match.group(1))) if match else 1
 
 
 @dataclass(frozen=True)

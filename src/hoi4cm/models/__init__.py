@@ -5,6 +5,7 @@ from .focus import Focus
 from .sidebar_form import (
     FocusSidebarValues,
     apply_sidebar_values,
+    parse_ai_will_do,
     sidebar_values_match_focus,
 )
 
@@ -16,5 +17,6 @@ __all__ = [
     "TreeDocument",
     "TreeMetadata",
     "apply_sidebar_values",
+    "parse_ai_will_do",
     "sidebar_values_match_focus",
 ]

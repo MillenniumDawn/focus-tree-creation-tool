@@ -103,6 +103,7 @@ from hoi4cm.models import (
     TreeDocument,
     TreeMetadata,
     apply_sidebar_values,
+    parse_ai_will_do,
     sidebar_values_match_focus,
 )
 from hoi4cm.ui import (
@@ -1914,41 +1915,44 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
         self.selected.icon = self._fv_icon.get()
         self._redraw_now()
 
+    def _read_sidebar_values(self):
+        """Snapshot sidebar widgets into FocusSidebarValues.
+
+        Returns None when the name field is empty so autosave cannot blank an
+        existing focus id on a half-cleared form.
+        """
+        raw = self._fv_name.get().strip()
+        if not raw:
+            return None
+        raw_ai = self._fv_ai_raw.get("1.0", "end").strip()
+        return FocusSidebarValues(
+            name=re.sub(r"[^A-Za-z0-9_]", "_", raw),
+            icon=self._fv_icon.get(),
+            gfx=self._fv_gfx.get().strip() or "GFX_goal_generic_political_pressure",
+            cost=int(self._fv_cost.get()),
+            ai_will_do=parse_ai_will_do(raw_ai),
+            ai_will_do_raw=raw_ai,
+            x=int(self._fv_x.get()),
+            y=int(self._fv_y.get()),
+            desc=self._fv_desc.get("1.0", "end").strip(),
+            search_filters=self._fv_search.get().strip() or "FOCUS_FILTER_POLITICAL",
+            available_cond=self._fv_avail.get("1.0", "end").strip(),
+            bypass_cond=self._fv_bypass.get("1.0", "end").strip(),
+            cancel_cond=self._fv_cancel2.get("1.0", "end").strip(),
+            cancel_if_invalid=self._fv_cancel.get(),
+            continue_if_invalid=self._fv_continue.get(),
+            available_if_capitulated=self._fv_cap.get(),
+            offsets=tuple(self._read_offsets_from_form()),
+        )
+
     def _autosave(self):
         if not self.selected:
             return
         f = self.selected
-        raw = self._fv_name.get().strip()
-        if not raw:
-            return
         try:
-            raw_ai = self._fv_ai_raw.get("1.0", "end").strip()
-            # Extract top-level numeric value — accept either `base` or `factor`
-            # (MD uses `base` at the ai_will_do top level, `factor` in modifier sub-blocks).
-            m = re.search(r"^\s*base\s*=\s*([\d.]+)", raw_ai, re.MULTILINE)
-            if not m:
-                m = re.search(r"^\s*factor\s*=\s*([\d.]+)", raw_ai, re.MULTILINE)
-            values = FocusSidebarValues(
-                name=re.sub(r"[^A-Za-z0-9_]", "_", raw),
-                icon=self._fv_icon.get(),
-                gfx=self._fv_gfx.get().strip()
-                or "GFX_goal_generic_political_pressure",
-                cost=int(self._fv_cost.get()),
-                ai_will_do=int(float(m.group(1))) if m else 1,
-                ai_will_do_raw=raw_ai,
-                x=int(self._fv_x.get()),
-                y=int(self._fv_y.get()),
-                desc=self._fv_desc.get("1.0", "end").strip(),
-                search_filters=self._fv_search.get().strip()
-                or "FOCUS_FILTER_POLITICAL",
-                available_cond=self._fv_avail.get("1.0", "end").strip(),
-                bypass_cond=self._fv_bypass.get("1.0", "end").strip(),
-                cancel_cond=self._fv_cancel2.get("1.0", "end").strip(),
-                cancel_if_invalid=self._fv_cancel.get(),
-                continue_if_invalid=self._fv_continue.get(),
-                available_if_capitulated=self._fv_cap.get(),
-                offsets=tuple(self._read_offsets_from_form()),
-            )
+            values = self._read_sidebar_values()
+            if values is None:
+                return
             # Pure select-away with an untouched form must not rebuild indexes.
             if sidebar_values_match_focus(f, values):
                 return
@@ -1958,8 +1962,11 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
             # x/y already go through move()'s incremental occupied_positions patch.
             if name_changed:
                 self.focuses.touch()
-        except Exception:
-            pass
+        except Exception as ex:
+            log.exception("Autosave failed")
+            self._log_error(
+                f"Autosave failed for focus {getattr(f, 'name', '?')}: {ex}"
+            )
 
     def _select(self, f):
         if self.selected and self.selected.id != f.id:

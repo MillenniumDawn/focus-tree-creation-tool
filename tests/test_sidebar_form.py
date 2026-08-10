@@ -4,6 +4,9 @@ A missed field in the match silently drops an edit when the user clicks
 another focus. The apply path must touch indexes only when name changes.
 """
 
+import time
+from unittest.mock import patch
+
 import pytest
 
 from hoi4cm.focus_tree.codec import render_focus_block
@@ -13,6 +16,7 @@ from hoi4cm.models import (
     FocusDocument,
     FocusSidebarValues,
     apply_sidebar_values,
+    parse_ai_will_do,
     sidebar_values_match_focus,
 )
 
@@ -64,6 +68,21 @@ def _values(focus=None, **overrides):
     if not overrides:
         return base
     return FocusSidebarValues(**{**base.__dict__, **overrides})
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("base = 3", 3),
+        ("factor = 2.5", 2),
+        ("base = 1.9", 1),
+        ("modifier = {\n\tfactor = 2\n}", 2),
+        ("", 1),
+        ("base = 4\nfactor = 9", 4),
+    ],
+)
+def test_parse_ai_will_do_accepts_base_or_factor(raw, expected):
+    assert parse_ai_will_do(raw) == expected
 
 
 def test_matching_form_is_noop():
@@ -209,3 +228,87 @@ def test_render_focus_block_accepts_document_by_name():
     assert "relative_position_id = PARENT" in via_view
     assert "x = 3" in via_view
     assert "y = 4" in via_view
+
+
+def _large_document(
+    size: int = 8_000,
+) -> tuple[FocusDocument, Focus, FocusSidebarValues]:
+    focuses = []
+    for index in range(1, size + 1):
+        focus = Focus(index % 64, index // 64)
+        focus.id = index
+        focus.name = f"F_{index}"
+        focus.ai_will_do_raw = "base = 1"
+        focuses.append(focus)
+    document = FocusDocument(focuses)
+    selected = focuses[0]
+    return document, selected, _values(selected)
+
+
+def test_matched_form_path_does_not_rebuild_indexes_at_scale():
+    document, selected, values = _large_document()
+    baseline = document.revision
+    rebuilds = 0
+    original = document.rebuild_indexes
+
+    def counted_rebuild() -> None:
+        nonlocal rebuilds
+        rebuilds += 1
+        original()
+
+    document.rebuild_indexes = counted_rebuild  # type: ignore[method-assign]
+
+    assert sidebar_values_match_focus(selected, values) is True
+    # Early-return path the autosave takes: no write, no touch, no rebuild.
+    assert rebuilds == 0
+    assert document.revision == baseline
+    assert document.validate_indexes()
+
+
+def test_by_name_get_does_not_scan_all_focuses():
+    document, selected, _unused = _large_document(size=4_000)
+    visits = {"n": 0}
+    real_values = document.values
+
+    def counting_values():
+        visits["n"] += 1
+        return real_values()
+
+    with patch.object(document, "values", side_effect=counting_values):
+        got = document.by_name.get(selected.name)
+
+    assert got is selected
+    assert visits["n"] == 0
+
+
+def test_select_away_hot_path_beats_full_rebuild_at_scale():
+    """1k matched checks and 10k by_name gets must beat full scans.
+
+    At Load All Trees scale the old path paid rebuild_indexes / name-map
+    rebuild per click. The dirty-check no-op and by_name view have to stay
+    cheaper than those full passes.
+    """
+    document, selected, values = _large_document(size=8_000)
+
+    t0 = time.perf_counter()
+    for _ in range(1_000):
+        assert sidebar_values_match_focus(selected, values)
+    match_s = time.perf_counter() - t0
+
+    t0 = time.perf_counter()
+    document.rebuild_indexes()
+    rebuild_s = time.perf_counter() - t0
+
+    t0 = time.perf_counter()
+    for _ in range(10_000):
+        assert document.by_name.get(selected.name) is selected
+    view_s = time.perf_counter() - t0
+
+    t0 = time.perf_counter()
+    for _ in range(10):
+        build_focus_name_lookup(document.values())
+    build_s = time.perf_counter() - t0
+
+    # Generous margins so CI load cannot flake this into a red build.
+    assert match_s < rebuild_s
+    assert view_s < build_s
