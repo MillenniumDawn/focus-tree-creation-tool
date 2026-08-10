@@ -139,6 +139,17 @@ def test_move_updates_positions_without_full_rebuild():
     _assert_indexes(document)
 
 
+def test_position_free_respects_except_id_and_occupants():
+    document = FocusDocument((_focus(1, x=0, y=0), _focus(2, x=1, y=1)))
+
+    assert document.position_free(2, 2) is True
+    assert document.position_free(1, 1) is False
+    assert document.position_free(1, 1, except_id=2) is True
+    assert document.position_free(1, 1, except_id=1) is False
+    assert document.move(1, 1, 1) is False
+    assert document.move(1, 1, 1, allow_occupied=True) is True
+
+
 def test_rename_prefix_bumps_revision_so_cached_ui_refreshes():
     document = FocusDocument((_focus(1, name="OLD_a"), _focus(2, name="keep")))
     revision = document.revision

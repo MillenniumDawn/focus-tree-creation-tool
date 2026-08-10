@@ -143,12 +143,18 @@ class FocusDocument(MutableMapping[int, Focus]):
         self._changed()
         self.rebuild_indexes()
 
+    def position_free(self, x: int, y: int, *, except_id: int | None = None) -> bool:
+        """True when no focus (other than except_id) occupies (x, y)."""
+        occupants = self.occupied_positions.get((x, y), set())
+        if except_id is not None:
+            occupants = occupants - {except_id}
+        return not occupants
+
     def move(
         self, focus_id: int, x: int, y: int, *, allow_occupied: bool = False
     ) -> bool:
         focus = self._focuses[focus_id]
-        occupants = self.occupied_positions.get((x, y), set()) - {focus_id}
-        if occupants and not allow_occupied:
+        if not allow_occupied and not self.position_free(x, y, except_id=focus_id):
             return False
         old = (focus.x, focus.y)
         if old == (x, y):

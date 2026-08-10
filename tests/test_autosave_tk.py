@@ -31,12 +31,17 @@ class _AutosaveHarness:
     _read_offsets_from_form = m.App._read_offsets_from_form
     _read_sidebar_values = m.App._read_sidebar_values
     _autosave = m.App._autosave
+    _apply = m.App._apply
     _log_error = m.App._log_error
 
     def __init__(self, root):
         self.selected: Focus | None = None
         self.focuses = FocusDocument()
         self._error_entries = logmod.get_error_entries()
+        self._undo_pushes: list[tuple[str, object]] = []
+        self._redraws = 0
+        self._populates: list[int] = []
+        self._list_invalidations = 0
         self._fv_name = tk.StringVar(master=root)
         self._fv_icon = tk.StringVar(master=root)
         self._fv_gfx = tk.StringVar(master=root)
@@ -53,6 +58,19 @@ class _AutosaveHarness:
         self._fv_bypass = tk.Text(root, height=2, width=20)
         self._fv_cancel2 = tk.Text(root, height=2, width=20)
         self._offset_entries: list = []
+
+    def _push_undo(self, label, touched_ids=()):
+        self._undo_pushes.append((label, touched_ids))
+
+    def _redraw(self):
+        self._redraws += 1
+
+    def _populate(self, focus):
+        self._populates.append(focus.id)
+        self.load_form(focus)
+
+    def _invalidate_focus_list_structure(self):
+        self._list_invalidations += 1
 
     def load_form(self, focus: Focus) -> None:
         self._fv_name.set(focus.name)
@@ -106,12 +124,25 @@ def _focus(**overrides) -> Focus:
     return focus
 
 
-def _harness_with(root, focus: Focus) -> _AutosaveHarness:
+def _harness_with(root, *focuses: Focus) -> _AutosaveHarness:
+    selected = focuses[0]
     h = _AutosaveHarness(root)
-    h.focuses = FocusDocument((focus,))
-    h.selected = focus
-    h.load_form(focus)
+    h.focuses = FocusDocument(focuses)
+    h.selected = selected
+    h.load_form(selected)
     return h
+
+
+class _MessageBox:
+    def __init__(self):
+        self.errors: list[tuple] = []
+        self.warnings: list[tuple] = []
+
+    def showerror(self, *args, **kwargs):
+        self.errors.append(args)
+
+    def showwarning(self, *args, **kwargs):
+        self.warnings.append(args)
 
 
 def test_autosave_noop_when_form_matches_focus(tk_root, log_state):
@@ -254,3 +285,98 @@ def test_read_sidebar_values_sanitizes_name_and_reads_offsets(tk_root):
     assert values is not None
     assert values.name == "Bad_Name_"
     assert values.offsets == ({"x": 9, "y": 2, "trigger": "tag = A"},)
+
+
+def test_autosave_keeps_position_when_target_cell_occupied(tk_root, log_state):
+    mover = _focus(id=1, name="mover", x=0, y=0, desc="old")
+    blocker = _focus(id=2, name="blocker", x=3, y=4)
+    h = _harness_with(tk_root, mover, blocker)
+    h._fv_x.set("3")
+    h._fv_y.set("4")
+    h._fv_desc.delete("1.0", "end")
+    h._fv_desc.insert("1.0", "moved desc")
+
+    h._autosave()
+
+    assert (mover.x, mover.y) == (0, 0)
+    assert mover.desc == "moved desc"
+    assert h.focuses.occupied_positions == {(0, 0): {1}, (3, 4): {2}}
+    assert h.focuses.validate_indexes()
+    assert log_state.get_error_entries() == []
+
+
+def test_apply_bad_cost_does_not_mutate_or_push_undo(tk_root, monkeypatch):
+    focus = _focus(name="keep", icon="⚔", gfx="GFX_goal_generic_political_pressure")
+    h = _harness_with(tk_root, focus)
+    before = deepcopy(focus.to_dict())
+    boxes = _MessageBox()
+    monkeypatch.setattr(m, "messagebox", boxes)
+    h._fv_name.set("renamed")
+    h._fv_icon.set("★")
+    h._fv_cost.set("nope")
+
+    h._apply()
+
+    assert focus.to_dict() == before
+    assert h._undo_pushes == []
+    assert len(boxes.errors) == 1
+    assert boxes.warnings == []
+
+
+def test_apply_empty_name_does_not_push_undo(tk_root, monkeypatch):
+    focus = _focus(name="keep")
+    h = _harness_with(tk_root, focus)
+    before = deepcopy(focus.to_dict())
+    boxes = _MessageBox()
+    monkeypatch.setattr(m, "messagebox", boxes)
+    h._fv_name.set("   ")
+
+    h._apply()
+
+    assert focus.to_dict() == before
+    assert h._undo_pushes == []
+    assert len(boxes.errors) == 1
+
+
+def test_apply_occupied_position_refuses_all_changes(tk_root, monkeypatch):
+    mover = _focus(id=1, name="mover", x=0, y=0, desc="old")
+    blocker = _focus(id=2, name="blocker", x=5, y=5)
+    h = _harness_with(tk_root, mover, blocker)
+    before = deepcopy(mover.to_dict())
+    boxes = _MessageBox()
+    monkeypatch.setattr(m, "messagebox", boxes)
+    h._fv_name.set("renamed")
+    h._fv_desc.delete("1.0", "end")
+    h._fv_desc.insert("1.0", "new desc")
+    h._fv_x.set("5")
+    h._fv_y.set("5")
+
+    h._apply()
+
+    assert mover.to_dict() == before
+    assert h._undo_pushes == []
+    assert len(boxes.warnings) == 1
+    assert boxes.errors == []
+
+
+def test_apply_writes_fields_and_moves_when_valid(tk_root, monkeypatch):
+    focus = _focus(name="old", x=0, y=0, desc="old")
+    h = _harness_with(tk_root, focus)
+    boxes = _MessageBox()
+    monkeypatch.setattr(m, "messagebox", boxes)
+    h._fv_name.set("new_name")
+    h._fv_desc.delete("1.0", "end")
+    h._fv_desc.insert("1.0", "new desc")
+    h._fv_x.set("2")
+    h._fv_y.set("3")
+
+    h._apply()
+
+    assert focus.name == "new_name"
+    assert focus.desc == "new desc"
+    assert (focus.x, focus.y) == (2, 3)
+    assert h._undo_pushes == [("edit focus", (focus.id,))]
+    assert h.focuses.first_by_name == {"new_name": focus.id}
+    assert h._list_invalidations == 1
+    assert boxes.errors == []
+    assert boxes.warnings == []

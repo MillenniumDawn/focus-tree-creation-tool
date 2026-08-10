@@ -1954,6 +1954,20 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
             values = self._read_sidebar_values()
             if values is None:
                 return
+            # Refuse occupied cells the same way canvas drag does: keep the live
+            # coordinates and still flush every other field the form changed.
+            if (values.x, values.y) != (f.x, f.y) and not self.focuses.position_free(
+                values.x, values.y, except_id=f.id
+            ):
+                log.warning(
+                    "Autosave kept position for %s: (%s, %s) is occupied",
+                    f.name,
+                    values.x,
+                    values.y,
+                )
+                values = FocusSidebarValues(
+                    **{**values.__dict__, "x": f.x, "y": f.y}
+                )
             # Pure select-away with an untouched form must not rebuild indexes.
             if sidebar_values_match_focus(f, values):
                 return
@@ -2674,34 +2688,11 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
     def _apply(self):
         if not self.selected:
             return
-        self._push_undo("edit focus", touched_ids=(self.selected.id,))
         f = self.selected
-        raw = self._fv_name.get().strip()
-        if not raw:
-            messagebox.showerror(
-                tr("dialog.error.title", "Error"),
-                tr("dialog.focus_id_empty", "Focus ID cannot be empty."),
-            )
-            return
-        f.name = re.sub(r"[^A-Za-z0-9_]", "_", raw)
-        f.icon = self._fv_icon.get()
-        f.gfx = self._fv_gfx.get().strip() or "GFX_goal_generic_political_pressure"
+        # Validate the whole form before mutating or pushing undo so a bad
+        # cost/x/y cannot leave name/icon/gfx half-applied.
         try:
-            f.cost = parse_focus_cost(self._fv_cost.get())
-            raw_ai = self._fv_ai_raw.get("1.0", "end").strip()
-            f.ai_will_do_raw = raw_ai
-            f.ai_will_do = parse_ai_will_do(raw_ai)
-            nx = int(self._fv_x.get())
-            ny = int(self._fv_y.get())
-            # move on canvas if x/y changed
-            if not self.focuses.move(f.id, nx, ny):
-                messagebox.showwarning(
-                    tr("dialog.position.title", "Position"),
-                    tr(
-                        "dialog.position_occupied",
-                        "Another focus already occupies that grid position.",
-                    ),
-                )
+            values = self._read_sidebar_values()
         except ValueError:
             messagebox.showerror(
                 tr("dialog.error.title", "Error"),
@@ -2711,15 +2702,42 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
                 ),
             )
             return
-        f.desc = self._fv_desc.get("1.0", "end").strip()
-        f.search_filters = self._fv_search.get().strip() or "FOCUS_FILTER_POLITICAL"
-        f.available_cond = self._fv_avail.get("1.0", "end").strip()
-        f.bypass_cond = self._fv_bypass.get("1.0", "end").strip()
-        f.cancel_cond = self._fv_cancel2.get("1.0", "end").strip()
-        f.cancel_if_invalid = self._fv_cancel.get()
-        f.continue_if_invalid = self._fv_continue.get()
-        f.available_if_capitulated = self._fv_cap.get()
-        self.focuses.touch()
+        if values is None:
+            messagebox.showerror(
+                tr("dialog.error.title", "Error"),
+                tr("dialog.focus_id_empty", "Focus ID cannot be empty."),
+            )
+            return
+        if (values.x, values.y) != (f.x, f.y) and not self.focuses.position_free(
+            values.x, values.y, except_id=f.id
+        ):
+            messagebox.showwarning(
+                tr("dialog.position.title", "Position"),
+                tr(
+                    "dialog.position_occupied",
+                    "Another focus already occupies that grid position.",
+                ),
+            )
+            return
+        if sidebar_values_match_focus(f, values):
+            return
+        self._push_undo("edit focus", touched_ids=(f.id,))
+        name_changed = apply_sidebar_values(f, values)
+        if not self.focuses.move(f.id, values.x, values.y):
+            # Pre-checked; if indexes raced, restore name indexes at least.
+            self.focuses.touch()
+            messagebox.showwarning(
+                tr("dialog.position.title", "Position"),
+                tr(
+                    "dialog.position_occupied",
+                    "Another focus already occupies that grid position.",
+                ),
+            )
+            self._redraw()
+            self._populate(f)
+            return
+        if name_changed:
+            self.focuses.touch()
         self._redraw()
         self._populate(f)
         self._invalidate_focus_list_structure()
