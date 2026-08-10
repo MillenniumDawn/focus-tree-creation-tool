@@ -97,7 +97,14 @@ from hoi4cm.core import (
 )
 from hoi4cm.editor import read_project, write_project
 from hoi4cm.mod import MOD, detect_loc_file
-from hoi4cm.models import EditorWorkspace, TreeDocument, TreeMetadata
+from hoi4cm.models import (
+    EditorWorkspace,
+    FocusSidebarValues,
+    TreeDocument,
+    TreeMetadata,
+    apply_sidebar_values,
+    sidebar_values_match_focus,
+)
 from hoi4cm.ui import (
     BG_CARD,
     BG_DARK,
@@ -1915,71 +1922,38 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
         if not raw:
             return
         try:
-            name = re.sub(r"[^A-Za-z0-9_]", "_", raw)
-            icon = self._fv_icon.get()
-            gfx = self._fv_gfx.get().strip() or "GFX_goal_generic_political_pressure"
-            cost = int(self._fv_cost.get())
             raw_ai = self._fv_ai_raw.get("1.0", "end").strip()
             # Extract top-level numeric value — accept either `base` or `factor`
             # (MD uses `base` at the ai_will_do top level, `factor` in modifier sub-blocks).
             m = re.search(r"^\s*base\s*=\s*([\d.]+)", raw_ai, re.MULTILINE)
             if not m:
                 m = re.search(r"^\s*factor\s*=\s*([\d.]+)", raw_ai, re.MULTILINE)
-            ai_will_do = int(float(m.group(1))) if m else 1
-            nx = int(self._fv_x.get())
-            ny = int(self._fv_y.get())
-            desc = self._fv_desc.get("1.0", "end").strip()
-            search_filters = (
-                self._fv_search.get().strip() or "FOCUS_FILTER_POLITICAL"
+            values = FocusSidebarValues(
+                name=re.sub(r"[^A-Za-z0-9_]", "_", raw),
+                icon=self._fv_icon.get(),
+                gfx=self._fv_gfx.get().strip()
+                or "GFX_goal_generic_political_pressure",
+                cost=int(self._fv_cost.get()),
+                ai_will_do=int(float(m.group(1))) if m else 1,
+                ai_will_do_raw=raw_ai,
+                x=int(self._fv_x.get()),
+                y=int(self._fv_y.get()),
+                desc=self._fv_desc.get("1.0", "end").strip(),
+                search_filters=self._fv_search.get().strip()
+                or "FOCUS_FILTER_POLITICAL",
+                available_cond=self._fv_avail.get("1.0", "end").strip(),
+                bypass_cond=self._fv_bypass.get("1.0", "end").strip(),
+                cancel_cond=self._fv_cancel2.get("1.0", "end").strip(),
+                cancel_if_invalid=self._fv_cancel.get(),
+                continue_if_invalid=self._fv_continue.get(),
+                available_if_capitulated=self._fv_cap.get(),
+                offsets=tuple(self._read_offsets_from_form()),
             )
-            available_cond = self._fv_avail.get("1.0", "end").strip()
-            bypass_cond = self._fv_bypass.get("1.0", "end").strip()
-            cancel_cond = self._fv_cancel2.get("1.0", "end").strip()
-            cancel_if_invalid = self._fv_cancel.get()
-            continue_if_invalid = self._fv_continue.get()
-            available_if_capitulated = self._fv_cap.get()
-            offsets = self._read_offsets_from_form()
-
             # Pure select-away with an untouched form must not rebuild indexes.
-            if (
-                f.name == name
-                and f.icon == icon
-                and getattr(f, "gfx", "GFX_goal_generic_political_pressure") == gfx
-                and f.cost == cost
-                and getattr(f, "ai_will_do_raw", "").strip() == raw_ai
-                and f.ai_will_do == ai_will_do
-                and f.x == nx
-                and f.y == ny
-                and f.desc == desc
-                and getattr(f, "search_filters", "FOCUS_FILTER_POLITICAL")
-                == search_filters
-                and getattr(f, "available_cond", "") == available_cond
-                and getattr(f, "bypass_cond", "") == bypass_cond
-                and getattr(f, "cancel_cond", "") == cancel_cond
-                and f.cancel_if_invalid == cancel_if_invalid
-                and f.continue_if_invalid == continue_if_invalid
-                and f.available_if_capitulated == available_if_capitulated
-                and getattr(f, "offsets", []) == offsets
-            ):
+            if sidebar_values_match_focus(f, values):
                 return
-
-            name_changed = f.name != name
-            f.name = name
-            f.icon = icon
-            f.gfx = gfx
-            f.cost = cost
-            f.ai_will_do_raw = raw_ai
-            f.ai_will_do = ai_will_do
-            self.focuses.move(f.id, nx, ny)
-            f.desc = desc
-            f.search_filters = search_filters
-            f.available_cond = available_cond
-            f.bypass_cond = bypass_cond
-            f.cancel_cond = cancel_cond
-            f.cancel_if_invalid = cancel_if_invalid
-            f.continue_if_invalid = continue_if_invalid
-            f.available_if_capitulated = available_if_capitulated
-            f.offsets = offsets
+            name_changed = apply_sidebar_values(f, values)
+            self.focuses.move(f.id, values.x, values.y)
             # name is the only autosave field that still needs a full index rebuild;
             # x/y already go through move()'s incremental occupied_positions patch.
             if name_changed:

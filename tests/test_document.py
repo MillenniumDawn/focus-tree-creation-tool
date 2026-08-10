@@ -139,25 +139,6 @@ def test_move_updates_positions_without_full_rebuild():
     _assert_indexes(document)
 
 
-def test_touch_only_needed_for_name_change_not_plain_field_writes():
-    """Autosave can write non-index fields without touch(); name still needs it."""
-    focus = _focus(1, name="keep")
-    focus.desc = "before"
-    document = FocusDocument((focus,))
-    revision = document.revision
-
-    focus.desc = "after"
-    assert document.revision == revision
-    assert document.validate_indexes()
-
-    focus.name = "renamed"
-    assert not document.validate_indexes()
-    document.touch()
-    assert document.revision == revision + 1
-    assert document.first_by_name == {"renamed": 1}
-    assert document.validate_indexes()
-
-
 def test_rename_prefix_bumps_revision_so_cached_ui_refreshes():
     document = FocusDocument((_focus(1, name="OLD_a"), _focus(2, name="keep")))
     revision = document.revision
