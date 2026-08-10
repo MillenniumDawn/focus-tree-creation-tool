@@ -1965,9 +1965,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
                     values.x,
                     values.y,
                 )
-                values = FocusSidebarValues(
-                    **{**values.__dict__, "x": f.x, "y": f.y}
-                )
+                values = FocusSidebarValues(**{**values.__dict__, "x": f.x, "y": f.y})
             # Pure select-away with an untouched form must not rebuild indexes.
             if sidebar_values_match_focus(f, values):
                 return
