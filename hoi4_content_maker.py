@@ -104,6 +104,7 @@ from hoi4cm.models import (
     TreeMetadata,
     apply_sidebar_values,
     parse_ai_will_do,
+    parse_focus_cost,
     sidebar_values_match_focus,
 )
 from hoi4cm.ui import (
@@ -1929,7 +1930,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
             name=re.sub(r"[^A-Za-z0-9_]", "_", raw),
             icon=self._fv_icon.get(),
             gfx=self._fv_gfx.get().strip() or "GFX_goal_generic_political_pressure",
-            cost=int(self._fv_cost.get()),
+            cost=parse_focus_cost(self._fv_cost.get()),
             ai_will_do=parse_ai_will_do(raw_ai),
             ai_will_do_raw=raw_ai,
             x=int(self._fv_x.get()),
@@ -2686,15 +2687,10 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
         f.icon = self._fv_icon.get()
         f.gfx = self._fv_gfx.get().strip() or "GFX_goal_generic_political_pressure"
         try:
-            f.cost = int(self._fv_cost.get())
+            f.cost = parse_focus_cost(self._fv_cost.get())
             raw_ai = self._fv_ai_raw.get("1.0", "end").strip()
             f.ai_will_do_raw = raw_ai
-
-            # Accept either `base` or `factor` at top level (MD convention uses `base`).
-            m = re.search(r"^\s*base\s*=\s*([\d.]+)", raw_ai, re.MULTILINE)
-            if not m:
-                m = re.search(r"^\s*factor\s*=\s*([\d.]+)", raw_ai, re.MULTILINE)
-            f.ai_will_do = int(float(m.group(1))) if m else 1
+            f.ai_will_do = parse_ai_will_do(raw_ai)
             nx = int(self._fv_x.get())
             ny = int(self._fv_y.get())
             # move on canvas if x/y changed
@@ -2711,7 +2707,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
                 tr("dialog.error.title", "Error"),
                 tr(
                     "dialog.focus_numeric_fields",
-                    "Cost, AI Will Do, X and Y must be integers.",
+                    "Cost, X and Y must be numbers (AI Will Do is taken from the raw block).",
                 ),
             )
             return

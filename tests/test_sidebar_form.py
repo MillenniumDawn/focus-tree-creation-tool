@@ -17,6 +17,7 @@ from hoi4cm.models import (
     FocusSidebarValues,
     apply_sidebar_values,
     parse_ai_will_do,
+    parse_focus_cost,
     sidebar_values_match_focus,
 )
 
@@ -83,6 +84,26 @@ def _values(focus=None, **overrides):
 )
 def test_parse_ai_will_do_accepts_base_or_factor(raw, expected):
     assert parse_ai_will_do(raw) == expected
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("10", 10),
+        ("10.0", 10),
+        ("7.5", 7.5),
+        (" 3.25 ", 3.25),
+        ("0", 0),
+    ],
+)
+def test_parse_focus_cost_keeps_fractions_and_normalizes_whole_numbers(raw, expected):
+    assert parse_focus_cost(raw) == expected
+    assert type(parse_focus_cost(raw)) is type(expected)
+
+
+def test_parse_focus_cost_rejects_non_numeric():
+    with pytest.raises(ValueError):
+        parse_focus_cost("not-a-number")
 
 
 def test_matching_form_is_noop():

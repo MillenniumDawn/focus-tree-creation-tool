@@ -27,6 +27,18 @@ def parse_ai_will_do(raw_ai: str) -> int:
     return int(float(match.group(1))) if match else 1
 
 
+def parse_focus_cost(raw: str) -> int | float:
+    """Parse a cost field, preserving fractional values from imported trees.
+
+    ``build_focuses`` keeps non-integral costs as float (e.g. 7.5). The sidebar
+    round-trips them via ``str(cost)``, so ``int(...)`` alone raises on select-away
+    and forces a false dirty path / error log spam.
+    """
+    value = float(raw.strip())
+    as_int = int(value)
+    return as_int if value == as_int else value
+
+
 @dataclass(frozen=True)
 class FocusSidebarValues:
     name: str

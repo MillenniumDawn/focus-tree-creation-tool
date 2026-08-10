@@ -58,7 +58,7 @@ class _AutosaveHarness:
         self._fv_name.set(focus.name)
         self._fv_icon.set(focus.icon)
         self._fv_gfx.set(focus.gfx)
-        self._fv_cost.set(str(int(focus.cost)))
+        self._fv_cost.set(str(focus.cost))
         self._fv_x.set(str(focus.x))
         self._fv_y.set(str(focus.y))
         self._fv_search.set(focus.search_filters)
@@ -187,6 +187,34 @@ def test_autosave_empty_name_leaves_focus_untouched(tk_root, log_state):
     assert log_state.get_error_entries() == []
 
 
+def test_autosave_float_cost_matches_without_error(tk_root, log_state):
+    """Imported non-integral costs must round-trip; int() used to raise."""
+    focus = _focus(cost=7.5)
+    h = _harness_with(tk_root, focus)
+    baseline = h.focuses.revision
+    before = deepcopy(focus.to_dict())
+
+    h._autosave()
+
+    assert focus.to_dict() == before
+    assert focus.cost == 7.5
+    assert h.focuses.revision == baseline
+    assert log_state.get_error_entries() == []
+
+
+def test_autosave_preserves_float_cost_when_other_field_edits(tk_root, log_state):
+    focus = _focus(cost=7.5, desc="old")
+    h = _harness_with(tk_root, focus)
+    h._fv_desc.delete("1.0", "end")
+    h._fv_desc.insert("1.0", "new")
+
+    h._autosave()
+
+    assert focus.cost == 7.5
+    assert focus.desc == "new"
+    assert log_state.get_error_entries() == []
+
+
 def test_autosave_logs_parse_errors_instead_of_swallowing(tk_root, log_state):
     focus = _focus(cost=10, desc="stay")
     h = _harness_with(tk_root, focus)
@@ -204,7 +232,7 @@ def test_autosave_logs_parse_errors_instead_of_swallowing(tk_root, log_state):
     assert len(entries) == 1
     message = entries[0][1]
     assert "Autosave failed for focus keep" in message
-    assert "invalid literal" in message
+    assert "not-a-number" in message
 
 
 def test_read_sidebar_values_returns_none_for_blank_name(tk_root):
