@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import bisect
 import hashlib
 import json
 import os
@@ -278,6 +279,8 @@ class GraphicsCatalog:
         # SQLite snapshot is re-stored at the next refresh or flush_cache(),
         # not on every write.
         self._cache_dirty = False
+        self._image_query_keys: tuple[str, ...] = ()
+        self._image_query_refs: tuple[PathReference, ...] = ()
 
     def refresh(
         self,
@@ -323,6 +326,7 @@ class GraphicsCatalog:
         self._root_identity = root_identity
         self._config_fingerprint = config_fingerprint
         self._derive_references(root, config)
+        self._rebuild_image_query_index()
         _remove_legacy_sidecar(root)
         if self._cache_dirty:
             self._flush_cache()
@@ -357,6 +361,7 @@ class GraphicsCatalog:
             delta = self._apply_image_record(
                 reference, ImageRecord(reference, _stamp_from_stat(path_stat))
             )
+            self._rebuild_image_query_index()
         elif self._is_interface_file(absolute_path):
             interface_root = os.path.join(self._root, "interface")
             record = GfxFileRecord(
@@ -404,6 +409,7 @@ class GraphicsCatalog:
                     delta.upsert["ideas"].add(name)
                 if self._ref_resolves_to(self._decision_refs.get(name), absolute_path):
                     delta.upsert["decisions"].add(name)
+            self._rebuild_image_query_index()
         if gfx_record is not None:
             for declaration in gfx_record.declarations:
                 self._unindex_declaration(declaration)
@@ -476,36 +482,58 @@ class GraphicsCatalog:
     def query(
         self, *, under: str | None = None, search: str = ""
     ) -> tuple[AssetRef, ...]:
-        under_path = os.path.normcase(os.path.abspath(under)) if under else None
+        under_path = _query_key(under) if under is not None else None
         search_text = search.casefold().strip()
-        assets: list[tuple[str, AssetRef]] = []
-        seen_paths: set[str] = set()
-        for record in self._images.values():
-            try:
-                absolute_path = record.path.resolve(self._source_roots)
-            except KeyError:
+        keys = self._image_query_keys
+        if under_path is None:
+            key_refs: Iterable[tuple[str, PathReference]] = zip(
+                keys, self._image_query_refs, strict=True
+            )
+        else:
+            start, end = _path_prefix_range(under_path)
+            start_index = bisect.bisect_left(keys, start)
+            end_index = bisect.bisect_left(keys, end)
+            key_refs = zip(
+                keys[start_index:end_index],
+                self._image_query_refs[start_index:end_index],
+                strict=True,
+            )
+
+        assets: list[AssetRef] = []
+        for key, ref in key_refs:
+            record = self._images.get(ref)
+            if record is None:
                 continue
-            normalized = os.path.normcase(os.path.abspath(absolute_path))
-            if normalized in seen_paths:
+            if search_text and search_text not in key:
                 continue
-            if under_path is not None and not _is_under(normalized, under_path):
-                continue
-            if search_text and search_text not in absolute_path.casefold():
-                continue
-            seen_paths.add(normalized)
             assets.append(
-                (
-                    absolute_path.casefold(),
-                    AssetRef(
-                        source_id=record.path.source_id,
-                        relative_path=record.path.relative_path,
-                        stamp=record.stamp,
-                        generation=self.generation,
-                    ),
+                AssetRef(
+                    source_id=ref.source_id,
+                    relative_path=ref.relative_path,
+                    stamp=record.stamp,
+                    generation=self.generation,
                 )
             )
-        assets.sort(key=lambda item: item[0])
-        return tuple(asset for _path, asset in assets)
+        return tuple(assets)
+
+    def _rebuild_image_query_index(self) -> None:
+        # Single-pass dict dedupe keeps the rebuild O(n) instead of the
+        # previous sort + linear walk. `setdefault` drops duplicate keys
+        # while preserving first-seen order; sort once at the end.
+        seen: dict[str, PathReference] = {}
+        for record in self._images.values():
+            try:
+                key = _query_key(record.path.resolve(self._source_roots))
+            except KeyError:
+                continue
+            seen.setdefault(key, record.path)
+        if not seen:
+            self._image_query_keys = ()
+            self._image_query_refs = ()
+            return
+        ordered = sorted(seen.items())
+        self._image_query_keys = tuple(item[0] for item in ordered)
+        self._image_query_refs = tuple(item[1] for item in ordered)
 
     def path_for(self, asset: AssetRef) -> str:
         return PathReference(asset.source_id, asset.relative_path).resolve(
@@ -1268,6 +1296,15 @@ def _image_candidates(path: PathReference) -> tuple[PathReference, ...]:
 
 def _absolute_key(path: str) -> str:
     return os.path.normcase(os.path.abspath(path))
+
+
+def _query_key(path: str) -> str:
+    return os.path.normcase(os.path.abspath(path)).casefold()
+
+
+def _path_prefix_range(prefix: str) -> tuple[str, str]:
+    normalized_prefix = prefix if prefix.endswith(os.sep) else prefix + os.sep
+    return normalized_prefix, normalized_prefix + "\uffff"
 
 
 def _absolute_candidates(path: str) -> tuple[str, ...]:

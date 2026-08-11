@@ -217,6 +217,25 @@ def test_catalog_query_uses_loaded_snapshot(graphics_tree, monkeypatch):
     ]
 
 
+def test_catalog_query_under_uses_directory_prefix_match(graphics_tree):
+    goals = graphics_tree / "gfx" / "interface" / "goals"
+    sibling = graphics_tree / "gfx" / "interface" / "goals_backup"
+    (goals / "nested").mkdir()
+    (goals / "nested" / "nested_goal.dds").write_bytes(b"nested")
+    sibling.mkdir()
+    (sibling / "disk_backup.dds").write_bytes(b"backup")
+
+    catalog = GraphicsCatalog()
+    catalog.refresh(str(graphics_tree), _config(), read_text=read_file)
+
+    results = [catalog.path_for(asset) for asset in catalog.query(under=str(goals))]
+    assert results == [
+        str(goals / "disk_focus.dds"),
+        str(goals / "nested" / "nested_goal.dds"),
+    ]
+    assert str(sibling / "disk_backup.dds") not in results
+
+
 def test_changed_graphics_path_uses_a_new_cache_entry(graphics_tree):
     alternate = graphics_tree / "gfx" / "alternate_ideas"
     alternate.mkdir()
