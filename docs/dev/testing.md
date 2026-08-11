@@ -75,10 +75,14 @@ isolating a single importer behavior: a `focus_tree = { }` wrapper with
 prerequisite OR/AND groups and mutex, bare top-level `focus`/`shared_focus`
 blocks with no wrapper, a `country` block with deliberately irregular
 formatting (to check verbatim capture), a country-tag-matching `offset`
-block, and a file with a missing closing brace that only the per-focus
-brace-walk fallback recovers. `tests/test_focus_tree_fixtures.py` parses and
-builds each one and compares the result against a committed golden JSON
-under `tests/fixtures/focus_trees/golden/`.
+block, a file with a missing closing brace that only the per-focus
+brace-walk fallback recovers, and `scanner_edge_cases.txt` — braces and
+hashes inside quoted strings, an icon path ending in a backslash, and
+comments in every position one can appear, which is what the regex scanners
+in `script/syntax.py` have to get right (see the scanner rewrite note in
+`performance.md`). `tests/test_focus_tree_fixtures.py` parses and builds
+each one and compares the result against a committed golden JSON under
+`tests/fixtures/focus_trees/golden/`.
 
 The comparison normalizes before asserting: focuses are keyed by name
 instead of numeric id (ids depend on `Focus._next`, a global counter), and
