@@ -49,3 +49,22 @@ def test_unloaded_mod_does_not_notify(tmp_path):
     files.write_text(tmp_path / "note.txt", "content", encoding="utf-8")
 
     assert mod.written == []
+
+
+def test_helper_is_reachable_from_the_mod_package():
+    """Non-wizard callers (the monolith's export path, ui/mod_loading) reach
+    it from hoi4cm.mod; _shared only re-exports it."""
+    from hoi4cm.mod import notifying_workspace_files as canonical
+
+    assert notifying_workspace_files is canonical
+
+
+def test_empty_mod_root_does_not_notify(tmp_path, monkeypatch):
+    """An unset save root must not accidentally match the cwd."""
+    monkeypatch.chdir(tmp_path)
+    mod = FakeMod(loaded=True, root=str(tmp_path))
+
+    files = notifying_workspace_files(mod, "")
+    files.write_text(tmp_path / "note.txt", "content", encoding="utf-8")
+
+    assert mod.written == []

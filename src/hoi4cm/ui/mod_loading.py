@@ -12,7 +12,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox
 
 from hoi4cm.core import default_hoi4_mod_dir, tr
-from hoi4cm.mod import MOD
+from hoi4cm.mod import MOD, notifying_workspace_files
 from hoi4cm.ui import (
     BG_CARD,
     BG_DARK,
@@ -714,6 +714,11 @@ class ModLoadingMixin:
         # Re-scan money files in case they weren't found on initial scan
         MOD._scan_md_money_files()
 
+        # Every step below rewrites a file the user already has. Route them
+        # through the atomic writer so a mid-write failure can't leave a
+        # truncated money-system script behind.
+        wf = notifying_workspace_files(MOD, MOD.root)
+
         # ── Step 1: 00_money_system.txt ──────────────────────────────
         money_sys = MOD.md_money_system_file
         if not money_sys:
@@ -779,8 +784,7 @@ class ModLoadingMixin:
                             i += 1
                         # Insert before closing brace (no extra tab before it)
                         sys_text = sys_text[:i] + inject_block + "\n" + sys_text[i:]
-                        with open(money_sys, "w", encoding="utf-8") as fp:
-                            fp.write(sys_text)
+                        wf.write_text(money_sys, sys_text, encoding="utf-8")
                         rel = os.path.relpath(money_sys, MOD.root)
                         saved.append(
                             f"✅ {rel}  — injected '{idea_id}' into "
@@ -828,8 +832,7 @@ class ModLoadingMixin:
                     f"\t}}\n"
                     f"}}\n"
                 )
-                with open(sloc, "a", encoding="utf-8") as fp:
-                    fp.write(defined_text)
+                wf.append_text(sloc, defined_text, encoding="utf-8")
                 rel = os.path.relpath(sloc, MOD.root)
                 saved.append(f"✅ {rel}  — appended '{summary_name}'")
         except Exception as e:
@@ -868,18 +871,17 @@ class ModLoadingMixin:
                         + f"\\n{summary_token}"
                         + yml_text[m2.start(3) :]
                     )
-                    with open(yml, "w", encoding="utf-8-sig") as fp:
-                        fp.write(new_yml)
+                    wf.write_text(yml, new_yml, encoding="utf-8-sig")
                     rel = os.path.relpath(yml, MOD.root)
                     saved.append(
                         f"✅ {rel}  — appended '{summary_token}' to {tooltip_loc_key}"
                     )
                 else:
                     # Key not found — append as new entry at end of file
-                    with open(yml, "a", encoding="utf-8-sig") as fp:
-                        if not yml_text:
-                            fp.write("l_english:\n")
-                        fp.write(f' {tooltip_loc_key}: "{summary_token}\\n"\n')
+                    entry = f' {tooltip_loc_key}: "{summary_token}\\n"\n'
+                    if not yml_text:
+                        entry = "l_english:\n" + entry
+                    wf.append_text(yml, entry, encoding="utf-8-sig")
                     rel = os.path.relpath(yml, MOD.root)
                     saved.append(
                         f"✅ {rel}  — appended new '{tooltip_loc_key}' entry "

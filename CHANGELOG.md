@@ -48,6 +48,32 @@ They are recorded here so they don't get "fixed" back.
   that ends in a backslash (e.g. `icon = "gfx\interface\"`) no longer swallows
   its closing quote and derails the rest of the file.
 
+### Every mod-file write is atomic (issue #46)
+
+**[BUG FIX] A failed export no longer destroys the file it was overwriting**
+- Export wrote the focus `.txt` and the loc `.yml` with a plain
+  `open(path, "w")`, which truncates the target before writing a byte. When an
+  edit target was set, that target is your existing tracked mod file — a crash,
+  a full disk, or a permission error mid-write left it truncated or empty, with
+  no backup. Neither write was wrapped in error handling, so a read-only file
+  aborted the export with a bare traceback, and a `.txt` that succeeded followed
+  by a `.yml` that failed left the export half-applied.
+- Every mod-file, localisation and project write now goes through
+  `WorkspaceFiles`: temp file in the target's directory, `fsync`, then
+  `os.replace`. The focus `.txt` and its loc `.yml` are written as one group —
+  both files are staged and fsynced before either is swapped in, and a swap that
+  fails part-way rolls the other one back. An export either fully lands or
+  changes nothing.
+- Failures now surface as a "Write Failed" dialog naming the file plus an entry
+  in the in-app error log, instead of a traceback, and no success dialog is shown
+  for an export that did not land.
+
+**[BEHAVIOR CHANGE] Exporting into a read-only folder now fails instead of overwriting**
+- An atomic write needs write permission on the target's *directory*, not just on
+  the file, so a mod folder you can't write to is now reported as a clear error
+  rather than silently accepting an in-place overwrite. Make the folder writable
+  (or export elsewhere) — the alternative is truncating your tree and hoping.
+
 ---
 
 ## Session 5 — Shared Focus Tree Position and Viewport Fixes

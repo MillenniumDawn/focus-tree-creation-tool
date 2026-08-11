@@ -6,6 +6,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
+from hoi4cm.mod.workspace_files import WorkspaceFiles
 from hoi4cm.models import (
     EditorWorkspace,
     Focus,
@@ -70,8 +71,9 @@ def decode_project(data: Mapping[str, Any]) -> EditorWorkspace:
 
 
 def write_project(path: str | Path, workspace: EditorWorkspace) -> None:
-    with open(path, "w", encoding="utf-8") as file:
-        json.dump(encode_project(workspace), file, indent=2)
+    """Save the project atomically — a failed write leaves the old file intact."""
+    text = json.dumps(encode_project(workspace), indent=2)
+    WorkspaceFiles().write_text(path, text, encoding="utf-8")
 
 
 def read_project(path: str | Path) -> EditorWorkspace:
