@@ -136,6 +136,7 @@ from hoi4cm.ui.menubar import build_menubar
 from hoi4cm.ui.mod_loading import ModLoadingMixin
 from hoi4cm.ui.settings_dialog import open_settings
 from hoi4cm.ui.toolbar import build_toolbar_row2
+from hoi4cm.ui.tree_badges import build_tree_badges
 
 log_startup()
 
@@ -369,6 +370,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
         self._joint_focuses = self.workspace.main_tree.metadata.joint_focuses
         # Extra loaded trees (shared/joint trees loaded alongside the main tree)
         self._extra_trees = []  # list of dicts: {type, file_path, tree_id, cfp_x, cfp_y, shared_focuses, joint_focuses, country_tag, focus_ids}
+        self._tree_badge_table = None  # rebuilt by _get_tree_badge on change
         toolbar = tk.Frame(self, bg=BG_DARK)
         toolbar.pack(fill="x")
         build_menubar(self, toolbar)
@@ -2819,6 +2821,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
         self._grid_key = None
         self._grid_img = None
         self._extra_trees.clear()
+        self._invalidate_tree_badges()
         self._shared_focuses.clear()
         self._joint_focuses.clear()
         self._refresh_loaded_trees_panel()
@@ -3912,6 +3915,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
             self._grid_key = None
             self._grid_img = None
             self._extra_trees.clear()
+            self._invalidate_tree_badges()
             self._refresh_loaded_trees_panel()
             self._hide_form()
             self._tree_id.set(parsed.tree_id)
@@ -3983,24 +3987,27 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
 
     # ── MULTI-TREE HELPERS ───────────────────────────────────────
 
+    def _invalidate_tree_badges(self):
+        """Drop the cached badge table after _extra_trees changes shape."""
+        self._tree_badge_table = None
+
     def _get_tree_badge(self, tree_idx):
-        """Return (badge_text, color) for a given tree_idx. Returns ('', FC_BORDER) for main tree."""
-        _SHARED_COLS = ["#f59e0b", "#fb923c", "#fcd34d", "#f97316"]
-        _JOINT_COLS = ["#a855f7", "#818cf8", "#c084fc", "#60a5fa"]
-        if tree_idx <= 0 or tree_idx > len(getattr(self, "_extra_trees", [])):
+        """Return (badge_text, color) for a given tree_idx. Returns ('', FC_BORDER) for main tree.
+
+        The canvas asks once per visible focus per redraw (plus once per
+        minimap dot and legend row), so the whole table is built once per
+        change to _extra_trees instead of counting same-typed trees per call.
+        The length check is a backstop for a mutation site that forgot to call
+        _invalidate_tree_badges.
+        """
+        extra_trees = getattr(self, "_extra_trees", [])
+        if tree_idx <= 0 or tree_idx > len(extra_trees):
             return "", FC_BORDER
-        info = self._extra_trees[tree_idx - 1]
-        tt = info["type"]
-        if tt == "shared":
-            n = sum(
-                1 for t in self._extra_trees[: tree_idx - 1] if t["type"] == "shared"
-            )
-            return ("S" if n == 0 else f"S{n + 1}"), _SHARED_COLS[n % len(_SHARED_COLS)]
-        else:
-            n = sum(
-                1 for t in self._extra_trees[: tree_idx - 1] if t["type"] == "joint"
-            )
-            return ("J" if n == 0 else f"J{n + 1}"), _JOINT_COLS[n % len(_JOINT_COLS)]
+        table = getattr(self, "_tree_badge_table", None)
+        if table is None or len(table) != len(extra_trees):
+            table = build_tree_badges(extra_trees)
+            self._tree_badge_table = table
+        return table[tree_idx - 1]
 
     def _install_extra_tree(self, raw, path, tree_type):
         """Parse raw focus-tree text, register the tree, and build its focuses.
@@ -4025,6 +4032,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
             "focus_ids": set(),
         }
         self._extra_trees.append(tree_info)
+        self._invalidate_tree_badges()
         if tree_type == "shared" and parsed.tree_id not in self._shared_focuses:
             self._shared_focuses.append(parsed.tree_id)
         elif tree_type == "joint" and parsed.tree_id not in self._joint_focuses:
@@ -4136,6 +4144,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
             self._hide_form()
         # Remove from list; re-index tree_idx on focuses belonging to later trees
         self._extra_trees.pop(tree_idx - 1)
+        self._invalidate_tree_badges()
         tree_updates = {}
         for new_idx, et in enumerate(self._extra_trees, start=1):
             if new_idx >= tree_idx:
@@ -4565,6 +4574,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
                         "focus_ids": set(),
                     }
                     self._extra_trees.append(tree_info)
+                    self._invalidate_tree_badges()
                     if (
                         r["type"] == "shared"
                         and parsed.tree_id not in self._shared_focuses
@@ -4808,6 +4818,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
                     "focus_ids": tree.focus_ids,
                 }
             )
+        self._invalidate_tree_badges()
         self._canvas_min = list(workspace.canvas_min)
         self._canvas_max = list(workspace.canvas_max)
         self._default_focus_prefix = workspace.default_focus_prefix

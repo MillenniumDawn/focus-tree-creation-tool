@@ -66,7 +66,15 @@ here today:
   against a bare `tk.Canvas` through a minimal fake host exposing only the
   attributes `_draw_focus` touches (`cv`, `focuses`, `offset`, `zoom`,
   `selected`, `_multi_sel`, `mutex_mode`, `mutex_src`, `_get_tree_badge`)
-  rather than a real `App`, and never needs real geometry.
+  rather than a real `App`, and never needs real geometry. The grid tests
+  are the exception: `_draw_grid` clips to the viewport, and a withdrawn
+  root's children never map, so `winfo_width/height` report 1 and there is
+  no viewport to clip to. Those use the module's `mapped_canvas` fixture,
+  which deiconifies and fails loudly (not skips) if the canvas still
+  doesn't map — a silently unmapped canvas would make the clipping
+  assertions vacuous. `test_unmapped_canvas_still_gets_a_grid_over_the_whole_extent`
+  pins the other side of that: with no dimensions to clip to, the grid
+  falls back to covering the canvas extent.
 
 ## Golden-fixture tests for the focus-tree pipeline
 
@@ -209,6 +217,30 @@ doesn't reproduce (event bindings, undo, mod reload, the minimap widget):
 - Reload the mod (File -> Load Mod again) while some focuses are panned
   off screen (culled), then pan back and confirm they redraw correctly
   with no stale `_culled`/`_items` state left over from before the reload.
+
+### Issue #26: render-loop bookkeeping checklist
+
+The unit tests cover each piece against a bare canvas. These need the real
+`App`, since what changed is *when* per-frame work is skipped:
+
+- Pan (middle-drag / Ctrl+drag) a full viewport in each direction without
+  releasing. The grid is generated one screen beyond the viewport, so this
+  is the case that runs off the generated lattice; releasing must snap a
+  full grid back.
+- Toggle the grid off and on at several zoom levels, and zoom past the
+  point where lines would smear (the `stepx < 4` cutoff) and back.
+- File -> New / Clear All with a tree loaded, then redraw: the grid pool's
+  items were destroyed with `cv.delete("all")` and have to be rebuilt.
+- Zoom all the way out on a big tree (so tens of thousands of edges draw),
+  then zoom back in. No stale line segments should remain visible.
+- Unload one extra tree from the middle of a Load All Trees session and
+  confirm every remaining tree's badge letter and colour re-numbers — that
+  is the badge table being invalidated rather than the old per-call scan.
+- Move focuses through every path that isn't `move()`: paste, undo/redo,
+  align/distribute, draw.io import, apply-code in the Code tab. Each has to
+  leave the canvas showing the new geometry. If one doesn't, run with
+  `HOI4CM_SCENE_INDEX_VALIDATE=1` — if that fixes it, the path mutated a
+  focus without bumping `FocusDocument.revision`.
 
 ### Phases 9-10: settings, menu sweep, GFX browser parity
 

@@ -50,6 +50,7 @@ from hoi4cm.ui.theme import (
 )
 from hoi4cm.ui.thumbnail_grid import ThumbnailItem, VirtualThumbnailGrid
 from hoi4cm.ui.toolbar import build_toolbar_row2
+from hoi4cm.ui.tree_badges import build_tree_badges
 from hoi4cm.ui.widgets import Tooltip, _safe_after, _safe_after_idle
 
 __all__ = [
@@ -91,6 +92,7 @@ __all__ = [
     "_safe_after_idle",
     "build_menubar",
     "build_toolbar_row2",
+    "build_tree_badges",
     "get_executor",
     "make_progress",
     "open_focus_icon_browser",

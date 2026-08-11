@@ -1,11 +1,21 @@
 from __future__ import annotations
 
+import os
 from collections import defaultdict
 from collections.abc import Mapping
 from dataclasses import dataclass
 from math import floor
 
 from hoi4cm.models.focus import Focus
+
+# ``ensure`` trusts ``FocusDocument.revision``: every mutation path on the
+# document bumps it, either through a mutating method or through an explicit
+# ``touch()``. Re-deriving ``signature()`` to double-check costs a nested tuple
+# per focus per frame, which is the whole document's worth of allocation on a
+# frame where nothing changed — so it is opt-in. Set the env var to have the
+# canvas cross-check every frame and rebuild on a mismatch; that is how a new
+# mutation path that forgot to bump the revision gets caught.
+DEBUG_VALIDATE = bool(os.environ.get("HOI4CM_SCENE_INDEX_VALIDATE"))
 
 
 @dataclass(frozen=True)
@@ -116,7 +126,7 @@ class SceneIndex:
                 else:
                     del self._edge_cells[(cell_x, cell_y)]
 
-    def ensure(self, focuses: Mapping[int, Focus], *, validate: bool) -> bool:
+    def ensure(self, focuses: Mapping[int, Focus], *, validate: bool = False) -> bool:
         document_revision = getattr(focuses, "revision", None)
         changed = document_revision != self._document_revision
         if validate and not changed:
@@ -198,6 +208,10 @@ class SceneIndex:
 
     @staticmethod
     def signature(focuses: Mapping[int, Focus]) -> tuple[object, ...]:
+        """Full geometry/topology fingerprint — O(F), for ``DEBUG_VALIDATE``.
+
+        Not on the render path: ``ensure`` uses the document revision.
+        """
         return tuple(
             (
                 focus_id,
@@ -233,4 +247,4 @@ class SceneIndex:
         return cell_x0, cell_y0, cell_x1, cell_y1
 
 
-__all__ = ["SceneEdge", "SceneIndex"]
+__all__ = ["DEBUG_VALIDATE", "SceneEdge", "SceneIndex"]

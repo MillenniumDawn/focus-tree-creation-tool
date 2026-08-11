@@ -1,4 +1,5 @@
 from hoi4cm.models import Focus
+from hoi4cm.models.document import FocusDocument
 from hoi4cm.ui.scene_index import SceneIndex
 
 
@@ -51,6 +52,61 @@ def test_view_only_ensure_does_not_validate_legacy_objects():
 
     assert index.ensure(focuses, validate=False) is False
     assert index.query_focus_ids((0, 0, 4, 4)) == [1]
+
+
+def test_ensure_defaults_to_trusting_the_document_revision():
+    document = FocusDocument([_focus(1, 1, 1)])
+    index = SceneIndex(cell_size=4)
+    index.rebuild(document)
+
+    assert index.ensure(document) is False  # revision unchanged: no O(F) work
+
+    document.move(1, 20, 1)
+
+    assert index.ensure(document) is True
+    assert index.query_focus_ids((16, 0, 24, 4)) == [1]
+
+
+def test_ensure_sees_every_document_mutation_kind_without_validating():
+    document = FocusDocument([_focus(1, 1, 1), _focus(2, 2, 2)])
+    index = SceneIndex(cell_size=4)
+    index.rebuild(document)
+
+    # Each of these is a distinct path onto the geometry the index caches;
+    # trusting the revision is only sound because every one of them bumps it.
+    document.link_prerequisite(2, [1])
+    assert index.ensure(document) is True
+    assert [(edge.source_id, edge.target_id) for edge in index.all_edges()] == [(1, 2)]
+
+    document.link_mutex(1, 2)
+    assert index.ensure(document) is True
+    assert len(index.all_edges()) == 2
+
+    document.add(_focus(3, 9, 9))
+    assert index.ensure(document) is True
+    assert index.query_focus_ids((8, 8, 10, 10)) == [3]
+
+    document.delete_many([3])
+    assert index.ensure(document) is True
+    assert index.query_focus_ids((8, 8, 10, 10)) == []
+
+    # The legacy escape hatch for direct field edits.
+    document[1].x = 30
+    document.touch()
+    assert index.ensure(document) is True
+    assert index.query_focus_ids((28, 0, 32, 4)) == [1]
+
+
+def test_direct_field_edit_without_touch_needs_the_debug_validate_path():
+    document = FocusDocument([_focus(1, 1, 1)])
+    index = SceneIndex(cell_size=4)
+    index.rebuild(document)
+
+    document[1].x = 20  # bypasses move()/touch(), so no revision bump
+
+    assert index.ensure(document) is False  # the cost of trusting the revision
+    assert index.ensure(document, validate=True) is True
+    assert index.query_focus_ids((16, 0, 24, 4)) == [1]
 
 
 def _rebuilt(focuses, *, cell_size):
