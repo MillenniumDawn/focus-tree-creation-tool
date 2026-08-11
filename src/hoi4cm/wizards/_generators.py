@@ -126,6 +126,24 @@ def generate_event_loc_yml(events):
     return "\n".join(lines)
 
 
+def build_event_scripted_loc_blocks(event_ids):
+    """GET_<id>_title / GET_<id>_desc scripted-loc block pairs, one pair per id.
+
+    `event_ids` is any iterable of event id strings (blank/whitespace-only
+    ones are skipped). Blocks are shaped for `hoi4cm.script.append_scripted_loc`
+    — mirrors the national spirit wizard's single-id GET_<id>_name pattern,
+    generalized to the event wizard's multi-event save.
+    """
+    blocks = []
+    for eid in event_ids:
+        eid = (eid or "").strip()
+        if not eid:
+            continue
+        blocks.append({"name": f"GET_{eid}_title", "texts": [], "default": f"{eid}.t"})
+        blocks.append({"name": f"GET_{eid}_desc", "texts": [], "default": f"{eid}.d"})
+    return blocks
+
+
 def _strip_val(v):
     if v is None or isinstance(v, bool):
         return ""
