@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from hoi4cm.script.syntax import (
     match_brace,
@@ -30,6 +30,20 @@ _COND_KEYS = (
     "select_effect",
     "bypass_effect",
     "allow_branch",
+)
+
+# focus_tree = { ... } wrapper keys already captured by named ParsedFocusTree
+# fields. Anything else (default, reset_on_civilwar, initial_show_position,
+# ...) is preserved verbatim in tree_extras so it survives a round-trip.
+_KNOWN_TREE_FIELDS = frozenset(
+    {
+        "id",
+        "continuous_focus_position",
+        "country",
+        "focus",
+        "shared_focus",
+        "joint_focus",
+    }
 )
 
 
@@ -56,6 +70,7 @@ class ParsedFocusTree:
     focuses_data: list
     raw_rewards: dict
     country_raw: str = ""
+    tree_extras: dict = field(default_factory=dict)
 
 
 def extract_raw_block(source, key):
@@ -142,6 +157,7 @@ def parse_focus_tree(raw, path):
     cfp_x = cfp_y = None
     country_tag = "TAG"
     country_raw = ""
+    tree_extras: dict = {}
     i = 0
     while i < len(tokens):
         if tokens[i] == "focus_tree" and i + 1 < len(tokens) and tokens[i + 1] == "=":
@@ -171,6 +187,11 @@ def parse_focus_tree(raw, path):
             # Preserve the full country block verbatim so it can be written
             # back unchanged on export.
             country_raw = extract_raw_block(txt, "country")
+            tree_extras = {
+                key: value
+                for key, value in block.items()
+                if key not in _KNOWN_TREE_FIELDS
+            }
             raw_focuses = block.get("focus", [])
             if isinstance(raw_focuses, dict):
                 raw_focuses = [raw_focuses]
@@ -253,4 +274,5 @@ def parse_focus_tree(raw, path):
         focuses_data=focuses_data,
         raw_rewards=raw_rewards,
         country_raw=country_raw,
+        tree_extras=tree_extras,
     )

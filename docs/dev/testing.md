@@ -95,11 +95,16 @@ source of truth.
 
 `tests/test_focus_tree_roundtrip.py` extends the same fixtures through
 `export_focus_tree` and back, checking export idempotence and structural
-field survival. `country_raw` is excluded from that round-trip: `export.py`
-still emits a canned `country` block rather than the captured verbatim text,
-so there's nothing to round-trip yet (wiring `country_raw` into `export.py`
-is a separate, later change). `country_raw` capture at parse time is
-checked directly in `test_focus_tree_fixtures.py` instead.
+field survival. `country_raw` and `tree_extras` (unrecognized `focus_tree`
+wrapper keys — `default`, `reset_on_civilwar`, `initial_show_position`, ...)
+are both written verbatim by `export_focus_tree` and `export_main_tree`,
+mirroring how `_script_extras` preserves unknown per-focus keys; dedicated
+tests in `test_focus_tree_roundtrip.py` and `test_focus_tree_export_main.py`
+cover both fields, falling back to the canned `country` block only when
+`country_raw` is blank (a brand-new tree with nothing captured on import).
+`country_raw` capture at parse time is checked directly in
+`test_focus_tree_fixtures.py`; `tree_extras` capture is checked in
+`test_focus_tree_parse.py` (it's not part of the golden-fixture `meta` shape).
 
 ## One-off comparison against a real mod
 

@@ -368,7 +368,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
         self._shared_focuses = self.workspace.main_tree.metadata.shared_focuses
         self._joint_focuses = self.workspace.main_tree.metadata.joint_focuses
         # Extra loaded trees (shared/joint trees loaded alongside the main tree)
-        self._extra_trees = []  # list of dicts: {type, file_path, tree_id, cfp_x, cfp_y, shared_focuses, joint_focuses, country_tag, focus_ids}
+        self._extra_trees = []  # list of dicts: {type, file_path, tree_id, cfp_x, cfp_y, shared_focuses, joint_focuses, country_tag, country_raw, tree_extras, focus_ids}
         toolbar = tk.Frame(self, bg=BG_DARK)
         toolbar.pack(fill="x")
         build_menubar(self, toolbar)
@@ -3925,6 +3925,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
             self._cfp_x_var.set("" if self._cfp_x is None else str(self._cfp_x))
             self._cfp_y_var.set("" if self._cfp_y is None else str(self._cfp_y))
             self._tree_country_raw = parsed.country_raw
+            self._tree_extras = parsed.tree_extras
             self._tree_had_wrapper = parsed.had_wrapper
             self._shared_focuses = parsed.shared_refs
             self._joint_focuses = parsed.joint_refs
@@ -4021,6 +4022,8 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
             "shared_focuses": parsed.shared_refs,
             "joint_focuses": parsed.joint_refs,
             "country_tag": parsed.country_tag,
+            "country_raw": parsed.country_raw,
+            "tree_extras": parsed.tree_extras,
             "had_wrapper": parsed.had_wrapper,
             "focus_ids": set(),
         }
@@ -4561,6 +4564,8 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
                         "shared_focuses": parsed.shared_refs,
                         "joint_focuses": parsed.joint_refs,
                         "country_tag": parsed.country_tag,
+                        "country_raw": parsed.country_raw,
+                        "tree_extras": parsed.tree_extras,
                         "had_wrapper": parsed.had_wrapper,
                         "focus_ids": set(),
                     }
@@ -4701,7 +4706,10 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
 
     # ── SAVE / LOAD ─────────────────────────────────────────────
     def _capture_workspace(self):
-        main_extras = self.workspace.main_tree.extras
+        main_extras = dict(self.workspace.main_tree.extras)
+        tree_extras = getattr(self, "_tree_extras", None)
+        if tree_extras:
+            main_extras["tree_extras"] = tree_extras
         try:
             cfp_x = int(self._cfp_x_var.get())
         except TypeError, ValueError:
@@ -4778,6 +4786,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
         self._tree_country_tag = meta.country_tag
         self._tree_country_name = meta.country_name
         self._tree_country_raw = meta.country_raw
+        self._tree_extras = workspace.main_tree.extras.get("tree_extras", {})
         self._tree_focus_prefix = meta.focus_prefix
         self._tree_had_wrapper = workspace.main_tree.had_wrapper
         # Legacy projects decode with an empty file_path; keep the user's
@@ -5429,6 +5438,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
                 "cfp_x": cfp_x,
                 "cfp_y": cfp_y,
                 "country_raw": getattr(self, "_tree_country_raw", ""),
+                "tree_extras": getattr(self, "_tree_extras", {}),
                 "shared_focuses": getattr(self, "_shared_focuses", []),
                 "joint_focuses": getattr(self, "_joint_focuses", []),
             },
