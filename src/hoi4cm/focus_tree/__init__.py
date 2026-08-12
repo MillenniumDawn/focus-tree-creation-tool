@@ -14,6 +14,14 @@ from .drawio import (
     parse_drawio_graph,
 )
 from .export import export_focus_tree, export_main_tree
+from .export_plan import (
+    ExportPlan,
+    ExportResult,
+    execute_export_plans,
+    make_extra_export_plan,
+    make_main_export_plan,
+    render_export_plan,
+)
 from .loc import build_loc_yml
 from .operations import (
     build_focus_name_lookup,
@@ -31,6 +39,12 @@ __all__ = [
     "build_focus_name_lookup",
     "export_focus_tree",
     "export_main_tree",
+    "ExportPlan",
+    "ExportResult",
+    "execute_export_plans",
+    "make_extra_export_plan",
+    "make_main_export_plan",
+    "render_export_plan",
     "group_focuses_by_tree",
     "render_focus_block",
     "render_focus_body",

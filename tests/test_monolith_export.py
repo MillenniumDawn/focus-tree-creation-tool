@@ -1,13 +1,4 @@
-"""Tests for the monolith's export path — issue #46.
-
-`_export` and `_export_extra_tree` overwrite the user's *tracked* mod files.
-These bind the unbound App methods onto a stand-in `self` (same trick as
-tests/test_sidebar_refresh.py) and check the two things the issue asked for:
-the writes are atomic, and a failure surfaces as a dialog + an error-log
-entry instead of a bare traceback.
-
-No Tk widgets are built: the tk vars are stubs and every dialog is captured.
-"""
+"""Tests for the monolith's Tk shells around the export-plan pipeline."""
 
 from types import SimpleNamespace
 
@@ -15,6 +6,8 @@ import pytest
 
 import hoi4_content_maker as m
 import hoi4cm.core.logger as logmod
+from hoi4cm.focus_tree.export_plan import execute_export_plans
+from hoi4cm.mod.workspace_files import WorkspaceFiles
 from hoi4cm.models import Focus
 
 
@@ -28,23 +21,22 @@ def reset_focus_counter():
 
 @pytest.fixture
 def dialogs(monkeypatch):
-    """Capture every dialog the export path can raise, and isolate the log."""
     captured = SimpleNamespace(info=[], warning=[], error=[])
     monkeypatch.setattr(
-        m.messagebox, "showinfo", lambda *a, **kw: captured.info.append(a)
+        m.messagebox, "showinfo", lambda *args, **_kwargs: captured.info.append(args)
     )
     monkeypatch.setattr(
-        m.messagebox, "showwarning", lambda *a, **kw: captured.warning.append(a)
+        m.messagebox,
+        "showwarning",
+        lambda *args, **_kwargs: captured.warning.append(args),
     )
     monkeypatch.setattr(
-        m.messagebox, "showerror", lambda *a, **kw: captured.error.append(a)
+        m.messagebox, "showerror", lambda *args, **_kwargs: captured.error.append(args)
     )
-    # _export falls back to a save dialog when no edit target is set; a test
-    # that hits it has mis-set up the mod, so make that loud.
     monkeypatch.setattr(
         m.filedialog,
         "asksaveasfilename",
-        lambda **kw: pytest.fail("export must reuse the edit target, not prompt"),
+        lambda **_kwargs: pytest.fail("export must reuse the edit target, not prompt"),
     )
     logmod.clear_errors()
     yield captured
@@ -53,7 +45,6 @@ def dialogs(monkeypatch):
 
 @pytest.fixture
 def mod_files(tmp_path, monkeypatch):
-    """A loaded-mod layout with an existing focus file and loc file."""
     focus_file = tmp_path / "common" / "national_focus" / "05_TST.txt"
     loc_file = tmp_path / "localisation" / "english" / "MD_focus_TST_l_english.yml"
     focus_file.parent.mkdir(parents=True)
@@ -68,21 +59,14 @@ def mod_files(tmp_path, monkeypatch):
 
 
 class _App:
-    """The slice of App state `_export` reads."""
+    def _begin_document_generation(self):
+        pass
 
     def __init__(self, focuses):
         self.selected = None
-        self.focuses = {f.id: f for f in focuses}
+        self.focuses = {focus.id: focus for focus in focuses}
         self._tree_id = SimpleNamespace(get=lambda: "TST_focus_tree")
         self._extra_trees = []
-
-
-def _export(app, **kw):
-    return m.App._export.__get__(app, _App)(**kw)
-
-
-def _export_extra_tree(app, idx, **kw):
-    return m.App._export_extra_tree.__get__(app, _App)(idx, **kw)
 
 
 def _focus(name, x=0, y=0):
@@ -92,6 +76,30 @@ def _focus(name, x=0, y=0):
     return focus
 
 
+def _bind_export_shells(app):
+    app._make_main_export_plan = m.App._make_main_export_plan.__get__(app, _App)
+    app._make_extra_export_plan = m.App._make_extra_export_plan.__get__(app, _App)
+    app._apply_export_results = m.App._apply_export_results.__get__(app, _App)
+
+    def run_export_plans(plans, on_done, *, title):
+        results = execute_export_plans(plans, WorkspaceFiles().write_texts)
+        on_done(results)
+        return results
+
+    app._run_export_plans = run_export_plans
+    app._autosave = lambda: None
+
+
+def _export(app, **kwargs):
+    _bind_export_shells(app)
+    return m.App._export.__get__(app, _App)(**kwargs)
+
+
+def _export_extra_tree(app, index, **kwargs):
+    _bind_export_shells(app)
+    return m.App._export_extra_tree.__get__(app, _App)(index, **kwargs)
+
+
 def _fail_replace(monkeypatch, message="No space left on device"):
     monkeypatch.setattr(
         "hoi4cm.mod.workspace_files.os.replace",
@@ -99,18 +107,10 @@ def _fail_replace(monkeypatch, message="No space left on device"):
     )
 
 
-# ── _export ──────────────────────────────────────────────────────────
-
-
 def test_export_writes_both_tracked_files(dialogs, mod_files):
-    app = _App([_focus("TST_root")])
+    _export(_App([_focus("TST_root")]))
 
-    result = _export(app)
-
-    assert result == str(mod_files.focus)
-    tree_text = mod_files.focus.read_text(encoding="utf-8")
-    assert "TST_root" in tree_text
-    assert "focus_tree" in tree_text
+    assert "TST_root" in mod_files.focus.read_text(encoding="utf-8")
     assert "TST_root" in mod_files.loc.read_text(encoding="utf-8-sig")
     assert len(dialogs.info) == 1
     assert dialogs.error == []
@@ -124,10 +124,8 @@ def test_failed_export_leaves_the_tracked_files_untouched(
     loc_before = mod_files.loc.read_text(encoding="utf-8-sig")
     _fail_replace(monkeypatch)
 
-    result = _export(app)
+    _export(app)
 
-    # The whole point of the issue: the user's tree survives a failed write.
-    assert result is None
     assert mod_files.focus.read_text(encoding="utf-8") == tree_before
     assert mod_files.loc.read_text(encoding="utf-8-sig") == loc_before
     assert list(mod_files.focus.parent.glob(".*.tmp")) == []
@@ -135,22 +133,18 @@ def test_failed_export_leaves_the_tracked_files_untouched(
 
 
 def test_failed_export_reports_instead_of_raising(dialogs, mod_files, monkeypatch):
-    app = _App([_focus("TST_root")])
     _fail_replace(monkeypatch, "Permission denied")
 
-    _export(app)
+    _export(_App([_focus("TST_root")]))
 
     assert len(dialogs.error) == 1
     assert "05_TST.txt" in dialogs.error[0][1]
     assert "Permission denied" in dialogs.error[0][1]
-    # No success dialog claiming an export that never landed.
     assert dialogs.info == []
-    # And it is recoverable from the in-app error log.
     assert len(logmod.get_error_entries()) == 1
 
 
 def test_export_does_not_apply_half_the_pair(dialogs, mod_files, monkeypatch):
-    """A .txt that lands followed by a .yml that fails must be rolled back."""
     app = _App([_focus("TST_root")])
     tree_before = mod_files.focus.read_text(encoding="utf-8")
     real_replace = m.os.replace
@@ -169,9 +163,6 @@ def test_export_does_not_apply_half_the_pair(dialogs, mod_files, monkeypatch):
     assert len(calls) == 2, "both files must be attempted as one group"
     assert mod_files.focus.read_text(encoding="utf-8") == tree_before
     assert len(dialogs.error) == 1
-
-
-# ── _export_extra_tree ───────────────────────────────────────────────
 
 
 def test_failed_extra_tree_export_keeps_the_source_file(dialogs, tmp_path, monkeypatch):
@@ -195,9 +186,78 @@ def test_failed_extra_tree_export_keeps_the_source_file(dialogs, tmp_path, monke
     monkeypatch.setattr(m.MOD, "loaded", False)
     _fail_replace(monkeypatch)
 
-    result = _export_extra_tree(app, 1)
+    _export_extra_tree(app, 1)
 
-    assert result is None
     assert shared.read_text(encoding="utf-8") == "shared_focus = { # real content }\n"
     assert len(dialogs.error) == 1
     assert "MD_shared_focuses.txt" in dialogs.error[0][1]
+
+
+def test_run_export_plans_uses_document_scope_and_closes_modal(monkeypatch, mod_files):
+    app = _App([_focus("TST_root")])
+    plan = m.App._make_main_export_plan.__get__(app, _App)(
+        list(app.focuses.values()),
+        dict(app.focuses),
+        {"TST_root": next(iter(app.focuses.values()))},
+        show_dialog=False,
+    )
+    modal = SimpleNamespace(closed=False)
+    calls = []
+
+    monkeypatch.setattr(
+        m,
+        "progress_modal",
+        lambda _app, _title: SimpleNamespace(
+            set_text=lambda _text: None,
+            set_fraction=lambda _fraction: None,
+            close=lambda: setattr(modal, "closed", True),
+        ),
+    )
+    monkeypatch.setattr(m, "make_progress", lambda _app, callback, **_kwargs: callback)
+
+    def run_background(_app, work, on_done, **kwargs):
+        calls.append(kwargs)
+        on_done(work())
+
+    monkeypatch.setattr(m, "run_bg", run_background)
+
+    results = []
+    m.App._run_export_plans.__get__(app, _App)(
+        [plan],
+        results.extend,
+        title="Export",
+    )
+
+    assert results[0].ok
+    assert modal.closed
+    assert len(calls) == 1
+    assert calls[0]["scope"] == "document"
+    assert callable(calls[0]["on_error"])
+
+
+def test_save_all_uses_one_plan_per_loaded_tree(dialogs, mod_files, tmp_path):
+    shared = tmp_path / "MD_shared_focuses.txt"
+    shared.write_text("shared_focus = { }\n", encoding="utf-8")
+    main = _focus("TST_main")
+    extra = _focus("TST_shared")
+    extra.tree_idx = 1
+    app = _App([main, extra])
+    app._extra_trees = [
+        {
+            "type": "shared",
+            "file_path": str(shared),
+            "tree_id": "TST_shared_focuses",
+            "country_tag": "TST",
+            "country_raw": "",
+            "cfp_x": None,
+            "cfp_y": None,
+            "had_wrapper": False,
+        }
+    ]
+    _bind_export_shells(app)
+
+    m.App._save_all_trees.__get__(app, _App)()
+
+    assert "TST_main" in mod_files.focus.read_text(encoding="utf-8")
+    assert "TST_shared" in shared.read_text(encoding="utf-8")
+    assert len(dialogs.info) == 1
