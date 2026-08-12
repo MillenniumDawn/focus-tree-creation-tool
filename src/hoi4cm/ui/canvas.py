@@ -1412,7 +1412,7 @@ class CanvasMixin:
             self._mm_canvas.place(
                 relx=1.0, rely=1.0, anchor="se", x=-8, y=-8, width=220, height=150
             )
-            self._mm_canvas.lift()
+            tk.Misc.tkraise(self._mm_canvas)
             self._draw_minimap()
         else:
             if hasattr(self, "_mm_canvas"):
