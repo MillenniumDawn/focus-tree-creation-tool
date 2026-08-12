@@ -4749,9 +4749,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
                         title=title,
                     )
                 else:
-                    add_error(
-                        f"Write failed: {result.plan.focus_path}: {result.error}"
-                    )
+                    add_error(f"Write failed: {result.plan.focus_path}: {result.error}")
                 continue
             if result.plan.extra_tree_idx is not None:
                 self._extra_trees[result.plan.extra_tree_idx - 1]["file_path"] = (
@@ -4877,9 +4875,9 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
                 candidate = saved_dir
                 for _ in range(5):
                     candidate = os.path.dirname(candidate)
-                    if os.path.isdir(os.path.join(candidate, "common")) and os.path.isdir(
-                        os.path.join(candidate, "localisation")
-                    ):
+                    if os.path.isdir(
+                        os.path.join(candidate, "common")
+                    ) and os.path.isdir(os.path.join(candidate, "localisation")):
                         mod_root = candidate
                         break
             if mod_root:
