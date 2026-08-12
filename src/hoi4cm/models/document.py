@@ -8,6 +8,25 @@ from typing import Any
 from .focus import Focus
 
 
+class _FocusNameMap(Mapping[str, Focus]):
+    """O(1) name -> Focus view over FocusDocument.first_by_name."""
+
+    __slots__ = ("_document",)
+
+    def __init__(self, document: FocusDocument) -> None:
+        self._document = document
+
+    def __getitem__(self, name: str) -> Focus:
+        focus_id = self._document.first_by_name[name]
+        return self._document[focus_id]
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._document.first_by_name)
+
+    def __len__(self) -> int:
+        return len(self._document.first_by_name)
+
+
 @dataclass
 class TreeMetadata:
     tree_id: str = "TAG_focus_tree"
@@ -51,6 +70,11 @@ class FocusDocument(MutableMapping[int, Focus]):
     @property
     def revision(self) -> int:
         return self.geometry_revision
+
+    @property
+    def by_name(self) -> Mapping[str, Focus]:
+        """First-match-wins name lookup backed by first_by_name (no rebuild)."""
+        return _FocusNameMap(self)
 
     @property
     def by_id(self) -> MutableMapping[int, Focus]:
@@ -119,12 +143,18 @@ class FocusDocument(MutableMapping[int, Focus]):
         self._changed()
         self.rebuild_indexes()
 
+    def position_free(self, x: int, y: int, *, except_id: int | None = None) -> bool:
+        """True when no focus (other than except_id) occupies (x, y)."""
+        occupants = self.occupied_positions.get((x, y), set())
+        if except_id is not None:
+            occupants = occupants - {except_id}
+        return not occupants
+
     def move(
         self, focus_id: int, x: int, y: int, *, allow_occupied: bool = False
     ) -> bool:
         focus = self._focuses[focus_id]
-        occupants = self.occupied_positions.get((x, y), set()) - {focus_id}
-        if occupants and not allow_occupied:
+        if not allow_occupied and not self.position_free(x, y, except_id=focus_id):
             return False
         old = (focus.x, focus.y)
         if old == (x, y):

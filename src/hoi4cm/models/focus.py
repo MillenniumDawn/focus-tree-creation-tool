@@ -35,7 +35,7 @@ class Focus:
         self.available_if_capitulated = False
         self.ai_will_do = 1
         self.ai_will_do_raw = ""  # full raw ai_will_do block if imported
-        self.relative_position_id = None  # preserved from import
+        self.relative_position_id: str | None = None  # preserved from import
         self.search_filters = "FOCUS_FILTER_POLITICAL"  # raw filter string
         self.available_cond = ""  # raw HOI4 block content (inside available = { })
         self.bypass_cond = ""  # raw HOI4 block content (inside bypass = { })
