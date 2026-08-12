@@ -57,6 +57,58 @@ def test_trailing_backslash_quote_does_not_swallow_closing_quote():
     assert blocks[0][2] == 'focus = { icon = "gfx\\interface\\" cost = 5 }'
 
 
+def test_unterminated_quote_runs_to_the_end_of_its_own_line():
+    """A missing closing quote must not leak into the following line.
+
+    ``strip_comments`` works a line at a time, so an unterminated string
+    protects the rest of *its* line from comment stripping and nothing more.
+    """
+    source = 'a = "open # not a comment\nb = yes # a comment\nc = "x"'
+
+    assert strip_comments(source) == 'a = "open # not a comment\nb = yes \nc = "x"'
+    # tokenize has no line concept, so there the string runs to the next quote
+    # and the last quote opens an unterminated (empty) one.
+    assert tokenize(source) == [
+        "a",
+        "=",
+        "open # not a comment\nb = yes # a comment\nc = ",
+        "x",
+        "",
+    ]
+
+
+def test_comment_only_line_survives_as_an_empty_line():
+    """Raw-block dedenting counts lines, so a stripped comment leaves one."""
+    source = "focus = {\n\t# note\n\tid = a\n}"
+
+    assert strip_comments(source) == "focus = {\n\t\n\tid = a\n}"
+
+
+def test_strip_comments_normalizes_every_line_break_form():
+    # CRLF and a lone CR both collapse to "\n", and a trailing line break is
+    # dropped — long-standing splitlines()/join() behavior the raw-block
+    # dedenting downstream is written against.
+    assert strip_comments("a # x\r\nb # y\rc # z\n") == "a \nb \nc "
+    assert strip_comments("a # x\n") == "a "
+    assert strip_comments("a # x") == "a "
+
+
+def test_tokenize_handles_empty_and_unterminated_quoted_values():
+    assert tokenize('a = "" b = "') == ["a", "=", "", "b", "=", ""]
+    assert tokenize("# only a comment") == []
+    assert tokenize("") == []
+
+
+def test_nested_braces_inside_strings_do_not_shift_brace_matching():
+    source = 'outer = { inner = "{{{" deeper = { x = "}}}" } }'
+
+    open_index = source.index("{")
+    assert match_brace(source, open_index) == len(source) - 1
+    blocks = find_blocks(source)
+    assert [name for name, _, _ in blocks] == ["outer"]
+    assert extract_named_block(source, "deeper") == ' x = "}}}" '
+
+
 def test_match_and_extract_block_ignore_braces_in_strings_and_comments():
     source = '{ text = "}" # }\n nested = { value = "{" } } trailing'
 

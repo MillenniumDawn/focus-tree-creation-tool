@@ -18,69 +18,72 @@ __all__ = [
 ]
 
 
-_BLOCK_START_RE = re.compile(r"\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*\{")
+# Clausewitz/Paradox script has no string escapes, so a backslash is a literal
+# character and a string closes at the very next quote. Treating ``\"`` as an
+# escape swallows the closing quote of values that end in a backslash (e.g.
+# ``icon = "gfx\interface\"``) and derails the rest of the parse. Every quoted
+# alternative below is therefore ``"[^"]*"?`` — greedy to the next quote, with
+# the closer optional so an unterminated string runs to the end of its scope
+# instead of failing the match.
+_QUOTED = r'"[^"]*"?'
 
+# The scanners are compiled alternations rather than per-character Python
+# loops: at the reference mod's scale (1.05M lines, 23.5k focus blocks) the
+# per-character form dominated cold-load CPU, and the GIL rules out
+# parallelising it away. Every alternative consumes its whole construct, so
+# ``finditer`` skips strings and comments for us instead of us repositioning
+# an index by hand.
+# Comments are the one alternative left outside the capture group, so
+# ``findall`` reports them as "" and every real token comes back non-empty —
+# which lets the whole scan run as one C-level ``findall`` instead of a Python
+# loop over match objects.
+_TOKEN_RE = re.compile(rf'#[^\n]*|({_QUOTED}|[{{}}=]|[^ \t\n\r{{}}="#]+)')
 
-def _quoted_end(source: str, start: int) -> int:
-    """Return the index past the closing quote.
+# Group 1 keeps quoted strings verbatim; comments match outside it and, being
+# an unmatched group in the ``\1`` template, substitute to nothing. Both
+# alternatives stop at a newline: a comment ends with its line, and a string
+# that never closes must not swallow the next line's comment.
+_COMMENT_RE = re.compile(r'("[^"\n]*"?)|#[^\n]*')
 
-    Clausewitz/Paradox script has no string escapes, so a backslash is a
-    literal character and the string closes at the very next quote. Treating
-    ``\\"`` as an escape swallows the closing quote of values that end in a
-    backslash (e.g. ``icon = "gfx\\interface\\"``) and derails the rest of
-    the parse.
-    """
-    position = source.find('"', start + 1)
-    return position + 1 if position != -1 else len(source)
+_BRACE_RE = re.compile(rf"{_QUOTED}|#[^\n]*|[{{}}]")
+
+# ``(?<!\w)`` replaces the old "is the previous character part of an
+# identifier?" guard, so ``nested = {`` inside ``notnested = {`` still isn't a
+# block start. A block-start match stops at its ``{`` and never swallows the
+# body, so a nested block is found by the very next search.
+_BLOCK_SCAN_RE = re.compile(
+    rf"{_QUOTED}|#[^\n]*|(?<!\w)(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s*=\s*\{{"
+)
 
 
 def strip_comments(source: str) -> str:
-    """Remove comments outside quoted strings while retaining line structure."""
-    lines: list[str] = []
-    for line in source.splitlines():
-        position = 0
-        while position < len(line):
-            if line[position] == '"':
-                position = _quoted_end(line, position)
-            elif line[position] == "#":
-                line = line[:position]
-                break
-            else:
-                position += 1
-        lines.append(line)
-    return "\n".join(lines)
+    """Remove comments outside quoted strings while retaining line structure.
+
+    Line endings are normalized to ``\\n`` first (``str.splitlines`` also
+    breaks on ``\\v``, ``\\f`` and friends), so the substitution below can
+    treat ``\\n`` as the only line break. Doing it in this order also keeps a
+    line that was nothing but a comment as an empty line rather than deleting
+    it, which downstream raw-block dedenting depends on.
+    """
+    return _COMMENT_RE.sub(r"\1", "\n".join(source.splitlines()))
+
+
+def _unquote(token: str) -> str:
+    """Return a captured ``"..."`` token without its quotes.
+
+    The closing quote is optional in the pattern, so an unterminated string
+    yields everything after the opening quote.
+    """
+    return token[1:-1] if len(token) > 1 and token[-1] == '"' else token[1:]
 
 
 def tokenize(source: str) -> list[str]:
     """Split Paradox script into braces, equals signs, and value tokens."""
-    tokens: list[str] = []
-    position = 0
-    while position < len(source):
-        char = source[position]
-        if char in " \t\n\r":
-            position += 1
-        elif char in "{}=":
-            tokens.append(char)
-            position += 1
-        elif char == "#":
-            newline = source.find("\n", position)
-            position = len(source) if newline < 0 else newline + 1
-        elif char == '"':
-            end = _quoted_end(source, position)
-            closing_quote = (
-                end <= len(source) and end > position and source[end - 1] == '"'
-            )
-            value_end = end - 1 if closing_quote else end
-            tokens.append(source[position + 1 : value_end])
-            position = end
-        else:
-            end = position
-            while end < len(source) and source[end] not in ' \t\n\r{}="#':
-                end += 1
-            if end > position:
-                tokens.append(source[position:end])
-            position = end
-    return tokens
+    parts = _TOKEN_RE.findall(source)
+    if '"' not in source:
+        # Nothing to unquote; only comments (captured as "") need dropping.
+        return [text for text in parts if text] if "#" in source else parts
+    return [_unquote(text) if text[0] == '"' else text for text in parts if text]
 
 
 def parse_block(tokens: Sequence[str], position: int) -> tuple[dict[str, object], int]:
@@ -127,25 +130,14 @@ def parse_script(source: str) -> dict[str, object]:
 def match_brace(source: str, open_index: int) -> int:
     """Return a matching close-brace index, or ``len(source)`` if missing."""
     depth = 0
-    position = open_index
-    while position < len(source):
-        char = source[position]
-        if char == '"':
-            position = _quoted_end(source, position)
-            continue
-        if char == "#":
-            newline = source.find("\n", position)
-            if newline < 0:
-                return len(source)
-            position = newline + 1
-            continue
+    for match in _BRACE_RE.finditer(source, open_index):
+        char = match.group()
         if char == "{":
             depth += 1
         elif char == "}":
             depth -= 1
             if depth == 0:
-                return position
-        position += 1
+                return match.start()
     return len(source)
 
 
@@ -160,22 +152,17 @@ def extract_block(source: str, open_index: int = 0) -> tuple[str, int]:
     return source[open_index + 1 : close_index], close_index
 
 
-def _block_match(
-    source: str, position: int, name: str | None = None
-) -> re.Match[str] | None:
-    match = _BLOCK_START_RE.match(source, position)
-    if match is None:
-        return None
-    name_start = match.start(1)
-    if (
-        name_start > 0
-        and name_start == position
-        and (source[name_start - 1].isalnum() or source[name_start - 1] == "_")
-    ):
-        return None
-    if name is not None and match.group(1) != name:
-        return None
-    return match
+def _raw_start(source: str, position: int, name_start: int) -> int:
+    """Return where a block's raw text begins: its leading whitespace run.
+
+    ``_BLOCK_SCAN_RE`` anchors on the block name, but callers slice raw text
+    from the earliest index the previous scan left off at, so back up over
+    whitespace the way the old ``\\s*``-prefixed per-position match did.
+    """
+    start = name_start
+    while start > position and source[start - 1].isspace():
+        start -= 1
+    return start
 
 
 def find_blocks(source: str) -> list[tuple[str, str, str]]:
@@ -183,21 +170,16 @@ def find_blocks(source: str) -> list[tuple[str, str, str]]:
     blocks: list[tuple[str, str, str]] = []
     position = 0
     while position < len(source):
-        char = source[position]
-        if char == '"':
-            position = _quoted_end(source, position)
-            continue
-        if char == "#":
-            newline = source.find("\n", position)
-            position = len(source) if newline < 0 else newline
-            continue
-        match = _block_match(source, position)
+        match = _BLOCK_SCAN_RE.search(source, position)
         if match is None:
-            position += 1
+            break
+        name = match.group("name")
+        if name is None:  # a quoted string or a comment — skip past it
+            position = match.end()
             continue
-        open_index = match.end() - 1
-        inner, close_index = extract_block(source, open_index)
-        blocks.append((match.group(1), inner, source[position : close_index + 1]))
+        start = _raw_start(source, position, match.start("name"))
+        inner, close_index = extract_block(source, match.end() - 1)
+        blocks.append((name, inner, source[start : close_index + 1]))
         position = close_index + 1
     return blocks
 
@@ -206,19 +188,13 @@ def extract_named_block(source: str, name: str) -> str | None:
     """Return the untrimmed inner source of the first named brace block."""
     position = 0
     while position < len(source):
-        char = source[position]
-        if char == '"':
-            position = _quoted_end(source, position)
-            continue
-        if char == "#":
-            newline = source.find("\n", position)
-            position = len(source) if newline < 0 else newline + 1
-            continue
-        match = _block_match(source, position, name)
-        if match is not None:
+        match = _BLOCK_SCAN_RE.search(source, position)
+        if match is None:
+            break
+        if match.group("name") == name:
             inner, _ = extract_block(source, match.end() - 1)
             return inner
-        position += 1
+        position = match.end()
     return None
 
 
