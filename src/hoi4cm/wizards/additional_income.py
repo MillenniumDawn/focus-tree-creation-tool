@@ -25,7 +25,7 @@ from hoi4cm.ui import (
     TEXT_DIM,
 )
 from hoi4cm.wizards import _generators
-from hoi4cm.wizards._shared import _LOC_KEY_RE
+from hoi4cm.wizards._shared import _LOC_KEY_RE, notifying_workspace_files
 
 
 def open_additional_income_wizard(app):
@@ -516,18 +516,20 @@ def open_additional_income_wizard(app):
                             if m:
                                 existing_keys.add(m.group(1))
                 os.makedirs(os.path.dirname(loc_path), exist_ok=True)
+                wf = notifying_workspace_files(MOD, MOD.root)
                 to_write = {}
                 if tooltip_key not in existing_keys:
                     to_write[tooltip_key] = (
                         f"$$[?{variable_name}|+3] from §Y${idea_id}$§!\\n"
                     )
                 if not os.path.isfile(loc_path):
-                    with open(loc_path, "w", encoding="utf-8-sig") as fp:
-                        fp.write("l_english:\n")
+                    wf.write_text(loc_path, "l_english:\n", encoding="utf-8-sig")
                 if to_write:
-                    with open(loc_path, "a", encoding="utf-8-sig") as fp:
-                        for k, v in to_write.items():
-                            fp.write(f' {k}: "{v}"\n')
+                    wf.append_text(
+                        loc_path,
+                        "".join(f' {k}: "{v}"\n' for k, v in to_write.items()),
+                        encoding="utf-8-sig",
+                    )
                     output_lines.append(
                         f"✅ {os.path.relpath(loc_path, MOD.root)}  — wrote tooltip localisation"
                     )

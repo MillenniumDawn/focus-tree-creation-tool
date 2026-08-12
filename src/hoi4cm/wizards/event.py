@@ -19,7 +19,7 @@ from hoi4cm.core import (
     tr,
 )
 from hoi4cm.core.image import PIL_OK, PILImage, PILImageTk
-from hoi4cm.mod import MOD
+from hoi4cm.mod import MOD, WorkspaceFiles
 from hoi4cm.script.syntax import parse_block, tokenize
 from hoi4cm.ui import (
     BG_CARD,
@@ -1071,8 +1071,11 @@ def open_event_wizard(app):
         )
         if not path:
             return
-        with open(path, "w", encoding="utf-8") as f:
-            f.write(_generate_all_txt())
+        try:
+            WorkspaceFiles().write_text(path, _generate_all_txt(), encoding="utf-8")
+        except Exception as e:
+            messagebox.showerror("Export Error", str(e), parent=win)
+            return
         status_lbl.config(text=f"  ✓  Exported {len(events)} events")
 
     def _copy_yml():

@@ -375,6 +375,8 @@
   "dialog.project_saved": "Project saved:\n{path}",
   "dialog.read_file_error": "Could not read file:\n{error}",
   "dialog.saved.title": "Saved",
+  "dialog.write_failed.body": "Could not write {file}:\n{error}\n\nThe file was left unchanged — nothing was overwritten.",
+  "dialog.write_failed.title": "Write Failed",
   "drawio.auto_shift.body": "{count} focus(es) were automatically moved to\navoid overlapping another focus:\n\n{detail}\n\nYou can drag them to better positions on the canvas.",
   "drawio.auto_shift.more": "  ... and {count} more",
   "drawio.auto_shift.title": "Auto-Shift Notice",

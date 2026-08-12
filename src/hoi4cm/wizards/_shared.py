@@ -5,12 +5,11 @@ Pulling them into one module keeps the wizard code free of cross-wizard
 coupling and gives the App a single place to clear caches on mod reload.
 """
 
-import os
 import re
 import tkinter as tk
 
 from hoi4cm.core import EFFECT_CATS, EFFECT_DEFS, effects_in_cat, tr
-from hoi4cm.mod import WorkspaceFiles
+from hoi4cm.mod import notifying_workspace_files
 from hoi4cm.ui import (
     BG_CARD,
     BG_DARK,
@@ -24,25 +23,8 @@ from hoi4cm.ui import (
     TEXT_DIM,
 )
 
-
-def notifying_workspace_files(mod, mod_root):
-    """A ``WorkspaceFiles`` that tells the mod's catalog what it writes.
-
-    The ``on_written`` callback fires only when the save target is inside the
-    currently loaded mod, so writing into some other folder never pokes the
-    live catalog. This is the seam that keeps newly written images / .gfx
-    files visible without a full rescan.
-    """
-    on_written = None
-    root = getattr(mod, "root", "") or ""
-    if getattr(mod, "loaded", False) and root:
-        same_mod = os.path.normcase(os.path.abspath(root)) == os.path.normcase(
-            os.path.abspath(mod_root)
-        )
-        if same_mod:
-            on_written = mod.note_file_written
-    return WorkspaceFiles(on_written=on_written)
-
+# ``notifying_workspace_files`` is imported from ``hoi4cm.mod`` here and
+# re-exported for wizard convenience.
 
 # ── Image cache registry ──────────────────────────────────────────
 # Wizards register their own caches here so the App can invalidate
@@ -250,10 +232,14 @@ def open_effect_picker(parent, target_text, on_insert=None):
     fields_cv.bind(
         "<Configure>", lambda e: fields_cv.itemconfig(fields_win, width=e.width)
     )
-    fields_cv.bind(
-        "<MouseWheel>",
-        lambda e: fields_cv.yview_scroll(int(-1 * (e.delta / 120)), "units"),
-    )
+
+    def _on_mousewheel(event):
+        try:
+            fields_cv.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        except Exception:
+            pass
+
+    fields_cv.bind("<MouseWheel>", _on_mousewheel)
     fields_cv.pack(side="left", fill="both", expand=True)
     fields_sb.pack(side="right", fill="y")
 
@@ -283,7 +269,7 @@ def open_effect_picker(parent, target_text, on_insert=None):
 
         tk.Label(
             fields_frm,
-            text=f"  [{defn.get('cat','')}]  {defn.get('label', key)}",
+            text=f"  [{defn.get('cat', '')}]  {defn.get('label', key)}",
             bg=BG_PANEL,
             fg=TEXT,
             font=("Helvetica", 10, "bold"),

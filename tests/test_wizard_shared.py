@@ -54,6 +54,25 @@ def test_unloaded_mod_does_not_notify(tmp_path):
     assert mod.written == []
 
 
+def test_helper_is_reachable_from_the_mod_package():
+    """Non-wizard callers (the monolith's export path, ui/mod_loading) reach
+    it from hoi4cm.mod; _shared only re-exports it."""
+    from hoi4cm.mod import notifying_workspace_files as canonical
+
+    assert notifying_workspace_files is canonical
+
+
+def test_empty_mod_root_does_not_notify(tmp_path, monkeypatch):
+    """An unset save root must not accidentally match the cwd."""
+    monkeypatch.chdir(tmp_path)
+    mod = FakeMod(loaded=True, root=str(tmp_path))
+
+    files = notifying_workspace_files(mod, "")
+    files.write_text(tmp_path / "note.txt", "content", encoding="utf-8")
+
+    assert mod.written == []
+
+
 # ── open_effect_picker (issue #45: decision wizard's "+ Effect Picker"
 # button called this as a bare, never-defined name and crashed with
 # NameError; event wizard's own copy is now this same shared function) ──
@@ -115,7 +134,7 @@ def test_open_effect_picker_insert_writes_snippet_and_closes_popup(tk_root):
     insert_btn = _find_button(
         popup, tr("effect_picker.insert_effect", "+ Insert Effect")
     )
-    assert insert_btn is not None
+    assert isinstance(insert_btn, tk.Button)
     insert_btn.invoke()
 
     assert target.get("1.0", "end-1c") != ""
@@ -133,6 +152,7 @@ def test_open_effect_picker_insert_calls_on_insert_callback(tk_root):
     insert_btn = _find_button(
         popup, tr("effect_picker.insert_effect", "+ Insert Effect")
     )
+    assert isinstance(insert_btn, tk.Button)
     insert_btn.invoke()
 
     assert calls == [True]
@@ -143,7 +163,7 @@ def test_open_effect_picker_cancel_closes_without_inserting(tk_root):
     popup = open_effect_picker(tk_root, target)
 
     cancel_btn = _find_button(popup, tr("common.cancel", "Cancel"))
-    assert cancel_btn is not None
+    assert isinstance(cancel_btn, tk.Button)
     cancel_btn.invoke()
 
     assert target.get("1.0", "end-1c") == ""
@@ -162,6 +182,7 @@ def test_open_effect_picker_search_narrows_to_matching_effect(tk_root):
     insert_btn = _find_button(
         popup, tr("effect_picker.insert_effect", "+ Insert Effect")
     )
+    assert isinstance(insert_btn, tk.Button)
     insert_btn.invoke()
 
     assert "add_political_power" in target.get("1.0", "end-1c")

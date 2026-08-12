@@ -27,7 +27,8 @@
 - **`mod/`**: `ModContext` (the `MOD` singleton): walks a mod's directory
   tree once and indexes sprites, focus/event/idea/decision/dyn-mod IDs,
   country tags, and MD money-system paths. `scan_cache.py` is the SQLite
-  per-file cache backing warm reloads.
+  per-file cache backing warm reloads. `workspace_files.py` is the single
+  writer every mod-file save goes through (see "Writing mod files" below).
 - **`wizards/`**: the five `open_*_wizard(app)` entry points (decision,
   event, national spirit, dynamic modifier, additional income) plus
   `_shared.py` for cross-wizard state. The package `__init__` resolves the
@@ -65,6 +66,45 @@ file text
 Parsing and export are pure and tested without a display. Everything from
 `App.focuses` onward touches Tk and is exercised manually (see
 `testing.md`).
+
+## Writing mod files
+
+Every write that lands in a user's mod goes through one class:
+`hoi4cm.mod.workspace_files.WorkspaceFiles`. Nothing outside it may call
+`open(path, "w")` on a mod file, a project `.json`, or a localisation
+`.yml` — the target is usually a **tracked file the user already has**, and a
+truncate-in-place write destroys it if the process dies mid-write (issue #46).
+
+- **`write_text(path, text, encoding=...)`** — temp file in the target's own
+  directory, `flush` + `fsync`, then `os.replace`. Creates missing parents
+  and preserves the target's existing mode.
+- **`write_texts([(path, text, encoding), ...])`** — the same, for a *group*
+  of files that must land together. Every temp file is staged and fsynced
+  before the first swap, so an encoding error or a full disk aborts while all
+  targets still hold their old contents; if a swap fails part-way anyway, the
+  already-swapped targets are restored from snapshots taken just before the
+  swap. This is what the focus-tree `.txt` + loc `.yml` pair uses, so an
+  export is never half-applied.
+- **`append_text(...)`** — a plain append (nothing to truncate), used by the
+  loc/scripted-loc paths that only ever add entries.
+
+`notifying_workspace_files(MOD, mod_root)` (same module, re-exported from
+`hoi4cm.wizards._shared` for the wizards) builds a writer whose `on_written`
+hook pokes the graphics catalog — but only when the save target is the
+currently loaded mod, so writing elsewhere never touches live state.
+
+The other half of the contract is that a failure is **reported**, not
+swallowed or raised as a traceback: `hoi4cm.ui.file_errors`'s
+`report_write_failure(parent, path, error)` records it via `add_error()` (so
+it reaches the in-app error log) and raises a dialog naming the file. The
+monolith's `_export`, `_export_extra_tree` and `_save` all return `None`
+through it rather than showing a success dialog for an export that never
+landed.
+
+One deliberate consequence: an atomic write needs write permission on the
+target's **directory**, not just on the file. A read-only mod folder that used
+to accept an in-place overwrite now fails with a clear dialog. That is the
+intended trade — the alternative is truncating the user's tree and hoping.
 
 ## The core facade
 

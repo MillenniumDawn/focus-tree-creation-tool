@@ -85,6 +85,118 @@ def test_atomic_write_preserves_existing_permissions(tmp_path):
     assert stat.S_IMODE(os.stat(target).st_mode) == 0o600
 
 
+def test_write_texts_replaces_every_target_and_notifies_in_order(tmp_path):
+    tree = tmp_path / "common" / "national_focus" / "05_TAG.txt"
+    loc = tmp_path / "localisation" / "english" / "TAG_l_english.yml"
+    notifications = []
+    files = WorkspaceFiles(on_written=notifications.append)
+
+    files.write_texts(
+        [(tree, "focus_tree = {}", "utf-8"), (loc, "l_english:\n", "utf-8-sig")]
+    )
+
+    assert tree.read_text(encoding="utf-8") == "focus_tree = {}"
+    assert loc.read_text(encoding="utf-8-sig") == "l_english:\n"
+    assert notifications == [str(tree), str(loc)]
+
+
+def test_write_texts_leaves_every_target_untouched_when_one_cannot_be_staged(tmp_path):
+    tree = tmp_path / "tree.txt"
+    loc = tmp_path / "loc.yml"
+    tree.write_text("old tree")
+    loc.write_text("old loc")
+    notifications = []
+    files = WorkspaceFiles(on_written=notifications.append)
+
+    # The second entry cannot be encoded, so the group must abort during
+    # staging — before the first (perfectly writable) target is swapped.
+    with pytest.raises(UnicodeEncodeError):
+        files.write_texts([(tree, "new tree", "utf-8"), (loc, "not ascii: é", "ascii")])
+
+    assert tree.read_text() == "old tree"
+    assert loc.read_text() == "old loc"
+    assert notifications == []
+    assert list(tmp_path.glob("*.tmp")) == []
+
+
+def test_write_texts_rolls_back_committed_targets_when_a_swap_fails(
+    tmp_path, monkeypatch
+):
+    tree = tmp_path / "tree.txt"
+    loc = tmp_path / "loc.yml"
+    tree.write_text("old tree")
+    loc.write_text("old loc")
+    notifications = []
+    files = WorkspaceFiles(on_written=notifications.append)
+    real_replace = os.replace
+    calls = []
+
+    def failing_replace(source, target):
+        calls.append(target)
+        if len(calls) == 1:
+            return real_replace(source, target)
+        raise OSError("replace failed")
+
+    monkeypatch.setattr("hoi4cm.mod.workspace_files.os.replace", failing_replace)
+
+    with pytest.raises(OSError, match="replace failed"):
+        files.write_texts([(tree, "new tree", "utf-8"), (loc, "new loc", "utf-8-sig")])
+
+    # The .txt swap succeeded before the .yml failed — a half-applied export
+    # is exactly what issue #46 is about, so it gets undone.
+    assert tree.read_text() == "old tree"
+    assert loc.read_text() == "old loc"
+    assert notifications == []
+    assert list(tmp_path.glob(".*.tmp")) == []
+
+
+def test_write_texts_rollback_deletes_targets_that_did_not_exist_before(
+    tmp_path, monkeypatch
+):
+    created = tmp_path / "created.txt"
+    loc = tmp_path / "loc.yml"
+    loc.write_text("old loc")
+    real_replace = os.replace
+    calls = []
+
+    def failing_replace(source, target):
+        calls.append(target)
+        if len(calls) == 1:
+            return real_replace(source, target)
+        raise OSError("replace failed")
+
+    monkeypatch.setattr("hoi4cm.mod.workspace_files.os.replace", failing_replace)
+
+    with pytest.raises(OSError, match="replace failed"):
+        WorkspaceFiles().write_texts(
+            [(created, "new", "utf-8"), (loc, "new loc", "utf-8-sig")]
+        )
+
+    assert not created.exists()
+    assert loc.read_text() == "old loc"
+
+
+def test_write_texts_with_no_entries_is_a_no_op():
+    WorkspaceFiles(
+        on_written=lambda _path: pytest.fail("nothing to notify")
+    ).write_texts([])
+
+
+def test_write_text_still_takes_the_single_entry_path(tmp_path, monkeypatch):
+    # write_text delegates to write_texts, but a lone target has nothing to
+    # roll back to — it must not pay for a pre-write snapshot read.
+    target = tmp_path / "data.txt"
+    target.write_text("old")
+    monkeypatch.setattr(
+        "hoi4cm.mod.workspace_files._read_bytes",
+        lambda _target: pytest.fail("single writes must not snapshot the target"),
+    )
+
+    WorkspaceFiles().write_text(target, "new", encoding="utf-8")
+
+    assert target.read_text() == "new"
+
+
 def test_append_text_notifies_after_write(tmp_path):
     target = tmp_path / "data.txt"
     target.write_text("first")

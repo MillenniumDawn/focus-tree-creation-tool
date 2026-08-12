@@ -1,6 +1,11 @@
 import pytest
 
-from hoi4cm.editor.project_codec import decode_project, encode_project
+from hoi4cm.editor.project_codec import (
+    decode_project,
+    encode_project,
+    read_project,
+    write_project,
+)
 from hoi4cm.models import (
     EditorWorkspace,
     Focus,
@@ -119,3 +124,41 @@ def test_future_project_version_is_rejected_without_legacy_fallback():
 
     with pytest.raises(ValueError, match="unsupported project version"):
         decode_project(project)
+
+
+# ── on-disk writes (issue #46) ───────────────────────────────────────
+
+
+def _one_focus_workspace():
+    focus = Focus(1, 2)
+    focus.name = "TAG_start"
+    return EditorWorkspace(
+        focuses=FocusDocument([focus]),
+        main_tree=TreeDocument(metadata=TreeMetadata(tree_id="TAG_focus_tree")),
+    )
+
+
+def test_write_project_round_trips_through_a_file(tmp_path):
+    path = tmp_path / "nested" / "project.json"
+
+    write_project(path, _one_focus_workspace())
+
+    restored = read_project(path)
+    assert restored.main_tree.metadata.tree_id == "TAG_focus_tree"
+    assert [f.name for f in restored.focuses.values()] == ["TAG_start"]
+
+
+def test_failed_project_write_keeps_the_previous_save(tmp_path, monkeypatch):
+    path = tmp_path / "project.json"
+    write_project(path, _one_focus_workspace())
+    original = path.read_text(encoding="utf-8")
+    monkeypatch.setattr(
+        "hoi4cm.mod.workspace_files.os.replace",
+        lambda *_args: (_ for _ in ()).throw(OSError("disk full")),
+    )
+
+    with pytest.raises(OSError, match="disk full"):
+        write_project(path, _one_focus_workspace())
+
+    assert path.read_text(encoding="utf-8") == original
+    assert list(tmp_path.glob(".*.tmp")) == []

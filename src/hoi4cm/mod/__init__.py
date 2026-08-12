@@ -11,7 +11,11 @@ from hoi4cm.mod.graphics_catalog import (
     GraphicsCatalog,
     GraphicsScanConfig,
 )
-from hoi4cm.mod.workspace_files import WorkspaceFiles
+from hoi4cm.mod.workspace_files import (
+    WorkspaceFiles,
+    WriteEntry,
+    notifying_workspace_files,
+)
 
 # Module-level singleton. Lazily constructed on first import so any code that
 # does ``from hoi4cm.mod import MOD`` gets the same instance.
@@ -25,5 +29,7 @@ __all__ = [
     "ModContext",
     "MOD",
     "WorkspaceFiles",
+    "WriteEntry",
     "detect_loc_file",
+    "notifying_workspace_files",
 ]

@@ -375,6 +375,8 @@
   "dialog.project_saved": "项目已保存：\n{path}",
   "dialog.read_file_error": "无法读取文件：\n{error}",
   "dialog.saved.title": "已保存",
+  "dialog.write_failed.body": "无法写入 {file}：\n{error}\n\n该文件未被修改 —— 没有任何内容被覆盖。",
+  "dialog.write_failed.title": "写入失败",
   "drawio.auto_shift.body": "{count} 个国策已自动移动，以避免与其他国策重叠：\n\n{detail}\n\n你可以在画布上拖动它们调整到更合适的位置。",
   "drawio.auto_shift.more": "  ... 以及另外 {count} 个",
   "drawio.auto_shift.title": "自动避让提示",

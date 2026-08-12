@@ -96,7 +96,7 @@ from hoi4cm.core import (
     tr,
 )
 from hoi4cm.editor import read_project, write_project
-from hoi4cm.mod import MOD, detect_loc_file
+from hoi4cm.mod import MOD, detect_loc_file, notifying_workspace_files
 from hoi4cm.models import (
     EditorWorkspace,
     FocusSidebarValues,
@@ -128,6 +128,7 @@ from hoi4cm.ui import (
     _safe_after,
     make_progress,
     progress_modal,
+    report_write_failure,
     run_bg,
 )
 from hoi4cm.ui.canvas import CanvasMixin
@@ -4331,8 +4332,14 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
             )
         if not path:
             return
-        with open(path, "w", encoding="utf-8") as fp:
-            fp.write(out_text)
+        try:
+            notifying_workspace_files(MOD, MOD.root).write_text(
+                path, out_text, encoding="utf-8"
+            )
+        except Exception as e:
+            log.error("extra tree export failed: %s", e, exc_info=True)
+            report_write_failure(self, path, e)
+            return None
         info["file_path"] = path
         if show_dialog:
             messagebox.showinfo(
@@ -4883,7 +4890,12 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
         )
         if not path:
             return
-        write_project(path, self._capture_workspace())
+        try:
+            write_project(path, self._capture_workspace())
+        except Exception as e:
+            log.error("project save failed: %s", e, exc_info=True)
+            report_write_failure(self, path, e)
+            return
         messagebox.showinfo(
             tr("dialog.saved.title", "Saved"),
             tr("dialog.project_saved", "Project saved:\n{path}", path=path),
@@ -5517,9 +5529,6 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
         if not path:
             return
 
-        with open(path, "w", encoding="utf-8") as fp:
-            fp.write(out_text)
-
         if MOD.edit_loc_file and os.path.isfile(MOD.edit_loc_file):
             loc_path = MOD.edit_loc_file
         else:
@@ -5571,10 +5580,21 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
             len(main_focuses),
         )
 
+        # The .txt and the .yml go out as one group: staged to temp files and
+        # fsynced first, then swapped in. A failure anywhere leaves both the
+        # tracked focus file and the loc file exactly as they were, instead of
+        # truncating one in place or applying half the export.
+        writes = [(path, out_text, "utf-8")]
         if new_loc_text is not None:
-            os.makedirs(os.path.dirname(loc_path) or ".", exist_ok=True)
-            with open(loc_path, "w", encoding="utf-8-sig") as fp:
-                fp.write(new_loc_text)
+            writes.append((loc_path, new_loc_text, "utf-8-sig"))
+        try:
+            notifying_workspace_files(MOD, MOD.root).write_texts(writes)
+        except Exception as e:
+            log.error("export failed: %s", e, exc_info=True)
+            report_write_failure(self, path, e)
+            return None
+
+        if new_loc_text is not None:
             loc_saved = "\n" + tr(
                 "export.localisation_added",
                 "Localisation: {file}  (+{count} new keys)",

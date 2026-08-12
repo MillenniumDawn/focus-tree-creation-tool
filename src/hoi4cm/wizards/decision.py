@@ -22,7 +22,7 @@ from hoi4cm.core import (
 )
 from hoi4cm.core.image import PIL_OK, PILImage, PILImageTk
 from hoi4cm.core.logger import get_logger
-from hoi4cm.mod import MOD
+from hoi4cm.mod import MOD, WorkspaceFiles
 from hoi4cm.script.syntax import extract_named_block, find_blocks
 from hoi4cm.ui import (
     BG_CARD,
@@ -4779,12 +4779,15 @@ def open_decision_wizard(app):
         )
         if not path:
             return
+        cat_path = path.replace(".txt", "_categories.txt")
         try:
-            with open(path, "w", encoding="utf-8") as f:
-                f.write(_gen_decisions_file())
-            cat_path = path.replace(".txt", "_categories.txt")
-            with open(cat_path, "w", encoding="utf-8") as f:
-                f.write(_gen_categories_file())
+            # Both files or neither: a half-written pair is worse than no export.
+            WorkspaceFiles().write_texts(
+                [
+                    (path, _gen_decisions_file(), "utf-8"),
+                    (cat_path, _gen_categories_file(), "utf-8"),
+                ]
+            )
             _dm_status.config(text="  ✓  Exported")
         except Exception as e:
             messagebox.showerror("Export Error", str(e), parent=win)

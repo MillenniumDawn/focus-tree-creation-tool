@@ -204,6 +204,13 @@ targets in `performance.md` only show up at MD's size:
   watching for undo-stack correctness and canvas redraw glitches.
 - Export to a scratch copy of a file and diff it against the original to
   confirm the round-trip didn't drop or reorder fields.
+- Export into a **read-only directory** (`chmod 555` a scratch copy of
+  `common/national_focus/`). The export must raise a "Write Failed" dialog
+  naming the file, add one entry to the in-app error log, show no success
+  dialog, and leave both the `.txt` and the loc `.yml` byte-identical. The
+  atomic/rollback behaviour itself is covered headlessly
+  (`tests/test_workspace_files.py`, `tests/test_monolith_export.py`); this
+  checks the dialog actually reaches the user.
 
 ### Phase 8: viewport culling checklist
 
