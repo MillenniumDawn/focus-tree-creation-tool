@@ -31,7 +31,7 @@ the target.
 | `_populate` tore down and recreated the offsets, prerequisites, mutex and effects sidebar sections on every call, even when the focus's data was unchanged. Saving a focus re-populates, so a save on a focus with a dozen effects rebuilt every card | `hoi4_content_maker.py` (`_refresh_offsets`, `_refresh_prereqs`, `_refresh_mutex`), `ui/effects_panel.py` (`_refresh_effects`) | Each section caches a signature of what it last rendered and returns early on a match, gated on `MOD.sidebar_refresh_skip`. `_refresh_effects(force=True)` bypasses it after a mod load, since effect cards carry mod-aware dropdowns | fixed in issue #34 | not yet measured, needs a display session against the real mod |
 | `strip_comments`, `tokenize`, `match_brace`, `find_blocks` and `extract_named_block` were all `while position < len(source)` per-character Python loops, and `find_blocks`/`extract_named_block` additionally tried a regex match at *every* character. `_extract_raw_rewards` then ran eleven independent `re.search` scans of each focus block (one per raw key), most of which found nothing and paid a full scan to say so, and `parse_focus_tree` scanned the whole file three separate times for the same `focus = {` block list | `script/syntax.py`, `focus_tree/parse.py` (`_extract_raw_rewards`, `parse_focus_tree`) | Compiled alternations scanned with `findall`/`finditer`, so the character walk runs in C; the raw keys became one alternation pass per focus block; the focus-block scan is done once in `focus_block_starts` and shared. See the scanner rewrite note below | fixed in issue #28 | synthetic 776-focus / 23.3k-line tree (Python 3.14, interleaved A/B in one process): `strip_comments` 27.3ms -> 8.5ms, `tokenize` 41.1ms -> 23.1ms, whole-file `match_brace` 44.9ms -> 15.0ms, `parse_focus_tree` end to end 208.9ms -> 118.4ms (-43%). At 5,000 focuses / 150k lines the end-to-end delta holds at -40% (1494ms -> 901ms) |
 | A plain focus click always ran `_autosave` → `touch()` → full `rebuild_indexes()` (and a revision-driven `SceneIndex` rebuild), then `_build_focus_code` rebuilt a throwaway name→Focus map with `build_focus_name_lookup`, so selecting one focus at Load All Trees scale paid several O(F+E)/O(F) passes even when the form was untouched | `hoi4_content_maker.py` (`_autosave`, `_read_sidebar_values`, `_build_focus_code`), `models/document.py` (`by_name`), `models/sidebar_form.py` | `_autosave` snapshots the form via `_read_sidebar_values`, no-ops when `sidebar_values_match_focus` says nothing changed, and only `touch()`es on a real name change (x/y stays on incremental `move()`). Empty name refuses to write; parse errors go through `_log_error` instead of a bare `except: pass`. Code-tab render takes `focuses.by_name` (O(1) over `first_by_name`) instead of scanning every focus | fixed in issue #25 | synthetic 8,000-focus document (Python 3.14): matched-form path calls rebuild 0 times; 1,000 dirty-checks beat one `rebuild_indexes`; 10,000 `by_name.get` beat 10 `build_focus_name_lookup` builds (`tests/test_sidebar_form.py`). Real-mod display session still open |
-
+| Five leftovers in the render loop still did whole-document work per frame after phase 8's culling: `SceneIndex.ensure` re-derived `signature()` on every SCENE frame, `_grow_canvas_to_focuses` walked every focus, the grid was generated across the whole canvas extent and deleted/recreated per zoom notch, `_draw_lines` re-hid the entire surplus line pool every frame, and `_get_tree_badge` did an O(extra trees) scan per visible focus per frame | `ui/scene_index.py` (`ensure`), `ui/canvas.py` (`_grow_canvas_to_focuses`, `_draw_grid`, `_draw_lines`, `_draw_canvas_legend`, `_draw_minimap_content`), `hoi4_content_maker.py` (`_get_tree_badge`) | `ensure` trusts `FocusDocument.revision` (`signature()` is now the `HOI4CM_SCENE_INDEX_VALIDATE` debug path); canvas growth offers up a revision-cached focus bbox instead of every position; the grid clips to the viewport plus a screen of margin and pools its line items; `_draw_lines` and the minimap pools track a used high-water mark and only hide newly freed slots; badges come from a `ui/tree_badges.py` table rebuilt when `_extra_trees` changes; the legend draws only the rows that fit on screen | fixed in issue #26 | synthetic 5,000-focus / 200-tree / 3,200-edge tree, 1600x900 viewport (Python 3.14): SCENE frame 34.2ms -> 22.1ms, idle VIEW frame 28.6ms -> 22.8ms, `_draw_lines` after a wide zoom-out 15.4ms -> 8.1ms, `_grow_canvas_to_focuses` 1.6ms -> 0.0ms, `_get_tree_badge` x200 0.79ms -> 0.03ms, legend 4.4ms -> 2.2ms. Grid regeneration becomes independent of canvas extent: at +-1000 cells 18.0ms -> 0.5ms. See the render-loop note below |
 The `_draw_key`/state-key check in `_draw_focus` (`ui/canvas.py:486`) already
 makes an unchanged focus close to free to redraw, but every `_redraw()` call
 still iterates the full focus dict to find that out. That per-redraw
@@ -70,6 +70,59 @@ patches that one index instead of rebuilding all seven; and
 `SceneIndex.update_focus` moves just the dragged focus between cells and
 re-rasterizes only its incident edges. The resulting work is O(1 + focus
 degree), not O(F+E).
+
+### Render-loop bookkeeping
+
+Phase 8 stopped the render loop *drawing* offscreen focuses. Issue #26
+stopped the surrounding bookkeeping scaling with the document instead of
+with the viewport. Five rules now hold on the frame path:
+
+- **The document revision is the change signal.** `SceneIndex.ensure`
+  compares `FocusDocument.revision` and nothing else. Re-deriving
+  `signature()` allocated a nested tuple per focus per frame to confirm that
+  nothing had changed, which is the common case. Trusting the revision is
+  only sound because every mutation path bumps it — a `FocusDocument`
+  method, or an explicit `touch()` after a direct field edit. A new path
+  that skips both leaves the canvas showing stale geometry, so
+  `HOI4CM_SCENE_INDEX_VALIDATE=1` restores the per-frame cross-check for
+  when a canvas desync needs chasing.
+- **Whole-document scans get keyed on that revision too.** Growing the
+  canvas bounds to fit every focus is really "grow to fit the focus bounding
+  box" — bounds only grow, and each axis grows independently — so
+  `_focus_bounds` computes the bbox once per revision and
+  `_grow_canvas_to_focuses` offers up its two corners.
+- **The grid is a viewport, not a document.** Generation is clipped to the
+  visible rect plus `_GRID_MARGIN_SCREENS` screens on each side, and the
+  lines are pooled. The margin is what a pan (a pure `cv.move`, no
+  regeneration until release) slides into. This is what makes the cost
+  independent of canvas extent; the pool is what keeps a wheel notch, which
+  regenerates synchronously, from deleting and recreating every line.
+- **Pooled item lists track a used mark, not just a length.** `self._lines`,
+  `_mm_line_pool` and `_mm_dot_pool` all grow to their high-water count — one
+  zoomed-out frame on a big tree can leave tens of thousands of items — and
+  hiding "everything past what this frame used" then costs a Tk call per
+  surplus item per frame, forever, for items that are already hidden. Each
+  pool now hides only the slots freed since the previous frame. Every user
+  of these pools clamps against the pool length, because clearing a pool
+  after a `cv.delete("all")` legitimately shrinks it.
+- **Per-tree derivations are tables, not scans.** A focus's badge and colour
+  used to be derived by counting the same-typed trees ahead of it, once per
+  visible focus per frame plus once per minimap dot and legend row.
+  `ui/tree_badges.py` builds the whole table in one pass;
+  `_get_tree_badge` rebuilds it when `_extra_trees` changes length and every
+  structural mutation site calls `_invalidate_tree_badges()`. The legend
+  additionally draws only the rows that fit in the canvas height — with
+  hundreds of trees loaded, the rest were laid out above the top edge.
+
+Two costs in the same loop are deliberately *not* addressed here. A wheel
+notch at moderate zoom is dominated by `_reclaim_focus_bundles` plus
+`_draw_focus`: each notch changes the visible set and every surviving
+focus's `draw_key`, so bundles churn (14 canvas items created and deleted
+per focus crossing the edge) and every visible card recomputes. And
+`_draw_coord_labels` deletes and recreates its rulers every frame. Both are
+viewport-bounded rather than document-bounded, so they don't grow with a
+Load All Trees session, but they are what a zoom frame actually spends its
+time on.
 
 ### Script scanner rewrite
 

@@ -6,6 +6,7 @@ inherits :class:`CanvasMixin`, so behaviour is identical — this only moves the
 lines out of ``hoi4_content_maker.py``.
 """
 
+import math
 import tkinter as tk
 
 from hoi4cm.mod import MOD
@@ -29,7 +30,7 @@ from hoi4cm.ui import (
 from hoi4cm.ui.canvas_renderer import FocusCanvasBundle
 from hoi4cm.ui.canvas_scheduler import DirtyRedrawState, RedrawChannel
 from hoi4cm.ui.image_broker import ImageBroker
-from hoi4cm.ui.scene_index import SceneIndex
+from hoi4cm.ui.scene_index import DEBUG_VALIDATE, SceneIndex
 from hoi4cm.ui.tasks import get_executor
 from hoi4cm.ui.viewport import edge_visible, focus_visible, visible_world_rect
 
@@ -38,6 +39,12 @@ from hoi4cm.ui.viewport import edge_visible, focus_visible, visible_world_rect
 # it, so nothing pops in/out right at the screen edge.
 _CULL_MARGIN_BOXES = 2
 _FOCUS_LOD_ZOOM = 0.4
+# Screens of grid generated beyond the viewport on each side. The grid is only
+# regenerated on zoom/resize/bounds change — a pan is a pure ``cv.move`` — so
+# the margin is what keeps lines under the cursor during a pan that has not
+# been released yet. One screen each way means a pan has to cross a whole
+# viewport before it runs off the generated lattice.
+_GRID_MARGIN_SCREENS = 1
 
 
 class CanvasMixin:
@@ -160,12 +167,49 @@ class CanvasMixin:
             changed = True
         return changed
 
-    def _grow_canvas_to_focuses(self):
-        """Expand bounds so every existing focus sits inside the usable canvas."""
-        changed = False
+    def _focus_bounds(self):
+        """(min_x, min_y, max_x, max_y) over every focus, or None if empty.
+
+        Cached against the document revision: a redraw on an unchanged
+        document reuses the last answer instead of walking the whole focus
+        dict again. A mapping with no ``revision`` (a plain dict in tests)
+        just recomputes.
+        """
+        revision = getattr(self.focuses, "revision", None)
+        cached = getattr(self, "_focus_bounds_cache", None)
+        if revision is not None and cached is not None and cached[0] == revision:
+            return cached[1]
+        bounds = None
         for f in self.focuses.values():
-            if self._ensure_canvas_contains(f.x, f.y):
-                changed = True
+            if bounds is None:
+                bounds = [f.x, f.y, f.x, f.y]
+                continue
+            if f.x < bounds[0]:
+                bounds[0] = f.x
+            elif f.x > bounds[2]:
+                bounds[2] = f.x
+            if f.y < bounds[1]:
+                bounds[1] = f.y
+            elif f.y > bounds[3]:
+                bounds[3] = f.y
+        result = tuple(bounds) if bounds is not None else None
+        self._focus_bounds_cache = (revision, result)
+        return result
+
+    def _grow_canvas_to_focuses(self):
+        """Expand bounds so every existing focus sits inside the usable canvas.
+
+        Bounds only ever grow and each axis grows independently, so containing
+        the corners of the focus bounding box contains every focus in it —
+        no need to offer up all F positions one at a time.
+        """
+        bounds = self._focus_bounds()
+        if bounds is None:
+            return False
+        min_x, min_y, max_x, max_y = bounds
+        changed = self._ensure_canvas_contains(min_x, min_y)
+        if self._ensure_canvas_contains(max_x, max_y):
+            changed = True
         return changed
 
     def _draw_canvas_bounds(self):
@@ -243,9 +287,7 @@ class CanvasMixin:
     def _render_frame(self, channels):
         max(1, self.cv.winfo_width())
         max(1, self.cv.winfo_height())
-        self._scene_index.ensure(
-            self.focuses, validate=bool(channels & RedrawChannel.SCENE)
-        )
+        self._scene_index.ensure(self.focuses, validate=DEBUG_VALIDATE)
         if channels & RedrawChannel.SCENE:
             self._grow_canvas_to_focuses()
         self._draw_grid()
@@ -289,7 +331,7 @@ class CanvasMixin:
             # edges instead of rebuilding the whole scene index every frame.
             self._scene_index.update_focus(self.focuses, drag_id)
         else:
-            self._scene_index.ensure(self.focuses, validate=True)
+            self._scene_index.ensure(self.focuses, validate=DEBUG_VALIDATE)
         self._draw_lines()
 
     def _redraw_now(
@@ -311,15 +353,51 @@ class CanvasMixin:
         request = self._redraw_state.consume()
         self._render_frame(request.channels)
 
-    def _draw_grid(self):
-        """Draw the bounded grid as native canvas lines.
+    def _grid_line(self, index, x0, y0, x1, y1, fill):
+        """Position pooled grid line *index*, creating it if the pool is short."""
+        pool = self._grid_pool
+        if index < len(pool):
+            item = pool[index]
+            self.cv.coords(item, x0, y0, x1, y1)
+            self.cv.itemconfig(item, fill=fill, state="normal")
+            return
+        pool.append(self.cv.create_line(x0, y0, x1, y1, fill=fill, tags="grid"))
 
-        The canvas is finite (min 10x10, grows by 5), so the grid is only a few
-        dozen line items — far cheaper than the old full-viewport PhotoImage that
-        was rebuilt pixel-by-pixel in Python every frame. Because the lines are
-        real canvas items tagged "grid", panning is a pure ``cv.move`` with no
-        rebuild; we only regenerate on zoom, resize or a bounds change.
+    def _hide_grid_surplus(self, used):
+        """Hide the pooled lines this generation didn't need.
+
+        Only the slots freed since the last generation are touched: lines left
+        hidden by an earlier, smaller grid are already hidden and re-hiding
+        them is a Tk call per line per frame for no visible effect.
         """
+        pool = self._grid_pool
+        for index in range(used, min(self._grid_used, len(pool))):
+            self.cv.itemconfig(pool[index], state="hidden")
+        self._grid_used = used
+
+    def _draw_grid(self):
+        """Draw the grid over the viewport (plus a margin) as canvas lines.
+
+        Two things keep this off the per-frame budget. The lines are real
+        canvas items tagged "grid", so panning is a pure ``cv.move`` and only
+        zoom, resize or a bounds change regenerates them; and generation is
+        clipped to the viewport instead of the whole canvas extent, so a
+        zoomed-in view on a wide document emits the handful of lines actually
+        on screen rather than one per row and column of the document. The
+        items are pooled and re-coordinated (like ``_draw_lines``'s
+        ``self._lines``) rather than deleted and recreated, since every zoom
+        notch drives a synchronous regeneration.
+        """
+        if not hasattr(self, "_grid_pool"):
+            self._grid_pool = []
+            self._grid_used = 0
+        # A `cv.delete("all")` elsewhere (new/clear document) takes the pooled
+        # items with it; the ids left behind name nothing.
+        if self._grid_pool and not self.cv.type(self._grid_pool[0]):
+            self._grid_pool.clear()
+            self._grid_used = 0
+            self._grid_key = None
+
         W = max(1, self.cv.winfo_width())
         H = max(1, self.cv.winfo_height())
         z = self.zoom
@@ -337,47 +415,60 @@ class CanvasMixin:
             W,
             H,
         )
-        if key == self._grid_key and self.cv.find_withtag("grid"):
+        if key == self._grid_key:
             return
         self._grid_key = key
-        self.cv.delete("grid")
         self._grid_item = None
         # Hide when toggled off or so dense the lines would smear together.
         if not on or stepx < 4:
+            self._hide_grid_surplus(0)
             return
 
         minx, miny = self._canvas_min
         maxx, maxy = self._canvas_max
         stepy = YGRID * z
-        x0 = minx * XGRID * z + self.offset[0] - stepx / 2
-        x1 = maxx * XGRID * z + self.offset[0] + stepx / 2
-        y0 = miny * YGRID * z + self.offset[1] - stepy / 2
-        y1 = maxy * YGRID * z + self.offset[1] + stepy / 2
+        # Cell boundaries sit at each g - 0.5, so boundary g maps to canvas
+        # pixel g*step + offset - step/2. Invert that for the viewport edges,
+        # widened by the pan margin, and clamp to the canvas bounds.
+        if W <= 1 or H <= 1:
+            # Not mapped yet (winfo_* report 1): there is no viewport to clip
+            # to, so cover the extent. The <Configure> that follows the map
+            # redraws with real dimensions.
+            gx0, gx1, gy0, gy1 = minx, maxx + 1, miny, maxy + 1
+        else:
+            margin_x = _GRID_MARGIN_SCREENS * W
+            margin_y = _GRID_MARGIN_SCREENS * H
+            gx0 = max(minx, math.floor((-margin_x - self.offset[0]) / stepx + 0.5))
+            gx1 = min(
+                maxx + 1, math.ceil((W + margin_x - self.offset[0]) / stepx + 0.5)
+            )
+            gy0 = max(miny, math.floor((-margin_y - self.offset[1]) / stepy + 0.5))
+            gy1 = min(
+                maxy + 1, math.ceil((H + margin_y - self.offset[1]) / stepy + 0.5)
+            )
+        if gx0 > gx1 or gy0 > gy1:
+            self._hide_grid_surplus(0)
+            return
+
+        x0 = gx0 * XGRID * z + self.offset[0] - stepx / 2
+        x1 = gx1 * XGRID * z + self.offset[0] - stepx / 2
+        y0 = gy0 * YGRID * z + self.offset[1] - stepy / 2
+        y1 = gy1 * YGRID * z + self.offset[1] - stepy / 2
         minor = "#1e293b"  # subtle cell line
         major = "#2d3a4e"  # brighter line every other column/row
 
+        used = 0
         # Vertical cell boundaries (a boundary sits at each gx - 0.5).
-        for gx in range(minx, maxx + 2):
+        for gx in range(gx0, gx1 + 1):
             px = gx * XGRID * z + self.offset[0] - stepx / 2
-            self.cv.create_line(
-                px,
-                y0,
-                px,
-                y1,
-                fill=(major if gx % 2 == 0 else minor),
-                tags="grid",
-            )
+            self._grid_line(used, px, y0, px, y1, major if gx % 2 == 0 else minor)
+            used += 1
         # Horizontal cell boundaries.
-        for gy in range(miny, maxy + 2):
+        for gy in range(gy0, gy1 + 1):
             py = gy * YGRID * z + self.offset[1] - stepy / 2
-            self.cv.create_line(
-                x0,
-                py,
-                x1,
-                py,
-                fill=(major if gy % 2 == 0 else minor),
-                tags="grid",
-            )
+            self._grid_line(used, x0, py, x1, py, major if gy % 2 == 0 else minor)
+            used += 1
+        self._hide_grid_surplus(used)
         self.cv.tag_lower("grid")
 
     def _draw_coord_labels(self):
@@ -557,8 +648,18 @@ class CanvasMixin:
                 )
                 cv.itemconfig(ar, state="hidden")
 
-        for idx in range(len(edges) * 2, len(self._lines)):
+        # Only re-hide the slots this frame freed. The pool grows to the
+        # high-water edge count — one zoomed-out frame on a big tree can leave
+        # tens of thousands of items in it — and everything past the previous
+        # frame's mark is already hidden, so walking to len(self._lines) is a
+        # Tk call per surplus item per frame for no visible effect. A
+        # `self._lines.clear()` elsewhere (new/clear document, after a
+        # `cv.delete("all")`) shrinks the pool, hence the clamp.
+        pool_size = len(self._lines)
+        previous_used = min(getattr(self, "_lines_used", pool_size), pool_size)
+        for idx in range(need, previous_used):
             cv.itemconfig(self._lines[idx], state="hidden")
+        self._lines_used = need
 
         if self._lines:
             cv.tag_lower("line")
@@ -1162,21 +1263,38 @@ class CanvasMixin:
         self._hint(base)
 
     def _draw_canvas_legend(self):
-        """Draw a compact legend in the bottom-left when extra trees are loaded."""
+        """Draw a compact legend in the bottom-left when extra trees are loaded.
+
+        Rows stack upward from the bottom edge, so only the ones that fit in
+        the canvas height are drawn: a Load All Trees session has hundreds of
+        entries, and the rest would be laid out above the top of the canvas —
+        a text item per loaded tree, per frame, none of them visible.
+        """
         self.cv.delete("legend")
         if not getattr(self, "_extra_trees", []):
             return
         cv = self.cv
         ch = cv.winfo_height()
         x, y = 8, ch - 8
-        items = [("■ Main tree", FC_BORDER)]
-        for idx, et in enumerate(self._extra_trees, start=1):
-            badge, col = self._get_tree_badge(idx)
-            items.append(
+        row_height = 14
+        extra = self._extra_trees
+        # Rows that fit between the bottom margin and the top of the canvas,
+        # two of which are the header and the cross-tree note.
+        max_rows = max(3, (ch - 8) // row_height)
+        first = max(0, len(extra) - (max_rows - 2))
+        if first:
+            header = (f"■ … {first} more trees", TEXT_DIM)
+        else:
+            header = ("■ Main tree", FC_BORDER)
+        rows = [header]
+        for idx in range(first, len(extra)):
+            et = extra[idx]
+            badge, col = self._get_tree_badge(idx + 1)
+            rows.append(
                 (f"■ [{badge}] {et['type'].capitalize()}: {et['tree_id']}", col)
             )
-        items.append(("· · ·  cross-tree prereq", "#94a3b8"))
-        for lbl, col in reversed(items):
+        rows.append(("· · ·  cross-tree prereq", "#94a3b8"))
+        for lbl, col in reversed(rows):
             cv.create_text(
                 x,
                 y,
@@ -1186,7 +1304,7 @@ class CanvasMixin:
                 font=("Helvetica", 8),
                 tags="legend",
             )
-            y -= 14
+            y -= row_height
 
     def _draw_cfp_markers(self):
         """Draw continuous_focus_position marker boxes on the canvas.
@@ -1244,7 +1362,6 @@ class CanvasMixin:
         # Extra tree CFPs
         for idx, et in enumerate(getattr(self, "_extra_trees", []), start=1):
             if et.get("cfp_x") is not None and et.get("cfp_y") is not None:
-                _, col = self._get_tree_badge(idx)
                 badge, _ = self._get_tree_badge(idx)
                 tree_type = et.get("type", "shared")
                 if tree_type == "joint":
@@ -1333,8 +1450,11 @@ class CanvasMixin:
                             mm.tag_lower(item)
                             self._mm_line_pool.append(item)
                         line_idx += 1
-        for index in range(line_idx, len(self._mm_line_pool)):
+        # Same high-water-mark rule as _draw_lines: only the slots this pass
+        # freed need hiding, not every slot an earlier, bigger pass allocated.
+        for index in range(line_idx, min(self._mm_line_used, len(self._mm_line_pool))):
             mm.itemconfig(self._mm_line_pool[index], state="hidden")
+        self._mm_line_used = line_idx
 
         dot = max(2, int(scale * 0.45))
         if downsample:
@@ -1371,8 +1491,9 @@ class CanvasMixin:
                 )
                 self._mm_dot_pool.append(item)
             dot_idx += 1
-        for index in range(dot_idx, len(self._mm_dot_pool)):
+        for index in range(dot_idx, min(self._mm_dot_used, len(self._mm_dot_pool))):
             mm.itemconfig(self._mm_dot_pool[index], state="hidden")
+        self._mm_dot_used = dot_idx
 
     def _draw_minimap(self):
         """Render all focuses as small colored dots plus the viewport rectangle.
@@ -1394,8 +1515,10 @@ class CanvasMixin:
         """
         if not hasattr(self, "_mm_line_pool"):
             self._mm_line_pool = []
+            self._mm_line_used = 0
         if not hasattr(self, "_mm_dot_pool"):
             self._mm_dot_pool = []
+            self._mm_dot_used = 0
         if not getattr(self, "_mm_visible", False):
             return
         if not hasattr(self, "_mm_canvas"):
@@ -1408,10 +1531,12 @@ class CanvasMixin:
             return
 
         if not self.focuses:
-            for item in self._mm_line_pool:
-                mm.itemconfig(item, state="hidden")
-            for item in self._mm_dot_pool:
-                mm.itemconfig(item, state="hidden")
+            for index in range(min(self._mm_line_used, len(self._mm_line_pool))):
+                mm.itemconfig(self._mm_line_pool[index], state="hidden")
+            for index in range(min(self._mm_dot_used, len(self._mm_dot_pool))):
+                mm.itemconfig(self._mm_dot_pool[index], state="hidden")
+            self._mm_line_used = 0
+            self._mm_dot_used = 0
             mm.delete("mm_overlay")
             return
 
