@@ -2,7 +2,8 @@
 
 Each fixture under tests/fixtures/focus_trees/ hand-covers one importer
 behavior (wrapper vs. bare focuses, bare shared_focus, country-tag-matching
-offsets, the per-focus brace-walk fallback). parse_focus_tree + build_focuses
+offsets, the per-focus brace-walk fallback, and the quote/comment edge cases
+the script scanners have to get right). parse_focus_tree + build_focuses
 output is normalized (focuses keyed by name, prereqs/mutex remapped from id to
 name) and compared against a committed golden JSON under
 tests/fixtures/focus_trees/golden/. See docs/dev/testing.md for how these were
@@ -28,6 +29,7 @@ FIXTURES = {
     "bare_shared_focus.txt": {},
     "offset_original_tag.txt": {"country_tag": "OFS"},
     "brace_broken.txt": {},
+    "scanner_edge_cases.txt": {},
 }
 
 

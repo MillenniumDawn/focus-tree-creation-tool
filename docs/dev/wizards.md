@@ -5,16 +5,22 @@
 
 | Wizard | Entry point | Lines | Purpose |
 |---|---|---|---|
-| Decision | `open_decision_wizard(app)` | 5,405 | Build a decision or decision category |
-| Event | `open_event_wizard(app)` | 3,445 | Build a HOI4 event |
+| Decision | `open_decision_wizard(app)` | 4,958 | Build a decision or decision category |
+| Event | `open_event_wizard(app)` | 2,849 | Build a HOI4 event |
 | National Spirit | `open_national_spirit_wizard(app)` | 2,113 | Build a national spirit / idea |
 | Dynamic Modifier | `open_dyn_mod_wizard(app)` | 1,662 | Build a dynamic modifier |
 | Additional Income | `open_additional_income_wizard(app)` | 582 | Build an MD additional-income entry |
 
+Event dropped from its original 3,445 lines when `_open_effect_picker`
+moved into `_shared.py` as `open_effect_picker` (issue #45) — decision.py
+had no picker of its own (the bug: its button called a name that was never
+defined anywhere), so it now imports the shared one instead of growing a
+second copy.
+
 ## `_shared.py`
 
-31 lines holding state that used to be plain module-level globals in the
-monolith's Tk-handling block:
+State that used to be plain module-level globals in the monolith's
+Tk-handling block, plus one popup shared across wizards:
 
 - `_app_img_caches`: a registry list every wizard appends its own image
   caches to, so the App can clear all of them in one place on mod reload
@@ -24,6 +30,12 @@ monolith's Tk-handling block:
   `_app_img_caches` at import time.
 - `_LOC_KEY_RE`: a pre-compiled regex the additional-income wizard uses to
   pull a localisation key out of a quoted HOI4 string.
+- `open_effect_picker(parent, target_text, on_insert=None)`: the popup
+  effect selector, extracted verbatim from the event wizard's own
+  `_open_effect_picker` (issue #45) and parameterized so the decision
+  wizard can call it too. Renders a snippet into `target_text`; `on_insert`
+  is an optional no-arg callback fired after a successful insert (the event
+  wizard passes its `_schedule_preview`, decision passes nothing).
 
 Pulling these into one module keeps the wizards free of cross-wizard
 coupling (no wizard imports another wizard's globals directly) while still
@@ -57,7 +69,8 @@ the `open_*_wizard` closures. Each wizard now resolves only its Tk-widget
 knobs (StringVar/Text reads) and delegates to a module-level pure function
 there, so the rendering logic is testable headlessly (see `testing.md`):
 
-- event: `render_event_txt`, `generate_events_txt`, `generate_event_loc_yml`
+- event: `render_event_txt`, `generate_events_txt`, `generate_event_loc_yml`,
+  `build_event_scripted_loc_blocks`
 - decision: `generate_decision_block`, `generate_decisions_file`,
   `generate_decision_categories_file`, `generate_decision_scripted_loc`,
   `generate_decision_loc_yml`

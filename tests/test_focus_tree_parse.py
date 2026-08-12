@@ -87,6 +87,45 @@ def test_parse_tree_metadata():
     assert [f["id"] for f in p.focuses_data] == ["TST_alpha", "TST_beta"]
 
 
+def test_parse_tree_extras_empty_when_no_unknown_wrapper_keys():
+    p = parse_focus_tree(WRAPPED, "/tmp/TST_shared_tree.txt")
+    assert p.tree_extras == {}
+
+
+def test_parse_tree_extras_captures_unknown_wrapper_keys():
+    """default/reset_on_civilwar/initial_show_position aren't named fields on
+    ParsedFocusTree — they must survive via tree_extras (issue #39)."""
+    src = """\
+focus_tree = {
+\tid = TST_extras_tree
+\tcountry = {
+\t\tfactor = 0
+\t}
+\tdefault = yes
+\treset_on_civilwar = no
+\tinitial_show_position = yes
+\tcontinuous_focus_position = { x = 0 y = 0 }
+\tshared_focus = OTHER_shared
+\tfocus = {
+\t\tid = TST_only
+\t\ticon = GFX_x
+\t\tx = 0
+\t\ty = 0
+\t\tcost = 1
+\t}
+}
+"""
+    p = parse_focus_tree(src, "/tmp/x.txt")
+    # Known wrapper fields (id, country, continuous_focus_position, focus,
+    # shared_focus) must NOT leak into tree_extras — only genuinely unknown
+    # keys belong there.
+    assert p.tree_extras == {
+        "default": "yes",
+        "reset_on_civilwar": "no",
+        "initial_show_position": "yes",
+    }
+
+
 def test_parse_keeps_focus_fields():
     p = parse_focus_tree(WRAPPED, "/tmp/TST_shared_tree.txt")
     alpha, beta = p.focuses_data
@@ -104,6 +143,48 @@ def test_parse_raw_rewards_and_conditions():
     assert "add_political_power = 120" in p.raw_rewards["TST_alpha"]
     assert "has_war = no" in p.raw_rewards[("TST_alpha", "available")]
     assert "add_stability = 0.05" in p.raw_rewards["TST_beta"]
+
+
+def test_raw_key_scan_does_not_confuse_prefixed_and_suffixed_keys():
+    """The single-pass raw-key scan must key each block to the right name.
+
+    ``bypass`` is a prefix of ``bypass_effect`` and the alternation is
+    deliberately unanchored, so this pins that ``bypass_effect = {`` is not
+    also read as ``bypass``, and that a ``custom_``-prefixed key still counts
+    (which is what the per-key ``re.search`` it replaced did).
+    """
+    source = """focus_tree = {
+\tid = keys_tree
+\tfocus = {
+\t\tid = keys_focus
+\t\tbypass_effect = { set_country_flag = from_bypass_effect }
+\t\tcustom_available = { has_war = from_custom_available }
+\t\tcancel = { has_war = from_cancel }
+\t}
+}"""
+
+    rewards = parse_focus_tree(source, "/tmp/keys.txt").raw_rewards
+
+    assert "from_bypass_effect" in rewards[("keys_focus", "bypass_effect")]
+    assert ("keys_focus", "bypass") not in rewards
+    assert "from_custom_available" in rewards[("keys_focus", "available")]
+    assert "from_cancel" in rewards[("keys_focus", "cancel")]
+
+
+def test_raw_key_scan_keeps_the_first_occurrence_of_a_repeated_key():
+    source = """focus_tree = {
+\tid = dup_tree
+\tfocus = {
+\t\tid = dup_focus
+\t\tavailable = { has_war = first }
+\t\tavailable = { has_war = second }
+\t}
+}"""
+
+    rewards = parse_focus_tree(source, "/tmp/dup.txt").raw_rewards
+
+    assert "first" in rewards[("dup_focus", "available")]
+    assert "second" not in rewards[("dup_focus", "available")]
 
 
 def test_parse_structured_offsets():

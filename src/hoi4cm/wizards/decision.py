@@ -49,6 +49,7 @@ from hoi4cm.wizards._image_loader import TkImageLoader
 from hoi4cm.wizards._shared import (
     _app_img_caches,
     notifying_workspace_files,
+    open_effect_picker,
 )
 
 
@@ -1003,7 +1004,7 @@ def open_decision_wizard(app):
         tk.Button(
             brow,
             text=tr("effect_picker.button", "+ Effect Picker"),
-            command=lambda tw=t: _open_effect_picker(tw),
+            command=lambda tw=t: open_effect_picker(win, tw),
             bg=C_CARD,
             fg=C_BLUE,
             relief="flat",
@@ -2481,7 +2482,7 @@ def open_decision_wizard(app):
                 tk.Button(
                     br2,
                     text=tr("effect_picker.button", "+ Effect Picker"),
-                    command=lambda tw=t2: _open_effect_picker(tw),
+                    command=lambda tw=t2: open_effect_picker(win, tw),
                     bg=C_CARD,
                     fg=C_BLUE,
                     relief="flat",

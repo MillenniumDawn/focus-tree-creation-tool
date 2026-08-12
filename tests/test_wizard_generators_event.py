@@ -11,6 +11,7 @@ from types import SimpleNamespace
 import pytest
 
 from hoi4cm.wizards._generators import (
+    build_event_scripted_loc_blocks,
     generate_event_loc_yml,
     generate_events_txt,
     render_event_txt,
@@ -312,3 +313,48 @@ def test_generate_events_txt_keeps_first_seen_namespace_order():
     ]
     out = generate_events_txt(events)
     assert out.index("add_namespace = beta") < out.index("add_namespace = alpha")
+
+
+# ── build_event_scripted_loc_blocks (issue #45: the save-to-mod scripted-loc
+# step tested `"v_id" in dir()` — always False, since v_id is never bound in
+# that closure — then unconditionally called an undefined `_get_output_text`,
+# crashing any save with a scripted-loc edit target set) ──────────────────
+
+
+def test_build_event_scripted_loc_blocks_emits_title_and_desc_per_id():
+    blocks = build_event_scripted_loc_blocks(["my_namespace.1"])
+    assert blocks == [
+        {
+            "name": "GET_my_namespace.1_title",
+            "texts": [],
+            "default": "my_namespace.1.t",
+        },
+        {"name": "GET_my_namespace.1_desc", "texts": [], "default": "my_namespace.1.d"},
+    ]
+
+
+def test_build_event_scripted_loc_blocks_covers_every_id():
+    blocks = build_event_scripted_loc_blocks(["ns.1", "ns.2"])
+    names = [b["name"] for b in blocks]
+    assert names == [
+        "GET_ns.1_title",
+        "GET_ns.1_desc",
+        "GET_ns.2_title",
+        "GET_ns.2_desc",
+    ]
+
+
+def test_build_event_scripted_loc_blocks_skips_blank_ids():
+    blocks = build_event_scripted_loc_blocks(["", "  ", "ns.1"])
+    assert len(blocks) == 2
+    assert blocks[0]["name"] == "GET_ns.1_title"
+
+
+def test_build_event_scripted_loc_blocks_empty_input_returns_empty_list():
+    assert build_event_scripted_loc_blocks([]) == []
+
+
+def test_build_event_scripted_loc_blocks_accepts_any_iterable():
+    """The call site passes a generator expression over `events`, not a list."""
+    blocks = build_event_scripted_loc_blocks(ev.eid for ev in [_make_event()])
+    assert len(blocks) == 2
