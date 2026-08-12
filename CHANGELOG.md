@@ -19,6 +19,19 @@
 
 ---
 
+## Application Modernization — Bug Fixes
+
+### Minimap opens and renders (issue #81)
+
+**[BUG FIX] Opening the minimap no longer raises `TclError` or leaves its toggle state inconsistent**
+- On a Tkinter `Canvas`, the usual widget-raising aliases resolve to the
+  canvas-item `tag_raise` operation, which requires an item ID. Pressing M or
+  choosing Tools -> Minimap therefore failed before the minimap could render.
+- The minimap now explicitly uses Tk's generic widget-raising implementation.
+  Widget coverage verifies that it renders, hides, and reopens normally.
+
+---
+
 ## Application Modernization — Behavior Changes
 
 The modernization rounds changed a few user-visible behaviors on purpose.
