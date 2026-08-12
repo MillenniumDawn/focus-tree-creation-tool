@@ -252,6 +252,31 @@ def test_country_raw_written_verbatim_with_nested_indent_preserved():
     assert "base = 0" not in text
 
 
+def test_tree_extras_written_after_continuous_focus_position():
+    """Wrapper-level keys with no named field (default, reset_on_civilwar,
+    initial_show_position, ...) must survive via tree_extras (#39)."""
+    root = Focus(0, 0)
+    root.name = "TST_root"
+    info = _info(tree_extras={"default": "yes", "initial_show_position": "yes"})
+    text = export_main_tree(
+        [root], info, focus_lookup={root.id: root}, effect_renderer=raw_block_renderer
+    )
+    assert "\tdefault = yes" in text
+    assert "\tinitial_show_position = yes" in text
+
+
+def test_tree_extras_omitted_when_empty():
+    root = Focus(0, 0)
+    root.name = "TST_root"
+    text = export_main_tree(
+        [root],
+        _info(),
+        focus_lookup={root.id: root},
+        effect_renderer=raw_block_renderer,
+    )
+    assert "default" not in text
+
+
 def _summary(focuses):
     by_id = {f.id: f.name for f in focuses}
     return [
@@ -281,6 +306,7 @@ def _main_info(parsed):
         "country_raw": parsed.country_raw,
         "shared_focuses": parsed.shared_refs,
         "joint_focuses": parsed.joint_refs,
+        "tree_extras": parsed.tree_extras,
     }
 
 

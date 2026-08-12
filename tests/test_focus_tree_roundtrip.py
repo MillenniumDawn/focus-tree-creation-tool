@@ -47,6 +47,8 @@ def _info(parsed, tree_type):
         "joint_focuses": parsed.joint_refs,
         "country_tag": parsed.country_tag,
         "had_wrapper": parsed.had_wrapper,
+        "country_raw": parsed.country_raw,
+        "tree_extras": parsed.tree_extras,
         "focus_ids": set(),
     }
 
@@ -125,6 +127,39 @@ def test_wrapped_content_present():
         assert needle in t1, needle
 
 
+def test_scanner_edge_case_fixture_round_trips():
+    """Quote/comment edge cases survive parse -> export -> parse unchanged.
+
+    The fixture is the one the regex scanners in ``script/syntax.py`` are most
+    likely to mis-handle: braces and hashes inside strings, an icon path that
+    ends in a backslash, and comments in every position one can appear.
+    """
+    src = read_file(os.path.join(FIX_DIR, "scanner_edge_cases.txt"))
+    f1, t1 = _load_and_export(src, "shared")
+    f2, t2 = _load_and_export(t1, "shared")
+
+    assert t1 == t2
+    assert _summary(f1) == _summary(f2)
+    # Every comment is gone, and every surviving "#" is inside a quoted string
+    # (an odd number of quotes precedes it on its line).
+    for line in t1.splitlines():
+        if "#" in line:
+            assert line.split("#", 1)[0].count('"') % 2 == 1, line
+    for needle in (
+        # The icon's quotes are dropped on export, but the trailing backslash
+        # survives — the closing quote was never mistaken for an escape.
+        "icon = gfx\\interface\\goals\\tst\\\n",
+        'has_country_flag = "flag_with_{_and_}_and_#_inside"',
+        'custom_effect_tooltip = "reward } # tooltip"',
+        'has_country_flag = "flag # with hash"',
+        "add_political_power = 50",
+        "id = TST_comment_between_keys",
+    ):
+        assert needle in t1, needle
+    # The commented-out completion_reward must not have been picked up.
+    assert "add_stability = 0.5\n" not in t1
+
+
 def test_joint_content_present():
     _f, t1 = _load_and_export(NO_WRAPPER, "joint")
     for needle in (
@@ -194,14 +229,134 @@ def test_extra_tree_export_preserves_main_tree_only_focus_fields(
     assert restored.available_if_capitulated is True
 
 
+def _extra_tree_info(**overrides):
+    info = {
+        "tree_id": "TST_shared_tree",
+        "country_tag": "TST",
+        "cfp_x": 0,
+        "cfp_y": 0,
+        "type": "shared",
+        "had_wrapper": True,
+        "shared_focuses": [],
+        "joint_focuses": [],
+    }
+    info.update(overrides)
+    return info
+
+
+def test_extra_tree_export_preserves_country_raw_verbatim():
+    """export_focus_tree must not discard an imported country block (#39)."""
+    focus = Focus(0, 0)
+    focus.name = "TST_root"
+    country_raw = "base = 0\nmodifier = {\n\tadd = 20\n\toriginal_tag=TST\n}"
+    info = _extra_tree_info(country_raw=country_raw)
+
+    text = export_focus_tree(
+        [focus],
+        info,
+        focus_lookup={focus.id: focus},
+        effect_renderer=raw_block_renderer,
+    )
+    expected_country_block = "\n".join(
+        [
+            "\tcountry = {",
+            "\t\tbase = 0",
+            "\t\tmodifier = {",
+            "\t\t\tadd = 20",
+            "\t\t\toriginal_tag=TST",
+            "\t\t}",
+            "\t}",
+        ]
+    )
+    assert expected_country_block in text
+    # The canned default must not also appear alongside the verbatim block.
+    assert "factor = 0" not in text
+
+
+def test_extra_tree_export_falls_back_to_canned_country_block_when_blank():
+    focus = Focus(0, 0)
+    focus.name = "TST_root"
+    info = _extra_tree_info()  # no country_raw override -> blank
+
+    text = export_focus_tree(
+        [focus],
+        info,
+        focus_lookup={focus.id: focus},
+        effect_renderer=raw_block_renderer,
+    )
+    assert "factor = 0" in text
+    assert "original_tag = TST" in text
+
+
+def test_extra_tree_export_emits_tree_extras():
+    """Wrapper-level keys with no named field (default, reset_on_civilwar,
+    initial_show_position, ...) must survive via tree_extras (#39)."""
+    focus = Focus(0, 0)
+    focus.name = "TST_root"
+    info = _extra_tree_info(tree_extras={"default": "yes", "reset_on_civilwar": "no"})
+
+    text = export_focus_tree(
+        [focus],
+        info,
+        focus_lookup={focus.id: focus},
+        effect_renderer=raw_block_renderer,
+    )
+    assert "\tdefault = yes" in text
+    assert "\treset_on_civilwar = no" in text
+
+
+def test_extra_tree_export_omits_tree_extras_block_when_empty():
+    focus = Focus(0, 0)
+    focus.name = "TST_root"
+    info = _extra_tree_info()
+
+    text = export_focus_tree(
+        [focus],
+        info,
+        focus_lookup={focus.id: focus},
+        effect_renderer=raw_block_renderer,
+    )
+    assert "default" not in text
+
+
+def test_extra_tree_roundtrip_preserves_country_raw_and_tree_extras():
+    """Full parse -> export -> reparse cycle for both fields at once."""
+    src = """\
+focus_tree = {
+\tid = TST_shared_tree
+\tcountry = {
+\t\tbase = 0
+\t\tmodifier = {
+\t\t\tadd = 20
+\t\t\toriginal_tag = TST
+\t\t}
+\t}
+\tdefault = yes
+\treset_on_civilwar = no
+\tcontinuous_focus_position = { x = 0 y = 0 }
+\tfocus = {
+\t\tid = TST_only
+\t\ticon = GFX_x
+\t\tx = 0
+\t\ty = 0
+\t\tcost = 1
+\t\tcompletion_reward = {
+\t\t\tadd_political_power = 1
+\t\t}
+\t}
+}
+"""
+    focuses1, t1 = _load_and_export(src, "shared")
+    focuses2, t2 = _load_and_export(t1, "shared")
+    assert t1 == t2
+    assert _summary(focuses1) == _summary(focuses2)
+    assert "\tdefault = yes" in t1
+    assert "\treset_on_civilwar = no" in t1
+    assert "base = 0" in t1
+    assert "factor = 0" not in t1  # canned block must not appear alongside it
+
+
 # ── Fixture-file round-trips (see tests/fixtures/focus_trees/) ────────────
-#
-# country_raw is NOT covered here: export_focus_tree always emits a canned
-# country block (factor/add/original_tag) rather than info["country_raw"]
-# verbatim. Wiring the verbatim block into export.py is the next phase (see
-# docs/dev/monolith-migration.md); until then this stays out of round-trip
-# scope. country_raw's own capture-at-parse-time is covered directly in
-# tests/test_focus_tree_fixtures.py.
 
 FIXTURE_FILES = [
     ("wrapper_basic.txt", "shared"),

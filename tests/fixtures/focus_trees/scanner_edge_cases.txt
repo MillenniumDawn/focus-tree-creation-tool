@@ -1,0 +1,68 @@
+# Edge cases for the regex script scanners in script/syntax.py.
+# Braces and hashes inside quoted strings, comments in every position a
+# comment can occupy, and the trailing-backslash icon path that must not
+# swallow its own closing quote.
+focus_tree = {
+	id = TST_edge_tree	# trailing comment after a value
+
+	country = {
+		factor = 0
+		# a comment on its own line inside a block
+		modifier = {
+			add = 20
+			original_tag = TST
+		}
+	}
+
+	continuous_focus_position = { x = 20 y = 300 }	# and here
+
+	focus = {
+		id = TST_braces_in_string
+		icon = "gfx\interface\goals\tst\"	# path ends in a backslash
+		x = 0
+		y = 0
+		cost = 5
+		available = {
+			# comment as the first line of a raw block
+			has_country_flag = "flag_with_{_and_}_and_#_inside"
+			NOT = { has_war = yes }	# comment after a nested block
+		}
+		completion_reward = {
+			custom_effect_tooltip = "reward } # tooltip"
+
+			add_political_power = 50
+		}
+	}
+
+	focus = {
+		id = TST_comment_between_keys
+		icon = GFX_goal_generic_political_pressure
+		x = 1
+		y = 1
+		relative_position_id = TST_braces_in_string
+		# completion_reward = { add_stability = 0.5 }
+		prerequisite = { focus = TST_braces_in_string }
+		bypass = { has_country_flag = bypassed }
+		# the commented-out block above must not be picked up as raw text
+		completion_reward = {
+			add_stability = 0.05
+		}
+	}
+
+	focus = {
+		id = TST_hash_heavy
+		icon = GFX_goal_generic_political_pressure
+		x = 2
+		y = 0
+		relative_position_id = TST_braces_in_string
+		cost = 7
+		select_effect = { set_country_flag = "selected" }	# tail comment
+		cancel = {
+			has_country_flag = "flag # with hash"	# quoted, commented
+		}
+		completion_reward = {
+			add_war_support = 0.02	# 2%
+			#
+		}
+	}
+}
