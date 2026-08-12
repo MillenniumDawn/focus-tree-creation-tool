@@ -264,6 +264,28 @@ def mapped_canvas(tk_root):
     return cv
 
 
+def test_minimap_toggle_renders_hides_and_reopens(mapped_canvas):
+    app = _FakeApp(mapped_canvas)
+    focus = Focus(1, 1)
+    app.focuses = FocusDocument([focus])
+
+    app._toggle_minimap()
+
+    assert app._mm_visible is True
+    assert app._mm_canvas.winfo_manager() == "place"
+    assert app._mm_canvas.find_withtag("mm_content")
+
+    app._toggle_minimap()
+
+    assert app._mm_visible is False
+    assert app._mm_canvas.winfo_manager() == ""
+
+    app._toggle_minimap()
+
+    assert app._mm_visible is True
+    assert app._mm_canvas.winfo_manager() == "place"
+
+
 def test_grid_covers_the_viewport_without_drawing_the_whole_canvas_extent(
     mapped_canvas,
 ):
