@@ -1,0 +1,129 @@
+{
+  "meta": {
+    "tree_id": "TST_edge_tree",
+    "cfp_x": 20,
+    "cfp_y": 300,
+    "country_tag": "TST",
+    "country_raw": "factor = 0\n\nmodifier = {\n\tadd = 20\n\toriginal_tag = TST\n}\n\t",
+    "shared_refs": [],
+    "joint_refs": [],
+    "had_wrapper": true
+  },
+  "focuses": {
+    "TST_braces_in_string": {
+      "name": "TST_braces_in_string",
+      "icon": "⚔",
+      "gfx": "gfx\\interface\\goals\\tst\\",
+      "x": 0,
+      "y": 0,
+      "cost": 5,
+      "desc": "",
+      "effects": [
+        {
+          "type": "_raw_block",
+          "fields": {
+            "raw": "custom_effect_tooltip = \"reward } # tooltip\"\n\nadd_political_power = 50\n\t\t"
+          }
+        }
+      ],
+      "prereqs": [],
+      "mutex": [],
+      "cancel_if_invalid": true,
+      "continue_if_invalid": false,
+      "available_if_capitulated": false,
+      "ai_will_do": 1,
+      "ai_will_do_raw": "",
+      "relative_position_id": null,
+      "search_filters": "FOCUS_FILTER_POLITICAL",
+      "available_cond": "has_country_flag = \"flag_with_{_and_}_and_#_inside\"\nNOT = { has_war = yes }\t\n\t\t",
+      "bypass_cond": "",
+      "cancel_cond": "",
+      "will_lead_to_war_with": "",
+      "complete_tooltip": "",
+      "select_effect": "",
+      "bypass_effect": "",
+      "allow_branch": "",
+      "text": "",
+      "offsets": [],
+      "tree_idx": 0
+    },
+    "TST_comment_between_keys": {
+      "name": "TST_comment_between_keys",
+      "icon": "⚔",
+      "gfx": "GFX_goal_generic_political_pressure",
+      "x": 1,
+      "y": 1,
+      "cost": 10,
+      "desc": "",
+      "effects": [
+        {
+          "type": "_raw_block",
+          "fields": {
+            "raw": "add_stability = 0.05\n\t\t"
+          }
+        }
+      ],
+      "prereqs": [
+        [
+          "TST_braces_in_string"
+        ]
+      ],
+      "mutex": [],
+      "cancel_if_invalid": true,
+      "continue_if_invalid": false,
+      "available_if_capitulated": false,
+      "ai_will_do": 1,
+      "ai_will_do_raw": "",
+      "relative_position_id": "TST_braces_in_string",
+      "search_filters": "FOCUS_FILTER_POLITICAL",
+      "available_cond": "",
+      "bypass_cond": " has_country_flag = bypassed ",
+      "cancel_cond": "",
+      "will_lead_to_war_with": "",
+      "complete_tooltip": "",
+      "select_effect": "",
+      "bypass_effect": "",
+      "allow_branch": "",
+      "text": "",
+      "offsets": [],
+      "tree_idx": 0
+    },
+    "TST_hash_heavy": {
+      "name": "TST_hash_heavy",
+      "icon": "⚔",
+      "gfx": "GFX_goal_generic_political_pressure",
+      "x": 2,
+      "y": 0,
+      "cost": 7,
+      "desc": "",
+      "effects": [
+        {
+          "type": "_raw_block",
+          "fields": {
+            "raw": "add_war_support = 0.02\t\n\n\t\t"
+          }
+        }
+      ],
+      "prereqs": [],
+      "mutex": [],
+      "cancel_if_invalid": true,
+      "continue_if_invalid": false,
+      "available_if_capitulated": false,
+      "ai_will_do": 1,
+      "ai_will_do_raw": "",
+      "relative_position_id": "TST_braces_in_string",
+      "search_filters": "FOCUS_FILTER_POLITICAL",
+      "available_cond": "",
+      "bypass_cond": "",
+      "cancel_cond": "has_country_flag = \"flag # with hash\"\t\n\t\t",
+      "will_lead_to_war_with": "",
+      "complete_tooltip": "",
+      "select_effect": " set_country_flag = \"selected\" ",
+      "bypass_effect": "",
+      "allow_branch": "",
+      "text": "",
+      "offsets": [],
+      "tree_idx": 0
+    }
+  }
+}

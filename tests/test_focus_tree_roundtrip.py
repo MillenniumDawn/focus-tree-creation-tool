@@ -127,6 +127,39 @@ def test_wrapped_content_present():
         assert needle in t1, needle
 
 
+def test_scanner_edge_case_fixture_round_trips():
+    """Quote/comment edge cases survive parse -> export -> parse unchanged.
+
+    The fixture is the one the regex scanners in ``script/syntax.py`` are most
+    likely to mis-handle: braces and hashes inside strings, an icon path that
+    ends in a backslash, and comments in every position one can appear.
+    """
+    src = read_file(os.path.join(FIX_DIR, "scanner_edge_cases.txt"))
+    f1, t1 = _load_and_export(src, "shared")
+    f2, t2 = _load_and_export(t1, "shared")
+
+    assert t1 == t2
+    assert _summary(f1) == _summary(f2)
+    # Every comment is gone, and every surviving "#" is inside a quoted string
+    # (an odd number of quotes precedes it on its line).
+    for line in t1.splitlines():
+        if "#" in line:
+            assert line.split("#", 1)[0].count('"') % 2 == 1, line
+    for needle in (
+        # The icon's quotes are dropped on export, but the trailing backslash
+        # survives — the closing quote was never mistaken for an escape.
+        "icon = gfx\\interface\\goals\\tst\\\n",
+        'has_country_flag = "flag_with_{_and_}_and_#_inside"',
+        'custom_effect_tooltip = "reward } # tooltip"',
+        'has_country_flag = "flag # with hash"',
+        "add_political_power = 50",
+        "id = TST_comment_between_keys",
+    ):
+        assert needle in t1, needle
+    # The commented-out completion_reward must not have been picked up.
+    assert "add_stability = 0.5\n" not in t1
+
+
 def test_joint_content_present():
     _f, t1 = _load_and_export(NO_WRAPPER, "joint")
     for needle in (

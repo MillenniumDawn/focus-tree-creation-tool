@@ -62,6 +62,27 @@ def test_duplicate_name_lookup_has_explicit_first_and_last_policy():
     assert document.find_by_name("duplicate", policy="last") is last
 
 
+def test_by_name_is_first_match_view_over_first_by_name():
+    first = _focus(10, name="duplicate")
+    last = _focus(20, name="duplicate")
+    other = _focus(30, name="unique")
+    document = FocusDocument((first, last, other))
+
+    lookup = document.by_name
+
+    assert lookup["duplicate"] is first
+    assert lookup.get("unique") is other
+    assert lookup.get("missing") is None
+    assert set(lookup) == {"duplicate", "unique"}
+    assert len(lookup) == 2
+    # View tracks the live index; no rebuild or copy on access.
+    first.name = "renamed"
+    document.touch()
+    assert document.by_name["renamed"] is first
+    # The second focus still owns "duplicate" after the first renames away.
+    assert document.by_name["duplicate"] is last
+
+
 def test_mapping_delete_missing_id_raises_key_error():
     document = FocusDocument()
 
@@ -116,6 +137,17 @@ def test_move_updates_positions_without_full_rebuild():
     assert document.occupied_positions == {(5, 5): {1}, (1, 1): {2}}
     assert document.validate_indexes()
     _assert_indexes(document)
+
+
+def test_position_free_respects_except_id_and_occupants():
+    document = FocusDocument((_focus(1, x=0, y=0), _focus(2, x=1, y=1)))
+
+    assert document.position_free(2, 2) is True
+    assert document.position_free(1, 1) is False
+    assert document.position_free(1, 1, except_id=2) is True
+    assert document.position_free(1, 1, except_id=1) is False
+    assert document.move(1, 1, 1) is False
+    assert document.move(1, 1, 1, allow_occupied=True) is True
 
 
 def test_rename_prefix_bumps_revision_so_cached_ui_refreshes():

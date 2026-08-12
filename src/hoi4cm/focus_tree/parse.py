@@ -73,6 +73,28 @@ class ParsedFocusTree:
     tree_extras: dict = field(default_factory=dict)
 
 
+# Every raw block pulled verbatim off a single focus block, in one alternation
+# so the scan happens once instead of once per key. Deliberately unanchored,
+# matching what the per-key ``re.search`` below does: a key preceded by other
+# identifier characters still counts, and the regex backtracks into the longer
+# alternatives, so ``bypass_effect = {`` matches as itself and not as
+# ``bypass``.
+_RAW_KEYS = ("completion_reward", *_COND_KEYS, "joint_trigger")
+_RAW_KEY_RE = re.compile(rf"(?P<key>{'|'.join(_RAW_KEYS)})\s*=\s*\{{")
+
+
+def _dedent_raw_block(source, start, end):
+    """Return ``source[start + 1:end]`` with its common tab indent removed."""
+    lines = source[start + 1 : end].split("\n")
+    min_indent = min(
+        (len(ln) - len(ln.lstrip("\t")) for ln in lines if ln and not ln.isspace()),
+        default=0,
+    )
+    if min_indent:  # a zero-indent (or all-blank) block needs no re-slicing
+        lines = [ln[min_indent:] if len(ln) >= min_indent else ln for ln in lines]
+    return "\n".join(lines).strip("\n")
+
+
 def extract_raw_block(source, key):
     """Return the dedented inner text of ``key = { ... }`` in ``source``."""
     m = re.search(key + r"\s*=\s*\{", source)
@@ -82,12 +104,35 @@ def extract_raw_block(source, key):
     end = match_brace(source, start)
     if end >= len(source):
         return ""
-    lines = source[start + 1 : end].split("\n")
-    non_empty = [ln for ln in lines if ln.strip()]
-    if non_empty:
-        min_indent = min(len(ln) - len(ln.lstrip("\t")) for ln in non_empty)
-        lines = [ln[min_indent:] if len(ln) >= min_indent else ln for ln in lines]
-    return "\n".join(lines).strip("\n")
+    return _dedent_raw_block(source, start, end)
+
+
+def _extract_raw_key_blocks(source):
+    """Return ``{key: dedented inner}`` for the first hit of each raw key.
+
+    One pass over the focus block replaces eleven independent
+    :func:`extract_raw_block` calls, most of which find nothing and pay a full
+    scan of the block to say so.
+    """
+    found = {}
+    for match in _RAW_KEY_RE.finditer(source):
+        key = match.group("key")
+        if key in found:  # first hit wins, as a per-key ``re.search`` would
+            continue
+        start = match.end() - 1
+        end = match_brace(source, start)
+        found[key] = "" if end >= len(source) else _dedent_raw_block(source, start, end)
+        if len(found) == len(_RAW_KEYS):
+            break
+    return {key: text for key, text in found.items() if text}
+
+
+_FOCUS_BLOCK_RE = re.compile(r"\b(?:shared_focus|joint_focus|focus)\s*=\s*\{")
+
+
+def focus_block_starts(txt):
+    """Return the ``{`` index of every ``focus``/``shared_focus`` block."""
+    return [m.end() - 1 for m in _FOCUS_BLOCK_RE.finditer(txt)]
 
 
 def block_to_str(block, depth=1):
@@ -100,21 +145,28 @@ def block_to_str(block, depth=1):
     return serialize_block(block, indent="\t" * depth, strip_strings=True)
 
 
-def _extract_raw_rewards(txt):
-    """Pull verbatim reward/condition/offset blocks keyed by focus id."""
+def _extract_raw_rewards(txt, block_starts=None):
+    """Pull verbatim reward/condition/offset blocks keyed by focus id.
+
+    ``block_starts`` are the ``{`` indices of every focus block, from
+    :data:`_FOCUS_BLOCK_RE`; :func:`parse_focus_tree` scans for them once and
+    shares the list with its own two passes.
+    """
     raw_rewards = {}
-    for fm in re.finditer(r"\b(?:shared_focus|joint_focus|focus)\s*=\s*\{", txt):
-        fs = fm.end() - 1
+    if block_starts is None:
+        block_starts = focus_block_starts(txt)
+    for fs in block_starts:
         fblock = txt[fs + 1 : match_brace(txt, fs)]
         id_m = re.search(r"\bid\s*=\s*(\S+)", fblock)
         if not id_m:
             continue
         fid = id_m.group(1)
-        reward = extract_raw_block(fblock, "completion_reward")
+        blocks = _extract_raw_key_blocks(fblock)
+        reward = blocks.get("completion_reward")
         if reward:
             raw_rewards[fid] = reward
         for ck in _COND_KEYS:
-            cv = extract_raw_block(fblock, ck)
+            cv = blocks.get(ck)
             if cv:
                 raw_rewards[(fid, ck)] = cv
         # offset = { x = N y = M trigger = { ... } } blocks as structured data
@@ -131,7 +183,7 @@ def _extract_raw_rewards(txt):
         if offsets:
             raw_rewards[(fid, "_offsets")] = offsets
         # joint_trigger preserved as extra raw text (offset stored separately)
-        jt = extract_raw_block(fblock, "joint_trigger")
+        jt = blocks.get("joint_trigger")
         if jt:
             raw_rewards[(fid, "_joint_extra")] = f"joint_trigger = {{\n{jt}\n}}"
     return raw_rewards
@@ -149,7 +201,8 @@ def parse_focus_tree(raw, path):
     shared_refs = re.findall(r"\bshared_focus\s*=\s*([^\s{]\S*)", txt)
     joint_refs = re.findall(r"\bjoint_focus\s*=\s*([^\s{]\S*)", txt)
 
-    raw_rewards = _extract_raw_rewards(txt)
+    block_starts = focus_block_starts(txt)
+    raw_rewards = _extract_raw_rewards(txt, block_starts)
 
     tokens = tokenize(txt)
     focuses_data = []
@@ -230,11 +283,9 @@ def parse_focus_tree(raw, path):
     # The fallback can find at most one focus per `focus = {` block, so when
     # the passes above already produced that many it can never win — skip the
     # brace-walk entirely on well-formed files (the common case).
-    block_count = len(re.findall(r"\b(?:focus|shared_focus|joint_focus)\s*=\s*\{", txt))
-    if len(focuses_data) < block_count:
+    if len(focuses_data) < len(block_starts):
         per_block_focuses = []
-        for bm in re.finditer(r"\b(?:focus|shared_focus|joint_focus)\s*=\s*\{", txt):
-            bs = bm.end() - 1  # position of '{'
+        for bs in block_starts:  # each is the index of a block's '{'
             bi = match_brace(txt, bs)
             if bi >= len(txt):
                 continue

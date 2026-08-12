@@ -29,6 +29,8 @@ the target.
 | Every launch imported all five wizards and `_wiz_shared` at monolith import time, pulling in ~12k lines of wizard code whether or not a wizard is ever opened | `hoi4_content_maker.py` (module header), `wizards/__init__.py`, `ui/mod_loading.py:28` | Imports moved into the five `_*_wizard` callbacks and `_close_app_caches`, *and* `wizards/__init__.py` made lazy through a module-level `__getattr__`. Moving the monolith's imports alone did nothing: `ui/mod_loading.py` pulls `_shared` in at module scope, and an eager package `__init__` turned that into all five wizards. `test_startup_does_not_import_wizard_modules` pins it | fixed in issue #34 | not yet measured, needs a display session against the real mod |
 | `_scan_files_cached` did one `SELECT` per file against `ScanCache` and one `INSERT OR REPLACE` per miss, so a domain covering the reference mod's ~790 focus files paid ~790 round trips | `mod/context.py` (`_scan_files_cached`), `mod/scan_cache.py` (`get_many`/`put_many`) | `get_many` pulls a domain's rows in one `SELECT` and matches them against the caller's `{path: (mtime, size)}` map; `put_many` writes the misses with one `executemany`. `prune` already holds the table to the current path set, so the whole-domain read stays proportional to the mod | fixed in issue #34 | not yet measured, needs a display session against the real mod |
 | `_populate` tore down and recreated the offsets, prerequisites, mutex and effects sidebar sections on every call, even when the focus's data was unchanged. Saving a focus re-populates, so a save on a focus with a dozen effects rebuilt every card | `hoi4_content_maker.py` (`_refresh_offsets`, `_refresh_prereqs`, `_refresh_mutex`), `ui/effects_panel.py` (`_refresh_effects`) | Each section caches a signature of what it last rendered and returns early on a match, gated on `MOD.sidebar_refresh_skip`. `_refresh_effects(force=True)` bypasses it after a mod load, since effect cards carry mod-aware dropdowns | fixed in issue #34 | not yet measured, needs a display session against the real mod |
+| `strip_comments`, `tokenize`, `match_brace`, `find_blocks` and `extract_named_block` were all `while position < len(source)` per-character Python loops, and `find_blocks`/`extract_named_block` additionally tried a regex match at *every* character. `_extract_raw_rewards` then ran eleven independent `re.search` scans of each focus block (one per raw key), most of which found nothing and paid a full scan to say so, and `parse_focus_tree` scanned the whole file three separate times for the same `focus = {` block list | `script/syntax.py`, `focus_tree/parse.py` (`_extract_raw_rewards`, `parse_focus_tree`) | Compiled alternations scanned with `findall`/`finditer`, so the character walk runs in C; the raw keys became one alternation pass per focus block; the focus-block scan is done once in `focus_block_starts` and shared. See the scanner rewrite note below | fixed in issue #28 | synthetic 776-focus / 23.3k-line tree (Python 3.14, interleaved A/B in one process): `strip_comments` 27.3ms -> 8.5ms, `tokenize` 41.1ms -> 23.1ms, whole-file `match_brace` 44.9ms -> 15.0ms, `parse_focus_tree` end to end 208.9ms -> 118.4ms (-43%). At 5,000 focuses / 150k lines the end-to-end delta holds at -40% (1494ms -> 901ms) |
+| A plain focus click always ran `_autosave` → `touch()` → full `rebuild_indexes()` (and a revision-driven `SceneIndex` rebuild), then `_build_focus_code` rebuilt a throwaway name→Focus map with `build_focus_name_lookup`, so selecting one focus at Load All Trees scale paid several O(F+E)/O(F) passes even when the form was untouched | `hoi4_content_maker.py` (`_autosave`, `_read_sidebar_values`, `_build_focus_code`), `models/document.py` (`by_name`), `models/sidebar_form.py` | `_autosave` snapshots the form via `_read_sidebar_values`, no-ops when `sidebar_values_match_focus` says nothing changed, and only `touch()`es on a real name change (x/y stays on incremental `move()`). Empty name refuses to write; parse errors go through `_log_error` instead of a bare `except: pass`. Code-tab render takes `focuses.by_name` (O(1) over `first_by_name`) instead of scanning every focus | fixed in issue #25 | synthetic 8,000-focus document (Python 3.14): matched-form path calls rebuild 0 times; 1,000 dirty-checks beat one `rebuild_indexes`; 10,000 `by_name.get` beat 10 `build_focus_name_lookup` builds (`tests/test_sidebar_form.py`). Real-mod display session still open |
 
 The `_draw_key`/state-key check in `_draw_focus` (`ui/canvas.py:486`) already
 makes an unchanged focus close to free to redraw, but every `_redraw()` call
@@ -68,6 +70,55 @@ patches that one index instead of rebuilding all seven; and
 `SceneIndex.update_focus` moves just the dragged focus between cells and
 re-rasterizes only its incident edges. The resulting work is O(1 + focus
 degree), not O(F+E).
+
+### Script scanner rewrite
+
+The scanners in `script/syntax.py` are the hottest correctness-sensitive
+code in the repo: a cold "Load All Trees" runs them over 1.05M lines, and
+per the GIL note below that cost cannot be parallelized away. They are now
+compiled regex alternations rather than per-character loops. The shape that
+makes this work is that **every alternative consumes its whole construct**
+— `"[^"]*"?` swallows a complete string, `#[^\n]*` a complete comment — so
+`finditer`/`findall` skip over strings and comments on their own instead of
+the loop repositioning an index by hand.
+
+Three details are load-bearing and easy to break:
+
+- **The closing quote is optional, and there are no escapes.** Paradox
+  script treats a backslash as a literal, so `icon = "gfx\interface\"`
+  closes at that final quote. `"[^"]*"?` reproduces that; anything with
+  `\\.` in it does not.
+- **`tokenize` captures everything except comments.** Comments are the one
+  alternative left outside the capture group, so `findall` reports them as
+  `""` and no real token can be empty — which is what lets the whole scan
+  be a single C-level `findall` with a comprehension over the result,
+  rather than a Python loop over match objects. That was worth roughly a
+  further 40% on `tokenize` over the `finditer` form.
+- **`strip_comments` normalizes line endings before it strips, not after.**
+  `str.splitlines` also breaks on `\v`, `\f`, `\x1c`-`\x1e`, `\x85`, `\u2028`
+  and `\u2029`, and drops a trailing break. Doing the substitution second
+  keeps a comment-only line as an empty line instead of deleting it, which
+  the raw-block dedenting in `focus_tree/parse.py` is written against.
+
+`find_blocks`/`extract_named_block` keep a `search`-from-position loop
+because they have to skip a matched block's whole body; the old
+identifier-boundary guard (`source[name_start - 1].isalnum()`) is now a
+`(?<!\w)` lookbehind, and `_raw_start` reproduces the leading-whitespace
+that the old `\s*`-prefixed match pulled into each block's raw text.
+
+The alternation in `_RAW_KEY_RE` (`focus_tree/parse.py`) is deliberately
+**unanchored**, matching what the per-key `re.search` calls it replaced
+did: `custom_available = {` still registers as `available`. Regex
+alternation backtracks at each start position, so listing `bypass` before
+`bypass_effect` does not shadow the longer key.
+
+The rewrite was validated by differential fuzzing against the pre-rewrite
+implementations — 200k randomized inputs across all five scanners, 60k
+across `_extract_raw_rewards`, and 40k whole-file `parse_focus_tree` runs,
+all byte-identical. `tests/fixtures/focus_trees/scanner_edge_cases.txt`
+and its golden are the committed residue of that: the golden was generated
+with the *old* parser, so the fixture test asserts the rewrite changed
+nothing.
 
 ### Sidebar refresh signatures
 

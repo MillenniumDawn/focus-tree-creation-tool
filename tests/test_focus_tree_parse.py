@@ -145,6 +145,48 @@ def test_parse_raw_rewards_and_conditions():
     assert "add_stability = 0.05" in p.raw_rewards["TST_beta"]
 
 
+def test_raw_key_scan_does_not_confuse_prefixed_and_suffixed_keys():
+    """The single-pass raw-key scan must key each block to the right name.
+
+    ``bypass`` is a prefix of ``bypass_effect`` and the alternation is
+    deliberately unanchored, so this pins that ``bypass_effect = {`` is not
+    also read as ``bypass``, and that a ``custom_``-prefixed key still counts
+    (which is what the per-key ``re.search`` it replaced did).
+    """
+    source = """focus_tree = {
+\tid = keys_tree
+\tfocus = {
+\t\tid = keys_focus
+\t\tbypass_effect = { set_country_flag = from_bypass_effect }
+\t\tcustom_available = { has_war = from_custom_available }
+\t\tcancel = { has_war = from_cancel }
+\t}
+}"""
+
+    rewards = parse_focus_tree(source, "/tmp/keys.txt").raw_rewards
+
+    assert "from_bypass_effect" in rewards[("keys_focus", "bypass_effect")]
+    assert ("keys_focus", "bypass") not in rewards
+    assert "from_custom_available" in rewards[("keys_focus", "available")]
+    assert "from_cancel" in rewards[("keys_focus", "cancel")]
+
+
+def test_raw_key_scan_keeps_the_first_occurrence_of_a_repeated_key():
+    source = """focus_tree = {
+\tid = dup_tree
+\tfocus = {
+\t\tid = dup_focus
+\t\tavailable = { has_war = first }
+\t\tavailable = { has_war = second }
+\t}
+}"""
+
+    rewards = parse_focus_tree(source, "/tmp/dup.txt").raw_rewards
+
+    assert "first" in rewards[("dup_focus", "available")]
+    assert "second" not in rewards[("dup_focus", "available")]
+
+
 def test_parse_structured_offsets():
     p = parse_focus_tree(WRAPPED, "/tmp/TST_shared_tree.txt")
     offsets = p.raw_rewards[("TST_beta", "_offsets")]
