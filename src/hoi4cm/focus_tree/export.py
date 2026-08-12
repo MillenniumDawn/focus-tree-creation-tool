@@ -7,11 +7,29 @@ writing the file.
 import re
 
 from hoi4cm.script.effects import render_effect
+from hoi4cm.script.syntax import serialize_block
 
 from .codec import render_focus_body
 from .operations import build_focus_name_lookup
 
 GFX_DEFAULT = "GFX_goal_generic_political_pressure"
+
+
+def _emit_tree_extras(out, info):
+    """Re-emit unrecognized focus_tree wrapper keys captured at parse time.
+
+    Mirrors how ``_script_extras`` preserves unknown per-focus keys — see
+    ``codec.render_focus_body``.
+    """
+    tree_extras = info.get("tree_extras") or {}
+    if not tree_extras:
+        return
+    rendered = serialize_block(
+        tree_extras, indent="\t", include_bare_values=True, strip_strings=True
+    )
+    if rendered:
+        out.extend(rendered.splitlines())
+        out.append("")
 
 
 def export_focus_tree(
@@ -26,10 +44,13 @@ def export_focus_tree(
 
     ``focuses_in_tree`` is the list of focuses to write. ``info`` is the tree
     metadata dict (``tree_id``, ``country_tag``, ``cfp_x``/``cfp_y``, ``type``,
-    ``had_wrapper``, ``shared_focuses``, ``joint_focuses``). ``focus_lookup`` is
-    a ``{id: Focus}`` mapping covering every loaded focus (for prerequisite /
-    mutex / relative-position name resolution). ``effect_renderer`` renders one
-    effect dict to script text.
+    ``had_wrapper``, ``shared_focuses``, ``joint_focuses``, ``country_raw`` —
+    the verbatim ``country = { ... }`` body captured on import, blank falls
+    back to the canned block — and ``tree_extras``, other unrecognized
+    ``focus_tree`` wrapper keys such as ``default`` or ``reset_on_civilwar``).
+    ``focus_lookup`` is a ``{id: Focus}`` mapping covering every loaded focus
+    (for prerequisite / mutex / relative-position name resolution).
+    ``effect_renderer`` renders one effect dict to script text.
     """
     tid = re.sub(r"[^A-Za-z0-9_]", "_", info["tree_id"].strip()) or "TAG_focus_tree"
     country_tag = info.get("country_tag", "TAG")
@@ -78,12 +99,18 @@ def export_focus_tree(
         out.append("focus_tree = {")
         out.append(f"\tid = {tid}")
         out.append("")
+        country_raw = (info.get("country_raw") or "").strip()
         out.append("\tcountry = {")
-        out.append("\t\tfactor = 0")
-        out.append("\t\tmodifier = {")
-        out.append("\t\t\tadd = 20")
-        out.append(f"\t\t\toriginal_tag = {country_tag}")
-        out.append("\t\t}")
+        if country_raw:
+            for ln in country_raw.splitlines():
+                if ln.strip():
+                    out.append(f"\t\t{ln}")
+        else:
+            out.append("\t\tfactor = 0")
+            out.append("\t\tmodifier = {")
+            out.append("\t\t\tadd = 20")
+            out.append(f"\t\t\toriginal_tag = {country_tag}")
+            out.append("\t\t}")
         out.append("\t}")
         out.append("")
         for sf in info.get("shared_focuses", []):
@@ -100,6 +127,7 @@ def export_focus_tree(
                 cfp_x = cfp_y = 0
         out.append(f"\tcontinuous_focus_position = {{ x = {cfp_x} y = {cfp_y} }}")
         out.append("")
+        _emit_tree_extras(out, info)
         for f in focuses_in_tree:
             out.append("\tfocus = {")
             out.append(f"\t\tid = {f.name}")
@@ -125,8 +153,10 @@ def export_main_tree(
     is the tree metadata dict: ``tree_id``, ``country_tag``, ``cfp_x``/``cfp_y``
     (``None`` to auto-derive from the focuses), ``country_raw`` (the verbatim
     ``country = { ... }`` body captured on import — blank falls back to the
-    MD-convention default block), and ``shared_focuses``/``joint_focuses``
-    (reference lines preserved from import). ``focus_lookup`` is the full
+    MD-convention default block), ``shared_focuses``/``joint_focuses``
+    (reference lines preserved from import), and ``tree_extras`` (other
+    unrecognized ``focus_tree`` wrapper keys, such as ``default`` or
+    ``reset_on_civilwar``, preserved verbatim). ``focus_lookup`` is the full
     ``{id: Focus}`` map (every loaded focus, including linked focuses) used to
     resolve prerequisite/mutex/relative-position names. ``effect_renderer``
     renders one effect dict to script text, exactly like ``export_focus_tree``.
@@ -180,6 +210,7 @@ def export_main_tree(
             cfp_x = cfp_y = 0
     out.append(f"\tcontinuous_focus_position = {{ x = {cfp_x} y = {cfp_y} }}")
     out.append("")
+    _emit_tree_extras(out, info)
 
     for f in focuses_in_tree:
         out.append("\tfocus = {")
