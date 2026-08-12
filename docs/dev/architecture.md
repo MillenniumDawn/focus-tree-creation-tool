@@ -247,7 +247,11 @@ process alive after the window is gone.
 
 Parsing, building, and export remain thread-agnostic pure functions with no
 opinion on which thread calls them. `run_bg` is what decides that they run
-off the Tk thread for `_load_all_trees`, `_import_txt`, and `_import_drawio`
-today. `performance.md`'s GIL guidance still applies: threads here buy UI
-responsiveness, not parse concurrency, which is why multi-file batch loads
-process files sequentially rather than fanning out across workers.
+off the Tk thread for `_load_all_trees`, `_import_txt`, `_import_drawio`, and
+all focus-tree exports. `focus_tree/export_plan.py` owns the plain-data export
+plans and sequential worker execution. The Tk shell resolves dialogs and
+snapshots its state before submission, then reports results and calls
+`MOD.note_file_written` on the Tk thread after each successful atomic write.
+`performance.md`'s GIL guidance still applies: threads here buy UI
+responsiveness, not parse concurrency, which is why multi-file work processes
+files sequentially rather than fanning out across workers.

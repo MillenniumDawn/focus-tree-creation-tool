@@ -35,12 +35,15 @@
   script parser, so it got its own module. `_import_drawio` is now an
   ~615-line Tk shell (dialogs + wiring); most of that is still the two
   Toplevel dialogs (tree setup, preview), which are Tk-only and stay put.
-- `_export` (phase 4): the main tree's export unified onto
+- `_export` (phases 4 and 11): the main tree's export unified onto
   `focus_tree/export.py` (`export_main_tree`, alongside the existing
   `export_focus_tree` for shared/joint trees), and the loc-file writer
-  extracted to a new `focus_tree/loc.py` (`build_loc_yml`). `_export` is now
-  an ~167-line Tk shell: autosave flush, path/dialog resolution, the two pure
-  calls, file writes, and messageboxes. The e693a19 O(F^2) fix (a
+  extracted to `focus_tree/loc.py` (`build_loc_yml`). Issue #27 added
+  `focus_tree/export_plan.py`, so the main, extra, and Save All paths share
+  one Tk-free render/write pipeline. The Tk shell resolves paths and
+  snapshots values before `run_bg`; the worker renders and atomically writes
+  each tree, and `on_done` reports failures and updates the mod catalog. The
+  e693a19 O(F^2) fix (a
   `name -> Focus` map built once instead of a `next()` scan per focus) is now
   also applied to `_build_focus_code`, the Code-tab preview.
 - Undo (phase 7): `_push_undo`/`_undo` redesigned around `core/undo.py`'s
@@ -191,7 +194,7 @@ needs it via `hoi4cm.core`.
 | `_import_txt` | ~5777-5899 (~123) | converged onto `focus_tree/parse.py` + `build.py` | **done** (phase 3) |
 | `_build_menubar` | was ~408-943 (~536) | `ui/menubar.py` (`build_menubar`) | **done** (phase 10) |
 | `_build_toolbar_row2` | was ~944-1202 (~259) | `ui/toolbar.py` (`build_toolbar_row2`) | **done** (phase 10) |
-| `_export` | ~8297-8463 (~167, was ~9003-9443/440) | `focus_tree/export.py` (`export_main_tree`) + `focus_tree/loc.py` (`build_loc_yml`) | **done** (phase 4) |
+| `_export` | ~8297-8463 (~167, was ~9003-9443/440) | `focus_tree/export.py` (`export_main_tree`) + `focus_tree/loc.py` (`build_loc_yml`) + `focus_tree/export_plan.py` (shared worker pipeline) | **done** (phases 4 and 11, #27) |
 | `_open_gfx_browser` | was ~2624-3058 (~435) | `ui/gfx_browser.py` (`open_focus_icon_browser`), extracted as-is, not merged, see below | **done** (phase 10) |
 | `_gfx_browse_files` | was ~3059-3267 (~209) | folded into `open_focus_icon_browser`'s `_browse_flat_folder` helper | **done** (phase 10) |
 | Sidebar builders (`_build_sidebar`, `_build_sidebar_props`, `_build_sidebar_conditions`, `_build_sidebar_code`, `_sb_*` helpers) | ~846-1817 (~970) | n/a | deferred |

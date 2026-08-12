@@ -79,13 +79,13 @@ from hoi4cm.core import (
     build_drawio_focuses,
     build_focus_name_lookup,
     build_focuses,
-    build_loc_yml,
     drawio_to_focus_data,
-    export_focus_tree,
-    export_main_tree,
+    execute_export_plans,
     get_error_entries,
     group_focuses_by_tree,
     install_excepthook,
+    make_extra_export_plan,
+    make_main_export_plan,
     parse_drawio_graph,
     parse_focus_tree,
     read_file,
@@ -96,7 +96,8 @@ from hoi4cm.core import (
     tr,
 )
 from hoi4cm.editor import read_project, write_project
-from hoi4cm.mod import MOD, detect_loc_file, notifying_workspace_files
+from hoi4cm.mod import MOD, detect_loc_file
+from hoi4cm.mod.workspace_files import WorkspaceFiles
 from hoi4cm.models import (
     EditorWorkspace,
     FocusSidebarValues,
@@ -4294,64 +4295,46 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
         show_dialog=True,
     ):
         """Export a single extra (shared/joint) tree to its source file."""
-        if tree_idx <= 0 or tree_idx > len(self._extra_trees):
-            return
-        info = self._extra_trees[tree_idx - 1]
         if focuses_in_tree is None:
             focuses_in_tree = [
-                f
-                for f in self.focuses.values()
-                if getattr(f, "tree_idx", 0) == tree_idx
+                focus
+                for focus in self.focuses.values()
+                if getattr(focus, "tree_idx", 0) == tree_idx
             ]
-        if not focuses_in_tree:
-            if show_dialog:
-                messagebox.showwarning(
-                    tr("dialog.export.title", "Export"),
-                    tr("dialog.no_focuses_in_tree", "No focuses in this tree."),
-                )
-            return
-        out_text = export_focus_tree(
+        plan = self._make_extra_export_plan(
+            tree_idx,
             focuses_in_tree,
-            info,
-            focus_lookup=self.focuses,
-            focus_name_lookup=focus_name_lookup,
+            dict(self.focuses),
+            focus_name_lookup or build_focus_name_lookup(self.focuses.values()),
+            show_dialog=show_dialog,
         )
-        # Save to source file or ask
-        if os.path.isfile(info["file_path"]):
-            path = info["file_path"]
-        else:
-            path = filedialog.asksaveasfilename(
-                defaultextension=".txt",
-                filetypes=[("HOI4 Focus Tree", "*.txt"), ("All", "*.*")],
-                initialfile=os.path.basename(info["file_path"]),
-                title=tr(
-                    "filedialog.save_extra_tree",
-                    "Save {type} Tree .txt",
-                    type=info["type"].capitalize(),
-                ),
-            )
-        if not path:
-            return
-        try:
-            notifying_workspace_files(MOD, MOD.root).write_text(
-                path, out_text, encoding="utf-8"
-            )
-        except Exception as e:
-            log.error("extra tree export failed: %s", e, exc_info=True)
-            report_write_failure(self, path, e)
+        if plan is None:
             return None
-        info["file_path"] = path
-        if show_dialog:
-            messagebox.showinfo(
-                tr("dialog.saved.title", "Saved"),
-                tr(
-                    "dialog.extra_tree_saved",
-                    "{type} tree saved:\n{file}",
-                    type=info["type"].capitalize(),
-                    file=os.path.basename(path),
-                ),
+
+        def on_done(results):
+            failures = self._apply_export_results(
+                results,
+                title=tr("dialog.export.title", "Export"),
             )
-        return path
+            if failures:
+                return
+            if show_dialog:
+                info = self._extra_trees[tree_idx - 1]
+                messagebox.showinfo(
+                    tr("dialog.saved.title", "Saved"),
+                    tr(
+                        "dialog.extra_tree_saved",
+                        "{type} tree saved:\n{file}",
+                        type=info["type"].capitalize(),
+                        file=os.path.basename(plan.focus_path),
+                    ),
+                )
+
+        return self._run_export_plans(
+            [plan],
+            on_done,
+            title=tr("dialog.export.title", "Export"),
+        )
 
     def _batch_load_trees_worker(
         self,
@@ -4716,50 +4699,263 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
             cursor="hand2",
         ).pack(side="left", expand=True, fill="x")
 
+    def _run_export_plans(self, plans, on_done, *, title):
+        """Run pre-resolved export plans off the Tk thread with progress UI."""
+        self._begin_document_generation()
+        modal = progress_modal(self, title)
+
+        def update_progress(index, total, label):
+            modal.set_text(
+                tr(
+                    "mod.loading.step",
+                    "Step {step}/{total}: {label}",
+                    step=index,
+                    total=total,
+                    label=label,
+                )
+            )
+            modal.set_fraction(index / total if total else 1.0)
+
+        progress = make_progress(self, update_progress, scope="document")
+
+        def work():
+            return execute_export_plans(
+                plans,
+                WorkspaceFiles().write_texts,
+                progress=progress,
+            )
+
+        def finish(results):
+            modal.close()
+            on_done(results)
+
+        def on_error(error):
+            modal.close()
+            messagebox.showerror(title, f"Export failed unexpectedly:\n{error}")
+
+        return run_bg(self, work, finish, on_error=on_error, scope="document")
+
+    def _apply_export_results(self, results, *, title=None, show_errors=True):
+        """Apply Tk-thread-only export side effects and report write failures."""
+        failures = []
+        for result in results:
+            if not result.ok:
+                failures.append(result)
+                if show_errors:
+                    report_write_failure(
+                        self,
+                        result.plan.focus_path,
+                        result.error,
+                        title=title,
+                    )
+                else:
+                    add_error(f"Write failed: {result.plan.focus_path}: {result.error}")
+                continue
+            if result.plan.extra_tree_idx is not None:
+                self._extra_trees[result.plan.extra_tree_idx - 1]["file_path"] = (
+                    result.plan.focus_path
+                )
+            if MOD.loaded and MOD.root:
+                for path in result.written_paths:
+                    MOD.note_file_written(path)
+        return failures
+
     def _save_all_trees(self):
         """Export all loaded trees (main + extra) with one click."""
-        results = []
-        errors = []
         self._autosave()
         focuses_by_tree = group_focuses_by_tree(self.focuses.values())
+        focus_lookup = dict(self.focuses)
         focus_name_lookup = build_focus_name_lookup(self.focuses.values())
-        try:
-            path = self._export(
-                focuses_in_tree=focuses_by_tree.get(0, []),
-                focus_name_lookup=focus_name_lookup,
+        plans = []
+        main_plan = self._make_main_export_plan(
+            focuses_by_tree.get(0, []),
+            focus_lookup,
+            focus_name_lookup,
+            show_dialog=False,
+        )
+        if main_plan is not None:
+            plans.append(main_plan)
+        for idx in range(1, len(self._extra_trees) + 1):
+            plan = self._make_extra_export_plan(
+                idx,
+                focuses_by_tree.get(idx, []),
+                focus_lookup,
+                focus_name_lookup,
                 show_dialog=False,
             )
-            if path:
-                results.append(f"Main: {self._tree_id.get()}")
-        except Exception as e:
-            errors.append(f"Main tree: {e}")
-        for idx, et in enumerate(self._extra_trees, start=1):
-            try:
-                path = self._export_extra_tree(
-                    idx,
-                    focuses_in_tree=focuses_by_tree.get(idx, []),
-                    focus_name_lookup=focus_name_lookup,
-                    show_dialog=False,
+            if plan is not None:
+                plans.append(plan)
+
+        def on_done(results):
+            failures = self._apply_export_results(results, show_errors=False)
+            saved = [result.plan.label for result in results if result.ok]
+            msg = tr("save_all.complete", "Save All Trees complete!") + "\n\n"
+            if saved:
+                msg += (
+                    tr("save_all.saved_header", "Saved:")
+                    + "\n"
+                    + "\n".join(f"  • {label}" for label in saved)
                 )
-                if path:
-                    results.append(f"{et['type'].capitalize()}: {et['tree_id']}")
-            except Exception as e:
-                errors.append(f"{et['tree_id']}: {e}")
-        msg = tr("save_all.complete", "Save All Trees complete!") + "\n\n"
-        if results:
-            msg += (
-                tr("save_all.saved_header", "Saved:")
-                + "\n"
-                + "\n".join(f"  • {r}" for r in results)
+            if failures:
+                msg += (
+                    "\n\n"
+                    + tr("save_all.errors_header", "Errors:")
+                    + "\n"
+                    + "\n".join(
+                        f"  ✕ {result.plan.label}: {result.error}"
+                        for result in failures
+                    )
+                )
+            messagebox.showinfo(tr("save_all.title", "Save All Trees"), msg)
+
+        if plans:
+            self._run_export_plans(
+                plans,
+                on_done,
+                title=tr("save_all.title", "Save All Trees"),
             )
-        if errors:
-            msg += (
-                "\n\n"
-                + tr("save_all.errors_header", "Errors:")
-                + "\n"
-                + "\n".join(f"  ✕ {e}" for e in errors)
+        else:
+            on_done([])
+
+    def _make_main_export_plan(
+        self, main_focuses, focus_lookup, focus_name_lookup, *, show_dialog
+    ):
+        """Resolve main-tree destinations and snapshot a plan on the Tk thread."""
+        if not main_focuses:
+            if show_dialog:
+                messagebox.showwarning(
+                    tr("dialog.export.title", "Export"),
+                    tr(
+                        "dialog.no_main_focuses_export",
+                        "No main-tree focuses to export.\nUse 'Save All' or the Loaded Trees panel to export shared/joint trees.",
+                    ),
+                )
+            return None
+        tree_id = self._tree_id.get()
+        tid = re.sub(r"[^A-Za-z0-9_]", "_", tree_id.strip()) or "TAG_focus_tree"
+        tag_match = re.match(r"^([A-Z]{2,5})_", tid)
+        country_tag = (
+            tag_match.group(1)
+            if tag_match
+            else getattr(self, "_tree_country_tag", "TAG")
+        )
+        country_tag = sanitize_component(country_tag.upper(), fallback="TAG")
+        cfp_x = getattr(self, "_cfp_x", None)
+        cfp_y = getattr(self, "_cfp_y", None)
+        try:
+            cfp_x = int(self._cfp_x_var.get())
+        except Exception:
+            pass
+        try:
+            cfp_y = int(self._cfp_y_var.get())
+        except Exception:
+            pass
+        default_filename = f"05_{country_tag}.txt"
+        if MOD.edit_focus_file and os.path.isfile(MOD.edit_focus_file):
+            path = MOD.edit_focus_file
+        else:
+            path = filedialog.asksaveasfilename(
+                defaultextension=".txt",
+                filetypes=[
+                    (tr("filetype.hoi4_focus_tree", "HOI4 Focus Tree"), "*.txt"),
+                    (tr("filetype.all", "All"), "*.*"),
+                ],
+                initialfile=default_filename,
+                title=tr("filedialog.export_hoi4_txt", "Export HOI4 .txt"),
             )
-        messagebox.showinfo(tr("save_all.title", "Save All Trees"), msg)
+        if not path:
+            return None
+        if MOD.edit_loc_file and os.path.isfile(MOD.edit_loc_file):
+            loc_path = MOD.edit_loc_file
+        else:
+            loc_filename = f"MD_focus_{country_tag}_l_english.yml"
+            saved_dir = os.path.dirname(os.path.abspath(path))
+            mod_root = MOD.root if MOD.root and os.path.isdir(MOD.root) else None
+            if mod_root is None:
+                candidate = saved_dir
+                for _ in range(5):
+                    candidate = os.path.dirname(candidate)
+                    if os.path.isdir(
+                        os.path.join(candidate, "common")
+                    ) and os.path.isdir(os.path.join(candidate, "localisation")):
+                        mod_root = candidate
+                        break
+            if mod_root:
+                loc_path = os.path.join(
+                    mod_root, "localisation", "english", loc_filename
+                )
+            else:
+                loc_path = filedialog.asksaveasfilename(
+                    defaultextension=".yml",
+                    filetypes=[
+                        (tr("filetype.yml_localisation", "YML localisation"), "*.yml"),
+                        (tr("filetype.all", "All"), "*.*"),
+                    ],
+                    initialfile=loc_filename,
+                    title=tr(
+                        "filedialog.save_localisation_yml",
+                        "Save Localisation .yml  (should go in localisation/english/)",
+                    ),
+                )
+                if not loc_path:
+                    loc_path = os.path.join(saved_dir, loc_filename)
+        return make_main_export_plan(
+            label=f"Main: {tree_id}",
+            focus_path=path,
+            loc_path=loc_path,
+            focuses=main_focuses,
+            tree_info={
+                "tree_id": tree_id,
+                "country_tag": country_tag,
+                "cfp_x": cfp_x,
+                "cfp_y": cfp_y,
+                "country_raw": getattr(self, "_tree_country_raw", ""),
+                "tree_extras": getattr(self, "_tree_extras", {}),
+                "shared_focuses": list(getattr(self, "_shared_focuses", [])),
+                "joint_focuses": list(getattr(self, "_joint_focuses", [])),
+            },
+            focus_lookup=focus_lookup,
+            focus_name_lookup=focus_name_lookup,
+        )
+
+    def _make_extra_export_plan(
+        self, tree_idx, focuses_in_tree, focus_lookup, focus_name_lookup, *, show_dialog
+    ):
+        """Resolve one extra tree destination and snapshot its export plan."""
+        if tree_idx <= 0 or tree_idx > len(self._extra_trees):
+            return None
+        info = self._extra_trees[tree_idx - 1]
+        if not focuses_in_tree:
+            if show_dialog:
+                messagebox.showwarning(
+                    tr("dialog.export.title", "Export"),
+                    tr("dialog.no_focuses_in_tree", "No focuses in this tree."),
+                )
+            return None
+        if os.path.isfile(info["file_path"]):
+            path = info["file_path"]
+        else:
+            path = filedialog.asksaveasfilename(
+                defaultextension=".txt",
+                filetypes=[("HOI4 Focus Tree", "*.txt"), ("All", "*.*")],
+                initialfile=os.path.basename(info["file_path"]),
+                title=tr(
+                    "filedialog.save_extra_tree",
+                    "Save {type} Tree .txt",
+                    type=info["type"].capitalize(),
+                ),
+            )
+        if not path:
+            return None
+        return make_extra_export_plan(
+            label=f"{info['type'].capitalize()}: {info['tree_id']}",
+            focus_path=path,
+            focuses=focuses_in_tree,
+            tree_info=dict(info),
+            focus_lookup=focus_lookup,
+            focus_name_lookup=focus_name_lookup,
+            extra_tree_idx=tree_idx,
+        )
 
     # ── SAVE / LOAD ─────────────────────────────────────────────
     def _capture_workspace(self):
@@ -5440,186 +5636,65 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
     def _export(
         self, *, focuses_in_tree=None, focus_name_lookup=None, show_dialog=True
     ):
-        # Flush any unsaved edits from the form back to the current focus before export
+        """Export the main tree through the shared background export pipeline."""
         try:
             if self.selected:
                 self._autosave()
         except Exception:
             pass
-        # Only export main-tree focuses (tree_idx == 0)
         main_focuses = focuses_in_tree
         if main_focuses is None:
             main_focuses = [
-                f for f in self.focuses.values() if getattr(f, "tree_idx", 0) == 0
+                focus
+                for focus in self.focuses.values()
+                if getattr(focus, "tree_idx", 0) == 0
             ]
-        if not main_focuses:
-            if show_dialog:
-                messagebox.showwarning(
-                    tr("dialog.export.title", "Export"),
-                    tr(
-                        "dialog.no_main_focuses_export",
-                        "No main-tree focuses to export.\nUse 'Save All' or the Loaded Trees panel to export shared/joint trees.",
-                    ),
-                )
-            return
-        tid = (
-            re.sub(r"[^A-Za-z0-9_]", "_", self._tree_id.get().strip())
-            or "TAG_focus_tree"
-        )
-
-        # ── Detect country TAG from tree id or focus prefix ──────────
-        # Tree id pattern: TAG_focus_tree → TAG
-        tag_match = re.match(r"^([A-Z]{2,5})_", tid)
-        country_tag = (
-            tag_match.group(1)
-            if tag_match
-            else getattr(self, "_tree_country_tag", "TAG")
-        )
-        # Sanitize: the fallback tag comes from parsed (untrusted) mod content
-        # and is used to build the loc filename below.
-        country_tag = sanitize_component(country_tag.upper(), fallback="TAG")
-
-        # continuous_focus_position: use stored value from import, never recalculate
-        cfp_x = getattr(self, "_cfp_x", None)
-        cfp_y = getattr(self, "_cfp_y", None)
-        # Also check if user edited the toolbar fields
-        try:
-            cfp_x = int(self._cfp_x_var.get())
-        except Exception:
-            pass
-        try:
-            cfp_y = int(self._cfp_y_var.get())
-        except Exception:
-            pass
-
-        t0 = time.perf_counter()
-        out_text = export_main_tree(
+        plan = self._make_main_export_plan(
             main_focuses,
-            {
-                "tree_id": self._tree_id.get(),
-                "country_tag": country_tag,
-                "cfp_x": cfp_x,
-                "cfp_y": cfp_y,
-                "country_raw": getattr(self, "_tree_country_raw", ""),
-                "tree_extras": getattr(self, "_tree_extras", {}),
-                "shared_focuses": getattr(self, "_shared_focuses", []),
-                "joint_focuses": getattr(self, "_joint_focuses", []),
-            },
-            focus_lookup=self.focuses,
-            focus_name_lookup=focus_name_lookup,
+            dict(self.focuses),
+            focus_name_lookup or build_focus_name_lookup(self.focuses.values()),
+            show_dialog=show_dialog,
         )
-        t1 = time.perf_counter()
-
-        # ── File naming: 05_TAG.txt per skill rules ───────────────────
-        default_filename = f"05_{country_tag}.txt"
-
-        # If an edit target is set, overwrite it directly; otherwise prompt
-        if MOD.edit_focus_file and os.path.isfile(MOD.edit_focus_file):
-            path = MOD.edit_focus_file
-        else:
-            path = filedialog.asksaveasfilename(
-                defaultextension=".txt",
-                filetypes=[
-                    (tr("filetype.hoi4_focus_tree", "HOI4 Focus Tree"), "*.txt"),
-                    (tr("filetype.all", "All"), "*.*"),
-                ],
-                initialfile=default_filename,
-                title=tr("filedialog.export_hoi4_txt", "Export HOI4 .txt"),
-            )
-        if not path:
-            return
-
-        if MOD.edit_loc_file and os.path.isfile(MOD.edit_loc_file):
-            loc_path = MOD.edit_loc_file
-        else:
-            loc_filename = f"MD_focus_{country_tag}_l_english.yml"
-            _saved_dir = os.path.dirname(os.path.abspath(path))
-            _mod_root = MOD.root if MOD.root and os.path.isdir(MOD.root) else None
-            if _mod_root is None:
-                _candidate = _saved_dir
-                for _ in range(5):
-                    _candidate = os.path.dirname(_candidate)
-                    if os.path.isdir(
-                        os.path.join(_candidate, "common")
-                    ) and os.path.isdir(os.path.join(_candidate, "localisation")):
-                        _mod_root = _candidate
-                        break
-            if _mod_root:
-                loc_path = os.path.join(
-                    _mod_root, "localisation", "english", loc_filename
-                )
-            else:
-                # Last resort: ask the user where to save the loc file
-                loc_path = filedialog.asksaveasfilename(
-                    defaultextension=".yml",
-                    filetypes=[
-                        (tr("filetype.yml_localisation", "YML localisation"), "*.yml"),
-                        (tr("filetype.all", "All"), "*.*"),
-                    ],
-                    initialfile=loc_filename,
-                    title=tr(
-                        "filedialog.save_localisation_yml",
-                        "Save Localisation .yml  (should go in localisation/english/)",
-                    ),
-                )
-                if not loc_path:
-                    loc_path = os.path.join(
-                        _saved_dir, loc_filename
-                    )  # absolute fallback
-
-        existing_loc_text = read_file(loc_path) if os.path.isfile(loc_path) else None
-        new_loc_text, added_count = build_loc_yml(
-            existing_loc_text, main_focuses, country_tag
-        )
-        t2 = time.perf_counter()
-        log.debug(
-            "export main tree %s: build %.1fms loc %.1fms (%d focuses)",
-            path,
-            (t1 - t0) * 1000,
-            (t2 - t1) * 1000,
-            len(main_focuses),
-        )
-
-        # The .txt and the .yml go out as one group: staged to temp files and
-        # fsynced first, then swapped in. A failure anywhere leaves both the
-        # tracked focus file and the loc file exactly as they were, instead of
-        # truncating one in place or applying half the export.
-        writes = [(path, out_text, "utf-8")]
-        if new_loc_text is not None:
-            writes.append((loc_path, new_loc_text, "utf-8-sig"))
-        try:
-            notifying_workspace_files(MOD, MOD.root).write_texts(writes)
-        except Exception as e:
-            log.error("export failed: %s", e, exc_info=True)
-            report_write_failure(self, path, e)
+        if plan is None:
             return None
 
-        if new_loc_text is not None:
-            loc_saved = "\n" + tr(
-                "export.localisation_added",
-                "Localisation: {file}  (+{count} new keys)",
-                file=os.path.basename(loc_path),
-                count=added_count,
+        def on_done(results):
+            failures = self._apply_export_results(
+                results,
+                title=tr("dialog.export.title", "Export"),
             )
-        else:
-            loc_saved = "\n" + tr(
-                "export.localisation_skipped",
-                "Localisation: all keys already present in {file} - skipped",
-                file=os.path.basename(loc_path),
-            )
-
-        if show_dialog:
+            if failures or not show_dialog:
+                return
+            result = results[0]
+            if result.localisation_added:
+                loc_saved = "\n" + tr(
+                    "export.localisation_added",
+                    "Localisation: {file}  (+{count} new keys)",
+                    file=os.path.basename(plan.loc_path),
+                    count=result.localisation_added,
+                )
+            else:
+                loc_saved = "\n" + tr(
+                    "export.localisation_skipped",
+                    "Localisation: all keys already present in {file} - skipped",
+                    file=os.path.basename(plan.loc_path),
+                )
             messagebox.showinfo(
                 tr("dialog.exported.title", "Exported"),
                 tr(
                     "dialog.exported.body",
                     "Export complete!\n\nFocus tree: {focus_file}{loc_saved}\n\nInstall paths:\n  .txt  ->  common/national_focus/{default_filename}\n\nReminders:\n  - Replace placeholder icons with real GFX keys\n  - Add shared_focus lines if using shared trees",
-                    focus_file=os.path.basename(path),
+                    focus_file=os.path.basename(plan.focus_path),
                     loc_saved=loc_saved,
-                    default_filename=default_filename,
+                    default_filename=os.path.basename(plan.focus_path),
                 ),
             )
-        return path
+
+        return self._run_export_plans(
+            [plan],
+            on_done,
+            title=tr("dialog.export.title", "Export"),
+        )
 
 
 # ─────────────────────────── ENTRY POINT ────────────────────────
