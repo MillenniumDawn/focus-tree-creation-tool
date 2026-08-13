@@ -33,6 +33,7 @@ from hoi4cm.ui import (
     TEXT_DIM,
     _safe_after,
     _safe_after_idle,
+    report_error,
 )
 from hoi4cm.wizards._generators import build_dyn_mod_output
 from hoi4cm.wizards._graphics import browser_folders, collect_image_pairs
@@ -1222,7 +1223,7 @@ def open_dyn_mod_wizard(app):
 
         # ── Summary ───────────────────────────────────────────
         if errors:
-            messagebox.showerror("Errors during file generation", "\n".join(errors))
+            report_error("\n".join(errors), title="Errors during file generation")
 
         lines = [f"Mod root: {mod_root}\n"]
         for rel, action, note in results:
@@ -1341,14 +1342,14 @@ def open_dyn_mod_wizard(app):
                 parsed = parse_script(src)
                 blk = parsed.get(modifier_id, {})
                 if not isinstance(blk, dict):
-                    messagebox.showerror(
-                        "Parse Error",
+                    report_error(
                         f"Could not parse modifier '{modifier_id}'",
                         parent=dlg,
+                        title="Parse Error",
                     )
                     return
             except Exception as e:
-                messagebox.showerror("Parse Error", str(e), parent=dlg)
+                report_error(str(e), e, parent=dlg, title="Parse Error")
                 return
 
             # Populate identity fields

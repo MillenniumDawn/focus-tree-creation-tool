@@ -101,6 +101,14 @@ monolith's `_export`, `_export_extra_tree` and `_save` all return `None`
 through it rather than showing a success dialog for an export that never
 landed.
 
+`report_write_failure` delegates to the generic `hoi4cm.ui.error_report`'s
+`report_error(msg, exc=None, *, parent=None, title=None)`, which is the one
+place a handled error turns into a log entry (with the traceback when an
+exception is given) plus a dialog. Synchronous import/parse/export failures
+across the monolith and the wizards go through it (issue #52), so the
+in-app error log sees what used to be dialog-only errors; background-task
+failures were already covered by `run_bg` in `ui/tasks.py`.
+
 One deliberate consequence: an atomic write needs write permission on the
 target's **directory**, not just on the file. A read-only mod folder that used
 to accept an in-place overwrite now fails with a clear dialog. That is the

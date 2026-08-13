@@ -24,6 +24,7 @@ from hoi4cm.ui import (
     TEXT,
     TEXT_DIM,
 )
+from hoi4cm.ui.error_report import report_error
 from hoi4cm.ui.tasks import make_progress, run_bg
 from hoi4cm.wizards import _shared as _wiz_shared
 
@@ -37,14 +38,14 @@ class ModLoadingMixin:
     def _load_mod_path(self, root):
         """Load a mod directly from a known path (used by Recent Mods menu)."""
         if not root or not os.path.isdir(root):
-            messagebox.showerror(
-                tr("dialog.mod_not_found.title", "Mod Not Found"),
+            report_error(
                 tr(
                     "dialog.mod_not_found.body",
                     "The folder no longer exists:\n{path}",
                     path=root,
                 ),
                 parent=self,
+                title=tr("dialog.mod_not_found.title", "Mod Not Found"),
             )
             # Remove stale entry
             if hasattr(MOD, "_recent_mods") and root in MOD._recent_mods:

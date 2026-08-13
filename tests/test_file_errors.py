@@ -6,6 +6,7 @@ Headless: the dialog call is stubbed, no Tk root is ever created.
 import pytest
 
 import hoi4cm.core.logger as logmod
+import hoi4cm.ui.error_report as error_report
 import hoi4cm.ui.file_errors as file_errors
 
 
@@ -14,7 +15,7 @@ def shown(monkeypatch):
     """Capture the messagebox call and isolate the shared error buffer."""
     calls = []
     monkeypatch.setattr(
-        file_errors.messagebox,
+        error_report.messagebox,
         "showerror",
         lambda title, message, **options: calls.append((title, message, options)),
     )
@@ -61,6 +62,17 @@ def test_parent_window_is_forwarded_when_given(shown):
     file_errors.report_write_failure(sentinel, "tree.txt", OSError("nope"))
 
     assert shown[0][2] == {"parent": sentinel}
+
+
+def test_failure_entry_carries_the_traceback(shown):
+    try:
+        raise OSError("disk full")
+    except OSError as exc:
+        file_errors.report_write_failure(None, "tree.txt", exc)
+
+    entry = logmod.get_error_entries()[0][1]
+    assert "OSError: disk full" in entry
+    assert "Traceback" in entry
 
 
 def test_custom_title_overrides_the_default(shown):

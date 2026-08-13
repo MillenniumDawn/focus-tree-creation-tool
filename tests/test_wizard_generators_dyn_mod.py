@@ -163,7 +163,7 @@ def test_build_dyn_mod_output_golden_definition_block():
         mods_raw="stability_factor = AM_stab = stab_tt",
         const="consumer_goods_factor = 0.05",
     )
-    definition = out.split("\n\n\n")[0]
+    definition = out.split("\n\n\n", maxsplit=1)[0]
     assert definition == "\n".join(
         [
             "# ============================================================",

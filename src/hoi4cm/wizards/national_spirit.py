@@ -39,6 +39,7 @@ from hoi4cm.ui import (
     TEXT_DIM,
     _safe_after,
     _safe_after_idle,
+    report_error,
 )
 from hoi4cm.wizards._generators import build_national_spirit_output
 from hoi4cm.wizards._graphics import browser_folders, collect_image_pairs
@@ -1815,14 +1816,14 @@ def open_national_spirit_wizard(app):
                     slot_data.get(spirit_id, {}) if isinstance(slot_data, dict) else {}
                 )
                 if not isinstance(spirit, dict):
-                    messagebox.showerror(
-                        "Parse Error",
+                    report_error(
                         f"Could not parse spirit '{spirit_id}'",
                         parent=dlg,
+                        title="Parse Error",
                     )
                     return
             except Exception as e:
-                messagebox.showerror("Parse Error", str(e), parent=dlg)
+                report_error(str(e), e, parent=dlg, title="Parse Error")
                 return
 
             # Populate identity fields

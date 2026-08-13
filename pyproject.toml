@@ -17,8 +17,8 @@ dev = [
   "pytest-cov>=4.0", # coverage gate for wizard generators
   "ruff>=0.16",
   "black>=26.5",
-  "mypy>=1.10",
-  "pylint>=3.2",
+  "mypy>=2.3.0",     # native_parser config requires 2.3.0 (PEP 758 support)
+  "pylint>=4.0.7",
   "pre-commit>=3.5",
 ] # tests + linting
 build = ["pyinstaller>=6.0", "Pillow>=9.0"] # compile standalone executables
@@ -72,20 +72,12 @@ select = ["E", "F", "W", "I", "UP", "B"]
 python_version = "3.14"
 mypy_path = ["src"]
 files = ["src/hoi4cm", "tests"]
-# The monolith and build scripts stay out until refactored. The PEP 758 files
-# (unparenthesized `except A, B:`) are excluded too: mypy 2.3.0 can't parse that
-# syntax yet, even though it's valid Python 3.14. Tracked in issue #68.
-exclude = [
-  "hoi4_content_maker.py",
-  "build",
-  "src/hoi4cm/core/undo.py",
-  "src/hoi4cm/data/effects.py",
-  "src/hoi4cm/mod/workspace_cache.py",
-  "src/hoi4cm/ui/lifecycle.py",
-  "src/hoi4cm/wizards/_image_loader.py",
-  "src/hoi4cm/mod/graphics_catalog.py",
-  "tests/test_i18n.py",
-]
+native_parser = true
+# The monolith and build scripts stay out until refactored. The native
+# parser (above) handles PEP 758's unparenthesized `except A, B:` on 3.14,
+# which the default parser could not (issue #68) — that is why those files
+# no longer need excluding.
+exclude = ["hoi4_content_maker.py", "build"]
 warn_unused_configs = true
 
 # Pillow is an optional extra and pytest is only a dev dependency; both may be

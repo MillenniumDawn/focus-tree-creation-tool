@@ -8,12 +8,11 @@ targets still hold their previous contents — the message says so.
 """
 
 import os
-from tkinter import messagebox
 
 # Core *submodules*, not the facade: core/__init__ imports hoi4cm.ui before it
 # binds these names (see tests/test_import_order.py).
 from hoi4cm.core.i18n import tr
-from hoi4cm.core.logger import add_error
+from hoi4cm.ui.error_report import report_error
 
 __all__ = ["report_write_failure"]
 
@@ -26,7 +25,6 @@ def report_write_failure(parent, path, error, *, title=None):
     callers that also want it in a status line.
     """
     name = os.path.basename(str(path)) or str(path)
-    add_error(f"Write failed: {path}: {error}")
     message = tr(
         "dialog.write_failed.body",
         "Could not write {file}:\n{error}\n\n"
@@ -34,10 +32,10 @@ def report_write_failure(parent, path, error, *, title=None):
         file=name,
         error=error,
     )
-    options = {"parent": parent} if parent is not None else {}
-    messagebox.showerror(
-        title or tr("dialog.write_failed.title", "Write Failed"),
+    report_error(
         message,
-        **options,
+        error,
+        parent=parent,
+        title=title or tr("dialog.write_failed.title", "Write Failed"),
     )
     return message

@@ -42,6 +42,7 @@ from hoi4cm.ui import (
     TEXT_DIM,
     open_gfx_placement_editor,
     open_universal_gfx_browser,
+    report_error,
 )
 from hoi4cm.wizards import _generators
 from hoi4cm.wizards._graphics import find_catalog_image
@@ -4511,7 +4512,7 @@ def open_decision_wizard(app):
                 with open(path, encoding="utf-8", errors="replace") as f:
                     raw = f.read()
             except Exception as e:
-                messagebox.showerror("Import Error", str(e), parent=win)
+                report_error(str(e), e, parent=win, title="Import Error")
                 continue
 
             for cat_name, cat_inner, _ in find_blocks(raw):
@@ -4751,7 +4752,7 @@ def open_decision_wizard(app):
                         if lm:
                             loc2[lm.group(1)] = lm.group(2)
             except Exception as e:
-                messagebox.showerror("YML Error", str(e), parent=win)
+                report_error(str(e), e, parent=win, title="YML Error")
                 return
         updated = 0
         for c in dm_cats:
@@ -4790,7 +4791,7 @@ def open_decision_wizard(app):
             )
             _dm_status.config(text="  ✓  Exported")
         except Exception as e:
-            messagebox.showerror("Export Error", str(e), parent=win)
+            report_error(str(e), e, parent=win, title="Export Error")
 
     def _copy_yml():
         _collect()

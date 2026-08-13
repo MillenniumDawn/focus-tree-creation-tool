@@ -1,0 +1,94 @@
+"""Integration tests: monolith error shells report instead of raising (issue #52).
+
+Drives the monolith's `_load` and `_apply_focus_code` failure paths through
+the real reporter: the dialog call is the only stub, the error buffer and
+`report_error` are the production ones. Both failure paths return before
+touching any widget state, so a bare shell stands in for the App.
+"""
+
+import pytest
+
+import hoi4_content_maker as m
+import hoi4cm.core.logger as logmod
+import hoi4cm.ui.error_report as error_report
+from hoi4cm.models import Focus, FocusDocument
+
+
+@pytest.fixture
+def shown(monkeypatch):
+    """Capture the error dialog and isolate the shared error buffer."""
+    calls = []
+    monkeypatch.setattr(
+        error_report.messagebox,
+        "showerror",
+        lambda title, message, **options: calls.append((title, message, options)),
+    )
+    orig_cb = logmod._error_callback
+    logmod.set_error_callback(None)
+    logmod.clear_errors()
+    yield calls
+    logmod._error_callback = orig_cb
+    logmod.clear_errors()
+
+
+def test_load_reports_a_corrupt_project(shown, monkeypatch):
+    monkeypatch.setattr(m.filedialog, "askopenfilename", lambda **_kw: "bad.json")
+
+    def boom(path):
+        raise ValueError(f"invalid JSON in {path}")
+
+    monkeypatch.setattr(m, "read_project", boom)
+
+    m.App._load(object())
+
+    assert len(shown) == 1
+    title, message, _options = shown[0]
+    assert title == "Load Project Error"
+    assert "invalid JSON" in message
+    entries = logmod.get_error_entries()
+    assert len(entries) == 1
+    assert "invalid JSON" in entries[0][1]
+    assert "Traceback" in entries[0][1]
+
+
+def test_load_cancel_shows_nothing(shown, monkeypatch):
+    monkeypatch.setattr(m.filedialog, "askopenfilename", lambda **_kw: "")
+
+    m.App._load(object())
+
+    assert shown == []
+    assert logmod.get_error_entries() == []
+
+
+def test_save_reports_a_write_failure(shown, monkeypatch):
+    monkeypatch.setattr(m.filedialog, "asksaveasfilename", lambda **_kw: "out.json")
+
+    def boom(path, workspace):
+        raise PermissionError("read-only folder")
+
+    monkeypatch.setattr(m, "write_project", boom)
+    shell = type("Shell", (), {"_capture_workspace": lambda self: None})()
+
+    m.App._save(shell)
+
+    assert len(shown) == 1
+    title, message, _options = shown[0]
+    assert title == "Write Failed"
+    assert "read-only folder" in message
+    entry = logmod.get_error_entries()[0][1]
+    assert "read-only folder" in entry
+    assert "Traceback" in entry
+
+
+def test_apply_focus_code_reports_a_parse_failure(shown):
+    shell = type("Shell", (), {"focuses": FocusDocument()})()
+    focus = Focus()
+
+    assert m.App._apply_focus_code(shell, focus, "not a focus block") is False
+
+    assert len(shown) == 1
+    title, message, _options = shown[0]
+    assert title == "Parse Error"
+    assert "Check Error Log for details" in message
+    entry = logmod.get_error_entries()[0][1]
+    assert "Traceback" in entry

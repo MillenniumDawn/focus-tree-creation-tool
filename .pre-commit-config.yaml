@@ -34,6 +34,6 @@ repos:
         args: [--config-file=pyproject.toml]
 
   - repo: https://github.com/PyCQA/pylint
-    rev: v4.0.6
+    rev: v4.0.7
     hooks:
       - id: pylint

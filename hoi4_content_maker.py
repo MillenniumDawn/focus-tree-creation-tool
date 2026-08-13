@@ -129,6 +129,7 @@ from hoi4cm.ui import (
     _safe_after,
     make_progress,
     progress_modal,
+    report_error,
     report_write_failure,
     run_bg,
 )
@@ -2087,14 +2088,14 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
             self.cv.after(30, _restore_vp)
             return True
         except Exception as ex:
-            self._log_error(str(ex))
-            messagebox.showerror(
-                tr("dialog.parse_error.title", "Parse Error"),
+            report_error(
                 tr(
                     "dialog.parse_error.body",
                     "Could not parse your edits:\n{error}\n\nCheck Error Log for details.",
                     error=ex,
                 ),
+                ex,
+                title=tr("dialog.parse_error.title", "Parse Error"),
             )
             return False
 
@@ -3293,11 +3294,12 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
             with open(path, encoding="utf-8", errors="replace") as fp:
                 raw_file = fp.read()
         except Exception as e:
-            messagebox.showerror(
-                tr("dialog.drawio_import.title", "Draw.io Import"),
+            report_error(
                 tr(
                     "dialog.drawio_read_error", "Could not read file:\n{error}", error=e
                 ),
+                e,
+                title=tr("dialog.drawio_import.title", "Draw.io Import"),
             )
             return
 
@@ -3893,9 +3895,10 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
             with open(path, encoding="utf-8-sig", errors="replace") as fp:
                 raw = fp.read()
         except Exception as e:
-            messagebox.showerror(
-                tr("dialog.import_error.title", "Import Error"),
+            report_error(
                 tr("dialog.read_file_error", "Could not read file:\n{error}", error=e),
+                e,
+                title=tr("dialog.import_error.title", "Import Error"),
             )
             return
 
@@ -4146,9 +4149,10 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
             with open(path, encoding="utf-8-sig", errors="replace") as fp:
                 raw = fp.read()
         except Exception as e:
-            messagebox.showerror(
-                tr("dialog.load_error.title", "Load Error"),
+            report_error(
                 tr("dialog.read_file_error", "Could not read file:\n{error}", error=e),
+                e,
+                title=tr("dialog.load_error.title", "Load Error"),
             )
             return
         try:
@@ -5135,7 +5139,19 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
         )
         if not path:
             return
-        workspace = read_project(path)
+        try:
+            workspace = read_project(path)
+        except Exception as e:
+            report_error(
+                tr(
+                    "dialog.load_project_error.body",
+                    "Could not load project:\n{error}",
+                    error=e,
+                ),
+                e,
+                title=tr("dialog.load_project_error.title", "Load Project Error"),
+            )
+            return
         self.cv.delete("all")
         self.selected = None
         self._lines.clear()
@@ -5373,7 +5389,8 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
             win,
             text=tr(
                 "bulk_rename.description",
-                "Replaces prefix across all {count} focus IDs,\nprerequisite references, and mutex links.",
+                "Replaces prefix across all {count} focus IDs,\n"
+                "prerequisite references, and mutex links.",
                 count=len(self.focuses),
             ),
             bg=BG_DARK,
@@ -5685,7 +5702,11 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
                 tr("dialog.exported.title", "Exported"),
                 tr(
                     "dialog.exported.body",
-                    "Export complete!\n\nFocus tree: {focus_file}{loc_saved}\n\nInstall paths:\n  .txt  ->  common/national_focus/{default_filename}\n\nReminders:\n  - Replace placeholder icons with real GFX keys\n  - Add shared_focus lines if using shared trees",
+                    "Export complete!\n\nFocus tree: {focus_file}{loc_saved}\n\n"
+                    "Install paths:\n"
+                    "  .txt  ->  common/national_focus/{default_filename}\n\n"
+                    "Reminders:\n  - Replace placeholder icons with real GFX keys\n"
+                    "  - Add shared_focus lines if using shared trees",
                     focus_file=os.path.basename(plan.focus_path),
                     loc_saved=loc_saved,
                     default_filename=os.path.basename(plan.focus_path),
