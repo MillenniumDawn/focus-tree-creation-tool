@@ -17,7 +17,7 @@ dev = [
   "pytest-cov>=4.0", # coverage gate for wizard generators
   "ruff>=0.16",
   "black>=26.5",
-  "mypy>=2.3.0", # native_parser config requires 2.3.0 (PEP 758 support)
+  "mypy>=2.3.0",     # native_parser config requires 2.3.0 (PEP 758 support)
   "pylint>=4.0.7",
   "pre-commit>=3.5",
 ] # tests + linting
@@ -77,10 +77,7 @@ native_parser = true
 # parser (above) handles PEP 758's unparenthesized `except A, B:` on 3.14,
 # which the default parser could not (issue #68) — that is why those files
 # no longer need excluding.
-exclude = [
-  "hoi4_content_maker.py",
-  "build",
-]
+exclude = ["hoi4_content_maker.py", "build"]
 warn_unused_configs = true
 
 # Pillow is an optional extra and pytest is only a dev dependency; both may be
