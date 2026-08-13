@@ -215,6 +215,8 @@ def render_focus_body(
     war_target = getattr(focus, "will_lead_to_war_with", "").strip()
     if war_target:
         if re.search(r"[\s{=]", war_target):
+            # block content (e.g. tag = GER) gets re-wrapped; a bare vanilla
+            # tag (will_lead_to_war_with = VEN) stays inline
             _emit_preserved_block(
                 out, "will_lead_to_war_with", war_target, indent, inner_indent
             )
