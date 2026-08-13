@@ -54,6 +54,14 @@ class _FakeApp(CanvasMixin):
         # them declared on the class for the tests that widen the bounds.
         self._canvas_min = [0, 0]
         self._canvas_max = [self.CANVAS_MIN_SIZE - 1, self.CANVAS_MIN_SIZE - 1]
+        # _unload_extra_tree touches these; the App defines them, the bare
+        # host declares them so tests can override without surprising pylint.
+        self._shared_focuses = []
+        self._joint_focuses = []
+        self._invalidate_tree_badges = lambda: None
+        self._refresh_tree_meta_panel = lambda: None
+        self._refresh_loaded_trees_panel = lambda: None
+        self._invalidate_focus_list_structure = lambda: None
         self._reset_canvas_bounds()
 
     def _get_tree_badge(self, tree_idx):
@@ -406,7 +414,7 @@ def test_unload_extra_tree_deletes_pooled_connection_items(tk_root):
     app._invalidate_tree_badges = lambda: None
     app._refresh_tree_meta_panel = lambda: None
     app._refresh_loaded_trees_panel = lambda: None
-    app._redraw = lambda: None
+    app._redraw = lambda *args, **kwargs: None
     app._invalidate_focus_list_structure = lambda: None
     app._draw_lines((-1.0, -1.0, 100.0, 1.0))
     assert len(cv.find_withtag("line")) == 22
