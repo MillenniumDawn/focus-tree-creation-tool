@@ -53,7 +53,7 @@ from hoi4cm.ui.theme import (
 from hoi4cm.ui.thumbnail_grid import ThumbnailItem, VirtualThumbnailGrid
 from hoi4cm.ui.toolbar import build_toolbar_row2
 from hoi4cm.ui.tree_badges import build_tree_badges
-from hoi4cm.ui.widgets import Tooltip, _safe_after, _safe_after_idle
+from hoi4cm.ui.widgets import ScrollableDropdown, Tooltip, _safe_after, _safe_after_idle
 
 __all__ = [
     "BG_CARD",
@@ -80,6 +80,7 @@ __all__ = [
     "PURPLE",
     "RED",
     "SEL_BG",
+    "ScrollableDropdown",
     "TEAL",
     "TEXT",
     "TEXT_DIM",

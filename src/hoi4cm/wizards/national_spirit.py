@@ -37,6 +37,7 @@ from hoi4cm.ui import (
     SEL_BG,
     TEXT,
     TEXT_DIM,
+    ScrollableDropdown,
     _safe_after,
     _safe_after_idle,
     report_error,
@@ -869,29 +870,13 @@ def open_national_spirit_wizard(app):
         if not items:
             return
         _mt.set(items[0][0])
-        om = tk.OptionMenu(dd_frame, _mt, *[k for k, _ in items])
-        menu = om["menu"]
-        menu.delete(0, "end")
-        for k, v in items:
-            menu.add_command(
-                label="{}  ({})".format(k, v["hint"]),
-                command=lambda val=k: _mt.set(val),
-            )
-        om.config(
-            bg=BG_CARD,
-            fg=TEXT,
-            activebackground=SEL_BG,
-            font=("Helvetica", 9),
-            relief="flat",
-            highlightthickness=1,
-            highlightbackground=BORDER_G,
-            anchor="w",
+        dd = ScrollableDropdown(
+            dd_frame,
+            variable=_mt,
+            items=[(k, "{}  ({})".format(k, v["hint"])) for k, v in items],
             width=26,
         )
-        om["menu"].config(
-            bg=BG_CARD, fg=TEXT, activebackground=SEL_BG, font=("Helvetica", 9)
-        )
-        om.pack(fill="x", expand=True)
+        dd.pack(fill="x", expand=True)
 
     _rebuild_mod_dd()
 
@@ -949,29 +934,15 @@ def open_national_spirit_wizard(app):
             ).pack(anchor="w")
             return
         _mt.set(matches[0][0])
-        om = tk.OptionMenu(dd_frame, _mt, *[k for k, _ in matches])
-        menu2 = om["menu"]
-        menu2.delete(0, "end")
-        for k, v in matches:
-            menu2.add_command(
-                label="[{}]  {}  ({})".format(v["cat"], k, v["hint"]),
-                command=lambda val=k: _mt.set(val),
-            )
-        om.config(
-            bg=BG_CARD,
-            fg=TEXT,
-            activebackground=SEL_BG,
-            font=("Helvetica", 9),
-            relief="flat",
-            highlightthickness=1,
-            highlightbackground=BORDER_G,
-            anchor="w",
+        dd = ScrollableDropdown(
+            dd_frame,
+            variable=_mt,
+            items=[
+                (k, "[{}]  {}  ({})".format(v["cat"], k, v["hint"])) for k, v in matches
+            ],
             width=30,
         )
-        om["menu"].config(
-            bg=BG_CARD, fg=TEXT, activebackground=SEL_BG, font=("Helvetica", 9)
-        )
-        om.pack(fill="x", expand=True)
+        dd.pack(fill="x", expand=True)
 
     _sv.trace_add("write", _filter_mod_dd)
 

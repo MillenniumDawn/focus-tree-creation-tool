@@ -5,6 +5,7 @@
 ## Application Modernization — Python Floor Raised to 3.14
 
 **Minimum supported Python is now 3.14, up from 3.9.**
+
 - `requires-python` in `pyproject.toml` bumped to `>=3.14`. CI's test matrix collapsed
   from `3.9`/`3.13` to `3.14` only, and the lint job moved off `3.12` to match.
 - `black` now targets `py314` and `ruff` infers the same from `requires-python`, so both
@@ -24,6 +25,7 @@
 ### Extra-tree unload removes connector lines (issue #80)
 
 **[BUG FIX] Unloading a shared or joint tree now removes its connection lines**
+
 - The focus cards disappeared correctly, but their prerequisite and mutex
   connectors remained visible at their old canvas positions for the rest of
   the session.
@@ -34,11 +36,26 @@
 ### Minimap opens and renders (issue #81)
 
 **[BUG FIX] Opening the minimap no longer raises `TclError` or leaves its toggle state inconsistent**
+
 - On a Tkinter `Canvas`, the usual widget-raising aliases resolve to the
   canvas-item `tag_raise` operation, which requires an item ID. Pressing M or
   choosing Tools -> Minimap therefore failed before the minimap could render.
 - The minimap now explicitly uses Tk's generic widget-raising implementation.
   Widget coverage verifies that it renders, hides, and reopens normally.
+
+### Idea Wizard modifier list scrolls and fits the screen (issue #72)
+
+**[BUG FIX] The Idea Wizard's modifier picker no longer overflows or closes on scroll**
+
+- The picker was a native `OptionMenu`, whose menu cannot scroll: with a
+  category holding 150+ modifiers it posted a menu taller than the screen,
+  mouse-wheel events unposted it while selecting whatever was under the
+  pointer, and off-screen entries were reachable only via keyboard.
+- It is now a `ScrollableDropdown` (`hoi4cm.ui.widgets`): a button that posts
+  a borderless popup holding a scrollable list, sized to the remaining screen
+  space and flipped above the button when there is more room up there. The
+  wheel scrolls, arrows move the highlight, Return commits, and Escape or
+  focus loss closes without selecting.
 
 ---
 
@@ -50,6 +67,7 @@ They are recorded here so they don't get "fixed" back.
 ### Code-tab apply replaces every editable field
 
 **[BEHAVIOR CHANGE] Applying the Code tab now resets fields you leave out**
+
 - The old regex patcher only rewrote the fields it recognized and left the
   rest untouched. The new apply parses the block and rewrites every editable
   field, so a field you delete from the code is reset to its parser default
@@ -58,6 +76,7 @@ They are recorded here so they don't get "fixed" back.
 ### Focus-sprite scanning honors `path_goals`
 
 **[BEHAVIOR CHANGE] Focus icons are read from your configured goals path**
+
 - Focus-sprite discovery used to hardcode `gfx/interface/goals`. It now
   honors the `path_goals` setting, so a mod that keeps focus goal icons
   somewhere else has them found.
@@ -65,6 +84,7 @@ They are recorded here so they don't get "fixed" back.
 ### Quote-aware script parsing
 
 **[BEHAVIOR CHANGE] `#` and `{ }` inside quoted strings now parse correctly**
+
 - Comments and braces inside a quoted value are no longer treated as real
   comments or braces, so a value like `"a # b { c }"` parses intact instead
   of getting truncated. Clausewitz has no string escapes, so a quoted value
@@ -74,6 +94,7 @@ They are recorded here so they don't get "fixed" back.
 ### Every mod-file write is atomic (issue #46)
 
 **[BUG FIX] A failed export no longer destroys the file it was overwriting**
+
 - Export wrote the focus `.txt` and the loc `.yml` with a plain
   `open(path, "w")`, which truncates the target before writing a byte. When an
   edit target was set, that target is your existing tracked mod file — a crash,
@@ -92,6 +113,7 @@ They are recorded here so they don't get "fixed" back.
   for an export that did not land.
 
 **[BEHAVIOR CHANGE] Exporting into a read-only folder now fails instead of overwriting**
+
 - An atomic write needs write permission on the target's *directory*, not just on
   the file, so a mod folder you can't write to is now reported as a clear error
   rather than silently accepting an in-place overwrite. Make the folder writable
@@ -104,6 +126,7 @@ They are recorded here so they don't get "fixed" back.
 ### Focus Tree — `_raw_rewards` Regex Missing `shared_focus` Blocks
 
 **[BUG FIX] `shared_focus = { }` blocks were silently skipped by the raw-block extractor**
+
 - `_load_extra_tree` (line ~17629) and `_load_extra_tree_from_path` (line ~18341)
 - The regex `r'\b(?:joint_focus|focus)\s*=\s*\{'` used a word-boundary `\b` before `focus`.
   In `shared_focus`, the preceding `_` is a word character, so `\bfocus` never matched inside it.
@@ -117,6 +140,7 @@ They are recorded here so they don't get "fixed" back.
 ### Focus Tree — Auto-Fit Viewport Missing After Import and Extra Tree Load
 
 **[BUG FIX] Loading any tree (main import or `+ Shared` / `+ Joint`) left the viewport unchanged, making focuses appear off-screen or "in the wrong position"**
+
 - `_import_txt` (line ~17472), `_load_extra_tree` (line ~17896), `_load_extra_tree_from_path` (line ~18571)
 - All three functions called `_redraw()` (throttled, preserves current zoom/pan) but not `_fit_all()`.
   The "Load All" batch dialog already called `_fit_all()` after loading; all other load paths did not.
@@ -138,6 +162,7 @@ They are recorded here so they don't get "fixed" back.
 ### Focus Tree — `tag =` → `original_tag =` (all remaining locations)
 
 **[BUG FIX] Draw.io import wizard preview code still used `tag =` instead of `original_tag =`**
+
 - Lines ~15436, ~15668, ~14904
 - The `_export()` function was already correct (`original_tag =`) but three other locations still emitted
   the wrong field: the Draw.io wizard's live preview text, the code preview pane built after import,
@@ -149,16 +174,19 @@ They are recorded here so they don't get "fixed" back.
 ### Focus Tree — Import Parser Reads Country Tag from File
 
 **[BUG FIX] Importing a `.txt` focus tree reset country tag to placeholder `"TAG"` instead of reading from file**
+
 - `_import_txt()`, around line ~15980
 - When importing an existing HOI4 focus tree file, the parser read the `focus_tree` block's `id` field
   but ignored the `country = { modifier = { original_tag = X } }` block entirely.
   The tag was inferred only from focus ID prefixes via `_detect_and_apply_tag()`, which fails for
   small trees or trees whose focus IDs don't follow the `TAG_` prefix convention.
 - Fix: after calling `parse_block()` on the `focus_tree` block, extract:
+
   ```
   block["country"]["modifier"]["original_tag"]  (preferred)
   block["country"]["modifier"]["tag"]            (backwards compat for old exports)
   ```
+
   Store the result as `self._tree_country_tag`. This value is used by `_export()` as the fallback
   tag when the tree ID doesn't match the `^TAG_` pattern.
 - Also: after `_detect_and_apply_tag()`, if the prefix was not auto-detected from focus names but
@@ -170,6 +198,7 @@ They are recorded here so they don't get "fixed" back.
 ### EFFECT_DEFS — Missing Scope Effects
 
 **[ADDED] `every_hostile_country` and `random_hostile_country` scope effects**
+
 - These country scopes iterate over / pick one of all countries currently at war with the current
   country. Commonly used in war-related focus completion rewards and event effects.
 - Both placed in the "Scopes" category alongside the existing `every_enemy_country` entry.
@@ -179,6 +208,7 @@ They are recorded here so they don't get "fixed" back.
 ### MODIFIER_DEFS — Missing Building-Specific Production Speed Modifiers
 
 **[ADDED] 18 building-specific `production_speed_X_factor` modifiers (Country category)**
+
 - `production_speed_industrial_complex_factor` — civilian factory
 - `production_speed_arms_factory_factor` — military factory
 - `production_speed_dockyard_factor`
@@ -202,6 +232,7 @@ They are recorded here so they don't get "fixed" back.
 ### MODIFIER_DEFS — Missing Resource-Specific State Modifiers
 
 **[ADDED] 6 `local_resources_X_factor` modifiers (State category)**
+
 - `local_resources_oil_factor`
 - `local_resources_steel_factor`
 - `local_resources_aluminium_factor`
@@ -218,12 +249,14 @@ They are recorded here so they don't get "fixed" back.
 ### Focus Tree Maker (`_export` and `_build_focus_code`)
 
 **[BUG FIX] `tag =` → `original_tag =` in focus_tree country block**
+
 - File line ~17655
 - The country selector block was emitting `tag = TAG`, which checks the current tag (can change
   during civil wars or puppeting). Changed to `original_tag = TAG`, which checks the permanent tag.
 - Without this fix the focus tree could load for the wrong nation in certain scenarios.
 
 **[BUG FIX] `search_filters = { FOCUS_FILTER_POLITICAL }` was silently dropped on export**
+
 - Lines ~17718–17720 (`_export`) and ~14447 (`_build_focus_code` preview)
 - The condition `if sf and sf != "FOCUS_FILTER_POLITICAL"` skipped writing the filter whenever
   it was set to the default political value. All political focuses were exported with no
@@ -231,6 +264,7 @@ They are recorded here so they don't get "fixed" back.
 - Fixed by removing the exclusion: `if sf:` now always writes the filter when set.
 
 **[BUG FIX] Focus log used wrong scope and missing "executed"**
+
 - Line ~17765 (`_export`) and ~15661 (import scaffold code path)
 - Was: `log = "[GetDateText]: [Root.GetName]: focus TAG_focus_name"`
 - Fixed to: `log = "[GetDateText]: [This.GetName]: focus TAG_focus_name executed"`
@@ -242,12 +276,14 @@ They are recorded here so they don't get "fixed" back.
 ## Session 1 — Output Correctness Fixes (Decision Maker)
 
 **[BUG FIX] `complete_effect` log — lowercase "decision" and extra " complete" suffix**
+
 - Lines ~7034 and ~7043
 - Was: `log = "[GetDateText]: [Root.GetName]: decision TAG_my_dec complete"`
 - Fixed to: `log = "[GetDateText]: [Root.GetName]: Decision TAG_my_dec"`
 - Matches the CLAUDE.md standard (capital D, no trailing word).
 
 **[BUG FIX] `remove_effect` log — said "decision … removed" instead of the effect identifier**
+
 - Line ~7053
 - Was: `log = "[GetDateText]: [Root.GetName]: decision TAG_my_dec removed"`
 - Fixed to: `log = "[GetDateText]: [Root.GetName]: remove_effect TAG_my_dec"`
@@ -258,6 +294,7 @@ They are recorded here so they don't get "fixed" back.
 ## Session 1 — Output Correctness Fixes (Event Maker)
 
 **[BUG FIX] Event wizard always emitted an empty `immediate` block**
+
 - Lines ~9632–9636
 - Even for `is_triggered_only = yes` events with no immediate effects, the wizard wrote:
   `immediate = { log = "..." }`. This adds unnecessary log I/O overhead on every trigger
@@ -266,6 +303,7 @@ They are recorded here so they don't get "fixed" back.
   the user has provided content.
 
 **[BUG FIX] Event option log was injected even when the option had no effects**
+
 - Line ~9644
 - CLAUDE.md rule: "Log only if there are actual effects in the option."
 - Was injecting a log line unconditionally into every option.
@@ -278,6 +316,7 @@ They are recorded here so they don't get "fixed" back.
 ### Effect System — `_normalize_effect_fields`
 
 **[BUG FIX] `set_variable` import stored field under wrong key `"var_name"`**
+
 - Lines ~10808–10815
 - When importing a file containing `set_variable = { TAG_my_var = 0.05 }`, the parsed dict
   was stored as `{"var_name": "TAG_my_var", "value": "0.05"}`.
@@ -286,6 +325,7 @@ They are recorded here so they don't get "fixed" back.
 - Fixed: normalized dict now uses `{"var": ..., "value": ...}`.
 
 **[BUG FIX] `add_to_variable` import stored fields under wrong keys `"variable"` / `"amount"`**
+
 - Lines ~10788–10794
 - Same class of bug. Imported `add_to_variable` effects always re-exported with the placeholder
   variable name `AM_my_stat_var` and default amount `0.05` regardless of actual content.
@@ -297,22 +337,26 @@ They are recorded here so they don't get "fixed" back.
 ### MD Additional Income Wizard
 
 **[BUG FIX] `localization_key` value in scripted_localisation block was double-quoted**
+
 - Line ~16575
 - Was generating: `localization_key = "my_tooltip_key"`
 - HOI4 scripted localisation expects bare (unquoted) keys for `localization_key`.
 - Fixed: now generates `localization_key = my_tooltip_key`.
 
 **[REMOVED] Dead empty fallback `text` block in scripted_loc output**
+
 - The block `text = { trigger = { NOT = { has_idea = X } } localization_key = "" }` was
   being appended after the main text block. An empty `localization_key` is invalid in HOI4.
 - Removed entirely. The `defined_text` block now only contains the active case.
 
 **[BUG FIX] Spirit snippet used `name = "Literal String"` instead of a loc key**
+
 - Line ~8685
 - Was: `name = "Free Trade Bonus"` (inline literal, bypasses the localisation system)
 - Fixed to: `name = {idea_id}` (bare localisation key reference, per CLAUDE.md convention)
 
 **[BUG FIX] Spirit snippet missing `allowed_civil_war = { always = yes }`**
+
 - CLAUDE.md requires this for all national ideas/spirits so the spirit persists through civil wars.
 - Added as the second field in the generated spirit block (after `name`).
 
@@ -321,6 +365,7 @@ They are recorded here so they don't get "fixed" back.
 ### Event Maker
 
 **[BUG FIX] No `WM_DELETE_WINDOW` handler — all events lost silently on window close**
+
 - The Event Maker had no close protocol and no autosave, unlike all other wizards.
 - Added `_ev_save_state()` and `_ev_load_state()` backed by a temp JSON file
   (`hoi4_cm_event_autosave.json` in the system temp directory).
@@ -332,6 +377,7 @@ They are recorded here so they don't get "fixed" back.
 ### National Spirit Wizard
 
 **[BUG FIX] `_save_raw` loc regex only matched obsolete `key:0 "value"` format**
+
 - Line ~3616
 - Was: `r'^\s*(\S+?):0\s+"(.*)"'` — required a `:0` version suffix that the wizard's own
   output no longer emits (current format is `key: "value"`).
@@ -340,6 +386,7 @@ They are recorded here so they don't get "fixed" back.
 - Fixed to: `r'^\s+(\S+?)(?::\d+)?\s+"(.*)"'` — matches both `key: "value"` and `key:0 "value"`.
 
 **[DEAD CODE] Duplicate `_edit_btn.config(...)` call on consecutive lines**
+
 - Lines ~3601–3602
 - `_edit_btn.config(text="✎ Edit", fg=TEXT_DIM, bg=BG_CARD)` appeared twice in a row with
   no code between them. The second call had no effect.
@@ -350,6 +397,7 @@ They are recorded here so they don't get "fixed" back.
 ### Dynamic Modifier Generator
 
 **[BUG FIX] `read_existing()` used `encoding="utf-8"` instead of `"utf-8-sig"`**
+
 - Line ~8192 inside `_save_file()`
 - HOI4 `.txt` files are written with BOM (`utf-8-sig`). Reading with plain `utf-8` causes the
   BOM byte sequence (`\ufeff`) to appear in the parsed string, corrupting regex matches on the
@@ -364,6 +412,7 @@ All notable changes to HOI4 Content Maker are documented here.
 ## [2.0] — 2025
 
 ### Decision Maker — New Features
+
 - Full Decision Maker wizard with three-panel layout (tree / editor / preview)
 - Live HOI4-themed preview canvas rendering decisions as they appear in-game
 - GFX icon picker with inline image grid browser
@@ -389,6 +438,7 @@ All notable changes to HOI4 Content Maker are documented here.
 - Autosave with session restore prompt on reopen
 
 ### Decision Maker — Bug Fixes
+
 - Fixed `NameError: name 'h' is not defined` in `_gen_decisions_file` (orphaned cache stub removed)
 - Fixed `AttributeError: 'bool' object has no attribute 'strip'` in generator functions — added `_s()` safe string coercion wrapper applied to all 84 field accesses
 - Fixed Apply Edits not saving: replaced fragile filedialog monkeypatch with a direct inline parser
@@ -401,6 +451,7 @@ All notable changes to HOI4 Content Maker are documented here.
 - Fixed Python 3.14 forward-reference errors in `_snap_then()` / `_on_dec_win_close`
 
 ### Focus Tree Editor
+
 - Drag-and-drop focus canvas with zoom, pan, multi-select
 - Prerequisite and mutex connection drawing
 - Per-focus properties panel with GFX browser
@@ -408,19 +459,23 @@ All notable changes to HOI4 Content Maker are documented here.
 - Export to `national_focus/*.txt` and localisation `.yml`
 
 ### National Spirit Wizard
+
 - Ideas/spirit block generator with GFX browser
 - Slot, modifier, trigger field support
 
 ### Dynamic Modifier Wizard
+
 - Dynamic modifier block generator with modifier picker
 
 ### Event Maker
+
 - Full event authoring with option builder, effect picker
 - Scripted localisation support
 - Live event preview
 - GFX background picker
 
 ### General
+
 - Single-file distribution (`hoi4_content_maker.py`) — no pip install required for core features
 - Persistent config saved to `~/.hoi4_focus_maker.json`
 - Mod folder scanner: auto-discovers sprites, focus IDs, event IDs, decision IDs, country tags
