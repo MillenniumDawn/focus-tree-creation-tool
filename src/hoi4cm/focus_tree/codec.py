@@ -120,7 +120,7 @@ def _reindent_effect(text: str, indent: str) -> str:
     source_indent = "\t\t\t"
     return "\n".join(
         (
-            f"{indent}{line[len(source_indent):]}"
+            f"{indent}{line[len(source_indent) :]}"
             if line.startswith(source_indent)
             else line
         )
