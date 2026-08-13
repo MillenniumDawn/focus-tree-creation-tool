@@ -1,5 +1,6 @@
 """Tkinter UI helpers for HOI4 Content Maker."""
 
+from hoi4cm.ui.error_report import report_error
 from hoi4cm.ui.file_errors import report_write_failure
 from hoi4cm.ui.gfx_browser import (
     open_focus_icon_browser,
@@ -101,6 +102,7 @@ __all__ = [
     "open_settings",
     "open_universal_gfx_browser",
     "progress_modal",
+    "report_error",
     "report_write_failure",
     "run_bg",
     "show_splash",

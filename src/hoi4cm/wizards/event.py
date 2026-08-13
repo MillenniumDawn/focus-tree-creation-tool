@@ -37,6 +37,7 @@ from hoi4cm.ui import (
     TEXT_DIM,
     _safe_after,
     _safe_after_idle,
+    report_error,
 )
 from hoi4cm.wizards import _generators
 from hoi4cm.wizards._graphics import (
@@ -1074,7 +1075,7 @@ def open_event_wizard(app):
         try:
             WorkspaceFiles().write_text(path, _generate_all_txt(), encoding="utf-8")
         except Exception as e:
-            messagebox.showerror("Export Error", str(e), parent=win)
+            report_error(str(e), e, parent=win, title="Export Error")
             return
         status_lbl.config(text=f"  ✓  Exported {len(events)} events")
 
@@ -1392,7 +1393,7 @@ def open_event_wizard(app):
             with open(path, encoding="utf-8", errors="replace") as f:
                 raw = f.read()
         except Exception as e:
-            messagebox.showerror("Import Error", str(e), parent=win)
+            report_error(str(e), e, parent=win, title="Import Error")
             return
 
         def _str_val(v, default=""):
