@@ -200,10 +200,15 @@ def build_focuses(
         f.cancel_cond = raw_rewards.get(
             (fid_str, "cancel"), block_to_str(rf.get("cancel", {}))
         )
-        f.will_lead_to_war_with = raw_rewards.get(
-            (fid_str, "will_lead_to_war_with"),
-            block_to_str(rf.get("will_lead_to_war_with", {})),
-        )
+        wltw = rf.get("will_lead_to_war_with", {})
+        if isinstance(wltw, list):
+            # repeated bare keys (vanilla GER_weserubung form) parse into a
+            # list; join so the exporter can re-emit one line per tag
+            f.will_lead_to_war_with = "\n".join(str(v) for v in wltw)
+        else:
+            f.will_lead_to_war_with = raw_rewards.get(
+                (fid_str, "will_lead_to_war_with"), block_to_str(wltw)
+            )
         f.complete_tooltip = raw_rewards.get(
             (fid_str, "complete_tooltip"),
             block_to_str(rf.get("complete_tooltip", {})),
