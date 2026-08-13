@@ -211,9 +211,13 @@ def render_focus_body(
             out, key, getattr(focus, attribute, ""), indent, inner_indent
         )
 
-    war_target = getattr(focus, "will_lead_to_war_with", "").strip()
-    if war_target:
-        out.append(f"{indent}will_lead_to_war_with = {war_target}")
+    _emit_preserved_block(
+        out,
+        "will_lead_to_war_with",
+        getattr(focus, "will_lead_to_war_with", ""),
+        indent,
+        inner_indent,
+    )
     _emit_block(out, "complete_tooltip", getattr(focus, "complete_tooltip", ""), indent)
     _emit_block(out, "select_effect", getattr(focus, "select_effect", ""), indent)
     if not focus.cancel_if_invalid:
