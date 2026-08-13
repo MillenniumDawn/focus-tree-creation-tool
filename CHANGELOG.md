@@ -21,6 +21,16 @@
 
 ## Application Modernization — Bug Fixes
 
+### Extra-tree unload removes connector lines (issue #80)
+
+**[BUG FIX] Unloading a shared or joint tree now removes its connection lines**
+- The focus cards disappeared correctly, but their prerequisite and mutex
+  connectors remained visible at their old canvas positions for the rest of
+  the session.
+- Unloading now deletes the pooled connector items before resetting their
+  tracking state, so the next redraw contains only connections between the
+  remaining focuses.
+
 ### Minimap opens and renders (issue #81)
 
 **[BUG FIX] Opening the minimap no longer raises `TclError` or leaves its toggle state inconsistent**

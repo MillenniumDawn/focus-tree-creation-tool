@@ -9,6 +9,7 @@ import tkinter as tk
 
 import pytest
 
+import hoi4_content_maker as app_module
 from hoi4cm.models import Focus
 from hoi4cm.models.document import FocusDocument
 from hoi4cm.ui.canvas import CanvasMixin
@@ -386,6 +387,36 @@ def _linked_chain(count, *, spacing=1):
     for previous, focus in zip(focuses, focuses[1:], strict=False):
         focus.prereqs = [[previous.id]]
     return focuses
+
+
+def test_unload_extra_tree_deletes_pooled_connection_items(tk_root):
+    cv = tk.Canvas(tk_root, width=200, height=200)
+    app = _FakeApp(cv)
+    focuses = _linked_chain(12)
+    app.focuses = FocusDocument(focuses)
+    app._extra_trees = [
+        {
+            "tree_id": "shared_tree",
+            "type": "shared",
+            "focus_ids": {focus.id for focus in focuses},
+        }
+    ]
+    app._shared_focuses = ["shared_tree"]
+    app._joint_focuses = []
+    app._invalidate_tree_badges = lambda: None
+    app._refresh_tree_meta_panel = lambda: None
+    app._refresh_loaded_trees_panel = lambda: None
+    app._redraw = lambda: None
+    app._invalidate_focus_list_structure = lambda: None
+    app._draw_lines((-1.0, -1.0, 100.0, 1.0))
+    assert len(cv.find_withtag("line")) == 22
+
+    app_module.App._unload_extra_tree(app, 1)
+
+    assert not app.focuses
+    assert not cv.find_withtag("line")
+    assert app._lines == []
+    assert app._lines_used == 0
 
 
 def test_narrow_frame_hides_the_lines_the_wide_frame_left_behind(tk_root):

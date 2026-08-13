@@ -4183,7 +4183,9 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
             if fid in self.focuses:
                 self.cv.delete("F" + str(fid))
         self.focuses.delete_many(info["focus_ids"], clean_references=False)
+        self.cv.delete("line")
         self._lines.clear()
+        self._lines_used = 0
         if self.selected and self.selected.id not in self.focuses:
             self.selected = None
             self._hide_form()

@@ -653,8 +653,8 @@ class CanvasMixin:
         # tens of thousands of items in it — and everything past the previous
         # frame's mark is already hidden, so walking to len(self._lines) is a
         # Tk call per surplus item per frame for no visible effect. A
-        # `self._lines.clear()` elsewhere (new/clear document, after a
-        # `cv.delete("all")`) shrinks the pool, hence the clamp.
+        # `self._lines.clear()` elsewhere follows deletion of the matching
+        # canvas items and shrinks the pool, hence the clamp.
         pool_size = len(self._lines)
         previous_used = min(getattr(self, "_lines_used", pool_size), pool_size)
         for idx in range(need, previous_used):
