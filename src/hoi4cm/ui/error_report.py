@@ -23,12 +23,14 @@ def report_error(msg, exc=None, *, parent=None, title=None):
     """Record ``msg`` (plus ``exc``'s traceback) and tell the user about it.
 
     Writes one entry to the in-app error log, one to the HOI4CM file log,
-    then raises a dialog. ``parent`` is the window the dialog should belong
-    to (``None`` for the default root). Returns the message shown, which is
-    handy for tests and status lines.
+    then raises a dialog. Only real exceptions contribute a traceback; any
+    other error object is ignored for it, so the reporter itself never
+    raises. ``parent`` is the window the dialog should belong to (``None``
+    for the default root). Returns the message shown, which is handy for
+    tests and status lines.
     """
     entry = msg
-    if exc is not None:
+    if isinstance(exc, BaseException):
         entry = f"{msg}\n" + "".join(traceback.format_exception(exc))
     log.error("%s", entry)
     add_error(entry)

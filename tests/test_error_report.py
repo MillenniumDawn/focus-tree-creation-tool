@@ -65,3 +65,13 @@ def test_custom_title_overrides_the_default(shown):
     error_report.report_error("boom", title="Parse Error")
 
     assert shown[0][0] == "Parse Error"
+
+
+def test_non_exception_error_object_does_not_crash(shown):
+    # The old add_error pattern sometimes logged strings; the reporter must
+    # survive whatever error object a caller hands it.
+    message = error_report.report_error("Write failed: x", "disk full")
+
+    assert message == "Write failed: x"
+    assert len(logmod.get_error_entries()) == 1
+    assert shown[0][1] == "Write failed: x"
