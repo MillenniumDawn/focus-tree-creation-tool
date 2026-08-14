@@ -7,7 +7,10 @@ def test_emit_scalar_empty():
 
 def test_emit_scalar_no_special_chars():
     assert emit_scalar("hello") == "hello"
-    assert emit_scalar("GFX_goal_generic_political_pressure") == "GFX_goal_generic_political_pressure"
+    assert (
+        emit_scalar("GFX_goal_generic_political_pressure")
+        == "GFX_goal_generic_political_pressure"
+    )
     assert emit_scalar("TST_a") == "TST_a"
     assert emit_scalar("VEN") == "VEN"
     assert emit_scalar("1") == "1"
