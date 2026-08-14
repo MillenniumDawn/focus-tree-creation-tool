@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable, Mapping
 from copy import deepcopy
 from typing import Literal
@@ -119,7 +120,7 @@ def _reindent_effect(text: str, indent: str) -> str:
     source_indent = "\t\t\t"
     return "\n".join(
         (
-            f"{indent}{line[len(source_indent):]}"
+            f"{indent}{line[len(source_indent) :]}"
             if line.startswith(source_indent)
             else line
         )
@@ -213,7 +214,18 @@ def render_focus_body(
 
     war_target = getattr(focus, "will_lead_to_war_with", "").strip()
     if war_target:
-        out.append(f"{indent}will_lead_to_war_with = {war_target}")
+        lines = [ln.strip() for ln in war_target.splitlines() if ln.strip()]
+        if len(lines) > 1 and all(not re.search(r"[\s{=]", ln) for ln in lines):
+            # repeated bare tags (vanilla GER_weserubung form): one line each
+            out.extend(f"{indent}will_lead_to_war_with = {ln}" for ln in lines)
+        elif re.search(r"[\s{=]", war_target):
+            # block content (e.g. tag = GER) gets re-wrapped; a bare vanilla
+            # tag (will_lead_to_war_with = VEN) stays inline
+            _emit_preserved_block(
+                out, "will_lead_to_war_with", war_target, indent, inner_indent
+            )
+        else:
+            out.append(f"{indent}will_lead_to_war_with = {war_target}")
     _emit_block(out, "complete_tooltip", getattr(focus, "complete_tooltip", ""), indent)
     _emit_block(out, "select_effect", getattr(focus, "select_effect", ""), indent)
     if not focus.cancel_if_invalid:
@@ -349,6 +361,8 @@ def _preserve_raw_coordinates(
 ) -> None:
     if not hasattr(focus, "_raw_gx") or candidate.offsets != focus.offsets:
         return
+    if focus._raw_gx is None or focus._raw_gy is None:
+        return
 
     focus_by_name = {item.name: item for item in focus_lookup.values()}
     original_parent = focus_by_name.get(getattr(focus, "relative_position_id", ""))
@@ -356,12 +370,15 @@ def _preserve_raw_coordinates(
         offset_x = focus.x - focus._raw_gx
         offset_y = focus.y - focus._raw_gy
     else:
-        raw_dx = getattr(focus, "_rel_dx", focus._raw_gx)
-        raw_dy = getattr(focus, "_rel_dy", focus._raw_gy)
+        raw_dx = getattr(focus, "_rel_dx", None)
+        raw_dy = getattr(focus, "_rel_dy", None)
+        if raw_dx is None or raw_dy is None:
+            raw_dx, raw_dy = focus._raw_gx, focus._raw_gy
         offset_x = focus.x - original_parent.x - raw_dx
         offset_y = focus.y - original_parent.y - raw_dy
 
-    candidate_parent = focus_by_name.get(candidate.relative_position_id)
+    rel_id = candidate.relative_position_id
+    candidate_parent = focus_by_name.get(rel_id) if rel_id else None
     if candidate_parent is None:
         candidate._raw_gx = candidate.x - offset_x
         candidate._raw_gy = candidate.y - offset_y

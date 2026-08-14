@@ -172,6 +172,103 @@ def test_joint_content_present():
         assert needle in t1, needle
 
 
+_WAR_TARGET_BLOCK = """\
+focus_tree = {
+\tid = TST_war_target
+\tfocus = {
+\t\tid = TST_block
+\t\tx = 0
+\t\ty = 0
+\t\twill_lead_to_war_with = {
+\t\t\ttag = GER
+\t\t}
+\t\tcompletion_reward = {
+\t\t\tadd_political_power = 50
+\t\t}
+\t}
+}
+"""
+
+_WAR_TARGET_BARE = """\
+focus_tree = {
+\tid = TST_war_target
+\tfocus = {
+\t\tid = TST_bare
+\t\tx = 0
+\t\ty = 0
+\t\twill_lead_to_war_with = VEN
+\t\tcompletion_reward = {
+\t\t\tadd_political_power = 50
+\t\t}
+\t}
+}
+"""
+
+_WAR_TARGET_REPEATED = """\
+focus_tree = {
+\tid = TST_war_target
+\tfocus = {
+\t\tid = TST_repeated
+\t\tx = 0
+\t\ty = 0
+\t\twill_lead_to_war_with = DEN
+\t\twill_lead_to_war_with = NOR
+\t\tcompletion_reward = {
+\t\t\tadd_political_power = 50
+\t\t}
+\t}
+}
+"""
+
+
+def test_will_lead_to_war_with_block_round_trips():
+    """Issue #76: a will_lead_to_war_with = { ... } block must not degrade.
+
+    The pre-fix exporter wrote it back inline (``will_lead_to_war_with = tag =
+    GER``), which is invalid script and lost the block on the next parse.
+    """
+    _f1, t1 = _load_and_export(_WAR_TARGET_BLOCK, "shared")
+    assert "\t\twill_lead_to_war_with = {\n\t\t\ttag = GER\n\t\t}" in t1
+    assert "will_lead_to_war_with = tag" not in t1
+    assert getattr(_f1[0], "will_lead_to_war_with", "").strip() == "tag = GER"
+    _f2, t2 = _load_and_export(t1, "shared")
+    assert t1 == t2
+    assert _summary(_f1) == _summary(_f2)
+    assert getattr(_f2[0], "will_lead_to_war_with", "").strip() == "tag = GER"
+
+
+def test_will_lead_to_war_with_bare_tag_stays_inline():
+    """Vanilla bare-tag form (will_lead_to_war_with = VEN) stays inline.
+
+    Regression guard: the field must not gain braces around a single bare tag.
+    """
+    _f1, t1 = _load_and_export(_WAR_TARGET_BARE, "shared")
+    assert "\t\twill_lead_to_war_with = VEN" in t1
+    assert "will_lead_to_war_with = {" not in t1
+    assert getattr(_f1[0], "will_lead_to_war_with", "").strip() == "VEN"
+    _f2, t2 = _load_and_export(t1, "shared")
+    assert t1 == t2
+    assert _summary(_f1) == _summary(_f2)
+    assert getattr(_f2[0], "will_lead_to_war_with", "").strip() == "VEN"
+
+
+def test_will_lead_to_war_with_repeated_bare_tags_round_trips():
+    """Issue #88: repeated bare tags must not degrade to a Python list repr.
+
+    Vanilla HOI4 allows several will_lead_to_war_with lines on one focus
+    (e.g. GER_weserubung). The pre-fix build path stringified the parsed list,
+    exporting `['DEN', 'NOR']` as invalid script.
+    """
+    _f1, t1 = _load_and_export(_WAR_TARGET_REPEATED, "shared")
+    assert "\t\twill_lead_to_war_with = DEN\n\t\twill_lead_to_war_with = NOR" in t1
+    assert "['DEN', 'NOR']" not in t1
+    assert getattr(_f1[0], "will_lead_to_war_with", "").strip() == "DEN\nNOR"
+    _f2, t2 = _load_and_export(t1, "shared")
+    assert t1 == t2
+    assert _summary(_f1) == _summary(_f2)
+    assert getattr(_f2[0], "will_lead_to_war_with", "").strip() == "DEN\nNOR"
+
+
 @pytest.mark.parametrize(
     "tree_type,had_wrapper,block_keyword",
     [
