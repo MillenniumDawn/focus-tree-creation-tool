@@ -476,6 +476,35 @@ def test_fixture_export_is_idempotent(fname, tree_type):
     assert t1 == t2
 
 
+def test_multiword_scalar_values_round_trip():
+    """Quoted values containing whitespace survive parse -> export -> parse.
+
+    Regression test for #75: export previously dropped quotes on scalar
+    values, truncating any value containing whitespace on re-parse.
+    """
+    src = (
+        "focus_tree = {\n"
+        "\tid = TST_tree\n"
+        "\tfocus = {\n"
+        "\t\tid = TST_a\n"
+        "\t\tx = 0\n"
+        "\t\ty = 0\n"
+        '\t\ttext = "Multi word title"\n'
+        '\t\ticon = "gfx/with a space/goal.dds"\n'
+        "\t\tcost = 7\n"
+        "\t}\n"
+        "}\n"
+    )
+    f1, t1 = _load_and_export(src, "shared")
+    # Exported text must re-quote values containing whitespace.
+    assert 'text = "Multi word title"' in t1
+    assert 'icon = "gfx/with a space/goal.dds"' in t1
+    # Round-trip must preserve the values intact.
+    f2, _t2 = _load_and_export(t1, "shared")
+    assert f2[0].text == "Multi word title"
+    assert f2[0].gfx == "gfx/with a space/goal.dds"
+
+
 @pytest.mark.parametrize("fname,tree_type", FIXTURE_FILES)
 def test_fixture_structural_fields_survive(fname, tree_type):
     f1, t1 = _load_and_export_fixture(fname, tree_type)
