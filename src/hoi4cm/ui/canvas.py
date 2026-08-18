@@ -1304,7 +1304,7 @@ class CanvasMixin:
         offs = getattr(f, "offsets", [])
         if offs:
             off_strs = [
-                f"x={o['x']} y={o['y']} [{o.get('trigger','').strip()[:30]}]"
+                f"x={o['x']} y={o['y']} [{o.get('trigger', '').strip()[:30]}]"
                 for o in offs
             ]
             base += f"  •  Offsets: {'; '.join(off_strs)}"
