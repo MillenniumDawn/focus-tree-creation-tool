@@ -338,3 +338,170 @@ def test_collect_decision_state_both_defaults_seam():
     # go through the same helper, so the file-level call with no dec matches
     # the single-decision call with an empty dec.
     assert collect_decision_state({}) == collect_decision_state({}, {})
+
+
+# ── edge / contract ─────────────────────────────────────────────────
+
+
+def test_collect_decision_state_handles_non_string_and_empty():
+    # Non-string .get() is coerced via str(); empty string is preserved
+    # (generator treats "" as not-None, so this documents the current contract).
+    assert collect_decision_state({"targeted": _FakeVar(123)})["targeted"] == "123"
+    assert collect_decision_state({"targeted": _FakeVar("")})["targeted"] == ""
+    # evars not a dict -> literal fallback, dec not a dict -> literal fallback
+    assert collect_decision_state(None) == {"targeted": "none", "cost_type": "pp"}
+    assert collect_decision_state({}, dec="not-a-dict") == {
+        "targeted": "none",
+        "cost_type": "pp",
+    }
+    # var without .get falls through
+    assert (
+        collect_decision_state({"targeted": object()}, {"targeted": "country"})[
+            "targeted"
+        ]
+        == "country"
+    )
+
+
+def test_collect_decision_state_cost_type_into_generator():
+    base = {
+        "uid": "dec-1",
+        "cat_uid": "cat-1",
+        "dec_id": "TAG_decision",
+        "loc_name": "My Decision",
+        "loc_desc": "",
+        "icon": "",
+        "allowed": "",
+        "visible": "",
+        "available": "",
+        "cost_type": "pp",
+        "cost": "25",
+        "custom_cost_trigger": "has_dlc = 1",
+        "custom_cost_text": "CUSTOM",
+        "ai_hint_pp_cost": "10",
+        "cost_var": "",
+        "cost_amount": "",
+        "days_remove": "",
+        "days_re_enable": "",
+        "fire_only_once": False,
+        "fixed_random_seed": True,
+        "is_mission": False,
+        "mission_timeout": "100",
+        "selectable_mission": False,
+        "is_good": False,
+        "activation": "",
+        "highlight_states": "",
+        "on_map_mode": "map_and_decisions_view",
+        "state_target_scope": "any",
+        "target_root_trigger": "",
+        "target_trigger": "",
+        "targets": "",
+        "targets_dynamic": False,
+        "target_non_existing": False,
+        "target_array": "",
+        "modifier": "",
+        "complete_effect": "",
+        "timeout_effect": "",
+        "remove_effect": "",
+        "cancel_trigger": "",
+        "cancel_effect": "",
+        "cancel_if_not_visible": False,
+        "remove_trigger": "",
+        "ai_will_do": "",
+        "priority": "1",
+        "war_target_complete": False,
+        "war_target_remove": False,
+        "war_complete_tag": "",
+        "war_remove_tag": "",
+    }
+    pp = generate_decision_block(
+        base, **collect_decision_state({"cost_type": _FakeVar("pp")})
+    )
+    assert "cost = 25" in pp
+    assert "custom_cost_text" not in pp
+    custom = generate_decision_block(
+        base, **collect_decision_state({"cost_type": _FakeVar("custom")})
+    )
+    assert "custom_cost_text = CUSTOM" in custom
+    assert "custom_cost_trigger" in custom
+
+
+def test_collect_national_spirit_state_handles_missing_and_bad_widgets():
+    # svars/text_widgets not dict -> defaults, bad .get() -> defaults
+    assert collect_national_spirit_state(None, None, None)["mod_id"] == ""
+    assert (
+        collect_national_spirit_state({}, {"allowed": _BadVar()}, [])["allowed"] == ""
+    )
+
+    # widget that only supports .get() without args (TypeError branch)
+    class OnlyNoArg:
+        def get(self):
+            return "has_war = yes"
+
+    state = collect_national_spirit_state({}, {"allowed": OnlyNoArg()}, [])
+    assert state["allowed"] == "has_war = yes"
+    # non-string scalar coerced
+    assert (
+        collect_national_spirit_state({"mod_id": _FakeVar(123)}, {}, [])["mod_id"]
+        == "123"
+    )
+    # whitespace-only Text -> stripped to ""
+    assert (
+        collect_national_spirit_state({}, {"allowed": _FakeText("   \n")}, [])[
+            "allowed"
+        ]
+        == ""
+    )
+    # widget without .get attribute
+    assert collect_national_spirit_state({"mod_id": object()}, {}, [])["mod_id"] == ""
+
+
+def test_collect_dyn_mod_state_handles_whitespace_and_bad_widgets():
+    assert collect_dyn_mod_state(None, None)["scope"] == "country"
+    assert collect_dyn_mod_state({}, {"enable": _BadVar()})["enable"] == ""
+    # scope empty string propagates (generator will treat "" != "country")
+    assert collect_dyn_mod_state({"scope": _FakeVar("")}, {})["scope"] == ""
+    # whitespace Text stripped to ""
+    assert collect_dyn_mod_state({}, {"enable": _FakeText("  \n")})["enable"] == ""
+
+
+def test_collect_additional_income_state_handles_bad_and_missing():
+    assert collect_additional_income_state(None)["mode"] == "wire_only"
+    # bad .get -> default
+    assert collect_additional_income_state({"idea_id": _BadVar()})["idea_id"] == ""
+    # widget without .get -> default
+    assert collect_additional_income_state({"idea_id": object()})["idea_id"] == ""
+    # non-string tag upper-cased via str()
+    assert (
+        collect_additional_income_state({"country_tag": _FakeVar(123)})["country_tag"]
+        == "123"
+    )
+
+
+def test_collect_event_state_accepts_any_iterable_and_is_shallow():
+    snap_tuple = collect_event_state((1, 2, 3))
+    assert snap_tuple == [1, 2, 3]
+    # shallow copy: objects are shared
+    obj = SimpleNamespace(eid="a.1")
+    snap = collect_event_state([obj])
+    obj.eid = "mutated"
+    assert snap[0].eid == "mutated"
+
+
+def test_national_spirit_and_dyn_mod_integration_roundtrip():
+    # Contract: collected state must be a valid generator input without extra glue.
+    ns_state = collect_national_spirit_state(
+        {"mod_id": _FakeVar("TAG_s"), "slot": _FakeVar("country")},
+        {"allowed": _FakeText("always = yes"), "extra": _FakeText("")},
+        [{"key": "stability_factor", "value": "0.05"}],
+    )
+    ns_out = build_national_spirit_output(**ns_state)
+    assert "TAG_s = {" in ns_out
+    assert "stability_factor = 0.05" in ns_out
+    dm_state = collect_dyn_mod_state(
+        {"mod_id": _FakeVar("TAG_dyn")},
+        {"mods": _FakeText("stability_factor = my_var")},
+    )
+    dm_out = build_dyn_mod_output(**dm_state)
+    assert "TAG_dyn = {" in dm_out
+    assert "stability_factor = my_var" in dm_out

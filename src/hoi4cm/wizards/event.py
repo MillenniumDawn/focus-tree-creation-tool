@@ -878,7 +878,7 @@ def open_event_wizard(app):
         hdr.pack(fill="x")
         tk.Label(
             hdr,
-            text=f"  Option {idx+1}",
+            text=f"  Option {idx + 1}",
             bg=BG_DARK,
             fg=TEXT_DIM,
             font=("Helvetica", 8, "bold"),
@@ -1019,7 +1019,7 @@ def open_event_wizard(app):
         n = len(sel[0].options) + 1
         sel[0].options.append(
             {
-                "name": f"{sel[0].eid}.{chr(96+n)}",
+                "name": f"{sel[0].eid}.{chr(96 + n)}",
                 "text": f"Option {n}",
                 "effects": "",
                 "ai_chance": "1",
@@ -1179,7 +1179,7 @@ def open_event_wizard(app):
                     wf.write_text(ev_file, ev_content, encoding="utf-8")
                 rel = os.path.relpath(ev_file, mod_root)
                 saved.append(
-                    f"{rel}  (+{len(to_append)} event{'s' if len(to_append)!=1 else ''})"
+                    f"{rel}  (+{len(to_append)} event{'s' if len(to_append) != 1 else ''})"
                 )
             else:
                 warnings.append(

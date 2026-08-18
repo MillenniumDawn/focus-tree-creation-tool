@@ -784,7 +784,7 @@ def open_decision_wizard(app):
                         _tag(tagrow, "T", C_TEAL, TEAL_TAG_BG, TEAL_TAG_BD)
                     if dec["cost_type"] == "pp" and dec.get("cost", "").strip():
                         _tag(
-                            tagrow, f'{dec["cost"]}PP', C_GOLD, GOLD_TAG_BG, GOLD_TAG_BD
+                            tagrow, f"{dec['cost']}PP", C_GOLD, GOLD_TAG_BG, GOLD_TAG_BD
                         )
                     if dec["chain"]:
                         _tag(
@@ -1310,7 +1310,7 @@ def open_decision_wizard(app):
         n = len(_decs_for(uid))
         msg = f"Delete category '{c['cat_id']}'"
         if n:
-            msg += f" and its {n} decision{'s' if n!=1 else ''}?"
+            msg += f" and its {n} decision{'s' if n != 1 else ''}?"
         else:
             msg += "?"
         if not messagebox.askyesno("Delete Category", msg, parent=win):
@@ -3164,7 +3164,9 @@ def open_decision_wizard(app):
         )
         text = _re_s.sub(r"\[([A-Z]{2,5})\](\S+)", r"\2", text)  # [TAG]Word → Word
         text = _re_s.sub(
-            r"\[([A-Z]{2,5}):[^\]]+\]", lambda m: m.group(1), text  # [TAG:X] → TAG
+            r"\[([A-Z]{2,5}):[^\]]+\]",
+            lambda m: m.group(1),
+            text,  # [TAG:X] → TAG
         )
         text = _re_s.sub(r"\[[^\]]{1,80}\]", "", text)  # remaining [tokens]
         return text.strip()
@@ -3726,7 +3728,7 @@ def open_decision_wizard(app):
                     TEAL_TAG_BD if dec["targeted"] != "none" else C_BORDG,
                 )
                 if dec["cost_type"] == "pp" and dec.get("cost", "").strip():
-                    _tag(tag_row, f'PP {dec["cost"]}', C_GOLD, GOLD_TAG_BG, GOLD_TAG_BD)
+                    _tag(tag_row, f"PP {dec['cost']}", C_GOLD, GOLD_TAG_BG, GOLD_TAG_BD)
                 _tag(tag_row, dec["dec_id"], C_DIM, C_DARK, C_BORDG)
 
         # Chain assignment card

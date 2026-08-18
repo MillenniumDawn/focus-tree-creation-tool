@@ -1250,7 +1250,7 @@ def open_dyn_mod_wizard(app):
             gfx_rel = os.path.join("interface", "ideas.gfx")
             gfx_existing = read_existing(gfx_rel)
             if gfx_existing is None:
-                gfx_final = f"spriteTypes = {{\n\n" f"{sprite_block}\n\n" f"}}\n"
+                gfx_final = f"spriteTypes = {{\n\n{sprite_block}\n\n}}\n"
                 gfx_action = "created"
             elif icon_gfx in gfx_existing:
                 gfx_final = gfx_existing
