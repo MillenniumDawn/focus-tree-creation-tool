@@ -313,11 +313,11 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
     def _workspace_fingerprint(self):
         try:
             cfp_x = int(self._cfp_x_var.get())
-        except (TypeError, ValueError, AttributeError):
+        except TypeError, ValueError, AttributeError:
             cfp_x = getattr(self, "_cfp_x", None)
         try:
             cfp_y = int(self._cfp_y_var.get())
-        except (TypeError, ValueError, AttributeError):
+        except TypeError, ValueError, AttributeError:
             cfp_y = getattr(self, "_cfp_y", None)
         extra_fp = []
         for tree in getattr(self, "_extra_trees", []):
@@ -341,6 +341,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             getattr(self, "_tree_country_name", ""),
             getattr(self, "_tree_country_raw", ""),
             getattr(self, "_tree_focus_prefix", ""),
+            getattr(self, "_tree_extras", {}),
             getattr(MOD, "edit_focus_file", "") or "",
             getattr(self, "_tree_had_wrapper", True),
             cfp_x,
@@ -421,9 +422,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
                 sibling = getattr(self, "_last_project_path", None)
                 if sibling:
                     try:
-                        write_project(
-                            sibling_autosave_path(sibling), self.workspace
-                        )
+                        write_project(sibling_autosave_path(sibling), self.workspace)
                     except Exception:
                         log.exception("sibling autosave failed")
         except Exception:
@@ -492,9 +491,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
                     ),
                     ex,
                     parent=self,
-                    title=tr(
-                        "dialog.autosave_restore_error.title", "Restore Failed"
-                    ),
+                    title=tr("dialog.autosave_restore_error.title", "Restore Failed"),
                 )
         else:
             clear_workspace_autosave(path)
@@ -608,9 +605,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         self._shared_focuses = self.workspace.main_tree.metadata.shared_focuses
         self._joint_focuses = self.workspace.main_tree.metadata.joint_focuses
         # Extra loaded trees (shared/joint trees loaded alongside the main tree)
-        self._extra_trees = (
-            []
-        )  # list of dicts: {type, file_path, tree_id, cfp_x, cfp_y, shared_focuses, joint_focuses, country_tag, country_raw, tree_extras, had_wrapper, focus_ids}
+        self._extra_trees = []  # list of dicts: {type, file_path, tree_id, cfp_x, cfp_y, shared_focuses, joint_focuses, country_tag, country_raw, tree_extras, had_wrapper, focus_ids}
         self._tree_badge_table = None  # rebuilt by _get_tree_badge on change
         toolbar = tk.Frame(self, bg=BG_DARK)
         toolbar.pack(fill="x")
@@ -2336,8 +2331,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             return parser(var.get()), False
         except ValueError, TypeError:
             self._log_error(
-                f"Invalid {field_name} value {var.get()!r}; "
-                f"using fallback {fallback}"
+                f"Invalid {field_name} value {var.get()!r}; using fallback {fallback}"
             )
             return fallback, True
 
@@ -2843,7 +2837,12 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
     def _update_title(self):
         """Reflect current tree ID in the window title bar."""
         tid = self._tree_id.get() or "untitled"
-        dirty = " *" if getattr(self, "_saved_fingerprint", None) is not None and self._is_dirty() else ""
+        dirty = (
+            " *"
+            if getattr(self, "_saved_fingerprint", None) is not None
+            and self._is_dirty()
+            else ""
+        )
         self.title(
             tr(
                 "app.title.tree",
@@ -5143,9 +5142,9 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
                     add_error(f"Write failed: {result.plan.focus_path}: {result.error}")
                 continue
             if result.plan.extra_tree_idx is not None:
-                self._extra_trees[result.plan.extra_tree_idx - 1][
-                    "file_path"
-                ] = result.plan.focus_path
+                self._extra_trees[result.plan.extra_tree_idx - 1]["file_path"] = (
+                    result.plan.focus_path
+                )
             if MOD.loaded and MOD.root:
                 for path in result.written_paths:
                     MOD.note_file_written(path)
@@ -5526,8 +5525,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         if threshold and len(most_common) >= 2:
             self._default_focus_prefix = most_common + "_"
             self._hint(
-                f"🏷 Tag {most_common} — new focuses auto-prefix "
-                f"'{most_common}_'"
+                f"🏷 Tag {most_common} — new focuses auto-prefix '{most_common}_'"
             )
         else:
             self._default_focus_prefix = ""

@@ -28,4 +28,9 @@ def clear_workspace_autosave(path: str | None = None) -> None:
         pass
 
 
-__all__ = ["AUTOSAVE_NAME", "clear_workspace_autosave", "workspace_autosave_path"]
+__all__ = [
+    "AUTOSAVE_NAME",
+    "clear_workspace_autosave",
+    "sibling_autosave_path",
+    "workspace_autosave_path",
+]
