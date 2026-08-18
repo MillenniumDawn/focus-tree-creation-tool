@@ -28,6 +28,13 @@ from .operations import (
     group_focuses_by_tree,
 )
 from .parse import EmptyFocusTreeError, ParsedFocusTree, parse_focus_tree
+from .validate import (
+    Issue,
+    Severity,
+    collect_loc_keys_from_text,
+    validate_document,
+    worst_severity_per_focus,
+)
 
 __all__ = [
     "parse_focus_tree",
@@ -53,4 +60,9 @@ __all__ = [
     "parse_drawio_graph",
     "drawio_to_focus_data",
     "build_drawio_focuses",
+    "Issue",
+    "Severity",
+    "collect_loc_keys_from_text",
+    "validate_document",
+    "worst_severity_per_focus",
 ]

@@ -10,6 +10,7 @@ import os
 import re
 import tkinter as tk
 from tkinter import filedialog, messagebox
+from typing import Any, cast
 
 from hoi4cm.core import default_hoi4_mod_dir, tr
 from hoi4cm.mod import MOD, notifying_workspace_files
@@ -34,6 +35,13 @@ _default_hoi4_mod_dir = default_hoi4_mod_dir
 
 class ModLoadingMixin:
     """Mod picking/scanning, post-load prompt and MD additional-income setup."""
+
+    _mod_lbl: Any  # type: ignore[no-redef]
+    _focus_bundles: Any  # type: ignore[no-redef]
+    cv: Any  # type: ignore[no-redef]
+
+    def __getattr__(self, name: str) -> Any:  # type: ignore[no-redef]
+        raise AttributeError(name)
 
     def _load_mod_path(self, root):
         """Load a mod directly from a known path (used by Recent Mods menu)."""
@@ -97,7 +105,7 @@ class ModLoadingMixin:
         MOD.save_config()
 
         # Progress window
-        pw = tk.Toplevel(self)
+        pw = tk.Toplevel(cast(Any, self))  # type: ignore[arg-type]
         pw.title(tr("mod.loading.title", "Loading Mod..."))
         pw.configure(bg=BG_DARK)
         pw.geometry("420x140")
@@ -125,7 +133,10 @@ class ModLoadingMixin:
         status_lbl.pack()
 
         def progress(i, total, label):
-            pct = int((i / total) * 380) if total else 380
+            try:
+                pct = int((i / total) * 380) if total else 380
+            except Exception:
+                pct = 0
             prog_lbl.config(
                 text=tr(
                     "mod.loading.step",
@@ -229,6 +240,12 @@ class ModLoadingMixin:
                 err_note=err_note,
             ),
         )
+        try:
+            sched = getattr(self, "_schedule_validation", None)
+            if callable(sched):
+                sched()
+        except Exception:
+            pass
         # Prompt user to pick edit targets for ideas/events files
         lifecycle = getattr(self, "_lifecycle", None)
         if lifecycle is None:
@@ -247,24 +264,30 @@ class ModLoadingMixin:
             messagebox.showinfo(
                 tr("dialog.no_mod.title", "No Mod"),
                 tr("dialog.no_mod.body", "Please load a mod first."),
-                parent=self,
+                parent=cast(Any, self),  # type: ignore[arg-type]
             )
             return
         root = MOD.root
         ideas_dir = os.path.join(root, "common", "ideas")
         events_dir = os.path.join(root, "events")
-        idea_files = (
-            sorted([f for f in os.listdir(ideas_dir) if f.endswith(".txt")])
-            if os.path.isdir(ideas_dir)
-            else []
-        )
-        event_files = (
-            sorted([f for f in os.listdir(events_dir) if f.endswith(".txt")])
-            if os.path.isdir(events_dir)
-            else []
-        )
+        try:
+            idea_files = (
+                sorted([f for f in os.listdir(ideas_dir) if f.endswith(".txt")])
+                if os.path.isdir(ideas_dir)
+                else []
+            )
+        except OSError:
+            idea_files = []
+        try:
+            event_files = (
+                sorted([f for f in os.listdir(events_dir) if f.endswith(".txt")])
+                if os.path.isdir(events_dir)
+                else []
+            )
+        except OSError:
+            event_files = []
 
-        dlg = tk.Toplevel(self)
+        dlg = tk.Toplevel(cast(Any, self))  # type: ignore[arg-type]
         dlg.title(tr("edit_targets.title", "Set Edit Targets"))
         dlg.configure(bg=BG_DARK)
         # Cap height to screen height - 80px so the dialog always fits
@@ -329,7 +352,11 @@ class ModLoadingMixin:
         def _on_mousewheel(e):
             # Only scroll outer canvas if the event widget is NOT a Listbox
             if not isinstance(e.widget, tk.Listbox):
-                _body_cv.yview_scroll(int(-1 * (e.delta / 120)), "units")
+                try:
+                    delta = int(-1 * (e.delta / 120))
+                except Exception:
+                    delta = 0
+                _body_cv.yview_scroll(delta, "units")
 
         dlg.bind_all("<MouseWheel>", _on_mousewheel)
         dlg.bind(
@@ -518,9 +545,12 @@ class ModLoadingMixin:
             _fd = os.path.join(MOD.root, "common", "national_focus")
             if os.path.isdir(_fd):
                 focus_dir = _fd
-                focus_files = sorted(
-                    f for f in os.listdir(_fd) if f.lower().endswith(".txt")
-                )
+                try:
+                    focus_files = sorted(
+                        f for f in os.listdir(_fd) if f.lower().endswith(".txt")
+                    )
+                except OSError:
+                    focus_files = []
 
         _make_section(
             body,
@@ -546,15 +576,18 @@ class ModLoadingMixin:
             _ld = os.path.join(MOD.root, "localisation")
             if os.path.isdir(_ld):
                 loc_dir = _ld
-                loc_files = sorted(
-                    f
-                    for f in os.listdir(_ld)
-                    if f.lower().endswith(".yml") and "english" in f.lower()
-                )
-                if not loc_files:
+                try:
                     loc_files = sorted(
-                        f for f in os.listdir(_ld) if f.lower().endswith(".yml")
+                        f
+                        for f in os.listdir(_ld)
+                        if f.lower().endswith(".yml") and "english" in f.lower()
                     )
+                    if not loc_files:
+                        loc_files = sorted(
+                            f for f in os.listdir(_ld) if f.lower().endswith(".yml")
+                        )
+                except OSError:
+                    loc_files = []
 
         _make_section(
             body,
@@ -578,9 +611,12 @@ class ModLoadingMixin:
             _sld = os.path.join(MOD.root, "common", "scripted_localisation")
             if os.path.isdir(_sld):
                 sloc_dir = _sld
-                sloc_files = sorted(
-                    f for f in os.listdir(_sld) if f.lower().endswith(".txt")
-                )
+                try:
+                    sloc_files = sorted(
+                        f for f in os.listdir(_sld) if f.lower().endswith(".txt")
+                    )
+                except OSError:
+                    sloc_files = []
 
         _make_section(
             body,
@@ -810,7 +846,10 @@ class ModLoadingMixin:
         sloc = MOD.md_money_scripted_loc_file
         if not sloc:
             sloc_dir = os.path.join(MOD.root, "common", "scripted_localisation")
-            os.makedirs(sloc_dir, exist_ok=True)
+            try:
+                os.makedirs(sloc_dir, exist_ok=True)
+            except OSError:
+                pass
             sloc = os.path.join(sloc_dir, "money_scripted_localization.txt")
         try:
             existing_sloc = ""
@@ -843,7 +882,10 @@ class ModLoadingMixin:
         yml = MOD.md_money_yml_file
         if not yml:
             yml_dir = os.path.join(MOD.root, "localisation", "english")
-            os.makedirs(yml_dir, exist_ok=True)
+            try:
+                os.makedirs(yml_dir, exist_ok=True)
+            except OSError:
+                pass
             yml = os.path.join(yml_dir, "MD_money_l_english.yml")
         try:
             summary_token = f"[additional_income_summary_{idea_id}]"
