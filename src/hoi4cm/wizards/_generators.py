@@ -678,14 +678,14 @@ def generate_decision_categories_file(cats, decs):
         if _strip_val(cat.get("highlight_states", "")):
             hs = _strip_val(cat["highlight_states"])
             if not hs.startswith("highlight_states"):
-                out.append(f"{T1}highlight_states = {{\n{_indent_lines(hs,2)}\n{T1}}}")
+                out.append(f"{T1}highlight_states = {{\n{_indent_lines(hs, 2)}\n{T1}}}")
             else:
                 out.append(_indent_lines(hs, 1))
         if cat["on_map_area"]:
             out.append(f"{T1}on_map_area = {{")
-            out.append(f"{T2}state = {_strip_val(cat.get('map_state',''))}")
-            out.append(f"{T2}name = {_strip_val(cat.get('map_name',''))}")
-            out.append(f"{T2}zoom = {_strip_val(cat.get('map_zoom','850'))}")
+            out.append(f"{T2}state = {_strip_val(cat.get('map_state', ''))}")
+            out.append(f"{T2}name = {_strip_val(cat.get('map_name', ''))}")
+            out.append(f"{T2}zoom = {_strip_val(cat.get('map_zoom', '850'))}")
             if _strip_val(cat.get("map_trigger", "")):
                 trig_ind = _indent_lines(_strip_val(cat["map_trigger"]), 3)
                 out.append(f"{T2}target_root_trigger = {{\n{trig_ind}\n{T2}}}")

@@ -179,14 +179,16 @@ def test_build_national_spirit_emits_loc_block():
 
 def test_build_national_spirit_skips_modifier_missing_key():
     out = build_national_spirit_output(
-        mod_id="TAG_s", modifiers=[{"value": "0.05"}]  # no key
+        mod_id="TAG_s",
+        modifiers=[{"value": "0.05"}],  # no key
     )
     assert "modifier = {" not in out
 
 
 def test_build_national_spirit_skips_modifier_missing_value():
     out = build_national_spirit_output(
-        mod_id="TAG_s", modifiers=[{"key": "stability_factor"}]  # no value
+        mod_id="TAG_s",
+        modifiers=[{"key": "stability_factor"}],  # no value
     )
     assert "modifier = {" not in out
 
