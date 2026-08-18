@@ -38,57 +38,35 @@ from hoi4cm.ui import (
 from hoi4cm.wizards._generators import build_dyn_mod_output
 from hoi4cm.wizards._graphics import browser_folders, collect_image_pairs
 from hoi4cm.wizards._image_loader import TkImageLoader
-from hoi4cm.wizards._shared import notifying_workspace_files
-
-
-def _svar_get(var, default=""):
-    if var is None or not hasattr(var, "get"):
-        return default
-    try:
-        val = var.get()
-        return val if isinstance(val, str) else str(val)
-    except Exception:
-        return default
-
-
-def _text_get(widget, default=""):
-    if widget is None or not hasattr(widget, "get"):
-        return default
-    try:
-        val = widget.get("1.0", "end")
-    except TypeError:
-        try:
-            val = widget.get()
-        except Exception:
-            return default
-    except Exception:
-        return default
-    if isinstance(val, str):
-        return val.strip()
-    return str(val).strip()
+from hoi4cm.wizards._shared import (
+    notifying_workspace_files,
+    svar_get,
+    text_get,
+)
 
 
 def collect_dyn_mod_state(svars, text_widgets):
     """Collect dynamic-modifier form state into kwargs for ``build_dyn_mod_output``."""
+    scope = svar_get(svars.get("scope") if isinstance(svars, dict) else None, "country")
+    if not scope.strip():
+        scope = "country"
     return {
-        "mod_id": _svar_get(svars.get("mod_id") if isinstance(svars, dict) else None),
-        "scope": _svar_get(
-            svars.get("scope") if isinstance(svars, dict) else None, "country"
-        ),
-        "icon": _svar_get(svars.get("icon") if isinstance(svars, dict) else None),
-        "enable": _text_get(
+        "mod_id": svar_get(svars.get("mod_id") if isinstance(svars, dict) else None),
+        "scope": scope,
+        "icon": svar_get(svars.get("icon") if isinstance(svars, dict) else None),
+        "enable": text_get(
             text_widgets.get("enable") if isinstance(text_widgets, dict) else None
         ),
-        "mods_raw": _text_get(
+        "mods_raw": text_get(
             text_widgets.get("mods") if isinstance(text_widgets, dict) else None
         ),
-        "const": _text_get(
+        "const": text_get(
             text_widgets.get("const") if isinstance(text_widgets, dict) else None
         ),
-        "loc_name": _svar_get(
+        "loc_name": svar_get(
             svars.get("loc_name") if isinstance(svars, dict) else None
         ),
-        "loc_desc": _svar_get(
+        "loc_desc": svar_get(
             svars.get("loc_desc") if isinstance(svars, dict) else None
         ),
     }

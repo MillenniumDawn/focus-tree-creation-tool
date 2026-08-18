@@ -45,34 +45,11 @@ from hoi4cm.ui import (
 from hoi4cm.wizards._generators import build_national_spirit_output
 from hoi4cm.wizards._graphics import browser_folders, collect_image_pairs
 from hoi4cm.wizards._image_loader import TkImageLoader
-from hoi4cm.wizards._shared import notifying_workspace_files
-
-
-def _svar_get(var, default=""):
-    if var is None or not hasattr(var, "get"):
-        return default
-    try:
-        val = var.get()
-        return val if isinstance(val, str) else str(val)
-    except Exception:
-        return default
-
-
-def _text_get(widget, default=""):
-    if widget is None or not hasattr(widget, "get"):
-        return default
-    try:
-        val = widget.get("1.0", "end")
-    except TypeError:
-        try:
-            val = widget.get()
-        except Exception:
-            return default
-    except Exception:
-        return default
-    if isinstance(val, str):
-        return val.strip()
-    return str(val).strip()
+from hoi4cm.wizards._shared import (
+    notifying_workspace_files,
+    svar_get,
+    text_get,
+)
 
 
 def collect_national_spirit_state(svars, text_widgets, modifiers):
@@ -85,45 +62,45 @@ def collect_national_spirit_state(svars, text_widgets, modifiers):
     ``{key, value}`` dicts.
     """
     return {
-        "mod_id": _svar_get(svars.get("mod_id") if isinstance(svars, dict) else None),
-        "name_key": _svar_get(
+        "mod_id": svar_get(svars.get("mod_id") if isinstance(svars, dict) else None),
+        "name_key": svar_get(
             svars.get("name_key") if isinstance(svars, dict) else None
         ),
-        "picture": _svar_get(svars.get("picture") if isinstance(svars, dict) else None),
-        "slot": _svar_get(svars.get("slot") if isinstance(svars, dict) else None),
-        "cost": _svar_get(svars.get("cost") if isinstance(svars, dict) else None),
-        "removal_cost": _svar_get(
+        "picture": svar_get(svars.get("picture") if isinstance(svars, dict) else None),
+        "slot": svar_get(svars.get("slot") if isinstance(svars, dict) else None),
+        "cost": svar_get(svars.get("cost") if isinstance(svars, dict) else None),
+        "removal_cost": svar_get(
             svars.get("removal") if isinstance(svars, dict) else None
         ),
-        "loc_name": _svar_get(
+        "loc_name": svar_get(
             svars.get("loc_name") if isinstance(svars, dict) else None
         ),
-        "loc_desc": _svar_get(
+        "loc_desc": svar_get(
             svars.get("loc_desc") if isinstance(svars, dict) else None
         ),
-        "ai_factor": _svar_get(svars.get("ai") if isinstance(svars, dict) else None),
-        "allowed": _text_get(
+        "ai_factor": svar_get(svars.get("ai") if isinstance(svars, dict) else None),
+        "allowed": text_get(
             text_widgets.get("allowed") if isinstance(text_widgets, dict) else None
         ),
-        "available": _text_get(
+        "available": text_get(
             text_widgets.get("available") if isinstance(text_widgets, dict) else None
         ),
-        "cancel": _text_get(
+        "cancel": text_get(
             text_widgets.get("cancel") if isinstance(text_widgets, dict) else None
         ),
-        "visible": _text_get(
+        "visible": text_get(
             text_widgets.get("visible") if isinstance(text_widgets, dict) else None
         ),
-        "on_add": _text_get(
+        "on_add": text_get(
             text_widgets.get("on_add") if isinstance(text_widgets, dict) else None
         ),
-        "on_remove": _text_get(
+        "on_remove": text_get(
             text_widgets.get("on_remove") if isinstance(text_widgets, dict) else None
         ),
-        "rule": _text_get(
+        "rule": text_get(
             text_widgets.get("rule") if isinstance(text_widgets, dict) else None
         ),
-        "extra_modifiers": _text_get(
+        "extra_modifiers": text_get(
             text_widgets.get("extra") if isinstance(text_widgets, dict) else None
         ),
         "modifiers": list(modifiers) if modifiers is not None else [],

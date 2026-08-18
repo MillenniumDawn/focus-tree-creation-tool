@@ -344,10 +344,22 @@ def test_collect_decision_state_both_defaults_seam():
 
 
 def test_collect_decision_state_handles_non_string_and_empty():
-    # Non-string .get() is coerced via str(); empty string is preserved
-    # (generator treats "" as not-None, so this documents the current contract).
+    # Non-string .get() is coerced via str(); empty/whitespace now falls
+    # through to fallback (previously propagated as "" and rendered a
+    # broken targeted block).
     assert collect_decision_state({"targeted": _FakeVar(123)})["targeted"] == "123"
-    assert collect_decision_state({"targeted": _FakeVar("")})["targeted"] == ""
+    assert collect_decision_state({"targeted": _FakeVar("")})["targeted"] == "none"
+    assert collect_decision_state({"targeted": _FakeVar("  \n")})["targeted"] == "none"
+    assert (
+        collect_decision_state({"targeted": _FakeVar("")}, {"targeted": "state"})[
+            "targeted"
+        ]
+        == "state"
+    )
+    assert (
+        collect_decision_state({"targeted": _FakeVar("")}, {"targeted": ""})["targeted"]
+        == "none"
+    )
     # evars not a dict -> literal fallback, dec not a dict -> literal fallback
     assert collect_decision_state(None) == {"targeted": "none", "cost_type": "pp"}
     assert collect_decision_state({}, dec="not-a-dict") == {
@@ -459,8 +471,9 @@ def test_collect_national_spirit_state_handles_missing_and_bad_widgets():
 def test_collect_dyn_mod_state_handles_whitespace_and_bad_widgets():
     assert collect_dyn_mod_state(None, None)["scope"] == "country"
     assert collect_dyn_mod_state({}, {"enable": _BadVar()})["enable"] == ""
-    # scope empty string propagates (generator will treat "" != "country")
-    assert collect_dyn_mod_state({"scope": _FakeVar("")}, {})["scope"] == ""
+    # empty/whitespace scope falls back to "country" ("" would render `scope = `)
+    assert collect_dyn_mod_state({"scope": _FakeVar("")}, {})["scope"] == "country"
+    assert collect_dyn_mod_state({"scope": _FakeVar("  \n")}, {})["scope"] == "country"
     # whitespace Text stripped to ""
     assert collect_dyn_mod_state({}, {"enable": _FakeText("  \n")})["enable"] == ""
 
@@ -505,3 +518,137 @@ def test_national_spirit_and_dyn_mod_integration_roundtrip():
     dm_out = build_dyn_mod_output(**dm_state)
     assert "TAG_dyn = {" in dm_out
     assert "stability_factor = my_var" in dm_out
+
+
+def test_collect_decision_state_targeted_matrix():
+    # Covers the most-branching generator path (state vs country vs none).
+    def _base(**overrides):
+        base = {
+            "uid": "dec-1",
+            "cat_uid": "cat-1",
+            "dec_id": "TAG_decision",
+            "loc_name": "N",
+            "loc_desc": "",
+            "icon": "",
+            "allowed": "",
+            "visible": "",
+            "available": "",
+            "cost_type": "pp",
+            "cost": "25",
+            "custom_cost_trigger": "",
+            "custom_cost_text": "",
+            "ai_hint_pp_cost": "",
+            "cost_var": "",
+            "cost_amount": "",
+            "days_remove": "",
+            "days_re_enable": "",
+            "fire_only_once": False,
+            "fixed_random_seed": True,
+            "is_mission": False,
+            "mission_timeout": "100",
+            "selectable_mission": False,
+            "is_good": False,
+            "activation": "",
+            "highlight_states": "",
+            "on_map_mode": "map_and_decisions_view",
+            "state_target_scope": "any",
+            "target_root_trigger": "has_war = yes",
+            "target_trigger": "is_core = yes",
+            "targets": "123",
+            "targets_dynamic": True,
+            "target_non_existing": False,
+            "target_array": "",
+            "modifier": "",
+            "complete_effect": "",
+            "timeout_effect": "",
+            "remove_effect": "",
+            "cancel_trigger": "",
+            "cancel_effect": "",
+            "cancel_if_not_visible": False,
+            "remove_trigger": "",
+            "ai_will_do": "",
+            "priority": "1",
+            "war_target_complete": False,
+            "war_target_remove": False,
+            "war_complete_tag": "",
+            "war_remove_tag": "",
+        }
+        base.update(overrides)
+        return base
+
+    # state-targeted with scope "any" -> state_target = yes
+    state_any = generate_decision_block(
+        _base(), **collect_decision_state({"targeted": _FakeVar("state")})
+    )
+    assert "state_target = yes" in state_any
+    assert "on_map_mode = map_and_decisions_view" in state_any
+    assert "target_root_trigger" in state_any
+    assert "targets = { 123 }" in state_any
+    assert "targets_dynamic = yes" in state_any
+    # state-targeted with specific scope
+    state_specific = generate_decision_block(
+        _base(state_target_scope="state:123"),
+        **collect_decision_state({"targeted": _FakeVar("state")}),
+    )
+    assert "state_target = state:123" in state_specific
+    # country-targeted -> no state_target, but targets still emitted
+    country = generate_decision_block(
+        _base(target_array="my_array"),
+        **collect_decision_state({"targeted": _FakeVar("country")}),
+    )
+    assert "state_target" not in country
+    assert "target_array = my_array" in country
+    # untargeted -> on_map_mode emitted at bottom, state_target not emitted
+    none = generate_decision_block(
+        _base(), **collect_decision_state({"targeted": _FakeVar("none")})
+    )
+    assert "state_target" not in none
+    # on_map_mode appears for untargeted (bottom branch)
+    assert "on_map_mode = map_and_decisions_view" in none
+
+
+def test_event_wizard_roundtrip_via_collect():
+    # Lightweight roundtrip: collect -> generate -> tokenise/parse survives.
+    from hoi4cm.script.syntax import parse_block, tokenize
+
+    ev = SimpleNamespace(
+        etype="country_event",
+        eid="test.99",
+        title_text="T",
+        desc_text="D",
+        picture="GFX_report_event_generic_handshake",
+        major=True,
+        fire_once=True,
+        triggered=True,
+        hidden=False,
+        trigger_code="has_war = yes",
+        mtth_days="10",
+        mtth_months="",
+        immediate="add_political_power = 10",
+        options=[
+            {
+                "name": "test.99.a",
+                "text": "Go",
+                "effects": "add_stability = 0.05",
+                "ai_chance": "5",
+            }
+        ],
+    )
+    snap = collect_event_state([ev])
+    from hoi4cm.wizards._generators import generate_events_txt
+
+    txt = generate_events_txt(snap)
+    # Txt must contain the structured blocks the parser can recover.
+    assert "add_namespace = test" in txt
+    assert "major = yes" in txt
+    assert "fire_only_once = yes" in txt
+    assert "add_political_power = 10" in txt
+    assert "add_stability = 0.05" in txt
+    # Parser roundtrip: tokenise and extract the country_event block.
+    toks = tokenize(txt)
+    # Find the event id via parse_block following the "country_event =" header.
+    idx = toks.index("country_event")
+    blk, _ = parse_block(toks, idx + 2)
+    assert blk.get("id") == "test.99"
+    assert blk.get("picture") == "GFX_report_event_generic_handshake"
+    assert blk.get("major") == "yes"

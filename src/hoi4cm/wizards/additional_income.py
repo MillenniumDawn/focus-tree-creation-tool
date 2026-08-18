@@ -25,17 +25,11 @@ from hoi4cm.ui import (
     TEXT_DIM,
 )
 from hoi4cm.wizards import _generators
-from hoi4cm.wizards._shared import _LOC_KEY_RE, notifying_workspace_files
-
-
-def _svar_get(var, default=""):
-    if var is None or not hasattr(var, "get"):
-        return default
-    try:
-        val = var.get()
-        return val if isinstance(val, str) else str(val)
-    except Exception:
-        return default
+from hoi4cm.wizards._shared import (
+    _LOC_KEY_RE,
+    notifying_workspace_files,
+    svar_get,
+)
 
 
 def collect_additional_income_state(svars):
@@ -48,7 +42,7 @@ def collect_additional_income_state(svars):
     """
 
     def _get(key, default=""):
-        return _svar_get(svars.get(key) if isinstance(svars, dict) else None, default)
+        return svar_get(svars.get(key) if isinstance(svars, dict) else None, default)
 
     return {
         "idea_id": _get("idea_id").strip(),

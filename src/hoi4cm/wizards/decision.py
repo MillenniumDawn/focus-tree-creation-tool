@@ -59,9 +59,11 @@ def collect_decision_state(evars, dec=None):
 
     The two Tk-only knobs ``targeted``/``cost_type`` live in ``evars``
     (``tk.StringVar`` in the dialog, any ``.get()`` fake in tests).
-    When the var is missing the ``dec`` fallback is used when given,
-    otherwise the wizard default (``"none"``/``"pp"``) — the two
-    call sites previously disagreed here; this is the single source.
+    When the var is missing *or* empty/whitespace the ``dec`` fallback
+    is used when given, otherwise the wizard default (``"none"``/``"pp"``)
+    — the two call sites previously disagreed here; this is the single source.
+    Empty strings previously propagated as ``""`` and rendered a broken
+    targeted block; they now fall through to the default.
     """
 
     def _resolve(key, fallback):
@@ -69,13 +71,21 @@ def collect_decision_state(evars, dec=None):
         if var is not None and hasattr(var, "get"):
             try:
                 val = var.get()
-                if isinstance(val, str):
-                    return val
-                return str(val)
+                sval = val if isinstance(val, str) else str(val)
+                if isinstance(sval, str) and not sval.strip():
+                    raise ValueError("empty")
+                return sval
             except Exception:
                 pass
         if isinstance(dec, dict):
-            return dec.get(key, fallback)
+            dval = dec.get(key, fallback)
+            if isinstance(dval, str) and not dval.strip():
+                return fallback
+            return (
+                dval
+                if isinstance(dval, str)
+                else str(dval) if dval is not None else fallback
+            )
         return fallback
 
     return {
