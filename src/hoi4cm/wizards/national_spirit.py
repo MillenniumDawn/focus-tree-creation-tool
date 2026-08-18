@@ -11,13 +11,16 @@ import os
 import re
 import threading
 import tkinter as tk
+import traceback
 from tkinter import filedialog, messagebox
 
 from hoi4cm.core import (
     MODIFIER_CATS,
     MODIFIER_DEFS,
+    add_error,
     append_scripted_loc,
     autosave_path,
+    get_logger,
     modifiers_in_cat,
     sanitize_component,
     tr,
@@ -1229,11 +1232,21 @@ def open_national_spirit_wizard(app):
         if _raw_override[0] is not None:
             return  # raw override takes precedence
         try:
+            text = _build_output()
+        except Exception as exc:
+            get_logger("national_spirit").error(
+                "Preview build failed: %s", exc, exc_info=True
+            )
+            add_error(
+                f"National spirit preview failed: {exc}\n{traceback.format_exc()}"
+            )
+            return
+        try:
             preview_txt.config(state="normal")
             preview_txt.delete("1.0", "end")
-            preview_txt.insert("1.0", _build_output())
+            preview_txt.insert("1.0", text)
             preview_txt.config(state="disabled")
-        except Exception:
+        except tk.TclError:
             pass
 
     def _get_output_text():

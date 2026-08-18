@@ -559,10 +559,22 @@ def build_national_spirit_output(
                 parts = line.split("=", 1)
                 all_mods.append({"key": parts[0].strip(), "value": parts[1].strip()})
     if all_mods:
-        out.append("\t\t\tmodifier = {")
+        valid_mods = []
         for m in all_mods:
-            out.append("\t\t\t\t{} = {}".format(m["key"], m["value"]))
-        out.append("\t\t\t}")
+            if not isinstance(m, dict):
+                continue
+            k = m.get("key")
+            v = m.get("value")
+            if not isinstance(k, str) or not k.strip():
+                continue
+            if v is None or (isinstance(v, str) and not v.strip()):
+                continue
+            valid_mods.append((k.strip(), str(v).strip()))
+        if valid_mods:
+            out.append("\t\t\tmodifier = {")
+            for k, v in valid_mods:
+                out.append(f"\t\t\t\t{k} = {v}")
+            out.append("\t\t\t}")
 
     if ai_f and ai_f != "0":
         out.append(f"\t\t\tai_will_do = {{ factor = {ai_f} }}")
