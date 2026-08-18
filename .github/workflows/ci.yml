@@ -138,8 +138,7 @@ jobs:
           HOI4ContentMaker-linux > SHA256SUMS.txt
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65
-        # v2.6.2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65  # yamllint disable-line rule:line-length # v2.6.2
         with:
           tag_name: ${{ github.ref_name }}
           name: HOI4 Content Maker ${{ github.ref_name }}
