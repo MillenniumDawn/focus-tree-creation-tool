@@ -207,7 +207,7 @@ def build_menubar(app, toolbar):
         btn.config(command=_open)
         btn.bind(
             "<Enter>",
-            lambda e, b=btn: (b.config(fg=TEXT) if open_menu_btn is not b else None),
+            lambda e, b=btn: b.config(fg=TEXT) if open_menu_btn is not b else None,
         )
         btn.bind(
             "<Leave>",
