@@ -282,3 +282,51 @@ def test_build_national_spirit_does_not_raise_for_malformed_list():
             "build_national_spirit_output raised KeyError for malformed modifier"
         )
     assert "a = 1" in out
+
+
+def test_build_national_spirit_fuzz_corrupted_autosave_never_raises():
+    """Corrupted autosave must never crash the generator (B hardening)."""
+    import random
+
+    rng = random.Random(0)
+    choices = [
+        lambda: {"key": "stability_factor", "value": "0.05"},  # valid
+        lambda: {"value": "0.05"},  # missing key
+        lambda: {"key": "stability_factor"},  # missing value
+        lambda: {"key": "", "value": "0.05"},  # blank key
+        lambda: {"key": "stability_factor", "value": ""},  # blank value
+        lambda: {"key": "   ", "value": "   "},  # whitespace
+        lambda: None,  # non-dict
+        lambda: "foo",  # non-dict
+        lambda: {"key": rng.choice([None, 123, 0]), "value": "0.05"},  # bad key type
+        lambda: {"key": "stability_factor", "value": None},  # None value
+        lambda: {"key": "stability_factor", "value": rng.randint(-5, 5)},  # numeric
+    ]
+    for _ in range(200):
+        mods = [rng.choice(choices)() for _ in range(rng.randint(0, 8))]
+        # Must not raise, must not leak None/blank, must not emit empty block
+        out = build_national_spirit_output(mod_id="TAG_s", modifiers=mods)
+        assert "None" not in out
+        # If any valid entry survived, modifier block appears once; else none.
+        has_valid = any(
+            isinstance(m, dict)
+            and isinstance(m.get("key"), str)
+            and m.get("key", "").strip()
+            and m.get("value") is not None
+            and not (isinstance(m.get("value"), str) and not m["value"].strip())
+            for m in mods
+        )
+        if has_valid:
+            # At least one valid entry could have been kept, but numeric
+            # values are also valid — just ensure block count is 0 or 1.
+            assert out.count("modifier = {") in (0, 1)
+        else:
+            assert "modifier = {" not in out
+        # Corrupted raw text is handled via extra_modifiers, also must not raise.
+        extra = "\n".join(
+            rng.choice(["ok = 0.1", "bad", " = 0.2", "# comment", ""]) for _ in range(3)
+        )
+        out2 = build_national_spirit_output(
+            mod_id="TAG_s", modifiers=mods, extra_modifiers=extra
+        )
+        assert "None" not in out2

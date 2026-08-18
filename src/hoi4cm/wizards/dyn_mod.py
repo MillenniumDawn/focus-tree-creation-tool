@@ -10,10 +10,13 @@ import json
 import os
 import re
 import tkinter as tk
+import traceback
 from tkinter import filedialog, messagebox
 
 from hoi4cm.core import (
+    add_error,
     autosave_path,
+    get_logger,
     sanitize_component,
     tr,
 )
@@ -954,11 +957,22 @@ def open_dyn_mod_wizard(app):
         messagebox.showinfo("Saved — Review Changes", "\n\n".join(parts), parent=win)
 
     def _dm_show_preview():
-        preview.config(state="normal")
-        preview.delete("1.0", "end")
-        preview.insert("1.0", _dm_get_output())
-        if not _dm_edit_mode[0]:
-            preview.config(state="disabled")
+        try:
+            text = _dm_get_output()
+        except Exception as exc:
+            get_logger("dyn_mod").error("Preview build failed: %s", exc, exc_info=True)
+            add_error(
+                f"Dynamic modifier preview failed: {exc}\n{traceback.format_exc()}"
+            )
+            return
+        try:
+            preview.config(state="normal")
+            preview.delete("1.0", "end")
+            preview.insert("1.0", text)
+            if not _dm_edit_mode[0]:
+                preview.config(state="disabled")
+        except tk.TclError:
+            pass
 
     _dm_edit_btn.config(command=_dm_toggle_edit)
     _dm_save_raw_btn.config(command=_dm_save_raw)
@@ -985,10 +999,21 @@ def open_dyn_mod_wizard(app):
             return
         if _dm_raw_override[0] is not None:
             return
-        preview.config(state="normal")
-        preview.delete("1.0", "end")
-        preview.insert("1.0", _build_output())
-        preview.config(state="disabled")
+        try:
+            text = _build_output()
+        except Exception as exc:
+            get_logger("dyn_mod").error("Preview build failed: %s", exc, exc_info=True)
+            add_error(
+                f"Dynamic modifier preview failed: {exc}\n{traceback.format_exc()}"
+            )
+            return
+        try:
+            preview.config(state="normal")
+            preview.delete("1.0", "end")
+            preview.insert("1.0", text)
+            preview.config(state="disabled")
+        except tk.TclError:
+            pass
 
     # live preview on any change
     for sv in (v_id, v_scope, v_icon, v_loc_name, v_loc_desc):
