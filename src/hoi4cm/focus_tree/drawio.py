@@ -17,6 +17,7 @@ from __future__ import annotations
 import base64
 import re
 import urllib.parse
+import xml.etree.ElementTree as ET
 import zlib
 from dataclasses import dataclass
 
@@ -90,11 +91,18 @@ def _get_graph_root(xml_text):
             continue
         try:
             return safe_fromstring(decompress_drawio(text))
-        except OSError, ValueError, zlib.error, UnicodeDecodeError, RuntimeError:
+        except (
+            OSError,
+            ValueError,
+            zlib.error,
+            UnicodeDecodeError,
+            RuntimeError,
+            ET.ParseError,
+        ):
             pass
         try:
             return safe_fromstring(text)
-        except OSError, ValueError, RuntimeError:
+        except OSError, ValueError, RuntimeError, ET.ParseError:
             pass
     return root
 
