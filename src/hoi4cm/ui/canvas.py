@@ -10,6 +10,7 @@ import math
 import tkinter as tk
 from typing import Any
 
+from hoi4cm.focus_tree.validate import Severity
 from hoi4cm.mod import MOD
 from hoi4cm.ui import (
     BG_CARD,
@@ -82,7 +83,7 @@ class CanvasMixin:
     _lifecycle: Any  # type: ignore[no-redef]
     _image_broker: Any  # type: ignore[no-redef]
     _image_poll_job: Any  # type: ignore[no-redef]
-    _validation_worst: dict[int, str]  # type: ignore[no-redef]
+    _validation_worst: dict[int, Severity]  # type: ignore[no-redef]
 
     def __getattr__(self, name: str) -> Any:  # type: ignore[no-redef]
         raise AttributeError(name)
@@ -850,7 +851,7 @@ class CanvasMixin:
             label_text = ""
 
         has_offsets = bool(getattr(f, "offsets", []))
-        val_sev = getattr(self, "_validation_worst", {}).get(f.id)
+        # val_sev already fetched before LOD branch; reuse for full path
         # Fast-exit: skip if nothing changed since last draw
         state_key = (
             round(cx, 1),

@@ -30,8 +30,11 @@ def _focus(  # type: ignore[no-untyped-def]
     return f
 
 
-def test_empty_document_returns_no_issues():
+def test_empty_mapping_returns_no_issues():
     assert validate_document({}) == []
+
+
+def test_empty_focus_document_returns_no_issues():
     assert validate_document(FocusDocument([])) == []
 
 
@@ -42,9 +45,8 @@ def test_valid_tree_with_custom_gfx_and_effects_is_clean():
     b.prereqs = [[1]]
     doc = FocusDocument([a, b])
     issues = validate_document(doc, sprites={"GFX_custom": "/a", "GFX_custom2": "/b"})
-    # no error, but maybe no issues at all (effects present, gfx known, no collision)
-    assert not any(it.severity == "error" for it in issues)
-    assert not any(it.code == "broken_prereq" for it in issues)
+    # fully clean when gfx known, effects present, no collision
+    assert issues == []
 
 
 def test_broken_prereq_and_mutex_reported_as_error():
@@ -328,15 +330,14 @@ def test_collect_loc_keys_handles_version_suffix():
 
 
 def test_worst_severity_per_focus_picks_error_over_warning():
-    a = _focus(1, name="A")
-    b = _focus(2, name="B")
+    # a has only error, b has only warning
+    a = _focus(1, name="A", x=0, y=0, prereqs=[[99]])
+    b = _focus(2, name="B", x=10, y=10, effects=[])
     doc = FocusDocument([a, b])
-    b.effects = []
-    a.prereqs = [[99]]
     issues = validate_document(doc)
     worst = worst_severity_per_focus(issues)
     assert worst[a.id] == "error"
-    assert worst.get(b.id) in ("warning", "error")
+    assert worst[b.id] == "warning"
 
 
 def test_worst_severity_ignores_none_focus_id_and_info():
@@ -351,24 +352,45 @@ def test_worst_severity_ignores_none_focus_id_and_info():
     assert None not in worst
 
 
-def test_validate_is_pure_and_sorted():
+def test_validate_is_pure_returns_new_list_and_does_not_mutate():
     a = _focus(2, name="Z", x=0, y=0)
     b = _focus(1, name="A", x=0, y=0)
     doc = FocusDocument([a, b])
     issues1 = validate_document(doc)
-    # mutate copy should not affect next call (pure)
-    assert issues1 is not validate_document(doc)
     issues2 = validate_document(doc)
+    assert issues1 is not issues2
     assert issues1 == issues2
-    # sorted by severity then name then code
-    severities = [it.severity for it in issues1]
-    if "error" in severities and "warning" in severities:
-        assert severities.index("error") < severities.index("warning")
-    # within same severity, alphabetical by focus_name
-    errors = [it for it in issues1 if it.severity == "error"]
-    if len(errors) >= 2:
-        names = [it.focus_name or "" for it in errors]
-        assert names == sorted(names)
+    before = {fid: (f.x, f.y, list(f.prereqs)) for fid, f in doc.items()}
+    validate_document(doc)
+    after = {fid: (f.x, f.y, list(f.prereqs)) for fid, f in doc.items()}
+    assert before == after
+
+
+def test_validate_sorts_by_severity_error_before_warning():
+    # one error (collision), one warning (empty)
+    a = _focus(1, name="A", x=0, y=0)
+    b = _focus(2, name="B", x=0, y=0, effects=[])
+    # force known severities: collision error + empty warning; give distinct names
+    # Use x=5 collision for A/B and empty on C
+    c = _focus(3, name="C", x=5, y=5, effects=[])
+    doc = FocusDocument([a, b, c])
+    issues = validate_document(doc)
+    severities = [it.severity for it in issues]
+    assert "error" in severities and "warning" in severities
+    assert severities.index("error") < severities.index("warning")
+
+
+def test_validate_sorts_within_severity_by_name():
+    a = _focus(1, name="Zebra", x=0, y=0)
+    b = _focus(2, name="b2", x=0, y=0)
+    c = _focus(3, name="Apple", x=1, y=1)
+    d = _focus(4, name="d2", x=1, y=1)
+    doc = FocusDocument([a, b, c, d])
+    errors = [it for it in validate_document(doc) if it.code == "position_collision"]
+    assert len(errors) == 2
+    names = [it.focus_name or "" for it in errors]
+    assert names == sorted(names)
+    assert names == ["Apple", "Zebra"]
 
 
 def test_validate_does_not_mutate_document():

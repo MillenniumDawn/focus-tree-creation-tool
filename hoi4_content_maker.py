@@ -781,7 +781,9 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
     def _validation_sprites(self):
         if MOD.loaded and getattr(MOD, "sprites", None):
             try:
-                return dict(MOD.sprites)
+                # return mapping view directly; validate_document only does `in` checks
+                # caller must not mutate
+                return MOD.sprites
             except Exception:
                 return None
         return None
@@ -813,11 +815,24 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             issues = validate_document(self.focuses, sprites=sprites, loc_keys=loc_keys)
         except Exception:
             return
-        self._validation_issues = issues
         try:
-            self._validation_worst = worst_severity_per_focus(issues)
+            worst = worst_severity_per_focus(issues)
         except Exception:
-            self._validation_worst = {}
+            worst = {}
+        prev_issues = getattr(self, "_validation_issues", None)
+        prev_worst = getattr(self, "_validation_worst", None)
+        changed = issues != prev_issues or worst != prev_worst
+        self._validation_issues = issues
+        self._validation_worst = worst
+        if not changed:
+            # still refresh dialog if open but avoid redraw churn
+            win = getattr(self, "_validation_win", None)
+            if win is not None and win.winfo_exists():
+                try:
+                    self._refresh_validation_dialog(win)
+                except Exception:
+                    pass
+            return
         # refresh UI surfaces that depend on validation
         try:
             self._redraw()
@@ -850,18 +865,39 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             pass
 
     def _redraw(self, *args, **kwargs):
-        super()._redraw(*args, **kwargs)  # type: ignore[misc]
+        # only validation-relevant redraws should re-queue validation
+        channels = kwargs.get("channels", args[0] if args else None)
+        should_schedule = True
         try:
-            self._schedule_validation()
+            from hoi4cm.ui.canvas_scheduler import RedrawChannel
+
+            if channels is not None:
+                should_schedule = bool(channels & RedrawChannel.SCENE)
         except Exception:
-            pass
+            should_schedule = True
+        super()._redraw(*args, **kwargs)  # type: ignore[misc]
+        if should_schedule:
+            try:
+                self._schedule_validation()
+            except Exception:
+                pass
 
     def _redraw_now(self, *args, **kwargs):
-        super()._redraw_now(*args, **kwargs)  # type: ignore[misc]
+        channels = kwargs.get("channels", args[0] if args else None)
+        should_schedule = True
         try:
-            self._schedule_validation()
+            from hoi4cm.ui.canvas_scheduler import RedrawChannel
+
+            if channels is not None:
+                should_schedule = bool(channels & RedrawChannel.SCENE)
         except Exception:
-            pass
+            should_schedule = True
+        super()._redraw_now(*args, **kwargs)  # type: ignore[misc]
+        if should_schedule:
+            try:
+                self._schedule_validation()
+            except Exception:
+                pass
 
     def _refresh_tree_meta_panel(self):
         """Refresh the shared_focus / joint_focus read-only display in the sidebar."""
@@ -5369,11 +5405,9 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         if not hasattr(self, "_focus_list"):
             return
         worst = getattr(self, "_validation_worst", {})
-        # Rebuild the item tuple only when the document structure changes;
-        # search keystrokes just re-filter the cached tuple.
-        self._focus_list_items = self._focus_list_cache.get(
-            self.focuses,
-            lambda: (
+
+        def _build_items():
+            return (
                 FocusListItem(
                     f.id,
                     f.name,
@@ -5384,10 +5418,13 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
                     validation_severity=worst.get(f.id),
                 )
                 for f in self.focuses.values()
-            ),
-        )
+            )
+
+        # Rebuild the item tuple only when the document structure changes;
+        # search keystrokes just re-filter the cached tuple.
+        self._focus_list_items = self._focus_list_cache.get(self.focuses, _build_items)
         # patch cached items if validation changed without document revision bump
-        if worst and self._focus_list_items:
+        if self._focus_list_items:
             needs_patch = any(
                 item.validation_severity != worst.get(item.key)
                 for item in self._focus_list_items
@@ -5395,21 +5432,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             if needs_patch:
                 self._focus_list_cache.invalidate()
                 self._focus_list_items = self._focus_list_cache.get(
-                    self.focuses,
-                    lambda: (
-                        FocusListItem(
-                            f.id,
-                            f.name,
-                            has_effects=bool(f.effects),
-                            has_broken_prerequisite=any(
-                                pid not in self.focuses
-                                for group in f.prereqs
-                                for pid in group
-                            ),
-                            validation_severity=worst.get(f.id),
-                        )
-                        for f in self.focuses.values()
-                    ),
+                    self.focuses, _build_items
                 )
         query = self._lp_search_var.get() if hasattr(self, "_lp_search_var") else ""
         placeholder = tr("common.search_placeholder", "Search...")
