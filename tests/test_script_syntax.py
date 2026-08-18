@@ -168,7 +168,7 @@ def test_recursive_serializer_supports_bare_values_and_duplicate_keys():
     assert serialize_block(parsed, indent="", include_bare_values=True) == (
         "item = first\n"
         "item = {\n\tenabled = yes\n}\n"
-        "values = {\n\tone\n\ttwo words\n}"
+        'values = {\n\tone\n\t"two words"\n}'
     )
 
 

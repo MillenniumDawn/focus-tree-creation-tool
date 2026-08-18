@@ -6,6 +6,7 @@ import re
 from collections.abc import Mapping, Sequence
 
 __all__ = [
+    "emit_scalar",
     "extract_block",
     "extract_named_block",
     "find_blocks",
@@ -198,11 +199,24 @@ def extract_named_block(source: str, name: str) -> str | None:
     return None
 
 
+def emit_scalar(value: str) -> str:
+    """Wrap a string in double quotes if it contains bare-token-breaking chars.
+
+    Paradox script bare tokens cannot contain whitespace, ``{``, ``}``, ``=``,
+    ``"``, or ``#``. Values containing any of these characters are quoted so
+    that they survive a parse -> export -> parse round-trip intact.
+    """
+    if any(c in value for c in ' \t\n\r{}="#') or '"' in value:
+        return f'"{value}"'
+    return value
+
+
 def _scalar_to_str(value: object, *, strip_strings: bool) -> str:
     if isinstance(value, bool):
         return "yes" if value else "no"
-    if isinstance(value, str) and strip_strings:
-        return value.strip()
+    if isinstance(value, str):
+        value = value.strip() if strip_strings else value
+        return emit_scalar(value)
     return str(value)
 
 

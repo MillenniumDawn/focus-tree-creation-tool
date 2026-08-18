@@ -2,6 +2,7 @@
 
 from .effects import render_effect
 from .syntax import (
+    emit_scalar,
     extract_block,
     extract_named_block,
     find_blocks,
@@ -16,6 +17,7 @@ from .syntax import (
 __all__ = [
     "append_scripted_loc",
     "dict_to_raw",
+    "emit_scalar",
     "extract_block",
     "extract_named_block",
     "find_blocks",
