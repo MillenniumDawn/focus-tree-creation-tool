@@ -17,6 +17,7 @@ from __future__ import annotations
 import base64
 import re
 import urllib.parse
+import zlib
 from dataclasses import dataclass
 
 from hoi4cm.core.safe_xml import bounded_inflate, safe_fromstring
@@ -89,11 +90,11 @@ def _get_graph_root(xml_text):
             continue
         try:
             return safe_fromstring(decompress_drawio(text))
-        except Exception:
+        except OSError, ValueError, zlib.error, UnicodeDecodeError, RuntimeError:
             pass
         try:
             return safe_fromstring(text)
-        except Exception:
+        except OSError, ValueError, RuntimeError:
             pass
     return root
 
@@ -119,7 +120,7 @@ def _read_geometry(geo):
     try:
         x = float(geo.get("x", 0) or 0)
         y = float(geo.get("y", 0) or 0)
-    except Exception:
+    except ValueError, TypeError, AttributeError:
         x = y = 0
     return x, y
 

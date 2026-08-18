@@ -577,8 +577,8 @@ def open_additional_income_wizard(app):
                     output_lines.append(
                         f"✅ {os.path.relpath(loc_path, MOD.root)}  — wrote tooltip localisation"
                     )
-            except Exception as e:
-                output_lines.append(f"❌ Tooltip localisation: {e}")
+            except (OSError, ValueError, UnicodeDecodeError, RuntimeError) as exc:
+                output_lines.append(f"❌ Tooltip localisation: {exc}")
 
         # ── Generate spirit code snippet ──────────────────────────────
         if mode == "also_spirit":

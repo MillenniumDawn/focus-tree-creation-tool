@@ -253,8 +253,10 @@ def open_event_wizard(app):
                 )
             with open(_ev_autosave_path, "w", encoding="utf-8") as fp:
                 json.dump(data, fp, indent=2)
-        except Exception:
-            pass
+        except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
+            from hoi4cm.core.logger import get_logger as _get_logger
+
+            _get_logger("event").debug("autosave failed: %s", exc, exc_info=True)
 
     def _ev_load_state():
         """Restore event list from autosave file if present."""
@@ -273,7 +275,13 @@ def open_event_wizard(app):
                     setattr(ev, k, v)
                 events.append(ev)
             return True
-        except Exception:
+        except (
+            OSError,
+            json.JSONDecodeError,
+            UnicodeDecodeError,
+            ValueError,
+            TypeError,
+        ):
             return False
 
     def _on_event_win_close():
@@ -353,7 +361,7 @@ def open_event_wizard(app):
             else:
                 img = tk.PhotoImage(file=path)
                 result = img.width(), img.height()
-        except Exception:
+        except OSError, tk.TclError, ValueError, RuntimeError, AttributeError:
             pass
         _ev_imgsize_cache[path] = result
         return result
@@ -497,7 +505,7 @@ def open_event_wizard(app):
 
                 try:
                     return ("pil", _decode(path))
-                except Exception:
+                except OSError, ValueError, RuntimeError, AttributeError:
                     # PIL failed (e.g. unsupported DDS compression BC1/BC3)
                     # Try alternative: look for a PNG/TGA version of the same stem
                     if path:
@@ -513,12 +521,17 @@ def open_event_wizard(app):
                                         if fname.lower() == base:
                                             alt_path = os.path.join(folder, fname)
                                             break
-                                except Exception:
+                                except OSError:
                                     pass
                             if os.path.exists(alt_path):
                                 try:
                                     return ("pil", _decode(alt_path))
-                                except Exception:
+                                except (
+                                    OSError,
+                                    ValueError,
+                                    RuntimeError,
+                                    AttributeError,
+                                ):
                                     pass
                 return None
 
@@ -1087,8 +1100,8 @@ def open_event_wizard(app):
             return
         try:
             WorkspaceFiles().write_text(path, _generate_all_txt(), encoding="utf-8")
-        except Exception as e:
-            report_error(str(e), e, parent=win, title="Export Error")
+        except (OSError, ValueError, TypeError, RuntimeError) as exc:
+            report_error(str(exc), exc, parent=win, title="Export Error")
             return
         status_lbl.config(text=f"  ✓  Exported {len(events)} events")
 
@@ -1186,8 +1199,8 @@ def open_event_wizard(app):
                     "No new events to append — all IDs already present in file."
                 )
 
-        except Exception as e:
-            errs.append("Events file: " + str(e))
+        except (OSError, ValueError, RuntimeError, UnicodeDecodeError) as exc:
+            errs.append("Events file: " + str(exc))
 
         # ── LOCALISATION: safe append — skip keys already present ─────────
         try:
@@ -1226,7 +1239,7 @@ def open_event_wizard(app):
                     with open(loc_file, encoding="utf-8-sig", errors="replace") as _rf:
                         if f"##########Events - {ns}##########" in _rf.read():
                             needs_hdr = False
-                except Exception:
+                except OSError, UnicodeDecodeError, ValueError:
                     pass
                 loc_body = ""
                 if needs_hdr:
@@ -1238,8 +1251,8 @@ def open_event_wizard(app):
             else:
                 warnings.append("No new localisation keys to append.")
 
-        except Exception as e:
-            errs.append("Localisation: " + str(e))
+        except (OSError, ValueError, RuntimeError, UnicodeDecodeError) as exc:
+            errs.append("Localisation: " + str(exc))
 
         # ── SCRIPTED LOC ─────────────────────────────────────────────────
         if MOD.edit_scripted_loc_file:
@@ -1352,7 +1365,7 @@ def open_event_wizard(app):
                     for m in _re2.finditer(r"\bids?\s*=\s*([^\s{}#\n]+)", raw)
                     if m.group(1) in existing_ids
                 ]
-            except Exception:
+            except OSError, UnicodeDecodeError, ValueError:
                 dupes = []
             if dupes:
                 d_str = ", ".join(sorted(set(dupes))[:8])
@@ -1405,8 +1418,8 @@ def open_event_wizard(app):
         try:
             with open(path, encoding="utf-8", errors="replace") as f:
                 raw = f.read()
-        except Exception as e:
-            report_error(str(e), e, parent=win, title="Import Error")
+        except (OSError, UnicodeDecodeError, ValueError) as exc:
+            report_error(str(exc), exc, parent=win, title="Import Error")
             return
 
         def _str_val(v, default=""):
@@ -1819,7 +1832,7 @@ def open_event_wizard(app):
                     nw = max(1, int(pw * ratio))
                     nh = max(1, int(ph * ratio))
                     return pil.resize((nw, nh), rs)
-                except Exception:
+                except OSError, ValueError, RuntimeError, AttributeError:
                     pass
             return None
 
@@ -2369,7 +2382,7 @@ def open_event_wizard(app):
                 nw2 = max(1, int(pw * ratio))
                 nh2 = max(1, int(ph * ratio))
                 return pil.resize((nw2, nh2), rs)
-            except Exception:
+            except OSError, ValueError, RuntimeError, AttributeError:
                 pass
         return None
 

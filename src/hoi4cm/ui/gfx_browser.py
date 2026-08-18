@@ -586,9 +586,9 @@ def open_gfx_placement_editor(win, initial_items=None, on_confirm=None):
                             rs,
                         )
                         return _PILImageTk.PhotoImage(pil)
-                    except Exception:
+                    except OSError, ValueError, RuntimeError, AttributeError:
                         pass
-        except Exception:
+        except OSError, ValueError, RuntimeError:
             pass
         return None
 
@@ -850,7 +850,7 @@ def open_gfx_placement_editor(win, initial_items=None, on_confirm=None):
                         it2[a] = int(sv2.get())
                         _render_item(it2)
                         _update_code()
-                    except Exception:
+                    except ValueError, TypeError, tk.TclError, RuntimeError:
                         pass
 
                 sv.trace_add("write", _on_dim)

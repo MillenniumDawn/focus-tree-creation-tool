@@ -126,8 +126,10 @@ def open_national_spirit_wizard(app):
         try:
             with open(_sp_autosave, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
-        except Exception:
-            pass
+        except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
+            get_logger("national_spirit").debug(
+                "autosave failed: %s", exc, exc_info=True
+            )
 
     def _on_spirit_close():
         data = {k: v.get() for k, v in _spirit_svars.items() if hasattr(v, "get")}
@@ -1233,7 +1235,8 @@ def open_national_spirit_wizard(app):
             return  # raw override takes precedence
         try:
             text = _build_output()
-        except Exception as exc:
+        # intentional: builder may raise any Exception
+        except Exception as exc:  # noqa: BLE001
             get_logger("national_spirit").error(
                 "Preview build failed: %s", exc, exc_info=True
             )
@@ -1630,8 +1633,8 @@ def open_national_spirit_wizard(app):
                 rel = os.path.relpath(ideas_path, mod_root)
                 saved.append(rel + "  (new file created)")
 
-        except Exception as e:
-            errs.append("Ideas: " + str(e))
+        except (OSError, ValueError, RuntimeError, UnicodeDecodeError) as exc:
+            errs.append("Ideas: " + str(exc))
 
         # ── SAFE APPEND to localisation ───────────────────────────────────
         if MOD.edit_loc_file and os.path.isfile(MOD.edit_loc_file):
@@ -1661,8 +1664,8 @@ def open_national_spirit_wizard(app):
                 saved.append(rel + f"  (+{len(to_add)} keys)")
             else:
                 warnings.append("Localisation keys already present — skipped.")
-        except Exception as e:
-            errs.append("Localisation: " + str(e))
+        except (OSError, ValueError, RuntimeError, UnicodeDecodeError) as exc:
+            errs.append("Localisation: " + str(exc))
 
         # ── SCRIPTED LOC ─────────────────────────────────────────────────
         if MOD.edit_scripted_loc_file:
@@ -1733,7 +1736,7 @@ def open_national_spirit_wizard(app):
                             continue
                         if isinstance(sdata, dict):
                             spirits.append((sid, slot_key, fp))
-            except Exception:
+            except OSError, ValueError, RuntimeError, UnicodeDecodeError:
                 pass
 
         if not spirits:
@@ -1867,8 +1870,8 @@ def open_national_spirit_wizard(app):
                         title="Parse Error",
                     )
                     return
-            except Exception as e:
-                report_error(str(e), e, parent=dlg, title="Parse Error")
+            except (OSError, ValueError, TypeError, RuntimeError) as exc:
+                report_error(str(exc), exc, parent=dlg, title="Parse Error")
                 return
 
             # Populate identity fields
@@ -1924,7 +1927,7 @@ def open_national_spirit_wizard(app):
                                 loc_desc = v
                         if loc_name and loc_desc:
                             break
-                    except Exception:
+                    except OSError, ValueError, UnicodeDecodeError:
                         pass
             v_loc_name.set(loc_name)
             v_loc_desc.set(loc_desc)

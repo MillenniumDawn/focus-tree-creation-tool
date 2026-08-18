@@ -82,7 +82,8 @@ class DaemonThreadPoolExecutor(Executor):
                 continue
             try:
                 result = item.work()
-            except BaseException as error:
+            # intentional: propagate BaseException to future (incl. KeyboardInterrupt)
+            except BaseException as error:  # noqa: BLE001
                 item.future.set_exception(error)
             else:
                 item.future.set_result(result)

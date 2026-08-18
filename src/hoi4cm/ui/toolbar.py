@@ -214,11 +214,11 @@ def build_toolbar_row2(app, toolbar):
     def _cfp_commit(*_):
         try:
             app._cfp_x = int(app._cfp_x_var.get())
-        except Exception:
+        except ValueError, TypeError, tk.TclError, AttributeError:
             pass
         try:
             app._cfp_y = int(app._cfp_y_var.get())
-        except Exception:
+        except ValueError, TypeError, tk.TclError, AttributeError:
             pass
 
     _cfp_y_ent = tk.Entry(

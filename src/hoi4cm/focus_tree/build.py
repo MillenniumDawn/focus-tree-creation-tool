@@ -144,7 +144,7 @@ def build_focuses(
         try:
             gx = int(rf.get("x", 0))
             gy = int(rf.get("y", 0))
-        except Exception:
+        except ValueError, TypeError:
             gx = 0
             gy = 0
         rel_id = rf.get("relative_position_id", None)
@@ -162,20 +162,20 @@ def build_focuses(
         try:
             cost = float(rf.get("cost", "10"))
             f.cost = cost if cost != int(cost) else int(cost)
-        except Exception:
+        except ValueError, TypeError:
             f.cost = 10
         aiblock = rf.get("ai_will_do", {})
         if isinstance(aiblock, dict):
             try:
                 factor = aiblock.get("factor", aiblock.get("base", 1))
                 f.ai_will_do = int(float(factor)) if factor is not None else 1
-            except Exception:
+            except ValueError, TypeError:
                 f.ai_will_do = 1
             f.ai_will_do_raw = dict_to_raw(aiblock)
         else:
             try:
                 f.ai_will_do = int(float(aiblock))
-            except Exception:
+            except ValueError, TypeError:
                 f.ai_will_do = 1
             f.ai_will_do_raw = ""
         f.cancel_if_invalid = rf.get("cancel_if_invalid", "yes") == "yes"

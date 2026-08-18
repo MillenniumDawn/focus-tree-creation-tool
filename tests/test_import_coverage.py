@@ -16,8 +16,8 @@ def test_all_hoi4cm_submodules_import_cleanly():
     for info in walker:
         try:
             importlib.import_module(info.name)
-        except Exception as e:
-            failures.append(f"{info.name}: {e!r}")
+        except (ImportError, AttributeError, ValueError, RuntimeError, OSError) as exc:
+            failures.append(f"{info.name}: {exc!r}")
 
     assert not failures, failures
 

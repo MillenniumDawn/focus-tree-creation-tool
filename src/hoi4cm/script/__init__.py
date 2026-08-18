@@ -193,5 +193,5 @@ def append_scripted_loc(sloc_path, blocks, saved, errs, mod_root=None):
                 f.write(sep + "\n\n".join(new_blocks) + "\n")
             rel = os.path.relpath(sloc_path, mod_root) if mod_root else sloc_path
             saved.append(rel + f"  (+{len(new_blocks)} scripted_loc blocks)")
-    except Exception as e:
-        errs.append("Scripted Loc: " + str(e))
+    except (OSError, ValueError, TypeError, RuntimeError) as exc:
+        errs.append("Scripted Loc: " + str(exc))

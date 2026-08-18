@@ -103,12 +103,14 @@ def run_bg(widget, work, on_done, on_error=None, *, scope="application"):
     def _job():
         try:
             result = work()
-        except Exception as exc:
+        # intentional: work is arbitrary user code, must capture any Exception
+        except Exception as exc:  # noqa: BLE001
             log.exception("background task failed")
             error_trace = traceback.format_exc()
             schedule(lambda error_trace=error_trace: add_error(error_trace))
             if on_error is not None:
-                schedule(lambda exc=exc: on_error(exc))
+                _on_error = on_error  # local alias for type narrowing
+                schedule(lambda exc=exc, _cb=_on_error: _cb(exc))
             return
         schedule(lambda result=result: on_done(result))
 
@@ -196,11 +198,11 @@ def progress_modal(parent, title, *, determinate=True):
     def close():
         try:
             win.grab_release()
-        except Exception:
+        except tk.TclError:
             pass
         try:
             win.destroy()
-        except Exception:
+        except tk.TclError:
             pass
 
     return SimpleNamespace(
