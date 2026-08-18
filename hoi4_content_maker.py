@@ -605,7 +605,9 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         self._shared_focuses = self.workspace.main_tree.metadata.shared_focuses
         self._joint_focuses = self.workspace.main_tree.metadata.joint_focuses
         # Extra loaded trees (shared/joint trees loaded alongside the main tree)
-        self._extra_trees = []  # list of dicts: {type, file_path, tree_id, cfp_x, cfp_y, shared_focuses, joint_focuses, country_tag, country_raw, tree_extras, had_wrapper, focus_ids}
+        self._extra_trees = (
+            []
+        )  # list of dicts: {type, file_path, tree_id, cfp_x, cfp_y, shared_focuses, joint_focuses, country_tag, country_raw, tree_extras, had_wrapper, focus_ids}
         self._tree_badge_table = None  # rebuilt by _get_tree_badge on change
         toolbar = tk.Frame(self, bg=BG_DARK)
         toolbar.pack(fill="x")
@@ -5142,9 +5144,9 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
                     add_error(f"Write failed: {result.plan.focus_path}: {result.error}")
                 continue
             if result.plan.extra_tree_idx is not None:
-                self._extra_trees[result.plan.extra_tree_idx - 1]["file_path"] = (
-                    result.plan.focus_path
-                )
+                self._extra_trees[result.plan.extra_tree_idx - 1][
+                    "file_path"
+                ] = result.plan.focus_path
             if MOD.loaded and MOD.root:
                 for path in result.written_paths:
                     MOD.note_file_written(path)

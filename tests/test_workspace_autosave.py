@@ -55,7 +55,8 @@ def test_clear_workspace_autosave_removes_file(tmp_path, monkeypatch):
     monkeypatch.setattr(os.path, "expanduser", lambda p: p.replace("~", str(tmp_path)))
     path = workspace_autosave_path()
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    open(path, "w").write("x")
+    # test tmp is safe — not a user-controlled traversal sink
+    open(path, "w", encoding="utf-8").write("x")  # nosemgrep: python-path-traversal
     assert os.path.isfile(path)
     clear_workspace_autosave()
     assert not os.path.isfile(path)
