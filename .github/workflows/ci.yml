@@ -56,7 +56,7 @@ jobs:
           xvfb-run -a pytest
           --cov
           --cov-report=term-missing
-          --cov-fail-under=35
+          --cov-fail-under=50
       - name: Coverage gate (wizard generators)
         # Per-module floor on `hoi4cm.wizards._generators` keeps new
         # script/loc extractions tested (see docs/dev/wizards.md). No Xvfb
