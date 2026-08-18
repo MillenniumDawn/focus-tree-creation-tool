@@ -9,7 +9,7 @@ from typing import Literal
 
 from hoi4cm.models import Focus
 from hoi4cm.script.effects import render_effect
-from hoi4cm.script.syntax import serialize_block
+from hoi4cm.script.syntax import emit_scalar, serialize_block
 
 from .build import build_focuses
 from .parse import parse_focus_tree
@@ -144,7 +144,7 @@ def render_focus_body(
     inner_indent = indent + "\t"
     text = getattr(focus, "text", "").strip()
     if text:
-        out.append(f"{indent}text = {text}")
+        out.append(f"{indent}text = {emit_scalar(text)}")
 
     x, y, relative_id = _render_coordinates(
         focus, focus_name_lookup, policy=coordinate_policy
@@ -225,7 +225,7 @@ def render_focus_body(
                 out, "will_lead_to_war_with", war_target, indent, inner_indent
             )
         else:
-            out.append(f"{indent}will_lead_to_war_with = {war_target}")
+            out.append(f"{indent}will_lead_to_war_with = {emit_scalar(war_target)}")
     _emit_block(out, "complete_tooltip", getattr(focus, "complete_tooltip", ""), indent)
     _emit_block(out, "select_effect", getattr(focus, "select_effect", ""), indent)
     if not focus.cancel_if_invalid:
@@ -286,7 +286,7 @@ def render_focus_block(
     out = [
         "focus = {",
         f"{indent}id = {focus.name}",
-        f"{indent}icon = {getattr(focus, 'gfx', _DEFAULT_GFX)}",
+        f"{indent}icon = {emit_scalar(getattr(focus, 'gfx', _DEFAULT_GFX))}",
     ]
     out.extend(
         render_focus_body(

@@ -7,7 +7,7 @@ writing the file.
 import re
 
 from hoi4cm.script.effects import render_effect
-from hoi4cm.script.syntax import serialize_block
+from hoi4cm.script.syntax import emit_scalar, serialize_block
 
 from .codec import render_focus_body
 from .operations import build_focus_name_lookup
@@ -90,7 +90,7 @@ def export_focus_tree(
         for f in focuses_in_tree:
             out.append(f"{block_kw} = {{")
             out.append(f"\tid = {f.name}")
-            out.append(f"\ticon = {getattr(f, 'gfx', GFX_DEFAULT)}")
+            out.append(f"\ticon = {emit_scalar(getattr(f, 'gfx', GFX_DEFAULT))}")
             write_focus_body(f, out, "\t")
             out.append("}")
             out.append("")
@@ -131,7 +131,7 @@ def export_focus_tree(
         for f in focuses_in_tree:
             out.append("\tfocus = {")
             out.append(f"\t\tid = {f.name}")
-            out.append(f"\t\ticon = {getattr(f, 'gfx', GFX_DEFAULT)}")
+            out.append(f"\t\ticon = {emit_scalar(getattr(f, 'gfx', GFX_DEFAULT))}")
             write_focus_body(f, out, "\t\t")
             out.append("\t}")
             out.append("")
@@ -215,7 +215,7 @@ def export_main_tree(
     for f in focuses_in_tree:
         out.append("\tfocus = {")
         out.append(f"\t\tid = {f.name}")
-        out.append(f"\t\ticon = {getattr(f, 'gfx', GFX_DEFAULT)}")
+        out.append(f"\t\ticon = {emit_scalar(getattr(f, 'gfx', GFX_DEFAULT))}")
         out.extend(
             render_focus_body(
                 f,
