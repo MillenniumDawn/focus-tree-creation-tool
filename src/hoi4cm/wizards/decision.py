@@ -54,6 +54,36 @@ from hoi4cm.wizards._shared import (
 )
 
 
+def collect_decision_state(evars, dec=None):
+    """Collect decision render knobs from widget vars.
+
+    The two Tk-only knobs ``targeted``/``cost_type`` live in ``evars``
+    (``tk.StringVar`` in the dialog, any ``.get()`` fake in tests).
+    When the var is missing the ``dec`` fallback is used when given,
+    otherwise the wizard default (``"none"``/``"pp"``) — the two
+    call sites previously disagreed here; this is the single source.
+    """
+
+    def _resolve(key, fallback):
+        var = evars.get(key) if isinstance(evars, dict) else None
+        if var is not None and hasattr(var, "get"):
+            try:
+                val = var.get()
+                if isinstance(val, str):
+                    return val
+                return str(val)
+            except Exception:
+                pass
+        if isinstance(dec, dict):
+            return dec.get(key, fallback)
+        return fallback
+
+    return {
+        "targeted": _resolve("targeted", "none"),
+        "cost_type": _resolve("cost_type", "pp"),
+    }
+
+
 def open_decision_wizard(app):
     """HOI4 Decision / Decision Category maker — matches mockup layout."""
     win = tk.Toplevel(app)
@@ -4233,32 +4263,19 @@ def open_decision_wizard(app):
         this closure only resolves the two widget-only knobs (targeted /
         cost_type) from the Tk StringVars, then delegates.
         """
-        tgt_var = _evars.get("targeted")
-        targeted = (
-            tgt_var.get()
-            if isinstance(tgt_var, tk.StringVar)
-            else dec.get("targeted", "none")
-        )
-        cost_type_var = _evars.get("cost_type")
-        cost_type = (
-            cost_type_var.get()
-            if isinstance(cost_type_var, tk.StringVar)
-            else dec.get("cost_type", "pp")
-        )
+        state = collect_decision_state(_evars, dec)
         return _generators.generate_decision_block(
-            dec, targeted=targeted, cost_type=cost_type
+            dec, targeted=state["targeted"], cost_type=state["cost_type"]
         )
 
     def _gen_decisions_file():
         _collect()
-        tgt_var = _evars.get("targeted")
-        targeted = tgt_var.get() if isinstance(tgt_var, tk.StringVar) else "none"
-        cost_type_var = _evars.get("cost_type")
-        cost_type = (
-            cost_type_var.get() if isinstance(cost_type_var, tk.StringVar) else "pp"
-        )
+        state = collect_decision_state(_evars)
         return _generators.generate_decisions_file(
-            dm_cats, dm_decs, targeted=targeted, cost_type=cost_type
+            dm_cats,
+            dm_decs,
+            targeted=state["targeted"],
+            cost_type=state["cost_type"],
         )
 
     def _gen_categories_file():

@@ -48,6 +48,88 @@ from hoi4cm.wizards._image_loader import TkImageLoader
 from hoi4cm.wizards._shared import notifying_workspace_files
 
 
+def _svar_get(var, default=""):
+    if var is None or not hasattr(var, "get"):
+        return default
+    try:
+        val = var.get()
+        return val if isinstance(val, str) else str(val)
+    except Exception:
+        return default
+
+
+def _text_get(widget, default=""):
+    if widget is None or not hasattr(widget, "get"):
+        return default
+    try:
+        val = widget.get("1.0", "end")
+    except TypeError:
+        try:
+            val = widget.get()
+        except Exception:
+            return default
+    except Exception:
+        return default
+    if isinstance(val, str):
+        return val.strip()
+    return str(val).strip()
+
+
+def collect_national_spirit_state(svars, text_widgets, modifiers):
+    """Collect wizard form state into kwargs for ``build_national_spirit_output``.
+
+    ``svars`` maps scalar field names to ``tk.StringVar``-like objects
+    (``.get()``), ``text_widgets`` maps trigger/text names to
+    ``tk.Text``-like objects (``.get("1.0", "end")``). Both accept
+    duck-typed fakes in tests. ``modifiers`` is the live list of
+    ``{key, value}`` dicts.
+    """
+    return {
+        "mod_id": _svar_get(svars.get("mod_id") if isinstance(svars, dict) else None),
+        "name_key": _svar_get(
+            svars.get("name_key") if isinstance(svars, dict) else None
+        ),
+        "picture": _svar_get(svars.get("picture") if isinstance(svars, dict) else None),
+        "slot": _svar_get(svars.get("slot") if isinstance(svars, dict) else None),
+        "cost": _svar_get(svars.get("cost") if isinstance(svars, dict) else None),
+        "removal_cost": _svar_get(
+            svars.get("removal") if isinstance(svars, dict) else None
+        ),
+        "loc_name": _svar_get(
+            svars.get("loc_name") if isinstance(svars, dict) else None
+        ),
+        "loc_desc": _svar_get(
+            svars.get("loc_desc") if isinstance(svars, dict) else None
+        ),
+        "ai_factor": _svar_get(svars.get("ai") if isinstance(svars, dict) else None),
+        "allowed": _text_get(
+            text_widgets.get("allowed") if isinstance(text_widgets, dict) else None
+        ),
+        "available": _text_get(
+            text_widgets.get("available") if isinstance(text_widgets, dict) else None
+        ),
+        "cancel": _text_get(
+            text_widgets.get("cancel") if isinstance(text_widgets, dict) else None
+        ),
+        "visible": _text_get(
+            text_widgets.get("visible") if isinstance(text_widgets, dict) else None
+        ),
+        "on_add": _text_get(
+            text_widgets.get("on_add") if isinstance(text_widgets, dict) else None
+        ),
+        "on_remove": _text_get(
+            text_widgets.get("on_remove") if isinstance(text_widgets, dict) else None
+        ),
+        "rule": _text_get(
+            text_widgets.get("rule") if isinstance(text_widgets, dict) else None
+        ),
+        "extra_modifiers": _text_get(
+            text_widgets.get("extra") if isinstance(text_widgets, dict) else None
+        ),
+        "modifiers": list(modifiers) if modifiers is not None else [],
+    }
+
+
 def open_national_spirit_wizard(app):
     """Visual National Spirit / Idea builder with searchable modifier cards."""
     win = tk.Toplevel(app)
@@ -1137,29 +1219,31 @@ def open_national_spirit_wizard(app):
     # ── Output builder ────────────────────────────────────────────────
     # Headless generator lives in _generators.py (issue #51).
     def _build_output():
-        def _tri(t):
-            return t.get("1.0", "end").strip()
-
-        return build_national_spirit_output(
-            mod_id=v_id.get(),
-            name_key=v_name_key.get(),
-            picture=v_picture.get(),
-            slot=v_slot.get(),
-            cost=v_cost.get(),
-            removal_cost=v_removal.get(),
-            loc_name=v_loc_name.get(),
-            loc_desc=v_loc_desc.get(),
-            ai_factor=v_ai.get(),
-            allowed=_tri(t_allowed),
-            available=_tri(t_available),
-            cancel=_tri(t_cancel),
-            visible=_tri(t_visible),
-            on_add=_tri(t_on_add),
-            on_remove=_tri(t_on_remove),
-            rule=_tri(t_rule),
-            extra_modifiers=t_extra.get("1.0", "end").strip(),
-            modifiers=spirit_modifiers,
+        state = collect_national_spirit_state(
+            {
+                "mod_id": v_id,
+                "name_key": v_name_key,
+                "picture": v_picture,
+                "slot": v_slot,
+                "cost": v_cost,
+                "removal": v_removal,
+                "loc_name": v_loc_name,
+                "loc_desc": v_loc_desc,
+                "ai": v_ai,
+            },
+            {
+                "allowed": t_allowed,
+                "available": t_available,
+                "cancel": t_cancel,
+                "visible": t_visible,
+                "on_add": t_on_add,
+                "on_remove": t_on_remove,
+                "rule": t_rule,
+                "extra": t_extra,
+            },
+            spirit_modifiers,
         )
+        return build_national_spirit_output(**state)
 
     def _refresh_preview(*_):
         """Rebuild preview from form fields (no-op in edit mode or raw override)."""

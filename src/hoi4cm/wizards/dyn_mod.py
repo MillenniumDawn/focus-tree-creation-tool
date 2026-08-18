@@ -41,6 +41,59 @@ from hoi4cm.wizards._image_loader import TkImageLoader
 from hoi4cm.wizards._shared import notifying_workspace_files
 
 
+def _svar_get(var, default=""):
+    if var is None or not hasattr(var, "get"):
+        return default
+    try:
+        val = var.get()
+        return val if isinstance(val, str) else str(val)
+    except Exception:
+        return default
+
+
+def _text_get(widget, default=""):
+    if widget is None or not hasattr(widget, "get"):
+        return default
+    try:
+        val = widget.get("1.0", "end")
+    except TypeError:
+        try:
+            val = widget.get()
+        except Exception:
+            return default
+    except Exception:
+        return default
+    if isinstance(val, str):
+        return val.strip()
+    return str(val).strip()
+
+
+def collect_dyn_mod_state(svars, text_widgets):
+    """Collect dynamic-modifier form state into kwargs for ``build_dyn_mod_output``."""
+    return {
+        "mod_id": _svar_get(svars.get("mod_id") if isinstance(svars, dict) else None),
+        "scope": _svar_get(
+            svars.get("scope") if isinstance(svars, dict) else None, "country"
+        ),
+        "icon": _svar_get(svars.get("icon") if isinstance(svars, dict) else None),
+        "enable": _text_get(
+            text_widgets.get("enable") if isinstance(text_widgets, dict) else None
+        ),
+        "mods_raw": _text_get(
+            text_widgets.get("mods") if isinstance(text_widgets, dict) else None
+        ),
+        "const": _text_get(
+            text_widgets.get("const") if isinstance(text_widgets, dict) else None
+        ),
+        "loc_name": _svar_get(
+            svars.get("loc_name") if isinstance(svars, dict) else None
+        ),
+        "loc_desc": _svar_get(
+            svars.get("loc_desc") if isinstance(svars, dict) else None
+        ),
+    }
+
+
 def open_dyn_mod_wizard(app):
     """Wizard to create a HOI4 dynamic modifier .txt file."""
     win = tk.Toplevel(app)
@@ -937,16 +990,17 @@ def open_dyn_mod_wizard(app):
         return _parse_mod_line_pure(ln)
 
     def _build_output():
-        return build_dyn_mod_output(
-            mod_id=v_id.get(),
-            scope=v_scope.get(),
-            icon=v_icon.get(),
-            enable=v_enable.get("1.0", "end"),
-            mods_raw=v_mods.get("1.0", "end"),
-            const=v_const.get("1.0", "end"),
-            loc_name=v_loc_name.get(),
-            loc_desc=v_loc_desc.get(),
+        state = collect_dyn_mod_state(
+            {
+                "mod_id": v_id,
+                "scope": v_scope,
+                "icon": v_icon,
+                "loc_name": v_loc_name,
+                "loc_desc": v_loc_desc,
+            },
+            {"enable": v_enable, "mods": v_mods, "const": v_const},
         )
+        return build_dyn_mod_output(**state)
 
     def _preview(*_):
         if _dm_edit_mode[0]:

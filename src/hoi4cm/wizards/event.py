@@ -54,6 +54,19 @@ from hoi4cm.wizards._shared import (
 )
 
 
+def collect_event_state(events):
+    """Snapshot the wizard's event list for headless generator calls.
+
+    Returns a shallow copy so a generator reading the list cannot be
+    affected by a concurrent mutation of the wizard's live list (the
+    same reason the dialog's export path copies before rendering).
+    Accepts any iterable; ``None`` becomes ``[]``.
+    """
+    if events is None:
+        return []
+    return list(events)
+
+
 def open_event_wizard(app):
     """HOI4 Event Maker — uses main app theme (BG_DARK / BG_PANEL etc.)."""
 
@@ -1034,10 +1047,10 @@ def open_event_wizard(app):
         return _generators.render_event_txt(ev)
 
     def _generate_all_txt():
-        return _generators.generate_events_txt(events)
+        return _generators.generate_events_txt(collect_event_state(events))
 
     def _generate_yml():
-        return _generators.generate_event_loc_yml(events)
+        return _generators.generate_event_loc_yml(collect_event_state(events))
 
     # ── Top bar actions ───────────────────────────────────────────────
     def _new_event():
