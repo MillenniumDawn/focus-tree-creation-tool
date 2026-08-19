@@ -36,6 +36,9 @@ class _UndoCallSiteApp:
         self._redraw = Mock()
         self._refresh_prereqs = Mock()
         self._refresh_mutex = Mock()
+        self._refresh_effects = Mock()
+        self._populate = Mock()
+        self._hint = Mock()
         self._draw_lines = Mock()
         self._begin_document_generation = Mock()
         self._hide_form = Mock()
@@ -100,6 +103,48 @@ def test_clear_all_round_trips_through_real_undo_stack(monkeypatch):
     assert app.focuses[focus.id].name == focus.name
 
 
+def test_undo_and_redo_refresh_selected_focus():
+    focus = Focus()
+    original_name = focus.name
+    app = _UndoCallSiteApp([focus])
+    app.selected = focus
+    app._undo_stack = UndoStack()
+
+    app_module.App._push_undo(_as_app(app), "edit focus", touched_ids=(focus.id,))
+    focus.name = "changed"
+    app_module.App._undo(_as_app(app))
+
+    assert app.selected is not focus
+    assert app.selected.name == original_name
+    app._populate.assert_called_once_with(app.selected)
+    app._refresh_prereqs.assert_called_once_with()
+    app._refresh_mutex.assert_called_once_with()
+    app._refresh_effects.assert_called_once_with()
+
+    app_module.App._redo(_as_app(app))
+
+    assert app.selected.name == "changed"
+    assert app._populate.call_count == 2
+    assert app._refresh_prereqs.call_count == 2
+    assert app._refresh_mutex.call_count == 2
+    assert app._refresh_effects.call_count == 2
+
+
+def test_undo_clears_selected_focus_after_removal():
+    app = _UndoCallSiteApp()
+    app._undo_stack = UndoStack()
+    app_module.App._push_undo(_as_app(app), "add focus", touched_ids=())
+    focus = Focus()
+    app.focuses.add(focus)
+    app.selected = focus
+
+    app_module.App._undo(_as_app(app))
+
+    assert app.selected is None
+    app._hide_form.assert_called_once_with()
+    app.cv.delete.assert_called_once_with(f"F{focus.id}")
+
+
 def test_make_prereq_pushes_child_id():
     child = Focus()
     parent = Focus()
@@ -123,6 +168,14 @@ def test_duplicate_prereq_does_not_push_undo():
     assert child.prereqs == [[parent.id]]
 
 
+def test_remove_prereq_without_selection_does_not_push_undo():
+    app = _UndoCallSiteApp([Focus()])
+
+    app_module.App._rm_prereq(_as_app(app), 0)
+
+    app._push_undo.assert_not_called()
+
+
 def test_remove_prereq_group_pushes_child_id():
     child = Focus()
     parent = Focus()
@@ -136,6 +189,14 @@ def test_remove_prereq_group_pushes_child_id():
         "remove prerequisite group", touched_ids=(child.id,)
     )
     assert child.prereqs == []
+
+
+def test_remove_mutex_without_selection_does_not_push_undo():
+    app = _UndoCallSiteApp([Focus()])
+
+    app_module.App._rm_mutex(_as_app(app), 0)
+
+    app._push_undo.assert_not_called()
 
 
 def test_make_mutex_pushes_both_focus_ids():
@@ -202,6 +263,42 @@ def test_drag_into_occupied_cell_does_not_push_undo():
     assert (focus.x, focus.y) == (0, 0)
 
 
+def test_drag_event_for_other_focus_does_not_push_undo():
+    focus = Focus()
+    other = Focus(1, 1)
+    app = _UndoCallSiteApp([focus, other])
+    app.zoom = 1.0
+    app.mutex_mode = False
+
+    CanvasMixin._foc_pr(
+        cast(CanvasMixin, app), focus.id, SimpleNamespace(x=0, y=0, state=0)
+    )
+    CanvasMixin._foc_mv(
+        cast(CanvasMixin, app), other.id, SimpleNamespace(x=XGRID, y=YGRID)
+    )
+
+    app._push_undo.assert_not_called()
+    assert (focus.x, focus.y) == (0, 0)
+
+
+def test_drag_in_mutex_mode_does_not_push_undo():
+    focus = Focus()
+    app = _UndoCallSiteApp([focus])
+    app.zoom = 1.0
+    app.mutex_mode = False
+
+    CanvasMixin._foc_pr(
+        cast(CanvasMixin, app), focus.id, SimpleNamespace(x=0, y=0, state=0)
+    )
+    app.mutex_mode = True
+    CanvasMixin._foc_mv(
+        cast(CanvasMixin, app), focus.id, SimpleNamespace(x=XGRID, y=YGRID)
+    )
+
+    app._push_undo.assert_not_called()
+    assert (focus.x, focus.y) == (0, 0)
+
+
 def test_drag_move_pushes_once_with_moved_focus_id():
     focus = Focus()
     app = _UndoCallSiteApp([focus])
@@ -215,6 +312,9 @@ def test_drag_move_pushes_once_with_moved_focus_id():
 
     CanvasMixin._foc_pr(
         cast(CanvasMixin, app), focus.id, SimpleNamespace(x=0, y=0, state=0)
+    )
+    CanvasMixin._foc_mv(
+        cast(CanvasMixin, app), focus.id, SimpleNamespace(x=XGRID, y=YGRID)
     )
     CanvasMixin._foc_mv(
         cast(CanvasMixin, app), focus.id, SimpleNamespace(x=XGRID, y=YGRID)

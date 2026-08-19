@@ -11,7 +11,9 @@ headless constraint"); everything else lives in the file that uses it.
 `pytest --cov` measures the whole `hoi4cm` package with branch coverage on
 (`[tool.coverage.run]` in `pyproject.toml`), so no `--cov=` argument is
 needed for the normal case. `pytest --cov --cov-report=term-missing` prints
-the per-module gaps.
+the per-module gaps. The coverage source intentionally excludes
+`hoi4_content_maker.py`, which is the Tk shell. Tests that call its seams are
+still regression coverage, but they do not change this package percentage.
 
 CI gates it twice:
 
