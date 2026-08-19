@@ -15,7 +15,7 @@ the per-module gaps.
 
 CI gates it twice:
 
-- The full run carries `--cov-fail-under=35`, a backstop against a large
+- The full run carries `--cov-fail-under=50`, a backstop against a large
   untested addition. It's a floor, not a target: raise it as coverage
   climbs.
 - `pytest tests/test_wizard_generators_*.py --cov=hoi4cm.wizards._generators
@@ -23,13 +23,17 @@ CI gates it twice:
   covered, and runs without Xvfb on purpose so they can't quietly grow a
   Tk dependency.
 
-The package number (~37% with a display, ~35% without) is dominated by the
-Tk dialog modules that no test constructs: `wizards/decision.py`,
-`event.py`, `national_spirit.py` and `dyn_mod.py` are 1-2%, and
-`ui/settings_dialog.py`, `ui/menubar.py`, `ui/toolbar.py`,
-`ui/mod_loading.py` and `ui/splash.py` are all under 10%. Everything pure
-is 82-100%. Extracting logic out of those closures (the `_generators.py`
-pattern) is what moves the number; chasing the percentage directly is not.
+The package number (~53% with a display, via `xvfb-run -a`) is still
+dominated by the large Tk dialog bodies, but construction is now
+smoke-tested (`tests/test_wizard_smoke.py`,
+`tests/test_ui_dialog_smoke.py`): `wizards/decision.py` 9%, `event.py` 26%,
+`national_spirit.py` 20%, `dyn_mod.py` 15%, `additional_income.py` 56%,
+`ui/gfx_browser.py` 48%, `ui/settings_dialog.py` 62%,
+`ui/mod_loading.py` 31%, `ui/menubar.py` 75%, `ui/toolbar.py` 88% and
+`ui/splash.py` 66%. Everything pure is 82-100%. Extracting logic out of
+those closures (the `_generators.py` pattern) is what moves the number;
+the smokes are a backstop against NameError regressions (see #45), not a
+substitute for that extraction.
 
 ## Fixture / isolation patterns
 
@@ -184,10 +188,12 @@ way: `visible_row_range`/`row_pool_size` are pure and carry the
 behavior around them (`tests/test_checklist.py`,
 `tests/test_focus_list.py`, `tests/test_thumbnail_grid.py`) needs a root.
 
-What still has no test at all is widget construction: the dialog bodies in
-`wizards/` and most of `ui/` (`settings_dialog.py`, `menubar.py`,
-`toolbar.py`, `mod_loading.py`, `gfx_browser.py`, `splash.py`). Those are
-manual-only, per the checklists below.
+Widget construction is smoke-tested: each `open_*_wizard` and each `ui/`
+dialog builds a Toplevel against `tk_root` without raising (see
+`tests/test_wizard_smoke.py` and `tests/test_ui_dialog_smoke.py`). Those
+smokes catch the NameError-on-click class (#45); deeper interaction
+(opening sub-browsers, confirming, file dialogs) remains manual-only, per
+the checklists below.
 
 ## Manual verification
 
