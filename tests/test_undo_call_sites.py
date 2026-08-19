@@ -3,6 +3,7 @@ from typing import Any, cast
 from unittest.mock import Mock
 
 import hoi4_content_maker as app_module
+from hoi4cm.core.undo import UndoStack
 from hoi4cm.models import Focus
 from hoi4cm.models.document import FocusDocument
 from hoi4cm.ui.canvas import CanvasMixin
@@ -13,6 +14,11 @@ class _UndoCallSiteApp:
     selected: Focus | None
     zoom: float
     mutex_mode: bool
+    _multisel_mode: bool
+    _multi_sel: set[int]
+    _select: Any
+    _push_undo: Any
+    _undo_stack: UndoStack
     _drag: dict[str, object]
     w2c: Any
     _fv_x: Any
@@ -23,6 +29,9 @@ class _UndoCallSiteApp:
     def __init__(self, focuses=()):
         self.focuses = FocusDocument(focuses)
         self.selected = None
+        self._multisel_mode = False
+        self._multi_sel = set()
+        self._select = Mock()
         self._push_undo = Mock()
         self._redraw = Mock()
         self._refresh_prereqs = Mock()
@@ -61,6 +70,36 @@ def test_clear_all_pushes_full_snapshot_after_confirmation(monkeypatch):
     assert not app.focuses
 
 
+def test_clear_all_cancel_keeps_document_without_undo(monkeypatch):
+    focus = Focus()
+    app = _UndoCallSiteApp([focus])
+    monkeypatch.setattr(app_module.messagebox, "askyesno", lambda *args: False)
+
+    app_module.App._clear_all(_as_app(app))
+
+    app._push_undo.assert_not_called()
+    assert app.focuses[focus.id] is focus
+
+
+def test_clear_all_round_trips_through_real_undo_stack(monkeypatch):
+    focus = Focus()
+    app = _UndoCallSiteApp([focus])
+    app._undo_stack = UndoStack()
+
+    def push_undo(label="action", touched_ids=None):
+        app_module.App._push_undo(_as_app(app), label, touched_ids)
+
+    app._push_undo = push_undo
+    monkeypatch.setattr(app_module.messagebox, "askyesno", lambda *args: True)
+
+    app_module.App._clear_all(_as_app(app))
+    result = app._undo_stack.undo(app.focuses, Focus.from_dict)
+
+    assert result is not None
+    assert result[0] == "clear all"
+    assert app.focuses[focus.id].name == focus.name
+
+
 def test_make_prereq_pushes_child_id():
     child = Focus()
     parent = Focus()
@@ -69,6 +108,18 @@ def test_make_prereq_pushes_child_id():
     app_module.App._make_prereq(_as_app(app), child, parent)
 
     app._push_undo.assert_called_once_with("add prerequisite", touched_ids=(child.id,))
+    assert child.prereqs == [[parent.id]]
+
+
+def test_duplicate_prereq_does_not_push_undo():
+    child = Focus()
+    parent = Focus()
+    child.prereqs = [[parent.id]]
+    app = _UndoCallSiteApp([child, parent])
+
+    app_module.App._make_prereq(_as_app(app), child, parent)
+
+    app._push_undo.assert_not_called()
     assert child.prereqs == [[parent.id]]
 
 
@@ -118,28 +169,53 @@ def test_remove_mutex_pushes_selected_and_partner_ids():
     assert partner.mutex == []
 
 
+def test_drag_click_without_grid_move_does_not_push_undo():
+    focus = Focus()
+    app = _UndoCallSiteApp([focus])
+    app.zoom = 1.0
+    app.mutex_mode = False
+
+    CanvasMixin._foc_pr(
+        cast(CanvasMixin, app), focus.id, SimpleNamespace(x=0, y=0, state=0)
+    )
+    CanvasMixin._foc_mv(cast(CanvasMixin, app), focus.id, SimpleNamespace(x=4, y=4))
+
+    app._push_undo.assert_not_called()
+    assert (focus.x, focus.y) == (0, 0)
+
+
+def test_drag_into_occupied_cell_does_not_push_undo():
+    focus = Focus()
+    occupied = Focus(1, 1)
+    app = _UndoCallSiteApp([focus, occupied])
+    app.zoom = 1.0
+    app.mutex_mode = False
+
+    CanvasMixin._foc_pr(
+        cast(CanvasMixin, app), focus.id, SimpleNamespace(x=0, y=0, state=0)
+    )
+    CanvasMixin._foc_mv(
+        cast(CanvasMixin, app), focus.id, SimpleNamespace(x=XGRID, y=YGRID)
+    )
+
+    app._push_undo.assert_not_called()
+    assert (focus.x, focus.y) == (0, 0)
+
+
 def test_drag_move_pushes_once_with_moved_focus_id():
     focus = Focus()
     app = _UndoCallSiteApp([focus])
     app.zoom = 1.0
     app.mutex_mode = False
-    app._drag = {
-        "id": focus.id,
-        "sx": focus.x,
-        "sy": focus.y,
-        "cx": 0,
-        "cy": 0,
-        "moved": False,
-        "undo_pushed": False,
-        "last_snap": (focus.x, focus.y),
-        "occupied": set(),
-    }
     app.w2c = lambda x, y: (x * XGRID, y * YGRID)
     app._fv_x = Mock()
     app._fv_y = Mock()
     app._hint = Mock()
     app._draw_lines_throttled = Mock()
 
+    CanvasMixin._foc_pr(
+        cast(CanvasMixin, app), focus.id, SimpleNamespace(x=0, y=0, state=0)
+    )
     CanvasMixin._foc_mv(
         cast(CanvasMixin, app), focus.id, SimpleNamespace(x=XGRID, y=YGRID)
     )
