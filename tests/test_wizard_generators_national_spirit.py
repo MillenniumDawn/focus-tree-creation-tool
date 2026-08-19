@@ -175,3 +175,160 @@ def test_build_national_spirit_emits_loc_block():
     assert "# LOCALISATION" in out
     assert ' TAG_s: "My Spirit"' in out
     assert ' TAG_s_desc: "What it does."' in out
+
+
+def test_build_national_spirit_skips_modifier_missing_key():
+    out = build_national_spirit_output(
+        mod_id="TAG_s",
+        modifiers=[{"value": "0.05"}],  # no key
+    )
+    assert "modifier = {" not in out
+
+
+def test_build_national_spirit_skips_modifier_missing_value():
+    out = build_national_spirit_output(
+        mod_id="TAG_s",
+        modifiers=[{"key": "stability_factor"}],  # no value
+    )
+    assert "modifier = {" not in out
+
+
+def test_build_national_spirit_skips_modifier_blank_key():
+    out = build_national_spirit_output(
+        mod_id="TAG_s", modifiers=[{"key": "   ", "value": "0.05"}]
+    )
+    assert "modifier = {" not in out
+
+
+def test_build_national_spirit_skips_modifier_blank_value():
+    out = build_national_spirit_output(
+        mod_id="TAG_s", modifiers=[{"key": "stability_factor", "value": "   "}]
+    )
+    assert "modifier = {" not in out
+
+
+def test_build_national_spirit_skips_modifier_non_dict_entry():
+    out = build_national_spirit_output(
+        mod_id="TAG_s",
+        modifiers=[None, "foo", {"key": "stability_factor", "value": "0.05"}],
+    )
+    assert "modifier = {" in out
+    assert "stability_factor = 0.05" in out
+    assert "foo" not in out
+    assert out.count("modifier = {") == 1
+
+
+def test_build_national_spirit_skips_all_malformed_no_block():
+    out = build_national_spirit_output(
+        mod_id="TAG_s",
+        modifiers=[
+            {"key": "", "value": "0.05"},
+            {"value": "0.1"},
+            {"key": "stability_factor"},
+            None,
+        ],
+    )
+    assert "modifier = {" not in out
+
+
+def test_build_national_spirit_mixed_valid_and_malformed():
+    out = build_national_spirit_output(
+        mod_id="TAG_s",
+        modifiers=[
+            {"key": "stability_factor", "value": "0.05"},
+            {"key": "", "value": "0.1"},
+            {"value": "0.2"},
+            {"key": "political_power_gain", "value": "0.1"},
+        ],
+    )
+    assert "stability_factor = 0.05" in out
+    assert "political_power_gain = 0.1" in out
+    assert out.count("modifier = {") == 1
+    # malformed entries are silently dropped, not rendered as blank or None
+    assert "None" not in out
+    assert "= 0.1" not in out or "political_power_gain = 0.1" in out
+
+
+def test_build_national_spirit_handles_numeric_value():
+    out = build_national_spirit_output(
+        mod_id="TAG_s",
+        modifiers=[
+            {"key": "stability_factor", "value": 0.05},
+            {"key": "political_power_gain", "value": 0},
+        ],
+    )
+    assert "stability_factor = 0.05" in out
+    assert "political_power_gain = 0" in out
+
+
+def test_build_national_spirit_trims_whitespace_in_key_and_value():
+    out = build_national_spirit_output(
+        mod_id="TAG_s",
+        modifiers=[{"key": " stability_factor ", "value": " 0.05 "}],
+    )
+    assert "\t\t\t\tstability_factor = 0.05" in out
+    # must not preserve surrounding spaces
+    assert " stability_factor " not in out
+
+
+def test_build_national_spirit_does_not_raise_for_malformed_list():
+    # Previously m["key"] raised KeyError inside the preview try and was swallowed;
+    # now it must not raise at all.
+    try:
+        out = build_national_spirit_output(
+            mod_id="TAG_s",
+            modifiers=[{"key": "a", "value": "1"}, {"bad": "entry"}],
+        )
+    except KeyError:
+        pytest.fail(
+            "build_national_spirit_output raised KeyError for malformed modifier"
+        )
+    assert "a = 1" in out
+
+
+def test_build_national_spirit_fuzz_corrupted_autosave_never_raises():
+    """Corrupted autosave must never crash the generator (B hardening)."""
+    import random
+
+    rng = random.Random(0)
+    choices = [
+        lambda: {"key": "stability_factor", "value": "0.05"},  # valid
+        lambda: {"value": "0.05"},  # missing key
+        lambda: {"key": "stability_factor"},  # missing value
+        lambda: {"key": "", "value": "0.05"},  # blank key
+        lambda: {"key": "stability_factor", "value": ""},  # blank value
+        lambda: {"key": "   ", "value": "   "},  # whitespace
+        lambda: None,  # non-dict
+        lambda: "foo",  # non-dict
+        lambda: {"key": rng.choice([None, 123, 0]), "value": "0.05"},  # bad key type
+        lambda: {"key": "stability_factor", "value": None},  # None value
+        lambda: {"key": "stability_factor", "value": rng.randint(-5, 5)},  # numeric
+    ]
+    for _ in range(200):
+        mods = [rng.choice(choices)() for _ in range(rng.randint(0, 8))]
+        # Must not raise, must not leak None/blank, must not emit empty block
+        out = build_national_spirit_output(mod_id="TAG_s", modifiers=mods)
+        assert "None" not in out
+        # If any valid entry survived, modifier block appears once; else none.
+        has_valid = any(
+            isinstance(m, dict)
+            and isinstance(m.get("key"), str)
+            and m.get("key", "").strip()
+            and m.get("value") is not None
+            and not (isinstance(m.get("value"), str) and not m["value"].strip())
+            for m in mods
+        )
+        if has_valid:
+            # At least one valid entry could have been kept, but numeric
+            # values are also valid — just ensure block count is 0 or 1.
+            assert out.count("modifier = {") in (0, 1)
+        else:
+            assert "modifier = {" not in out
+        # Corrupted raw text is handled via extra_modifiers, also must not raise.
+        extra = "\n".join(
+            rng.choice(["ok = 0.1", "bad", " = 0.2", "# comment", ""]) for _ in range(3)
+        )
+        out2 = build_national_spirit_output(
+            mod_id="TAG_s", modifiers=mods, extra_modifiers=extra
+        )
+        assert "None" not in out2

@@ -62,8 +62,8 @@ def _load_i18n(lang=None):
     try:
         with open(path, encoding="utf-8") as f:
             I18N_STRINGS = json.load(f)
-    except Exception as e:
-        _log.warning("locale load failed for %s: %s", chosen, e)
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError, ValueError) as exc:
+        _log.warning("locale load failed for %s: %s", chosen, exc)
         I18N_STRINGS = {}
     I18N_LANG = chosen
 
@@ -90,7 +90,7 @@ def tr(key: str, default: str | None = None, **kwargs: object) -> str:
     text = I18N_STRINGS.get(key, default if default is not None else key)
     try:
         return text.format(**kwargs)
-    except Exception:
+    except KeyError, ValueError, IndexError, AttributeError, TypeError:
         return text
 
 

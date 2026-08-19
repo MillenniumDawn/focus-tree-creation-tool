@@ -608,7 +608,7 @@ class CanvasMixin:
         if self.cv.find_withtag("grid"):
             try:
                 self.cv.tag_raise("coord_lbl", "grid")
-            except Exception:
+            except tk.TclError:
                 pass
 
     def _draw_lines(self, vis_rect=None):
@@ -1472,7 +1472,7 @@ class CanvasMixin:
             if hasattr(self, "_mm_canvas"):
                 try:
                     self._mm_canvas.place_forget()
-                except Exception:
+                except tk.TclError:
                     pass
 
     def _draw_minimap_content(self, mm, g2mm, scale):
@@ -1581,7 +1581,7 @@ class CanvasMixin:
             mm = self._mm_canvas
             if not mm.winfo_exists():
                 return
-        except Exception:
+        except tk.TclError:
             return
 
         if not self.focuses:
@@ -1707,7 +1707,7 @@ class CanvasMixin:
                 width=1,
                 tags="mm_overlay",
             )
-        except Exception:
+        except tk.TclError:
             pass
 
         # Label

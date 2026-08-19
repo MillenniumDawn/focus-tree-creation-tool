@@ -89,7 +89,7 @@ class TkImageLoader:
                     return
                 try:
                     decoded = decoder(item)
-                except Exception:
+                except OSError, ValueError, RuntimeError, AttributeError, TypeError:
                     decoded = None
                 if self._closed:
                     return
@@ -173,7 +173,13 @@ class TkImageLoader:
             if result.decoded is not None:
                 try:
                     image = result.realizer(result.decoded)
-                except Exception:
+                except (
+                    OSError,
+                    ValueError,
+                    RuntimeError,
+                    AttributeError,
+                    tk.TclError,
+                ):
                     image = None
             if not self._owner_exists():
                 self._closed = True
@@ -187,7 +193,7 @@ class TkImageLoader:
     def _owner_exists(self) -> bool:
         try:
             return bool(self._owner.winfo_exists())
-        except Exception:
+        except tk.TclError:
             return False
 
     def _discard_results(self) -> None:

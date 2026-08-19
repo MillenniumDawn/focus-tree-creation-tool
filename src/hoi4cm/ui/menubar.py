@@ -39,14 +39,14 @@ def build_menubar(app, toolbar):
         if w:
             try:
                 w.destroy()
-            except Exception:
+            except tk.TclError:
                 pass
         open_menu_win = None
         open_menu_btn = None
         if b:
             try:
                 b.config(bg="#080b10", fg=TEXT_DIM)
-            except Exception:
+            except tk.TclError, RuntimeError, AttributeError:
                 pass
 
     def _menu_btn(parent, label, items):
@@ -207,7 +207,7 @@ def build_menubar(app, toolbar):
         btn.config(command=_open)
         btn.bind(
             "<Enter>",
-            lambda e, b=btn: (b.config(fg=TEXT) if open_menu_btn is not b else None),
+            lambda e, b=btn: b.config(fg=TEXT) if open_menu_btn is not b else None,
         )
         btn.bind(
             "<Leave>",

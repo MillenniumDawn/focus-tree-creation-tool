@@ -215,16 +215,18 @@ def parse_focus_tree(raw, path):
     while i < len(tokens):
         if tokens[i] == "focus_tree" and i + 1 < len(tokens) and tokens[i + 1] == "=":
             block, i = parse_block(tokens, i + 2)
-            tree_name = block.get("id", tree_name)
+            _id_val = block.get("id")
+            if isinstance(_id_val, str):
+                tree_name = _id_val
             cfp_blk = block.get("continuous_focus_position", {})
             if isinstance(cfp_blk, dict):
                 try:
                     cfp_x = int(cfp_blk.get("x", ""))
-                except Exception:
+                except ValueError, TypeError:
                     cfp_x = None
                 try:
                     cfp_y = int(cfp_blk.get("y", ""))
-                except Exception:
+                except ValueError, TypeError:
                     cfp_y = None
             country_blk = block.get("country", {})
             if isinstance(country_blk, dict):
@@ -245,9 +247,13 @@ def parse_focus_tree(raw, path):
                 for key, value in block.items()
                 if key not in _KNOWN_TREE_FIELDS
             }
-            raw_focuses = block.get("focus", [])
-            if isinstance(raw_focuses, dict):
-                raw_focuses = [raw_focuses]
+            _raw_focuses = block.get("focus", [])
+            if isinstance(_raw_focuses, dict):
+                raw_focuses: list[object] = [_raw_focuses]
+            elif isinstance(_raw_focuses, list):
+                raw_focuses = _raw_focuses
+            else:
+                raw_focuses = []
             for rf in raw_focuses:
                 if isinstance(rf, dict):
                     focuses_data.append(rf)

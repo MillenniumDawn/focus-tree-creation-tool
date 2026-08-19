@@ -19,7 +19,8 @@ def cfg_load():
     try:
         with open(CONFIG_PATH, encoding="utf-8") as f:
             return json.load(f)
-    except Exception:
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError, ValueError) as exc:
+        _log.debug("config load failed: %s", exc, exc_info=True)
         return {}
 
 
@@ -39,11 +40,11 @@ def cfg_save(data):
             except OSError:
                 pass
             os.replace(tmp, CONFIG_PATH)
-        except Exception:
+        except OSError, ValueError, TypeError, RuntimeError:
             try:
                 os.remove(tmp)
             except OSError:
                 pass
             raise
-    except Exception as e:
-        _log.error(f"save failed: {e}")
+    except (OSError, ValueError, TypeError, RuntimeError) as exc:
+        _log.debug("save failed: %s", exc, exc_info=True)

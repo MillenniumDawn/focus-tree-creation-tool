@@ -95,7 +95,13 @@ from hoi4cm.core import (
     show_splash,
     tr,
 )
-from hoi4cm.editor import read_project, write_project
+from hoi4cm.editor import (
+    clear_workspace_autosave,
+    read_project,
+    sibling_autosave_path,
+    workspace_autosave_path,
+    write_project,
+)
 from hoi4cm.focus_tree.validate import (
     collect_loc_keys_from_text,
     validate_document,
@@ -266,21 +272,229 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         self._validation_worst = {}
         self._validation_job = None
         self._validation_win = None
+        self._saved_revision = self.focuses.revision
+        self._saved_fingerprint = self._workspace_fingerprint()
+        self._autosave_job = None
+        self._autosave_interval_ms = 60000
+        self._last_project_path = None
         self.protocol("WM_DELETE_WINDOW", self._on_app_close)
         self._build_ui()
         self._redraw()
         self._schedule_validation()
+        self._update_title()
+        self._schedule_autosave()
+        self.after(800, self._maybe_offer_autosave_restore)
 
     def _on_app_close(self):
+        if self._is_dirty():
+            ans = messagebox.askyesnocancel(
+                tr("dialog.unsaved_changes.title", "Unsaved Changes"),
+                tr(
+                    "dialog.unsaved_changes.close_body",
+                    "You have unsaved changes.\n\nSave before closing?",
+                ),
+                parent=self,
+            )
+            if ans is None:
+                return
+            if ans and not self._save():
+                return
         if not self._lifecycle.begin_close():
             return
         try:
+            self._cancel_autosave()
             MOD.save_config()
         except Exception:
             pass
         finally:
             self._lifecycle.finish_close()
             self.destroy()
+
+    def _workspace_fingerprint(self):
+        try:
+            cfp_x = int(self._cfp_x_var.get())
+        except TypeError, ValueError, AttributeError:
+            cfp_x = getattr(self, "_cfp_x", None)
+        try:
+            cfp_y = int(self._cfp_y_var.get())
+        except TypeError, ValueError, AttributeError:
+            cfp_y = getattr(self, "_cfp_y", None)
+        extra_fp = []
+        for tree in getattr(self, "_extra_trees", []):
+            extra_fp.append(
+                (
+                    tree.get("type", ""),
+                    tree.get("file_path", ""),
+                    tree.get("tree_id", ""),
+                    tree.get("cfp_x"),
+                    tree.get("cfp_y"),
+                    tree.get("country_tag", ""),
+                    tree.get("had_wrapper", True),
+                    tuple(sorted(tree.get("focus_ids", set()))),
+                    tuple(tree.get("shared_focuses", [])),
+                    tuple(tree.get("joint_focuses", [])),
+                )
+            )
+        return (
+            self._tree_id.get() if hasattr(self, "_tree_id") else "TAG_focus_tree",
+            getattr(self, "_tree_country_tag", ""),
+            getattr(self, "_tree_country_name", ""),
+            getattr(self, "_tree_country_raw", ""),
+            getattr(self, "_tree_focus_prefix", ""),
+            getattr(self, "_tree_extras", {}),
+            getattr(MOD, "edit_focus_file", "") or "",
+            getattr(self, "_tree_had_wrapper", True),
+            cfp_x,
+            cfp_y,
+            tuple(getattr(self, "_shared_focuses", [])),
+            tuple(getattr(self, "_joint_focuses", [])),
+            tuple(getattr(self, "_canvas_min", [0, 0])),
+            tuple(getattr(self, "_canvas_max", [9, 9])),
+            getattr(self, "_default_focus_prefix", ""),
+            tuple(extra_fp),
+        )
+
+    def _is_dirty(self) -> bool:
+        if getattr(self, "focuses", None) is None:
+            return False
+        if self.focuses.revision != getattr(self, "_saved_revision", 0):
+            return True
+        try:
+            return self._workspace_fingerprint() != getattr(
+                self, "_saved_fingerprint", None
+            )
+        except Exception:
+            return False
+
+    def _mark_clean(self) -> None:
+        self._saved_revision = self.focuses.revision
+        try:
+            self._saved_fingerprint = self._workspace_fingerprint()
+        except Exception:
+            self._saved_fingerprint = None
+        self._update_title()
+
+    def _confirm_discard(self, action: str = "close") -> bool:
+        if not self._is_dirty():
+            return True
+        ans = messagebox.askyesnocancel(
+            tr("dialog.unsaved_changes.title", "Unsaved Changes"),
+            tr(
+                "dialog.unsaved_changes.body",
+                "You have unsaved changes.\n\nSave before {action}?",
+                action=action,
+            ),
+            parent=self,
+        )
+        if ans is None:
+            return False
+        if ans and not self._save():
+            return False
+        return True
+
+    def _schedule_autosave(self) -> None:
+        self._cancel_autosave()
+        if not hasattr(self, "_autosave_interval_ms"):
+            return
+        try:
+            self._autosave_job = self.after(
+                self._autosave_interval_ms, self._autosave_tick
+            )
+        except Exception:
+            self._autosave_job = None
+
+    def _cancel_autosave(self) -> None:
+        job = getattr(self, "_autosave_job", None)
+        if job is not None:
+            try:
+                self.after_cancel(job)
+            except Exception:
+                pass
+            self._autosave_job = None
+
+    def _autosave_tick(self) -> None:
+        self._autosave_job = None
+        try:
+            if self._is_dirty():
+                path = workspace_autosave_path()
+                self._capture_workspace()
+                write_project(path, self.workspace)
+                sibling = getattr(self, "_last_project_path", None)
+                if sibling:
+                    try:
+                        write_project(sibling_autosave_path(sibling), self.workspace)
+                    except Exception:
+                        log.exception("sibling autosave failed")
+        except Exception:
+            log.exception("workspace autosave failed")
+        finally:
+            self._schedule_autosave()
+
+    def _maybe_offer_autosave_restore(self) -> None:
+        path = workspace_autosave_path()
+        if not os.path.isfile(path):
+            return
+        if self._is_dirty():
+            return
+        try:
+            autosaved = read_project(path)
+        except Exception:
+            return
+        if not autosaved.focuses and autosaved.main_tree.metadata.tree_id in (
+            "",
+            "TAG_focus_tree",
+        ):
+            return
+        focus_count = len(autosaved.focuses)
+        tree_id = autosaved.main_tree.metadata.tree_id or "untitled"
+        ans = messagebox.askyesnocancel(
+            tr("dialog.autosave_restore.title", "Restore Autosave?"),
+            tr(
+                "dialog.autosave_restore.body",
+                "An autosaved workspace was found ({count} focuses, tree '{tree}').\n\nRestore it?",
+                count=focus_count,
+                tree=tree_id,
+            ),
+            parent=self,
+        )
+        if ans is None:
+            return
+        if ans:
+            try:
+                self.cv.delete("all")
+                self.selected = None
+                self._lines.clear()
+                self._grid_item = None
+                self._grid_key = None
+                self._grid_img = None
+                self._install_workspace(autosaved)
+                self._update_title()
+                self._detect_and_apply_tag()
+                self._refresh_tree_meta_panel()
+                self._refresh_loaded_trees_panel()
+                self._hide_form()
+                self._redraw()
+                self._invalidate_focus_list_structure()
+                self._hint(
+                    tr(
+                        "hint.autosave_restored",
+                        "Autosaved workspace restored — save to keep it",
+                    )
+                )
+            except Exception as ex:
+                log.exception("autosave restore failed")
+                report_error(
+                    tr(
+                        "dialog.autosave_restore_error.body",
+                        "Could not restore autosave:\n{error}",
+                        error=ex,
+                    ),
+                    ex,
+                    parent=self,
+                    title=tr("dialog.autosave_restore_error.title", "Restore Failed"),
+                )
+        else:
+            clear_workspace_autosave(path)
 
     def _close_app_caches(self):
         from hoi4cm.wizards import _shared as _wiz_shared
@@ -2145,8 +2359,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             return parser(var.get()), False
         except ValueError, TypeError:
             self._log_error(
-                f"Invalid {field_name} value {var.get()!r}; "
-                f"using fallback {fallback}"
+                f"Invalid {field_name} value {var.get()!r}; using fallback {fallback}"
             )
             return fallback, True
 
@@ -2652,11 +2865,18 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
     def _update_title(self):
         """Reflect current tree ID in the window title bar."""
         tid = self._tree_id.get() or "untitled"
+        dirty = (
+            " *"
+            if getattr(self, "_saved_fingerprint", None) is not None
+            and self._is_dirty()
+            else ""
+        )
         self.title(
             tr(
                 "app.title.tree",
-                "HOI4 Content Maker  -  {tree}  [Wiki Accurate v2]",
+                "HOI4 Content Maker  -  {tree}{dirty}  [Wiki Accurate v2]",
                 tree=tid,
+                dirty=dirty,
             )
         )
         self._update_statusbar()
@@ -2781,22 +3001,20 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             tree_id = var_tree.get().strip() or ("%s_focus" % tag.lower())
             foc_pfx = var_foc.get().strip() or (tag + "_")
 
-            # Ask to save before clearing
-            if self.focuses:
-                ans = messagebox.askyesnocancel(
-                    tr("dialog.save_current_tree.title", "Save Current Tree?"),
-                    tr(
-                        "dialog.save_current_tree.body",
-                        "You have unsaved work on '{tree}'\n\nSave it before starting a new tree?",
-                        tree=self._tree_id.get(),
-                    ),
-                    parent=win,
-                )
-                if ans is None:  # Cancel
-                    return
-                if ans:  # Yes — save first
-                    self._save()
-                # Clear canvas (Yes or No both clear)
+            if self._is_dirty() or self.focuses:
+                if self._is_dirty():
+                    ans = messagebox.askyesnocancel(
+                        tr("dialog.unsaved_changes.title", "Unsaved Changes"),
+                        tr(
+                            "dialog.unsaved_changes.new_tree_body",
+                            "You have unsaved changes.\n\nSave before starting a new tree?",
+                        ),
+                        parent=win,
+                    )
+                    if ans is None:
+                        return
+                    if ans and not self._save():
+                        return
                 self.cv.delete("all")
                 self.focuses.clear()
                 self.selected = None
@@ -5291,20 +5509,37 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             title=tr("filedialog.save_project", "Save Project"),
         )
         if not path:
-            return
+            return False
         try:
             write_project(path, self._capture_workspace())
         except Exception as e:
             log.error("project save failed: %s", e, exc_info=True)
             report_write_failure(self, path, e)
-            return
+            return False
+        try:
+            self._last_project_path = path
+        except Exception:
+            pass
+        try:
+            self._mark_clean()
+        except Exception:
+            pass
+        try:
+            clear_workspace_autosave()
+        except Exception:
+            pass
+        try:
+            clear_workspace_autosave(sibling_autosave_path(path))
+        except Exception:
+            pass
         messagebox.showinfo(
             tr("dialog.saved.title", "Saved"),
             tr("dialog.project_saved", "Project saved:\n{path}", path=path),
         )
+        return True
 
     def _detect_and_apply_tag(self):
-        """Scan all loaded focus IDs, detect common country tag prefix, apply to new focuses."""
+        """Detect common tag prefix from loaded focuses."""
         if not self.focuses:
             return
         names = [f.name for f in self.focuses.values() if f.name and "_" in f.name]
@@ -5312,24 +5547,29 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             return
         from collections import Counter
 
-        # Extract first segment before first underscore (e.g. "JAP" from "JAP_militarism")
+        # First segment before "_" (e.g. "JAP" from "JAP_militarism")
         segs = [n.split("_")[0].upper() for n in names]
-        # Filter: must be 2-5 chars (typical HOI4 tags are 3 chars like JAP, GER, USA)
+        # Filter: 2-5 chars (typical tag like JAP, GER, USA)
         segs = [s for s in segs if 2 <= len(s) <= 5 and s.isalpha()]
         if not segs:
             return
         most_common, count = Counter(segs).most_common(1)[0]
-        # Apply if appears in at least 2 focuses OR >30% of all (handles small trees too)
+        # Apply if >=2 focuses and >=30% (handles small trees)
         threshold = count >= 2 and (count / len(names) >= 0.30)
         if threshold and len(most_common) >= 2:
             self._default_focus_prefix = most_common + "_"
             self._hint(
-                f"🏷 Tag detected: {most_common}  —  new focuses will auto-prefix '{most_common}_'"
+                f"🏷 Tag {most_common} — new focuses auto-prefix '{most_common}_'"
             )
         else:
             self._default_focus_prefix = ""
 
     def _load(self):
+        try:
+            if not self._confirm_discard(action="loading"):
+                return
+        except AttributeError:
+            pass
         path = filedialog.askopenfilename(
             filetypes=[
                 (tr("filetype.json_project", "JSON Project"), "*.json"),
@@ -5359,7 +5599,18 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         self._grid_key = None
         self._grid_img = None
         self._install_workspace(workspace)
-        self._update_title()
+        try:
+            self._last_project_path = path
+        except Exception:
+            pass
+        try:
+            self._mark_clean()
+        except Exception:
+            pass
+        try:
+            clear_workspace_autosave()
+        except Exception:
+            pass
         self._detect_and_apply_tag()
         self._refresh_tree_meta_panel()
         self._refresh_loaded_trees_panel()

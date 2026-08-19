@@ -13,6 +13,7 @@ import datetime
 import logging
 import os
 import sys
+import tkinter as tk
 from logging.handlers import RotatingFileHandler
 
 _LOG_NAME = "HOI4CM"
@@ -45,8 +46,8 @@ def _configure():
         )
         fileh.setFormatter(logging.Formatter(_FILE_FORMAT, datefmt=_DATEFMT))
         log.addHandler(fileh)
-    except Exception as e:
-        log.warning("File logging disabled: %s", e)
+    except (OSError, ValueError, RuntimeError) as exc:
+        log.warning("File logging disabled: %s", exc)
 
 
 _configure()
@@ -83,7 +84,7 @@ def add_error(msg):
     if _error_callback is not None:
         try:
             _error_callback(count)
-        except Exception:
+        except tk.TclError, RuntimeError, AttributeError, ValueError, TypeError:
             pass
     return count
 

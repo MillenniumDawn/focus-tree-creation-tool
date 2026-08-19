@@ -270,14 +270,14 @@ class ModContext:
         """Parse a HOI4 script string into a dict tree."""
         try:
             return parse_script(src)
-        except Exception:
+        except ValueError, TypeError, RuntimeError, OSError:
             return {}
 
     def _parse_file(self, path):
         """Parse a HOI4 script file into a dict tree."""
         try:
             return self._parse_text(self._read(path))
-        except Exception:
+        except OSError, ValueError, TypeError, RuntimeError:
             return {}
 
     # ── Scanners ─────────────────────────────────────────────────────
@@ -534,8 +534,8 @@ class ModContext:
                 photo = _PILImageTk.PhotoImage(img)
                 self.sprite_imgs[key] = photo
                 return photo
-            except Exception as e:
-                last_err = f"{os.path.basename(try_path)}: {e}"
+            except (OSError, ValueError, RuntimeError, AttributeError) as exc:
+                last_err = f"{os.path.basename(try_path)}: {exc}"
 
         self.sprite_imgs[key] = None
         self._img_errors.append(f"LOAD FAILED {gfx_name}: {last_err}")
@@ -588,8 +588,8 @@ class ModContext:
                 t0 = time.perf_counter()
                 try:
                     fn()
-                except Exception as e:
-                    _log.warning("scan step %s failed: %s", label, e)
+                except (OSError, ValueError, RuntimeError, TypeError) as exc:
+                    _log.warning("scan step %s failed: %s", label, exc, exc_info=True)
                 _log.debug(
                     "scan step %s: %.1fms", label, (time.perf_counter() - t0) * 1000
                 )

@@ -88,7 +88,7 @@ def decode_image(path: str, transform: ImageTransform) -> object:
                     ratio = min(size[0] / max(width, 1), size[1] / max(height, 1))
                     size = (max(1, int(width * ratio)), max(1, int(height * ratio)))
                 return image.resize(size, resample)
-        except Exception as exc:
+        except (OSError, ValueError, RuntimeError, AttributeError, TypeError) as exc:
             last_error = exc
     if last_error is None:
         raise OSError(f"no image candidates for {path}")
@@ -268,7 +268,7 @@ class ImageBroker:
     def _queue_result(self, key: _ImageKey, future: Future[object | None]) -> None:
         try:
             decoded = future.result()
-        except Exception:
+        except OSError, ValueError, RuntimeError, AttributeError, TypeError:
             log.exception("image worker failed for %s", key.path)
             decoded = None
         if not self._closed:
@@ -305,7 +305,13 @@ class ImageBroker:
         if decoded is not None and not realized:
             try:
                 photo = self._realizer(decoded)
-            except Exception:
+            except (
+                OSError,
+                ValueError,
+                RuntimeError,
+                AttributeError,
+                TypeError,
+            ):
                 log.exception("image realization failed for %s", key.path)
 
         delivered = []

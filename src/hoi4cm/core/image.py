@@ -29,8 +29,8 @@ def _try_install_pillow():
             stderr=subprocess.DEVNULL,
         )
         return True
-    except Exception as e:
-        _log.warning("Pillow auto-install failed: %s", e)
+    except (OSError, subprocess.SubprocessError, ValueError, RuntimeError) as exc:
+        _log.warning("Pillow auto-install failed: %s", exc)
         return False
 
 
@@ -57,8 +57,8 @@ def _import_pillow():
 
         _log.info("Pillow installed and imported OK")
         return Image, ImageTk, True
-    except Exception as e:
-        _log.warning("Pillow import still failed after install: %s", e)
+    except (ImportError, OSError, RuntimeError, ValueError, AttributeError) as exc:
+        _log.warning("Pillow import still failed after install: %s", exc)
         return None, None, False
 
 
