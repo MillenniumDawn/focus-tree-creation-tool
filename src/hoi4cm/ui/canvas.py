@@ -72,6 +72,7 @@ class CanvasMixin:
     _focus_bundles: Any  # type: ignore[no-redef]
     _redraw_job: Any  # type: ignore[no-redef]
     _lines_job: Any  # type: ignore[no-redef]
+    _push_undo: Any  # type: ignore[no-redef]
     _grid_pool: Any  # type: ignore[no-redef]
     _grid_used: Any  # type: ignore[no-redef]
     _grid_key: Any  # type: ignore[no-redef]
@@ -1254,6 +1255,7 @@ class CanvasMixin:
             "cx": e.x,
             "cy": e.y,
             "moved": False,
+            "undo_pushed": False,
             "last_snap": (f.x, f.y),
             # Other focuses don't move during a drag, so snapshot their grid
             # cells once for O(1) collision checks per motion event.
@@ -1278,6 +1280,9 @@ class CanvasMixin:
             return
         if (ngx, ngy) in d.get("occupied", ()):
             return
+        if not d["undo_pushed"]:
+            self._push_undo("move focus", touched_ids=(fid,))
+            d["undo_pushed"] = True
         old_cx, old_cy = self.w2c(f.x, f.y)
         self.focuses.move(fid, ngx, ngy)
         new_cx, new_cy = self.w2c(f.x, f.y)

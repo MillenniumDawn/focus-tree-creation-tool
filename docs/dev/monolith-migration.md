@@ -52,7 +52,16 @@
   `_snapshot` deep-copying every loaded focus on every push. `_undo` deletes
   canvas items only for the ids that came back changed or removed and does
   one `_redraw()`, replacing the old `cv.delete("all")` + full rebuild. See
-  `performance.md`'s undo row for the design.
+  `performance.md`'s undo row for the design. `#48` later closed the
+  remaining coverage holes: `_clear_all` and the four prereq/mutex
+  link/unlink methods (`_make_prereq`, `_rm_prereq`, `_make_mutex`,
+  `_rm_mutex`) now push undo, the canvas drag-move in
+  `src/hoi4cm/ui/canvas.py:_foc_mv` snapshots its pre-move state on the
+  first motion frame, and a paired redo stack (`_redo` in the monolith,
+  `UndoStack.redo` in `core/undo.py`) plus `<Control-y>` /
+  `<Control-Shift-Z>` bindings round-trip the recent history.
+  `push()` clears the redo trail so a new edit branch invalidates redo,
+  matching every other editor.
 - Settings dialog (phase 9): `_open_settings`'s ~1,315-line body moved to
   `ui/settings_dialog.py` as `open_settings(app)`, the same one-line-delegate
   pattern the five wizards use. Lifted out along with it: `relativize_to_mod_root`
@@ -165,8 +174,9 @@ methods group into:
   `_event_wizard`, one-line calls into their `hoi4cm` modules.
 - **Error log**: `_init_error_log`, `_log_error`, `_on_error_logged`,
   `_show_error_log`.
-- **Undo shell**: `_push_undo`, `_undo` (the Tk-facing half of
-  `core/undo.py`'s `UndoStack`).
+- **Undo shell**: `_push_undo`, `_undo`, `_redo` (the Tk-facing half of
+  `core/undo.py`'s `UndoStack`, including the redo stack that pairs with
+  undo).
 - **Autocomplete / mod-aware suggestions**: `_attach_autocomplete`,
   `_get_mod_suggestions`.
 - **Widget factories / low-level helpers**: `_mk_btn`, `_mk_lbl`,
@@ -198,7 +208,7 @@ needs it via `hoi4cm.core`.
 | `_open_gfx_browser` | was ~2624-3058 (~435) | `ui/gfx_browser.py` (`open_focus_icon_browser`), extracted as-is, not merged, see below | **done** (phase 10) |
 | `_gfx_browse_files` | was ~3059-3267 (~209) | folded into `open_focus_icon_browser`'s `_browse_flat_folder` helper | **done** (phase 10) |
 | Sidebar builders (`_build_sidebar`, `_build_sidebar_props`, `_build_sidebar_conditions`, `_build_sidebar_code`, `_sb_*` helpers) | ~846-1817 (~970) | n/a | deferred |
-| Undo (`_push_undo`/`_undo`) | ~1561-1588 | `core/undo.py` (`UndoStack`, redesigned, see `performance.md`) | **done** (phase 7) |
+| Undo (`_push_undo`/`_undo`/`_redo`) | ~1561-1608 | `core/undo.py` (`UndoStack` with redo stack, see `performance.md`) | **done** (phase 7; redo + call-site coverage in #48) |
 | Background threads / executor | n/a | `core/concurrency.py` (`DaemonThreadPoolExecutor`) | **done** (modernization) |
 | Workspace / focus document model | n/a | `models/document.py` (`FocusDocument`, `TreeDocument`, `EditorWorkspace`) | **done** (modernization) |
 | Focus-tree codec + focus operations | n/a | `focus_tree/codec.py`, `focus_tree/operations.py` | **done** (modernization) |

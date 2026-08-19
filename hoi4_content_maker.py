@@ -631,6 +631,10 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
 
         self.bind("<Control-z>", lambda e: self._undo())
         self.bind("<Control-Z>", lambda e: self._undo())
+        self.bind("<Control-y>", lambda e: self._redo())
+        self.bind("<Control-Y>", lambda e: self._redo())
+        self.bind("<Control-Shift-Z>", lambda e: self._redo())
+        self.bind("<Control-Shift-z>", lambda e: self._redo())
         self.bind("<Control-n>", lambda e: self._new_tree_dialog())
         self.bind("<Control-s>", lambda e: self._save())
         self.bind("<Control-o>", lambda e: self._load())
@@ -989,6 +993,28 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         self._redraw()
         self._invalidate_focus_list_structure()
         self._hint(f"↩ Undid: {label}")
+
+    def _redo(self):
+        """Re-apply the most recently undone action."""
+        result = self._undo_stack.redo(self.focuses, Focus.from_dict)
+        if result is None:
+            self._hint("Nothing to redo.")
+            return
+        label, changed_ids, removed_ids = result
+        for fid in changed_ids | removed_ids:
+            self.cv.delete("F" + str(fid))
+        if self.selected and self.selected.id in removed_ids:
+            self.selected = None
+            self._hide_form()
+        elif self.selected and self.selected.id in changed_ids:
+            self.selected = self.focuses[self.selected.id]
+            self._populate(self.selected)
+            self._refresh_prereqs()
+            self._refresh_mutex()
+            self._refresh_effects()
+        self._redraw()
+        self._invalidate_focus_list_structure()
+        self._hint(f"↪ Redid: {label}")
 
     def _hint(self, t):
         self._hint_lbl.config(text=t)
@@ -3239,6 +3265,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             tr("dialog.clear_all.body", "Delete ALL focuses?"),
         ):
             return
+        self._push_undo("clear all")
         self._begin_document_generation()
         self.cv.delete("all")
         self._focus_bundles.clear()
@@ -3583,6 +3610,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         for g in child.prereqs:
             if parent.id in g:
                 return
+        self._push_undo("add prerequisite", touched_ids=(child.id,))
         self.focuses.link_prerequisite(child.id, (parent.id,))
         self._redraw()
         if self.selected:
@@ -3591,6 +3619,8 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
     def _rm_prereq(self, gi):
         if not self.selected:
             return
+        child_id = self.selected.id
+        self._push_undo("remove prerequisite group", touched_ids=(child_id,))
         self.focuses.unlink_prerequisite_group(self.selected.id, gi)
         self._refresh_prereqs()
         self._draw_lines()
@@ -3637,6 +3667,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         self._redraw()
 
     def _make_mutex(self, a, b):
+        self._push_undo("add mutex", touched_ids=(a.id, b.id))
         self.focuses.link_mutex(a.id, b.id)
         self._redraw()
         if self.selected:
@@ -3646,6 +3677,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         if not self.selected:
             return
         mid = self.selected.mutex[idx]
+        self._push_undo("remove mutex", touched_ids=(self.selected.id, mid))
         self.focuses.unlink_mutex(self.selected.id, mid)
         self._refresh_mutex()
         self._draw_lines()
