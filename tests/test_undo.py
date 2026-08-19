@@ -61,15 +61,273 @@ def _delete_with_cleanup(focuses, stack, fid, label="delete focus"):
 def test_len_and_clear():
     stack = UndoStack()
     assert len(stack) == 0
+    assert not stack.can_redo()
     stack.push("x", {}, touched_ids=())
     assert len(stack) == 1
+    assert not stack.can_redo()
+    stack.undo({}, Focus.from_dict)
+    assert len(stack) == 0
+    assert stack.can_redo()
     stack.clear()
     assert len(stack) == 0
+    assert not stack.can_redo()
 
 
 def test_undo_on_empty_stack_returns_none():
     stack = UndoStack()
     assert stack.undo({}, Focus.from_dict) is None
+    assert stack.redo({}, Focus.from_dict) is None
+
+
+def test_redo_on_empty_redo_returns_none():
+    """`redo` is independent of `undo`: an unused stack has nothing to redo."""
+    stack = UndoStack()
+    focuses = {1: _mk_focus(1, "focus_1")}
+    stack.push("x", focuses, touched_ids=())
+    assert stack.redo(focuses, Focus.from_dict) is None
+
+
+def test_push_clears_redo_trail():
+    """A new edit branch invalidates the redo stack, like every editor does."""
+    focuses = {1: _mk_focus(1, "focus_1")}
+    stack = UndoStack()
+    stack.push("a", focuses, touched_ids=(1,))
+    focuses[1].name = "after_a"
+    stack.undo(focuses, Focus.from_dict)
+    assert stack.can_redo()
+    assert focuses[1].name == "focus_1"
+
+    # Branching: a new push must wipe the redo stack.
+    stack.push("b", focuses, touched_ids=(1,))
+    assert not stack.can_redo()
+    focuses[1].name = "after_b"
+    assert stack.redo(focuses, Focus.from_dict) is None
+
+
+def test_clear_empties_both_stacks():
+    """`clear` is supposed to be a full reset, not just undo."""
+    stack = UndoStack()
+    focuses = {1: _mk_focus(1, "focus_1")}
+    stack.push("a", focuses, touched_ids=(1,))
+    stack.push("b", focuses, touched_ids=(1,))
+    stack.undo(focuses, Focus.from_dict)
+    assert len(stack) == 1
+    assert stack.can_redo()
+    stack.clear()
+    assert len(stack) == 0
+    assert not stack.can_redo()
+
+
+def test_undo_then_redo_roundtrip_restores_state_and_changed_set():
+    """After undo, redo must reconstruct the post-edit focus and report it
+    as `changed_ids` so the caller's redraw picks it up."""
+    focuses = {1: _mk_focus(1, "focus_1", cost=10)}
+    stack = UndoStack()
+    stack.push("edit cost", focuses, touched_ids=(1,))
+    focuses[1].cost = 99
+    pre_state = focuses[1].to_dict()
+
+    label, changed, removed = stack.undo(focuses, Focus.from_dict)
+    assert label == "edit cost"
+    assert changed == {1}
+    assert removed == set()
+    assert focuses[1].cost == 10
+    assert stack.can_redo()
+
+    label2, changed2, removed2 = stack.redo(focuses, Focus.from_dict)
+    assert label2 == "edit cost"
+    assert changed2 == {1}
+    assert removed2 == set()
+    assert focuses[1].to_dict() == pre_state
+    assert not stack.can_redo()
+
+
+def test_redo_after_undo_then_push_is_blocked():
+    """Redo state should vanish as soon as any new edit is pushed, even after
+    several undo/redo hops that left the trail non-empty."""
+    focuses = {1: _mk_focus(1, "focus_1", cost=10)}
+    stack = UndoStack()
+    stack.push("a", focuses, touched_ids=(1,))
+    focuses[1].cost = 20
+    stack.undo(focuses, Focus.from_dict)
+    stack.redo(focuses, Focus.from_dict)
+    stack.undo(focuses, Focus.from_dict)
+    assert stack.can_redo()
+
+    stack.push("b", focuses, touched_ids=(1,))
+    assert not stack.can_redo()
+    focuses[1].cost = 30
+
+    result = stack.redo(focuses, Focus.from_dict)
+    assert result is None
+    assert focuses[1].cost == 30
+
+
+def test_redo_restores_created_focuses():
+    """`redo` must recreate focuses the user added between push and undo,
+    not just leave them absent, so the round-trip is genuinely a no-op."""
+    focuses = {1: _mk_focus(1, "focus_1")}
+    stack = UndoStack()
+    stack.push("add focus", focuses, touched_ids=())
+    new = _mk_focus(2, "focus_2", cost=7)
+    focuses[2] = new
+    new_dict = new.to_dict()
+
+    label, changed, removed = stack.undo(focuses, Focus.from_dict)
+    assert label == "add focus"
+    assert removed == {2}
+    assert 2 not in focuses
+
+    label2, changed2, removed2 = stack.redo(focuses, Focus.from_dict)
+    assert label2 == "add focus"
+    # `changed_ids` is the snapshot's full keyset, not just the diff: every
+    # focus gets a redraw, since the document was reloaded wholesale. The
+    # important invariant is that focus 2 came back and nothing was removed.
+    assert changed2 == {1, 2}
+    assert removed2 == set()
+    assert 2 in focuses
+    assert focuses[2].to_dict() == new_dict
+    assert focuses[2].cost == 7
+
+
+def test_redo_eviction_caps_at_maxlen():
+    """Both stacks must honor `maxlen`; full-snapshot redo entries are heavy,
+    so an unbounded redo would balloon memory."""
+    stack = UndoStack(maxlen=4)
+    focuses = {1: _mk_focus(1, "focus_1", cost=0)}
+    for i in range(10):
+        stack.push(f"op_{i}", focuses, touched_ids=(1,))
+        focuses[1].cost = i + 1
+    assert len(stack) == 4
+
+    # Undo all four pushes: each undo enqueues one redo entry. Since none
+    # of the undo-then-push churn happens, redo also fills to maxlen.
+    undone_labels = []
+    for _ in range(4):
+        result = stack.undo(focuses, Focus.from_dict)
+        undone_labels.append(result[0])
+    assert len(stack) == 0
+    assert stack.can_redo()
+
+    # Two more undos when the undo stack is empty should be no-ops, not
+    # overflow the redo stack past maxlen.
+    assert stack.undo(focuses, Focus.from_dict) is None
+    assert stack.undo(focuses, Focus.from_dict) is None
+    assert stack.can_redo()
+
+    redo_labels = []
+    while stack.can_redo():
+        result = stack.redo(focuses, Focus.from_dict)
+        redo_labels.append(result[0])
+    # Only 4 redo entries survived; the undos past the cap didn't enqueue.
+    assert len(redo_labels) == 4
+    # Redo pops from the most recent undo first, so the survivor list is
+    # the last 4 undo labels in the order they get re-applied.
+    assert redo_labels == ["op_6", "op_7", "op_8", "op_9"]
+
+
+def test_redo_sparse_matches_full_snapshot_reference():
+    """Round-tripping undo+redo must converge on the same state for both
+    sparse and full-snapshot stacks, across randomized push/undo/redo."""
+    rng = random.Random(1)
+
+    def seed():
+        return {
+            1: _mk_focus(1, "seed_1"),
+            2: _mk_focus(2, "seed_2", prereqs=[[1]]),
+            3: _mk_focus(3, "seed_3", mutex=[1]),
+        }
+
+    sparse_focuses = seed()
+    full_focuses = seed()
+    sparse_stack = UndoStack()
+    full_stack = UndoStack()
+    next_id = [4]
+
+    def snapshot_state(focuses):
+        return {fid: f.to_dict() for fid, f in focuses.items()}
+
+    def assert_in_sync():
+        assert snapshot_state(sparse_focuses) == snapshot_state(full_focuses)
+        assert len(sparse_stack) == len(full_stack)
+        assert sparse_stack.can_redo() == full_stack.can_redo()
+
+    assert_in_sync()
+
+    for _step in range(120):
+        op = rng.choice(["add_sparse", "add_full", "undo", "redo"])
+
+        if op in ("add_sparse", "add_full"):
+            fid = next_id[0]
+            next_id[0] += 1
+            # Push to both stacks using their respective snapshot strategy so
+            # they remain in sync. The pre-id_set differs (sparse captures
+            # empty touched_ids, full captures the pre-state as a full blob)
+            # but the post-state is identical and redo restores both to the
+            # same place.
+            sparse_stack.push("add", sparse_focuses, touched_ids=())
+            sparse_focuses[fid] = _mk_focus(fid, f"gen_{fid}")
+            full_stack.push("add", full_focuses, touched_ids=None)
+            full_focuses[fid] = _mk_focus(fid, f"gen_{fid}")
+        elif op == "undo" and sparse_stack:
+            r1 = sparse_stack.undo(sparse_focuses, Focus.from_dict)
+            r2 = full_stack.undo(full_focuses, Focus.from_dict)
+            assert r1 is not None and r2 is not None
+            # Sparse and full undo entries can legitimately disagree on
+            # `changed_ids`/`removed_ids` for an "add" op: the sparse
+            # snapshot doesn't include the newly-added focus, so its
+            # `changed_ids` is empty and `removed_ids` carries the diff.
+            # The full snapshot includes it, so its `changed_ids` covers
+            # every restored key. Both must converge on the same final
+            # document state.
+            assert r1[0] == r2[0]
+        elif op == "redo" and sparse_stack.can_redo():
+            r1 = sparse_stack.redo(sparse_focuses, Focus.from_dict)
+            r2 = full_stack.redo(full_focuses, Focus.from_dict)
+            assert r1 is not None and r2 is not None
+            assert r1[0] == r2[0]
+
+        assert_in_sync()
+
+
+def test_undo_refreshes_id_set_cache_for_redo():
+    """The redo post-snapshot must read the document's id_set, not a stale
+    pre-undo one; otherwise redo would try to "delete" ids the user just
+    got back and drop them on the floor."""
+    focuses = FocusDocument([_mk_focus(1, "focus_1")])
+    stack = UndoStack()
+    stack.push("add focus", focuses, touched_ids=())
+    focuses.add(_mk_focus(2, "focus_2"))
+    assert focuses.id_set == frozenset({1, 2})
+
+    stack.undo(focuses, Focus.from_dict)
+    assert focuses.id_set == frozenset({1})
+
+    result = stack.redo(focuses, Focus.from_dict)
+    assert result is not None
+    # `changed_ids` is the snapshot's full keyset: focus 2 came back AND
+    # focus 1 was reloaded by `FocusDocument.load(restored)`. The redraw
+    # workload is the union; the important assertion is that focus 2 is in
+    # it and nothing was wrongly removed.
+    assert result[1] == {1, 2}
+    assert result[2] == set()
+    assert focuses.id_set == frozenset({1, 2})
+
+
+def test_redo_with_focus_document_uses_load_replace():
+    """When applying a redo entry, calling `load` must replace, not append,
+    otherwise every redo would accumulate duplicates of the same focus."""
+    focuses = FocusDocument([_mk_focus(1, "focus_1")])
+    stack = UndoStack()
+    stack.push("edit", focuses, touched_ids=(1,))
+    focuses[1].cost = 42
+
+    stack.undo(focuses, Focus.from_dict)
+    assert focuses[1].cost == 10
+    stack.redo(focuses, Focus.from_dict)
+    assert len(focuses) == 1
+    assert focuses[1].cost == 42
+    assert focuses.validate_indexes()
 
 
 def test_creation_only_undo_removes_new_focus():
