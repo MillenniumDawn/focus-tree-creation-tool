@@ -96,6 +96,11 @@ from hoi4cm.core import (
     tr,
 )
 from hoi4cm.editor import read_project, write_project
+from hoi4cm.focus_tree.validate import (
+    collect_loc_keys_from_text,
+    validate_document,
+    worst_severity_per_focus,
+)
 from hoi4cm.mod import MOD, detect_loc_file
 from hoi4cm.mod.workspace_files import WorkspaceFiles
 from hoi4cm.models import (
@@ -211,7 +216,7 @@ def _apply_tk_dpi_scaling(root):
         log.warning(f"Tk DPI scaling setup skipped: {e}")
 
 
-class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
+class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[misc]
     CANVAS_MIN_SIZE = 10
     CANVAS_EXPAND_STEP = 5
 
@@ -257,9 +262,14 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
         self._grid_item = None
         self._grid_key = None
         self._sash_x = 0
+        self._validation_issues = []
+        self._validation_worst = {}
+        self._validation_job = None
+        self._validation_win = None
         self.protocol("WM_DELETE_WINDOW", self._on_app_close)
         self._build_ui()
         self._redraw()
+        self._schedule_validation()
 
     def _on_app_close(self):
         if not self._lifecycle.begin_close():
@@ -768,6 +778,128 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
 
     def _hint(self, t):
         self._hint_lbl.config(text=t)
+
+    # ── VALIDATION (background + dialog) ───────────────────────────
+    def _validation_sprites(self):
+        if MOD.loaded and getattr(MOD, "sprites", None):
+            try:
+                # return mapping view directly; validate_document only does `in` checks
+                # caller must not mutate
+                return MOD.sprites
+            except Exception:
+                return None
+        return None
+
+    def _validation_loc_keys(self):
+        path = getattr(MOD, "edit_loc_file", "")
+        if path and os.path.isfile(path):
+            try:
+                text = read_file(path)
+                keys = collect_loc_keys_from_text(text)
+                return keys
+            except Exception:
+                return None
+        return None
+
+    def _schedule_validation(self):
+        if getattr(self, "_validation_job", None):
+            return
+        try:
+            self._validation_job = self.after(150, self._run_validation)
+        except Exception:
+            self._run_validation()
+
+    def _run_validation(self):
+        self._validation_job = None
+        try:
+            sprites = self._validation_sprites()
+            loc_keys = self._validation_loc_keys()
+            issues = validate_document(self.focuses, sprites=sprites, loc_keys=loc_keys)
+        except Exception:
+            return
+        try:
+            worst = worst_severity_per_focus(issues)
+        except Exception:
+            worst = {}
+        prev_issues = getattr(self, "_validation_issues", None)
+        prev_worst = getattr(self, "_validation_worst", None)
+        changed = issues != prev_issues or worst != prev_worst
+        self._validation_issues = issues
+        self._validation_worst = worst
+        if not changed:
+            # still refresh dialog if open but avoid redraw churn
+            win = getattr(self, "_validation_win", None)
+            if win is not None and win.winfo_exists():
+                try:
+                    self._refresh_validation_dialog(win)
+                except Exception:
+                    pass
+            return
+        # refresh UI surfaces that depend on validation
+        try:
+            self._redraw()
+        except Exception:
+            pass
+        try:
+            self._invalidate_focus_list_structure()
+        except Exception:
+            pass
+        # if validation dialog is open, refresh its contents
+        win = getattr(self, "_validation_win", None)
+        if win is not None and win.winfo_exists():
+            try:
+                self._refresh_validation_dialog(win)
+            except Exception:
+                pass
+
+    def _center_on_focus(self, fid):
+        f = self.focuses.get(fid)
+        if f is None:
+            return
+        try:
+            cw = self.cv.winfo_width() or 800
+            ch = self.cv.winfo_height() or 600
+            self.offset[0] = cw / 2 - f.x * 96 * self.zoom
+            self.offset[1] = ch / 2 - f.y * 130 * self.zoom
+            self._redraw()
+            self._select(f)
+        except Exception:
+            pass
+
+    def _redraw(self, *args, **kwargs):
+        # only validation-relevant redraws should re-queue validation
+        channels = kwargs.get("channels", args[0] if args else None)
+        should_schedule = True
+        try:
+            from hoi4cm.ui.canvas_scheduler import RedrawChannel
+
+            if channels is not None:
+                should_schedule = bool(channels & RedrawChannel.SCENE)
+        except Exception:
+            should_schedule = True
+        super()._redraw(*args, **kwargs)  # type: ignore[misc]
+        if should_schedule:
+            try:
+                self._schedule_validation()
+            except Exception:
+                pass
+
+    def _redraw_now(self, *args, **kwargs):
+        channels = kwargs.get("channels", args[0] if args else None)
+        should_schedule = True
+        try:
+            from hoi4cm.ui.canvas_scheduler import RedrawChannel
+
+            if channels is not None:
+                should_schedule = bool(channels & RedrawChannel.SCENE)
+        except Exception:
+            should_schedule = True
+        super()._redraw_now(*args, **kwargs)  # type: ignore[misc]
+        if should_schedule:
+            try:
+                self._schedule_validation()
+            except Exception:
+                pass
 
     def _refresh_tree_meta_panel(self):
         """Refresh the shared_focus / joint_focus read-only display in the sidebar."""
@@ -5308,11 +5440,10 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
         self._lp_search_job = None
         if not hasattr(self, "_focus_list"):
             return
-        # Rebuild the item tuple only when the document structure changes;
-        # search keystrokes just re-filter the cached tuple.
-        self._focus_list_items = self._focus_list_cache.get(
-            self.focuses,
-            lambda: (
+        worst = getattr(self, "_validation_worst", {})
+
+        def _build_items():
+            return (
                 FocusListItem(
                     f.id,
                     f.name,
@@ -5320,10 +5451,25 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
                     has_broken_prerequisite=any(
                         pid not in self.focuses for group in f.prereqs for pid in group
                     ),
+                    validation_severity=worst.get(f.id),
                 )
                 for f in self.focuses.values()
-            ),
-        )
+            )
+
+        # Rebuild the item tuple only when the document structure changes;
+        # search keystrokes just re-filter the cached tuple.
+        self._focus_list_items = self._focus_list_cache.get(self.focuses, _build_items)
+        # patch cached items if validation changed without document revision bump
+        if self._focus_list_items:
+            needs_patch = any(
+                item.validation_severity != worst.get(item.key)
+                for item in self._focus_list_items
+            )
+            if needs_patch:
+                self._focus_list_cache.invalidate()
+                self._focus_list_items = self._focus_list_cache.get(
+                    self.focuses, _build_items
+                )
         query = self._lp_search_var.get() if hasattr(self, "_lp_search_var") else ""
         placeholder = tr("common.search_placeholder", "Search...")
         selected_id = self.selected.id if self.selected else None
@@ -5582,61 +5728,105 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
         self._redraw()
 
     # ─────────────────── VALIDATE TREE ───────────────────────────
-    def _validate_tree(self):
-        """Check tree for common errors and report them."""
-        issues = []
-        for f in self.focuses.values():
-            # Broken prereqs (prereqs store Focus IDs = ints)
-            for grp in f.prereqs:
-                for pid in grp:
-                    if pid not in self.focuses:
-                        issues.append(f"[{f.name}]  broken prereq → id:{pid}")
-            # Broken mutex (mutex stores Focus IDs = ints)
-            for mid in f.mutex:
-                if mid not in self.focuses:
-                    issues.append(f"[{f.name}]  broken mutex → id:{mid}")
-            # No effects
-            if not f.effects:
-                issues.append(f"[{f.name}]  no effects in completion_reward")
-            # Missing GFX
-            gfx = getattr(f, "gfx", "")
-            if not gfx or gfx == "GFX_goal_generic_political_pressure":
-                issues.append(f"[{f.name}]  using default/missing icon GFX")
+    def _refresh_validation_dialog(self, win):
+        filt = getattr(win, "_val_filter_var", None)
+        tree = getattr(win, "_val_tree", None)
+        hdr_lbl = getattr(win, "_val_hdr_lbl", None)
+        if filt is None or tree is None:
+            return
+        issues = getattr(self, "_validation_issues", [])
+        mode = filt.get()
+        if mode == "error":
+            shown = [it for it in issues if it.severity == "error"]
+        elif mode == "warning":
+            shown = [it for it in issues if it.severity == "warning"]
+        else:
+            shown = list(issues)
+        if hdr_lbl is not None:
+            err = sum(1 for it in issues if it.severity == "error")
+            warn = sum(1 for it in issues if it.severity == "warning")
+            if not issues:
+                hdr_lbl.config(
+                    text=tr("validation.clean", "  Tree looks clean!"),
+                    fg="#22c55e",
+                )
+            else:
+                hdr_lbl.config(
+                    text=tr(
+                        "validation.issues_found",
+                        "  {count} issues — {err} errors, {warn} warnings",
+                        count=len(issues),
+                        err=err,
+                        warn=warn,
+                    ),
+                    fg="#fbbf24" if err else "#f59e0b",
+                )
+        for iid in tree.get_children():
+            tree.delete(iid)
+        for idx, it in enumerate(shown):
+            sev_icon = (
+                "🔴"
+                if it.severity == "error"
+                else "🟡"
+                if it.severity == "warning"
+                else "🔵"
+            )
+            focus_txt = it.focus_name or "—"
+            tree.insert(
+                "",
+                "end",
+                iid=str(idx),
+                values=(sev_icon, focus_txt, it.message, it.code),
+                tags=(str(idx),),
+            )
+        # store mapping for click handler
+        win._val_shown = shown  # type: ignore[attr-defined]
 
+    def _validate_tree(self):
+        """Validate tree via pure validator and show filterable dialog."""
+        from tkinter import ttk
+
+        try:
+            sprites = self._validation_sprites()
+            loc_keys = self._validation_loc_keys()
+            issues = validate_document(self.focuses, sprites=sprites, loc_keys=loc_keys)
+            self._validation_issues = issues
+            self._validation_worst = worst_severity_per_focus(issues)
+            self._redraw()
+            self._invalidate_focus_list_structure()
+        except Exception:
+            issues = getattr(self, "_validation_issues", [])
         win = tk.Toplevel(self)
         win.title(tr("validation.title", "Tree Validation"))
         win.configure(bg=BG_DARK)
-        win.geometry("640x440")
+        win.geometry("820x460")
         win.resizable(True, True)
+        self._validation_win = win
 
+        def _on_close():
+            self._validation_win = None
+            try:
+                win.destroy()
+            except Exception:
+                pass
+
+        win.protocol("WM_DELETE_WINDOW", _on_close)
         hdr = tk.Frame(win, bg="#080c12")
         hdr.pack(fill="x")
-        if issues:
-            tk.Label(
-                hdr,
-                text=tr(
-                    "validation.issues_found",
-                    "  {count} issues found",
-                    count=len(issues),
-                ),
-                bg="#080c12",
-                fg="#fbbf24",
-                font=("Helvetica", 11, "bold"),
-                pady=8,
-            ).pack(side="left", padx=8)
-        else:
-            tk.Label(
-                hdr,
-                text=tr("validation.clean", "  Tree looks clean!"),
-                bg="#080c12",
-                fg="#22c55e",
-                font=("Helvetica", 11, "bold"),
-                pady=8,
-            ).pack(side="left", padx=8)
+        hdr_lbl = tk.Label(
+            hdr,
+            text="",
+            bg="#080c12",
+            fg="#fbbf24",
+            font=("Helvetica", 11, "bold"),
+            pady=8,
+        )
+        hdr_lbl.pack(side="left", padx=8)
+        win._val_hdr_lbl = hdr_lbl  # type: ignore[attr-defined]
         tk.Button(
             hdr,
             text="✕",
-            command=win.destroy,
+            command=_on_close,
             bg="#080c12",
             fg=TEXT_DIM,
             relief="flat",
@@ -5644,49 +5834,181 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
             padx=10,
         ).pack(side="right")
         tk.Frame(win, bg=BORDER_G, height=1).pack(fill="x")
+        # filter row
+        filt_var = tk.StringVar(value="all")
+        win._val_filter_var = filt_var  # type: ignore[attr-defined]
+        filt_row = tk.Frame(win, bg=BG_DARK)
+        filt_row.pack(fill="x", padx=8, pady=6)
+        tk.Label(
+            filt_row,
+            text=tr("validation.filter", "Filter:"),
+            bg=BG_DARK,
+            fg=TEXT_DIM,
+            font=("Helvetica", 9),
+        ).pack(side="left")
+        for val, label in (
+            ("all", tr("validation.filter_all", "All")),
+            ("error", tr("validation.filter_errors", "Errors")),
+            ("warning", tr("validation.filter_warnings", "Warnings")),
+        ):
+            tk.Radiobutton(
+                filt_row,
+                text=label,
+                variable=filt_var,
+                value=val,
+                bg=BG_DARK,
+                fg=TEXT,
+                selectcolor="#1e293b",
+                activebackground=BG_DARK,
+                command=lambda: self._refresh_validation_dialog(win),
+            ).pack(side="left", padx=6)
 
+        def _copy_filtered():
+            shown = getattr(win, "_val_shown", [])
+            if not shown:
+                return
+            text = "\n".join(
+                f"{it.severity.upper()}: {it.message} [{it.code}]" for it in shown
+            )
+            try:
+                self.clipboard_clear()
+                self.clipboard_append(text)
+                self._hint(
+                    tr("validation.copied", "Copied {count} issues", count=len(shown))
+                )
+            except Exception:
+                pass
+
+        tk.Button(
+            filt_row,
+            text=tr("validation.copy", "Copy"),
+            command=_copy_filtered,
+            bg=BG_CARD,
+            fg=TEXT,
+            relief="flat",
+            padx=10,
+            pady=2,
+            cursor="hand2",
+            font=("Helvetica", 9),
+        ).pack(side="right", padx=4)
+        tk.Button(
+            filt_row,
+            text=tr("validation.revalidate", "Re-validate"),
+            command=lambda: (
+                self._run_validation(),
+                self._refresh_validation_dialog(win),
+            ),
+            bg=BG_CARD,
+            fg=TEXT,
+            relief="flat",
+            padx=10,
+            pady=2,
+            cursor="hand2",
+            font=("Helvetica", 9),
+        ).pack(side="right")
         frm = tk.Frame(win, bg=BG_DARK)
-        frm.pack(fill="both", expand=True)
+        frm.pack(fill="both", expand=True, padx=8, pady=(0, 8))
+        # Treeview with scrollbar
         sb = tk.Scrollbar(frm)
         sb.pack(side="right", fill="y")
-        txt = tk.Text(
-            frm,
-            bg="#050810",
-            fg=TEXT,
-            font=("Courier", 10),
-            relief="flat",
-            yscrollcommand=sb.set,
-            wrap="word",
-            highlightthickness=0,
-        )
-        sb.config(command=txt.yview)
-        txt.pack(fill="both", expand=True, padx=8, pady=8)
-        if issues:
-            for issue in issues:
-                if "broken" in issue:
-                    txt.insert("end", "  🔴  " + issue + "\n")
-                elif "no effects" in issue:
-                    txt.insert("end", "  🟡  " + issue + "\n")
-                else:
-                    txt.insert("end", "  🔵  " + issue + "\n")
-        else:
-            txt.insert(
-                "end",
-                "\n"
-                + tr(
-                    "validation.all_prereqs_valid",
-                    "  All prerequisite chains are valid.",
-                )
-                + "\n"
-                + tr("validation.all_mutex_valid", "  All mutex references resolve.")
-                + "\n"
-                + tr(
-                    "validation.all_effects_present",
-                    "  All focuses have completion_reward effects.",
-                )
-                + "\n",
+        style = ttk.Style()
+        try:
+            style.theme_use("clam")
+            style.configure(
+                "Val.Treeview",
+                background="#050810",
+                foreground=TEXT,
+                fieldbackground="#050810",
+                borderwidth=0,
+                highlightthickness=0,
+                rowheight=22,
             )
-        txt.config(state="disabled")
+            style.configure(
+                "Val.Treeview.Heading",
+                background="#1e293b",
+                foreground=TEXT,
+                relief="flat",
+            )
+            style.map("Val.Treeview", background=[("selected", "#1e2d4a")])
+        except Exception:
+            pass
+        tree = ttk.Treeview(
+            frm,
+            columns=("sev", "focus", "message", "code"),
+            show="headings",
+            style="Val.Treeview",
+            yscrollcommand=sb.set,
+        )
+        win._val_tree = tree  # type: ignore[attr-defined]
+        tree.heading("sev", text="")
+        tree.heading("focus", text=tr("validation.col_focus", "Focus"))
+        tree.heading("message", text=tr("validation.col_message", "Message"))
+        tree.heading("code", text=tr("validation.col_code", "Code"))
+        tree.column("sev", width=40, minwidth=30, stretch=False, anchor="center")
+        tree.column("focus", width=160, minwidth=100, anchor="w")
+        tree.column("message", width=420, minwidth=200, anchor="w")
+        tree.column("code", width=120, minwidth=80, anchor="w")
+        sb.config(command=tree.yview)
+        tree.pack(fill="both", expand=True)
+        hint = tk.Label(
+            win,
+            text=tr(
+                "validation.hint",
+                "Click a row to select the focus on the canvas. Double-click to center.",
+            ),
+            bg=BG_DARK,
+            fg=TEXT_DIM,
+            font=("Helvetica", 8),
+            anchor="w",
+        )
+        hint.pack(fill="x", padx=8, pady=(0, 6))
+
+        def _select_focus(event=None):
+            sel = tree.selection()
+            if not sel:
+                return
+            try:
+                idx = int(sel[0])
+            except Exception:
+                return
+            shown = getattr(win, "_val_shown", [])
+            if 0 <= idx < len(shown):
+                it = shown[idx]
+                if it.focus_id is not None and it.focus_id in self.focuses:
+                    self._select(self.focuses[it.focus_id])
+                    self._hint(f"Selected {it.focus_name}: {it.code}")
+
+        def _center_focus(event=None):
+            sel = tree.selection()
+            if not sel:
+                return
+            try:
+                idx = int(sel[0])
+            except Exception:
+                return
+            shown = getattr(win, "_val_shown", [])
+            if 0 <= idx < len(shown):
+                it = shown[idx]
+                if it.focus_id is not None and it.focus_id in self.focuses:
+                    self._center_on_focus(it.focus_id)
+
+        tree.bind("<<TreeviewSelect>>", _select_focus)
+        tree.bind("<Double-Button-1>", _center_focus)
+        self._refresh_validation_dialog(win)
+        if not issues:
+            tree.insert(
+                "",
+                "end",
+                values=(
+                    "",
+                    "",
+                    tr(
+                        "validation.all_prereqs_valid",
+                        "All prerequisite chains are valid.",
+                    ),
+                    "",
+                ),
+            )
 
     def _export(
         self, *, focuses_in_tree=None, focus_name_lookup=None, show_dialog=True

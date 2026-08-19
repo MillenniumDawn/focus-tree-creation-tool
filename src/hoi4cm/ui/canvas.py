@@ -8,7 +8,9 @@ lines out of ``hoi4_content_maker.py``.
 
 import math
 import tkinter as tk
+from typing import Any
 
+from hoi4cm.focus_tree.validate import Severity
 from hoi4cm.mod import MOD
 from hoi4cm.ui import (
     BG_CARD,
@@ -49,6 +51,42 @@ _GRID_MARGIN_SCREENS = 1
 
 class CanvasMixin:
     """Canvas rendering + interaction methods for :class:`App`."""
+
+    # App-owned attributes accessed through the mixin. Declared here so
+    # type-checkers know they exist on the concrete App instance.
+    cv: Any  # type: ignore[no-redef]
+    focuses: Any  # type: ignore[no-redef]
+    offset: Any  # type: ignore[no-redef]
+    zoom: Any  # type: ignore[no-redef]
+    selected: Any  # type: ignore[no-redef]
+    _multi_sel: Any  # type: ignore[no-redef]
+    _multisel_mode: Any  # type: ignore[no-redef]
+    mutex_src: Any  # type: ignore[no-redef]
+    mutex_mode: Any  # type: ignore[no-redef]
+    _lines: Any  # type: ignore[no-redef]
+    _temp_line: Any  # type: ignore[no-redef]
+    _pan_start: Any  # type: ignore[no-redef]
+    _drag: Any  # type: ignore[no-redef]
+    _redraw_state: Any  # type: ignore[no-redef]
+    _scene_index: Any  # type: ignore[no-redef]
+    _focus_bundles: Any  # type: ignore[no-redef]
+    _redraw_job: Any  # type: ignore[no-redef]
+    _lines_job: Any  # type: ignore[no-redef]
+    _grid_pool: Any  # type: ignore[no-redef]
+    _grid_used: Any  # type: ignore[no-redef]
+    _grid_key: Any  # type: ignore[no-redef]
+    _grid_item: Any  # type: ignore[no-redef]
+    _grid_on: Any  # type: ignore[no-redef]
+    _canvas_min: Any  # type: ignore[no-redef]
+    _canvas_max: Any  # type: ignore[no-redef]
+    _extra_trees: Any  # type: ignore[no-redef]
+    _lifecycle: Any  # type: ignore[no-redef]
+    _image_broker: Any  # type: ignore[no-redef]
+    _image_poll_job: Any  # type: ignore[no-redef]
+    _validation_worst: dict[int, Severity]  # type: ignore[no-redef]
+
+    def __getattr__(self, name: str) -> Any:  # type: ignore[no-redef]
+        raise AttributeError(name)
 
     # Above this many loaded focuses, the minimap buckets dots to one per
     # occupied pixel cell and skips prereq lines (see _draw_minimap).
@@ -727,7 +765,7 @@ class CanvasMixin:
             self._delete_focus_bundle(f.id)
             bundle = None
         z = self.zoom
-        XGRID * z  # horizontal slot width
+        _ = XGRID * z  # horizontal slot width, keeps import used
         box = BOX * z
         h = box / 2
         sd = max(1, int(2 * z))
@@ -753,6 +791,14 @@ class CanvasMixin:
         )
         fill_col = FC_SEL if sel else ("#0a2030" if msel else FC_BG)
         bw = 3 if sel else (2 if msel else 1)
+        # validation overlay: error red, warning amber when not selected
+        val_sev = getattr(self, "_validation_worst", {}).get(f.id)
+        if val_sev and not sel and not msel and not mut:
+            if val_sev == "error":
+                border_col = "#ef4444"
+                bw = max(bw, 2)
+            elif val_sev == "warning":
+                border_col = "#f59e0b"
 
         if lod == "compact":
             state_key = (
@@ -762,6 +808,7 @@ class CanvasMixin:
                 border_col,
                 fill_col,
                 bw,
+                val_sev,
             )
             if bundle is not None and bundle.draw_key == state_key:
                 return
@@ -804,6 +851,7 @@ class CanvasMixin:
             label_text = ""
 
         has_offsets = bool(getattr(f, "offsets", []))
+        # val_sev already fetched before LOD branch; reuse for full path
         # Fast-exit: skip if nothing changed since last draw
         state_key = (
             round(cx, 1),
@@ -819,6 +867,7 @@ class CanvasMixin:
             getattr(f, "gfx", ""),
             tree_idx,
             has_offsets,
+            val_sev,
         )
         if bundle is not None and bundle.draw_key == state_key:
             return
@@ -1256,7 +1305,7 @@ class CanvasMixin:
         offs = getattr(f, "offsets", [])
         if offs:
             off_strs = [
-                f"x={o['x']} y={o['y']} [{o.get('trigger','').strip()[:30]}]"
+                f"x={o['x']} y={o['y']} [{o.get('trigger', '').strip()[:30]}]"
                 for o in offs
             ]
             base += f"  •  Offsets: {'; '.join(off_strs)}"
@@ -1286,7 +1335,7 @@ class CanvasMixin:
             header = (f"■ … {first} more trees", TEXT_DIM)
         else:
             header = ("■ Main tree", FC_BORDER)
-        rows = [header]
+        rows: list[tuple[str, str]] = [header]
         for idx in range(first, len(extra)):
             et = extra[idx]
             badge, col = self._get_tree_badge(idx + 1)
