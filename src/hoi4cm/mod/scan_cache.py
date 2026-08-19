@@ -56,10 +56,18 @@ class ScanCache:
             conn.execute(_SCHEMA)
             conn.commit()
             self._conn = conn
-        except Exception as e:  # pragma: no cover - depends on FS/db state
+        except (  # pragma: no cover - depends on FS/db state
+            OSError,
+            sqlite3.Error,
+            ValueError,
+            RuntimeError,
+        ) as exc:
             if conn is not None:
-                conn.close()
-            _log.warning("scan cache disabled (open failed): %s", e)
+                try:
+                    conn.close()
+                except sqlite3.Error, OSError:
+                    pass
+            _log.warning("scan cache disabled (open failed): %s", exc)
             self._conn = None
 
     @property
@@ -81,7 +89,7 @@ class ScanCache:
             if c_size != size or abs(c_mtime - mtime) > 1e-6:
                 return None
             return json.loads(data)
-        except Exception:
+        except sqlite3.Error, json.JSONDecodeError, ValueError, OSError, TypeError:
             return None
 
     def get_many(self, domain, sigs):
@@ -107,13 +115,13 @@ class ScanCache:
                     continue
                 try:
                     value = json.loads(data)
-                except Exception:
+                except json.JSONDecodeError, ValueError, TypeError:
                     continue
                 if value is None:
                     continue
                 hits[path] = value
             return hits
-        except Exception:
+        except sqlite3.Error, OSError, ValueError, RuntimeError:
             return {}
 
     def put(self, domain, path, mtime, size, data):
@@ -125,7 +133,7 @@ class ScanCache:
                 "(domain, path, mtime, size, data) VALUES (?, ?, ?, ?, ?)",
                 (domain, path, mtime, size, json.dumps(data, ensure_ascii=False)),
             )
-        except Exception:
+        except sqlite3.Error, OSError, ValueError, TypeError:
             pass
 
     def put_many(self, domain, items):
@@ -141,7 +149,7 @@ class ScanCache:
                     for path, mtime, size, data in items
                 ],
             )
-        except Exception:
+        except sqlite3.Error, OSError, ValueError, TypeError:
             pass
 
     def prune(self, domain, keep_paths):
@@ -158,7 +166,7 @@ class ScanCache:
                 self._conn.executemany(
                     "DELETE FROM file_cache WHERE domain=? AND path=?", stale
                 )
-        except Exception:
+        except sqlite3.Error, OSError, ValueError:
             pass
 
     def commit(self):
@@ -166,7 +174,7 @@ class ScanCache:
             return
         try:
             self._conn.commit()
-        except Exception:
+        except sqlite3.Error, OSError:
             pass
 
     def close(self):
@@ -175,7 +183,7 @@ class ScanCache:
         try:
             self._conn.commit()
             self._conn.close()
-        except Exception:
+        except sqlite3.Error, OSError:
             pass
         finally:
             self._conn = None

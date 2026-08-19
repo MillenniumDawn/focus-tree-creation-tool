@@ -6,12 +6,15 @@ import os
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 
+from hoi4cm.core.logger import get_logger
 from hoi4cm.core.paths import read_file
 from hoi4cm.mod.workspace_files import WriteEntry
 from hoi4cm.models import Focus
 
 from .export import export_focus_tree, export_main_tree
 from .loc import build_loc_yml
+
+_log = get_logger("export_plan")
 
 WriteTexts = Callable[[Iterable[WriteEntry]], None]
 ProgressCallback = Callable[[int, int, str], None]
@@ -150,7 +153,8 @@ def execute_export_plans(
                 plan, read_text=read_text, is_file=is_file
             )
             write_texts(writes)
-        except Exception as error:
+        except (OSError, ValueError, TypeError, RuntimeError) as error:
+            _log.error("export failed for %s: %s", plan.label, error, exc_info=True)
             results.append(ExportResult(plan=plan, error=error))
         else:
             results.append(

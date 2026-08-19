@@ -273,7 +273,7 @@ def open_effect_picker(parent, target_text, on_insert=None):
     def _on_mousewheel(event):
         try:
             fields_cv.yview_scroll(int(-1 * (event.delta / 120)), "units")
-        except Exception:
+        except tk.TclError:
             pass
 
     fields_cv.bind("<MouseWheel>", _on_mousewheel)
@@ -448,7 +448,7 @@ def open_effect_picker(parent, target_text, on_insert=None):
     def _update_preview(*_):
         try:
             prev_lbl.config(text=_render_snippet())
-        except Exception:
+        except tk.TclError:
             pass
 
     # rebind all field changes to also update preview — wire after a small delay

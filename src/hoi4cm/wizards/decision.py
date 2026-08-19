@@ -134,8 +134,8 @@ def open_decision_wizard(app):
             data = {"cats": dm_cats, "decs": dm_decs}
             with open(_autosave_path, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
-        except Exception:
-            pass
+        except (OSError, ValueError) as exc:
+            get_logger("decision").debug("autosave failed: %s", exc)
 
     def _load_autosave():
         """Restore from autosave JSON if it exists."""
@@ -150,8 +150,8 @@ def open_decision_wizard(app):
                 dm_decs.clear()
                 dm_decs.extend(data["decs"])
                 return True
-        except Exception:
-            pass
+        except (OSError, ValueError) as exc:
+            get_logger("decision").debug("autosave load failed: %s", exc)
         return False
 
     def _on_dec_win_close():
@@ -165,8 +165,8 @@ def open_decision_wizard(app):
         try:
             if _c_fn:
                 _c_fn()
-        except Exception:
-            pass
+        except (tk.TclError, ValueError, RuntimeError) as exc:
+            get_logger("decision").debug("collect on close failed: %s", exc)
         try:
             _as_fn = _autosave  # noqa: F821 - late-bound closure
         except NameError:
@@ -174,11 +174,11 @@ def open_decision_wizard(app):
         try:
             if _as_fn:
                 _as_fn()
-        except Exception:
-            pass
+        except (OSError, ValueError) as exc:
+            get_logger("decision").debug("autosave on close failed: %s", exc)
         try:
             win.destroy()
-        except Exception:
+        except tk.TclError:
             pass
 
     win.protocol("WM_DELETE_WINDOW", _on_dec_win_close)
@@ -432,11 +432,11 @@ def open_decision_wizard(app):
         try:
             _collect()
             _autosave()
-        except Exception:
-            pass
+        except (OSError, ValueError, tk.TclError) as exc:
+            get_logger("decision").debug("periodic autosave failed: %s", exc)
         try:
             win.after(60000, _periodic_autosave)
-        except Exception:
+        except tk.TclError:
             pass
 
     win.after(60000, _periodic_autosave)
@@ -619,7 +619,7 @@ def open_decision_wizard(app):
                 crow.config(bg=bg_sel if is_sel else bg_norm)
                 inn.config(bg=bg_sel if is_sel else bg_norm)
                 lbar.config(bg=C_GOLD if is_sel else bg_norm)
-            except Exception:
+            except tk.TclError:
                 pass
 
     def _rebuild_tree():
@@ -1126,13 +1126,13 @@ def open_decision_wizard(app):
                     stem = os.path.splitext(os.path.basename(files[0]))[0]
                     sv.set("GFX_decision_" + stem)
                     drop_outer.configure(highlightbackground=C_BORDG)
-            except Exception:
-                pass
+            except (OSError, ValueError, tk.TclError) as exc:
+                get_logger("decision").debug("drop handling failed: %s", exc)
 
         try:
             drop_outer.drop_target_register("DND_Files")
             drop_outer.dnd_bind("<<Drop>>", _on_drop)
-        except Exception:
+        except tk.TclError:
             pass
         if prefix_note:
             tk.Label(
@@ -1196,7 +1196,7 @@ def open_decision_wizard(app):
             if isinstance(v, tk.Text):
                 return v.get("1.0", "end-1c") if v.winfo_exists() else None
             return v.get()
-        except Exception:
+        except tk.TclError:
             return None
 
     def _collect():
@@ -2681,7 +2681,7 @@ def open_decision_wizard(app):
             for _m, cb in cbs:
                 try:
                     v.trace_remove("write", cb)
-                except Exception:
+                except tk.TclError:
                     pass
             if isinstance(v, tk.BooleanVar):
                 v.set(bool(value))
@@ -2690,15 +2690,15 @@ def open_decision_wizard(app):
             for _m, cb in cbs:
                 try:
                     v.trace_add("write", lambda *a, _cb=cb, _v=v: None)
-                except Exception:
+                except tk.TclError:
                     pass
-        except Exception:
+        except tk.TclError:
             try:
                 if isinstance(v, tk.BooleanVar):
                     v.set(bool(value))
                 else:
                     v.set(str(value) if value is not None else "")
-            except Exception:
+            except tk.TclError:
                 pass
 
     def _set_text_silent(key, value):
@@ -2710,7 +2710,7 @@ def open_decision_wizard(app):
             v.delete("1.0", "end")
             if value:
                 v.insert("1.0", str(value))
-        except Exception:
+        except tk.TclError:
             pass
 
     def _populate_dec_editor(d):
@@ -2790,7 +2790,7 @@ def open_decision_wizard(app):
             if fn:
                 try:
                     fn()
-                except Exception:
+                except tk.TclError:
                     pass
         # Update badge row
         try:
@@ -2815,7 +2815,7 @@ def open_decision_wizard(app):
                     fg=C_TEXT,
                     font=("Courier", 11),
                 ).pack(side="left")
-        except Exception:
+        except tk.TclError:
             pass
 
     def _populate_cat_editor(c):
@@ -2884,7 +2884,7 @@ def open_decision_wizard(app):
         # Scroll editor back to top on selection change
         try:
             mid_cv.yview_moveto(0)
-        except Exception:
+        except tk.TclError:
             pass
 
     # ════════════════════════════════════════════════════════════════════════
@@ -2962,7 +2962,7 @@ def open_decision_wizard(app):
         if _rr_job[0] is not None:
             try:
                 win.after_cancel(_rr_job[0])
-            except Exception:
+            except tk.TclError:
                 pass
 
         def _do_rebuild():
@@ -3000,7 +3000,8 @@ def open_decision_wizard(app):
                 if hasattr(_tpil, "registered_extensions")
                 else False
             )
-        except Exception:
+        except (OSError, ValueError, AttributeError, ImportError) as exc:
+            get_logger("decision").debug("dds check failed: %s", exc)
             _dds_supported = False
 
     def _decode_dec_icon(gfx_key, size=24):
@@ -3052,7 +3053,7 @@ def open_decision_wizard(app):
                         pil = source.convert("RGBA")
                     rs = getattr(PILImage, "LANCZOS", getattr(PILImage, "ANTIALIAS", 1))
                     return pil.resize((size, size), rs)
-                except Exception as _ico_err:
+                except (OSError, ValueError) as _ico_err:
                     get_logger("ico").warning(f"PIL failed {cpath}: {_ico_err}")
         else:
             get_logger("ico").warning(
@@ -3129,8 +3130,10 @@ def open_decision_wizard(app):
                     return pil.resize(
                         (max(1, int(pw * ratio)), max(1, int(ph * ratio))), rs
                     )
-                except Exception:
-                    pass
+                except (OSError, ValueError) as exc:
+                    get_logger("decision").debug(
+                        "PIL cat picture failed %s: %s", cpath, exc
+                    )
         return None
 
     def _load_cat_picture(gfx_key, w=64, h=64):
@@ -3231,7 +3234,7 @@ def open_decision_wizard(app):
             try:
                 new_w = max(10, e.width // 7)
                 t.config(width=new_w)
-            except Exception:
+            except tk.TclError:
                 pass
 
         parent.bind("<Configure>", _resize, add=True)
@@ -3475,7 +3478,7 @@ def open_decision_wizard(app):
                             try:
                                 if not box.winfo_exists():
                                     return
-                            except Exception:
+                            except tk.TclError:
                                 return
 
                             def _paint(item, img):
@@ -3569,7 +3572,7 @@ def open_decision_wizard(app):
                             try:
                                 if not box.winfo_exists():
                                     return
-                            except Exception:
+                            except tk.TclError:
                                 return
 
                             def _paint(item, img):
@@ -3636,7 +3639,7 @@ def open_decision_wizard(app):
                 try:
                     name_lbl.bind("<Button-1>", _on_prev_click)
                     name_lbl.config(cursor="hand2")
-                except Exception:
+                except tk.TclError:
                     pass
 
                 if i < len(decs) - 1:
@@ -3975,8 +3978,10 @@ def open_decision_wizard(app):
                         _dm_status.config(
                             text=f"  ✓  Scripted loc saved to {os.path.basename(MOD.edit_scripted_loc_file)}"
                         )
-                    except Exception as _ex:
-                        _dm_status.config(text=f"  ✗  Save error: {_ex}")
+                    except OSError as _ex:
+                        report_error(
+                            f"Save error: {_ex}", _ex, parent=win, title="Save Error"
+                        )
                 else:
                     win.clipboard_clear()
                     win.clipboard_append(raw)
@@ -4130,18 +4135,20 @@ def open_decision_wizard(app):
                 _rebuild_editor()
                 try:
                     _build_preview()
-                except Exception:
+                except tk.TclError:
                     pass
                 _autosave()
                 _dm_status.config(
                     text=f"  ✓  Applied — {len(dm_cats)} categories, {imported} decisions parsed from code"
                 )
-            except Exception as _ex:
+            except Exception as _ex:  # noqa: BLE001
                 import traceback as _tb
 
                 dm_cats[:] = old_cats
                 dm_decs[:] = old_decs
-                _dm_status.config(text=f"  ✗  Parse error: {_ex}")
+                report_error(
+                    f"Parse error: {_ex}", _ex, parent=win, title="Parse Error"
+                )
                 _tb.print_exc()
 
         tk.Button(
@@ -4404,8 +4411,10 @@ def open_decision_wizard(app):
                             and cid in existing_cat_ids
                         ):
                             new_cats.append(cid)
-                except Exception:
-                    pass
+                except (OSError, ValueError) as exc:
+                    get_logger("decision").debug(
+                        "duplicate scan failed %s: %s", fp, exc
+                    )
             if new_cats:
                 dupes = ", ".join(sorted(set(new_cats)))
                 if not messagebox.askyesno(
@@ -4505,8 +4514,8 @@ def open_decision_wizard(app):
                             lm = _re.match(r'\s+([\w]+):(?:\d+)?\s+"(.*?)"', line)
                             if lm:
                                 loc[lm.group(1)] = lm.group(2)
-                except Exception:
-                    pass
+                except (OSError, ValueError) as exc:
+                    get_logger("decision").debug("loc read failed %s: %s", path, exc)
 
         # Also try to auto-load loc from same folder as first .txt
         txt_paths = [p for p in paths if p.lower().endswith(".txt")]
@@ -4530,8 +4539,10 @@ def open_decision_wizard(app):
                                         )
                                         if lm:
                                             loc[lm.group(1)] = lm.group(2)
-                            except Exception:
-                                pass
+                            except (OSError, ValueError) as exc:
+                                get_logger("decision").debug(
+                                    "loc dir read failed %s: %s", fn, exc
+                                )
                     break
                 folder = os.path.dirname(folder)
 
@@ -4540,7 +4551,7 @@ def open_decision_wizard(app):
             try:
                 with open(path, encoding="utf-8", errors="replace") as f:
                     raw = f.read()
-            except Exception as e:
+            except OSError as e:
                 report_error(str(e), e, parent=win, title="Import Error")
                 continue
 
@@ -4733,8 +4744,10 @@ def open_decision_wizard(app):
                     _rsl.DOTALL,
                 ):
                     sloc_map[m.group(1)] = m.group(2)
-            except Exception:
-                pass
+            except (OSError, ValueError) as exc:
+                get_logger("decision").debug(
+                    "scripted loc read failed %s: %s", path, exc
+                )
         if not sloc_map:
             _dm_status.config(text="  ⚠  No defined_text blocks found")
             return
@@ -4780,7 +4793,7 @@ def open_decision_wizard(app):
                         lm = _re2.match(r'\s+([\w]+):(?:\d+)?\s+"(.*?)"', line)
                         if lm:
                             loc2[lm.group(1)] = lm.group(2)
-            except Exception as e:
+            except OSError as e:
                 report_error(str(e), e, parent=win, title="YML Error")
                 return
         updated = 0
@@ -4819,7 +4832,7 @@ def open_decision_wizard(app):
                 ]
             )
             _dm_status.config(text="  ✓  Exported")
-        except Exception as e:
+        except OSError as e:
             report_error(str(e), e, parent=win, title="Export Error")
 
     def _copy_yml():
@@ -4863,8 +4876,9 @@ def open_decision_wizard(app):
                 saved.append(os.path.relpath(dec_path, mod_root))
             except ValueError:
                 saved.append(dec_path)
-        except Exception as e:
+        except OSError as e:
             errs.append(str(e))
+            get_logger("decision").error("save decisions failed: %s", e, exc_info=True)
         # Categories file — use the matching edit target if set, else default
         if MOD.edit_decisions_cat_file and os.path.isfile(MOD.edit_decisions_cat_file):
             cat_path = MOD.edit_decisions_cat_file
@@ -4879,8 +4893,9 @@ def open_decision_wizard(app):
                 saved.append(os.path.relpath(cat_path, mod_root))
             except ValueError:
                 saved.append(cat_path)
-        except Exception as e:
+        except OSError as e:
             errs.append(str(e))
+            get_logger("decision").error("save categories failed: %s", e, exc_info=True)
         yml_path = (
             MOD.edit_loc_file
             if MOD.edit_loc_file and os.path.isfile(MOD.edit_loc_file)
@@ -4921,8 +4936,9 @@ def open_decision_wizard(app):
             saved.append(
                 os.path.relpath(yml_path, mod_root) + f"  (+{len(to_write)} keys)"
             )
-        except Exception as e:
+        except OSError as e:
             errs.append(str(e))
+            get_logger("decision").error("save loc failed: %s", e, exc_info=True)
         # ── SCRIPTED LOC ─────────────────────────────────────────────────
         if MOD.edit_scripted_loc_file:
             sloc_blocks = []
@@ -4977,8 +4993,8 @@ def open_decision_wizard(app):
                         _rebuild_tree()
                         _rebuild_editor()
                         _rebuild_right()
-            except Exception:
-                pass
+            except (OSError, ValueError) as exc:
+                get_logger("decision").debug("autosave restore failed: %s", exc)
 
     if not dm_cats:
         win.after(50, _try_restore)

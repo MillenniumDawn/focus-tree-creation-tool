@@ -670,7 +670,7 @@ class ModLoadingMixin:
                         if m
                         else os.path.splitext(os.path.basename(MOD.edit_events_file))[0]
                     )
-                except Exception:
+                except OSError, ValueError, RuntimeError, UnicodeDecodeError:
                     pass
             # Update mod label
             parts = []
@@ -833,8 +833,8 @@ class ModLoadingMixin:
                             f"'calculate_additional_income_rate' in "
                             f"{os.path.basename(money_sys)}. Insert manually."
                         )
-            except Exception as e:
-                errs.append(f"❌ 00_money_system.txt: {e}")
+            except (OSError, ValueError, RuntimeError, UnicodeDecodeError) as exc:
+                errs.append(f"❌ 00_money_system.txt: {exc}")
         else:
             errs.append(
                 "⚠ 00_money_system.txt not found at expected path. Insert manually:\n"
@@ -875,8 +875,8 @@ class ModLoadingMixin:
                 wf.append_text(sloc, defined_text, encoding="utf-8")
                 rel = os.path.relpath(sloc, MOD.root)
                 saved.append(f"✅ {rel}  — appended '{summary_name}'")
-        except Exception as e:
-            errs.append(f"❌ money_scripted_localization.txt: {e}")
+        except (OSError, ValueError, RuntimeError, UnicodeDecodeError) as exc:
+            errs.append(f"❌ money_scripted_localization.txt: {exc}")
 
         # ── Step 3: MD_money_l_english.yml ───────────────────────────
         yml = MOD.md_money_yml_file
@@ -930,7 +930,7 @@ class ModLoadingMixin:
                         f"✅ {rel}  — appended new '{tooltip_loc_key}' entry "
                         f"(key not found, added at end)"
                     )
-        except Exception as e:
-            errs.append(f"❌ MD_money_l_english.yml: {e}")
+        except (OSError, ValueError, RuntimeError, UnicodeDecodeError) as exc:
+            errs.append(f"❌ MD_money_l_english.yml: {exc}")
 
         return saved, errs

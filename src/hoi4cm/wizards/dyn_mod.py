@@ -10,10 +10,13 @@ import json
 import os
 import re
 import tkinter as tk
+import traceback
 from tkinter import filedialog, messagebox
 
 from hoi4cm.core import (
+    add_error,
     autosave_path,
+    get_logger,
     sanitize_component,
     tr,
 )
@@ -87,8 +90,8 @@ def open_dyn_mod_wizard(app):
             data = {k: v.get() for k, v in _dm_svars.items()}
             with open(_dm_autosave_p, "w", encoding="utf-8") as f:
                 json.dump(data, f)
-        except Exception:
-            pass
+        except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
+            get_logger("dyn_mod").debug("autosave failed: %s", exc, exc_info=True)
         win.destroy()
 
     win.protocol("WM_DELETE_WINDOW", _dynmod_close)
@@ -498,7 +501,7 @@ def open_dyn_mod_wizard(app):
                     return pil.resize(
                         (max(1, int(pw * ratio)), max(1, int(ph * ratio))), rs
                     )
-                except Exception:
+                except OSError, ValueError, RuntimeError, AttributeError:
                     pass
             return None
 
@@ -954,11 +957,23 @@ def open_dyn_mod_wizard(app):
         messagebox.showinfo("Saved — Review Changes", "\n\n".join(parts), parent=win)
 
     def _dm_show_preview():
-        preview.config(state="normal")
-        preview.delete("1.0", "end")
-        preview.insert("1.0", _dm_get_output())
-        if not _dm_edit_mode[0]:
-            preview.config(state="disabled")
+        try:
+            text = _dm_get_output()
+        # intentional: generator may raise any Exception
+        except Exception as exc:  # noqa: BLE001
+            get_logger("dyn_mod").error("Preview build failed: %s", exc, exc_info=True)
+            add_error(
+                f"Dynamic modifier preview failed: {exc}\n{traceback.format_exc()}"
+            )
+            return
+        try:
+            preview.config(state="normal")
+            preview.delete("1.0", "end")
+            preview.insert("1.0", text)
+            if not _dm_edit_mode[0]:
+                preview.config(state="disabled")
+        except tk.TclError:
+            pass
 
     _dm_edit_btn.config(command=_dm_toggle_edit)
     _dm_save_raw_btn.config(command=_dm_save_raw)
@@ -985,10 +1000,22 @@ def open_dyn_mod_wizard(app):
             return
         if _dm_raw_override[0] is not None:
             return
-        preview.config(state="normal")
-        preview.delete("1.0", "end")
-        preview.insert("1.0", _build_output())
-        preview.config(state="disabled")
+        try:
+            text = _build_output()
+        # intentional: builder may raise any Exception
+        except Exception as exc:  # noqa: BLE001
+            get_logger("dyn_mod").error("Preview build failed: %s", exc, exc_info=True)
+            add_error(
+                f"Dynamic modifier preview failed: {exc}\n{traceback.format_exc()}"
+            )
+            return
+        try:
+            preview.config(state="normal")
+            preview.delete("1.0", "end")
+            preview.insert("1.0", text)
+            preview.config(state="disabled")
+        except tk.TclError:
+            pass
 
     # live preview on any change
     for sv in (v_id, v_scope, v_icon, v_loc_name, v_loc_desc):
@@ -1044,7 +1071,7 @@ def open_dyn_mod_wizard(app):
             try:
                 with open(p, encoding=encoding, errors="replace") as f:
                     return f.read()
-            except Exception:
+            except OSError, UnicodeDecodeError, ValueError:
                 return None
 
         def write(rel, content, encoding="utf-8"):
@@ -1052,8 +1079,8 @@ def open_dyn_mod_wizard(app):
             try:
                 workspace_files.write_text(p, content, encoding=encoding)
                 return True
-            except Exception as e:
-                errors.append(f"{rel}: {e}")
+            except (OSError, ValueError, TypeError, RuntimeError) as exc:
+                errors.append(f"{rel}: {exc}")
                 return False
 
         # ════════════════════════════════════════════════════════
@@ -1303,7 +1330,7 @@ def open_dyn_mod_wizard(app):
                 for k, v in parsed.items():
                     if k not in ("_values", "=") and isinstance(v, dict):
                         mods.append((k, fp))
-            except Exception:
+            except OSError, ValueError, RuntimeError:
                 pass
 
         if not mods:
@@ -1380,8 +1407,8 @@ def open_dyn_mod_wizard(app):
                         title="Parse Error",
                     )
                     return
-            except Exception as e:
-                report_error(str(e), e, parent=dlg, title="Parse Error")
+            except (OSError, ValueError, TypeError, RuntimeError) as exc:
+                report_error(str(exc), exc, parent=dlg, title="Parse Error")
                 return
 
             # Populate identity fields
@@ -1437,7 +1464,7 @@ def open_dyn_mod_wizard(app):
                                 loc_desc = v2
                         if loc_name and loc_desc:
                             break
-                    except Exception:
+                    except OSError, ValueError, UnicodeDecodeError:
                         pass
             v_loc_name.set(loc_name)
             v_loc_desc.set(loc_desc)

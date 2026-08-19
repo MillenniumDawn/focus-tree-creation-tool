@@ -45,7 +45,7 @@ def read_file(path, max_bytes=MAX_READ_BYTES):
                     _log.warning("skipping oversize/streaming file: %s", path)
                     return ""
                 return data
-        except Exception:
+        except OSError, ValueError, UnicodeDecodeError:
             pass
     return ""
 
