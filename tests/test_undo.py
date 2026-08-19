@@ -62,16 +62,16 @@ def _delete_with_cleanup(focuses, stack, fid, label="delete focus"):
 def test_len_and_clear():
     stack = UndoStack()
     assert len(stack) == 0
-    assert not stack.can_redo()
+    assert stack.redo({}, Focus.from_dict) is None
     stack.push("x", {}, touched_ids=())
     assert len(stack) == 1
-    assert not stack.can_redo()
+    assert stack.redo({}, Focus.from_dict) is None
     stack.undo({}, Focus.from_dict)
     assert len(stack) == 0
-    assert stack.can_redo()
+    assert stack.redo({}, Focus.from_dict) is not None
     stack.clear()
     assert len(stack) == 0
-    assert not stack.can_redo()
+    assert stack.redo({}, Focus.from_dict) is None
 
 
 def test_undo_on_empty_stack_returns_none():
@@ -95,12 +95,14 @@ def test_push_clears_redo_trail():
     stack.push("a", focuses, touched_ids=(1,))
     focuses[1].name = "after_a"
     stack.undo(focuses, Focus.from_dict)
-    assert stack.can_redo()
     assert focuses[1].name == "focus_1"
+    # Capture the redo result without binding it: redo() is mutating and
+    # would push us back to "after_a". The point of this branch is just
+    # that redo was non-empty after the undo.
+    assert stack.redo(focuses, Focus.from_dict) is not None
 
     # Branching: a new push must wipe the redo stack.
     stack.push("b", focuses, touched_ids=(1,))
-    assert not stack.can_redo()
     focuses[1].name = "after_b"
     assert stack.redo(focuses, Focus.from_dict) is None
 
@@ -113,10 +115,10 @@ def test_clear_empties_both_stacks():
     stack.push("b", focuses, touched_ids=(1,))
     stack.undo(focuses, Focus.from_dict)
     assert len(stack) == 1
-    assert stack.can_redo()
+    assert stack.redo(focuses, Focus.from_dict) is not None
     stack.clear()
     assert len(stack) == 0
-    assert not stack.can_redo()
+    assert stack.redo(focuses, Focus.from_dict) is None
 
 
 def test_undo_then_redo_roundtrip_restores_state_and_changed_set():
@@ -133,14 +135,13 @@ def test_undo_then_redo_roundtrip_restores_state_and_changed_set():
     assert changed == {1}
     assert removed == set()
     assert focuses[1].cost == 10
-    assert stack.can_redo()
 
     label2, changed2, removed2 = stack.redo(focuses, Focus.from_dict)
     assert label2 == "edit cost"
     assert changed2 == {1}
     assert removed2 == set()
     assert focuses[1].to_dict() == pre_state
-    assert not stack.can_redo()
+    assert stack.redo(focuses, Focus.from_dict) is None
 
 
 def test_redo_after_undo_then_push_is_blocked():
@@ -153,10 +154,10 @@ def test_redo_after_undo_then_push_is_blocked():
     stack.undo(focuses, Focus.from_dict)
     stack.redo(focuses, Focus.from_dict)
     stack.undo(focuses, Focus.from_dict)
-    assert stack.can_redo()
+    assert stack.redo(focuses, Focus.from_dict) is not None
 
     stack.push("b", focuses, touched_ids=(1,))
-    assert not stack.can_redo()
+    assert stack.redo(focuses, Focus.from_dict) is None
     focuses[1].cost = 30
 
     result = stack.redo(focuses, Focus.from_dict)
@@ -208,17 +209,17 @@ def test_redo_eviction_caps_at_maxlen():
         result = stack.undo(focuses, Focus.from_dict)
         undone_labels.append(result[0])
     assert len(stack) == 0
-    assert stack.can_redo()
 
-    # Two more undos when the undo stack is empty should be no-ops, not
+    # Two extra undos when the undo stack is empty must be no-ops, not
     # overflow the redo stack past maxlen.
     assert stack.undo(focuses, Focus.from_dict) is None
     assert stack.undo(focuses, Focus.from_dict) is None
-    assert stack.can_redo()
 
     redo_labels = []
-    while stack.can_redo():
+    while True:
         result = stack.redo(focuses, Focus.from_dict)
+        if result is None:
+            break
         redo_labels.append(result[0])
     # Only 4 redo entries survived; the undos past the cap didn't enqueue.
     assert len(redo_labels) == 4
@@ -251,7 +252,6 @@ def test_redo_sparse_matches_full_snapshot_reference():
     def assert_in_sync():
         assert snapshot_state(sparse_focuses) == snapshot_state(full_focuses)
         assert len(sparse_stack) == len(full_stack)
-        assert sparse_stack.can_redo() == full_stack.can_redo()
 
     assert_in_sync()
 
@@ -282,19 +282,21 @@ def test_redo_sparse_matches_full_snapshot_reference():
             # every restored key. Both must converge on the same final
             # document state.
             assert r1[0] == r2[0]
-        elif op == "redo" and sparse_stack.can_redo():
+        elif op == "redo":
             pre_sparse = snapshot_state(sparse_focuses)
             pre_full = snapshot_state(full_focuses)
             r1 = sparse_stack.redo(sparse_focuses, Focus.from_dict)
             r2 = full_stack.redo(full_focuses, Focus.from_dict)
-            assert r1 is not None and r2 is not None
-            assert r1[0] == r2[0]
-            # Round-trip: undo should restore the pre-redo state. This catches
-            # a redo that forgot to push back onto the undo stack.
-            sparse_stack.undo(sparse_focuses, Focus.from_dict)
-            full_stack.undo(full_focuses, Focus.from_dict)
-            assert snapshot_state(sparse_focuses) == pre_sparse
-            assert snapshot_state(full_focuses) == pre_full
+            assert (r1 is None) == (r2 is None)
+            if r1 is not None:
+                assert r1[0] == r2[0]
+                # Round-trip: undo should restore the pre-redo state. This
+                # catches a redo that forgot to push back onto the undo
+                # stack.
+                sparse_stack.undo(sparse_focuses, Focus.from_dict)
+                full_stack.undo(full_focuses, Focus.from_dict)
+                assert snapshot_state(sparse_focuses) == pre_sparse
+                assert snapshot_state(full_focuses) == pre_full
 
         assert_in_sync()
 

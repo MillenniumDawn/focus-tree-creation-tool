@@ -99,10 +99,6 @@ class UndoStack:
     def __len__(self):
         return len(self._stack)
 
-    def can_redo(self) -> bool:
-        """True when ``redo`` would do something; mirrors ``len(self) > 0``."""
-        return bool(self._redo)
-
     def clear(self):
         """Drop every entry from both stacks."""
         self._stack.clear()
