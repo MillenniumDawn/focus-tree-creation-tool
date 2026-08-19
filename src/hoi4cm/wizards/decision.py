@@ -54,6 +54,46 @@ from hoi4cm.wizards._shared import (
 )
 
 
+def collect_decision_state(evars, dec=None):
+    """Collect decision render knobs from widget vars.
+
+    The two Tk-only knobs ``targeted``/``cost_type`` live in ``evars``
+    (``tk.StringVar`` in the dialog, any ``.get()`` fake in tests).
+    When the var is missing *or* empty/whitespace the ``dec`` fallback
+    is used when given, otherwise the wizard default (``"none"``/``"pp"``)
+    — the two call sites previously disagreed here; this is the single source.
+    Empty strings previously propagated as ``""`` and rendered a broken
+    targeted block; they now fall through to the default.
+    """
+
+    def _resolve(key, fallback):
+        var = evars.get(key) if isinstance(evars, dict) else None
+        if var is not None and hasattr(var, "get"):
+            try:
+                val = var.get()
+                sval = val if isinstance(val, str) else str(val)
+                if isinstance(sval, str) and not sval.strip():
+                    raise ValueError("empty")
+                return sval
+            except Exception:
+                pass
+        if isinstance(dec, dict):
+            dval = dec.get(key, fallback)
+            if isinstance(dval, str) and not dval.strip():
+                return fallback
+            return (
+                dval
+                if isinstance(dval, str)
+                else str(dval) if dval is not None else fallback
+            )
+        return fallback
+
+    return {
+        "targeted": _resolve("targeted", "none"),
+        "cost_type": _resolve("cost_type", "pp"),
+    }
+
+
 def open_decision_wizard(app):
     """HOI4 Decision / Decision Category maker — matches mockup layout."""
     win = tk.Toplevel(app)
@@ -754,7 +794,7 @@ def open_decision_wizard(app):
                         _tag(tagrow, "T", C_TEAL, TEAL_TAG_BG, TEAL_TAG_BD)
                     if dec["cost_type"] == "pp" and dec.get("cost", "").strip():
                         _tag(
-                            tagrow, f'{dec["cost"]}PP', C_GOLD, GOLD_TAG_BG, GOLD_TAG_BD
+                            tagrow, f"{dec['cost']}PP", C_GOLD, GOLD_TAG_BG, GOLD_TAG_BD
                         )
                     if dec["chain"]:
                         _tag(
@@ -1280,7 +1320,7 @@ def open_decision_wizard(app):
         n = len(_decs_for(uid))
         msg = f"Delete category '{c['cat_id']}'"
         if n:
-            msg += f" and its {n} decision{'s' if n!=1 else ''}?"
+            msg += f" and its {n} decision{'s' if n != 1 else ''}?"
         else:
             msg += "?"
         if not messagebox.askyesno("Delete Category", msg, parent=win):
@@ -3134,7 +3174,9 @@ def open_decision_wizard(app):
         )
         text = _re_s.sub(r"\[([A-Z]{2,5})\](\S+)", r"\2", text)  # [TAG]Word → Word
         text = _re_s.sub(
-            r"\[([A-Z]{2,5}):[^\]]+\]", lambda m: m.group(1), text  # [TAG:X] → TAG
+            r"\[([A-Z]{2,5}):[^\]]+\]",
+            lambda m: m.group(1),
+            text,  # [TAG:X] → TAG
         )
         text = _re_s.sub(r"\[[^\]]{1,80}\]", "", text)  # remaining [tokens]
         return text.strip()
@@ -3696,7 +3738,7 @@ def open_decision_wizard(app):
                     TEAL_TAG_BD if dec["targeted"] != "none" else C_BORDG,
                 )
                 if dec["cost_type"] == "pp" and dec.get("cost", "").strip():
-                    _tag(tag_row, f'PP {dec["cost"]}', C_GOLD, GOLD_TAG_BG, GOLD_TAG_BD)
+                    _tag(tag_row, f"PP {dec['cost']}", C_GOLD, GOLD_TAG_BG, GOLD_TAG_BD)
                 _tag(tag_row, dec["dec_id"], C_DIM, C_DARK, C_BORDG)
 
         # Chain assignment card
@@ -4233,32 +4275,19 @@ def open_decision_wizard(app):
         this closure only resolves the two widget-only knobs (targeted /
         cost_type) from the Tk StringVars, then delegates.
         """
-        tgt_var = _evars.get("targeted")
-        targeted = (
-            tgt_var.get()
-            if isinstance(tgt_var, tk.StringVar)
-            else dec.get("targeted", "none")
-        )
-        cost_type_var = _evars.get("cost_type")
-        cost_type = (
-            cost_type_var.get()
-            if isinstance(cost_type_var, tk.StringVar)
-            else dec.get("cost_type", "pp")
-        )
+        state = collect_decision_state(_evars, dec)
         return _generators.generate_decision_block(
-            dec, targeted=targeted, cost_type=cost_type
+            dec, targeted=state["targeted"], cost_type=state["cost_type"]
         )
 
     def _gen_decisions_file():
         _collect()
-        tgt_var = _evars.get("targeted")
-        targeted = tgt_var.get() if isinstance(tgt_var, tk.StringVar) else "none"
-        cost_type_var = _evars.get("cost_type")
-        cost_type = (
-            cost_type_var.get() if isinstance(cost_type_var, tk.StringVar) else "pp"
-        )
+        state = collect_decision_state(_evars)
         return _generators.generate_decisions_file(
-            dm_cats, dm_decs, targeted=targeted, cost_type=cost_type
+            dm_cats,
+            dm_decs,
+            targeted=state["targeted"],
+            cost_type=state["cost_type"],
         )
 
     def _gen_categories_file():
