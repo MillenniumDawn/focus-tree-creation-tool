@@ -5,7 +5,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable, Hashable, Iterable, Sequence
 from dataclasses import dataclass, field
 from math import ceil, floor
-from typing import Protocol
+from typing import Literal, Protocol
 
 from hoi4cm.ui.theme import BG_PANEL, BLUE, TEXT_DIM
 
@@ -27,6 +27,7 @@ class FocusListItem:
     name: str
     has_effects: bool = False
     has_broken_prerequisite: bool = False
+    validation_severity: Literal["error", "warning", "info"] | None = None
     name_lower: str = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
@@ -142,11 +143,18 @@ class _FocusRow:
     def show(self, item: FocusListItem, *, selected: bool) -> None:
         self.key = item.key
         self.label.configure(text=item.name)
-        color = (
-            "#ef4444"
-            if item.has_broken_prerequisite
-            else "#22c55e" if item.has_effects else "#fbbf24"
-        )
+        if item.validation_severity == "error":
+            color = "#ef4444"
+        elif item.validation_severity == "warning":
+            color = "#f59e0b"
+        elif item.validation_severity == "info":
+            color = "#60a5fa"
+        elif item.has_broken_prerequisite:
+            color = "#ef4444"
+        elif item.has_effects:
+            color = "#22c55e"
+        else:
+            color = "#fbbf24"
         self.dot.configure(fg=color)
         self.apply_selection(selected)
 

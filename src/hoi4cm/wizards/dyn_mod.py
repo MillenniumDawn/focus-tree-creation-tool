@@ -38,7 +38,38 @@ from hoi4cm.ui import (
 from hoi4cm.wizards._generators import build_dyn_mod_output
 from hoi4cm.wizards._graphics import browser_folders, collect_image_pairs
 from hoi4cm.wizards._image_loader import TkImageLoader
-from hoi4cm.wizards._shared import notifying_workspace_files
+from hoi4cm.wizards._shared import (
+    notifying_workspace_files,
+    svar_get,
+    text_get,
+)
+
+
+def collect_dyn_mod_state(svars, text_widgets):
+    """Collect dynamic-modifier form state into kwargs for ``build_dyn_mod_output``."""
+    scope = svar_get(svars.get("scope") if isinstance(svars, dict) else None, "country")
+    if not scope.strip():
+        scope = "country"
+    return {
+        "mod_id": svar_get(svars.get("mod_id") if isinstance(svars, dict) else None),
+        "scope": scope,
+        "icon": svar_get(svars.get("icon") if isinstance(svars, dict) else None),
+        "enable": text_get(
+            text_widgets.get("enable") if isinstance(text_widgets, dict) else None
+        ),
+        "mods_raw": text_get(
+            text_widgets.get("mods") if isinstance(text_widgets, dict) else None
+        ),
+        "const": text_get(
+            text_widgets.get("const") if isinstance(text_widgets, dict) else None
+        ),
+        "loc_name": svar_get(
+            svars.get("loc_name") if isinstance(svars, dict) else None
+        ),
+        "loc_desc": svar_get(
+            svars.get("loc_desc") if isinstance(svars, dict) else None
+        ),
+    }
 
 
 def open_dyn_mod_wizard(app):
@@ -937,16 +968,17 @@ def open_dyn_mod_wizard(app):
         return _parse_mod_line_pure(ln)
 
     def _build_output():
-        return build_dyn_mod_output(
-            mod_id=v_id.get(),
-            scope=v_scope.get(),
-            icon=v_icon.get(),
-            enable=v_enable.get("1.0", "end"),
-            mods_raw=v_mods.get("1.0", "end"),
-            const=v_const.get("1.0", "end"),
-            loc_name=v_loc_name.get(),
-            loc_desc=v_loc_desc.get(),
+        state = collect_dyn_mod_state(
+            {
+                "mod_id": v_id,
+                "scope": v_scope,
+                "icon": v_icon,
+                "loc_name": v_loc_name,
+                "loc_desc": v_loc_desc,
+            },
+            {"enable": v_enable, "mods": v_mods, "const": v_const},
         )
+        return build_dyn_mod_output(**state)
 
     def _preview(*_):
         if _dm_edit_mode[0]:
@@ -1196,7 +1228,7 @@ def open_dyn_mod_wizard(app):
             gfx_rel = os.path.join("interface", "ideas.gfx")
             gfx_existing = read_existing(gfx_rel)
             if gfx_existing is None:
-                gfx_final = f"spriteTypes = {{\n\n" f"{sprite_block}\n\n" f"}}\n"
+                gfx_final = f"spriteTypes = {{\n\n{sprite_block}\n\n}}\n"
                 gfx_action = "created"
             elif icon_gfx in gfx_existing:
                 gfx_final = gfx_existing

@@ -25,7 +25,37 @@ from hoi4cm.ui import (
     TEXT_DIM,
 )
 from hoi4cm.wizards import _generators
-from hoi4cm.wizards._shared import _LOC_KEY_RE, notifying_workspace_files
+from hoi4cm.wizards._shared import (
+    _LOC_KEY_RE,
+    notifying_workspace_files,
+    svar_get,
+)
+
+
+def collect_additional_income_state(svars):
+    """Collect additional-income wizard fields into plain strings.
+
+    ``svars`` maps field names to ``tk.StringVar``-like objects
+    (``.get()``). The returned dict is what ``_apply`` needs after
+    stripping and normalising (``country_tag`` upper-cased, ``idea_id``
+    sanitisation left to the caller).
+    """
+
+    def _get(key, default=""):
+        return svar_get(svars.get(key) if isinstance(svars, dict) else None, default)
+
+    return {
+        "idea_id": _get("idea_id").strip(),
+        "country_tag": _get("country_tag").strip().upper(),
+        "variable_name": _get("variable_name").strip(),
+        "amount": _get("amount").strip(),
+        "tooltip_key": _get("tooltip_key").strip(),
+        "spirit_name": _get("spirit_name").strip(),
+        "spirit_desc": _get("spirit_desc").strip(),
+        "tooltip_text": _get("tooltip_text").strip(),
+        "mode": _get("mode", "wire_only"),
+        "formula_type": _get("formula_type", "fixed"),
+    }
 
 
 def open_additional_income_wizard(app):
@@ -449,16 +479,30 @@ def open_additional_income_wizard(app):
 
     # ── Apply button ──────────────────────────────────────────────────────
     def _apply():
-        idea_id = v_idea_id.get().strip()
-        country_tag = v_country_tag.get().strip().upper()
-        variable_name = v_variable_name.get().strip()
-        amount = v_amount.get().strip()
-        tooltip_key = v_tooltip_key.get().strip()
-        spirit_name = v_spirit_name.get().strip()
-        spirit_desc = v_spirit_desc.get().strip()
-        tooltip_text = v_tooltip_text.get().strip()
-        mode = mode_var.get()
-        formula_type = formula_var.get()
+        state = collect_additional_income_state(
+            {
+                "idea_id": v_idea_id,
+                "country_tag": v_country_tag,
+                "variable_name": v_variable_name,
+                "amount": v_amount,
+                "tooltip_key": v_tooltip_key,
+                "spirit_name": v_spirit_name,
+                "spirit_desc": v_spirit_desc,
+                "tooltip_text": v_tooltip_text,
+                "mode": mode_var,
+                "formula_type": formula_var,
+            }
+        )
+        idea_id = state["idea_id"]
+        country_tag = state["country_tag"]
+        variable_name = state["variable_name"]
+        amount = state["amount"]
+        tooltip_key = state["tooltip_key"]
+        spirit_name = state["spirit_name"]
+        spirit_desc = state["spirit_desc"]
+        tooltip_text = state["tooltip_text"]
+        mode = state["mode"]
+        formula_type = state["formula_type"]
 
         if not idea_id or not variable_name or not amount or not tooltip_key:
             messagebox.showwarning(

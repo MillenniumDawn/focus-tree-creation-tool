@@ -26,6 +26,43 @@ from hoi4cm.ui import (
 # ``notifying_workspace_files`` is imported from ``hoi4cm.mod`` here and
 # re-exported for wizard convenience.
 
+
+# ── Shared widget-read helpers ────────────────────────────────────
+# Small ``.get()`` adapters used by the ``collect_*_state`` helpers so
+# the seam between Tk widgets and the ``_generators`` stays DRY and
+# testable.  Each accepts duck-typed fakes in tests (``hasattr(.get)``)
+# and real ``tk.StringVar``/``tk.Text`` in the dialogs.
+
+
+def svar_get(var, default=""):
+    """Return ``var.get()`` coerced to ``str``, or ``default`` if missing/broken."""
+    if var is None or not hasattr(var, "get"):
+        return default
+    try:
+        val = var.get()
+        return val if isinstance(val, str) else str(val)
+    except Exception:
+        return default
+
+
+def text_get(widget, default=""):
+    """Return ``widget.get("1.0", "end")`` stripped, with ``StringVar`` fallback."""
+    if widget is None or not hasattr(widget, "get"):
+        return default
+    try:
+        val = widget.get("1.0", "end")
+    except TypeError:
+        try:
+            val = widget.get()
+        except Exception:
+            return default
+    except Exception:
+        return default
+    if isinstance(val, str):
+        return val.strip()
+    return str(val).strip()
+
+
 # ── Image cache registry ──────────────────────────────────────────
 # Wizards register their own caches here so the App can invalidate
 # everything on mod reload without poking into each module.
@@ -483,4 +520,6 @@ __all__ = [
     "_LOC_KEY_RE",
     "notifying_workspace_files",
     "open_effect_picker",
+    "svar_get",
+    "text_get",
 ]
