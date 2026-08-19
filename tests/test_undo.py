@@ -7,10 +7,11 @@ used for today, but the module itself never imports it.
 """
 
 import random
+import zlib
 
 import pytest
 
-from hoi4cm.core.undo import UndoStack
+from hoi4cm.core.undo import UndoStack, _decode_full
 from hoi4cm.focus_tree.export import export_focus_tree
 from hoi4cm.models import Focus, FocusDocument
 
@@ -282,10 +283,18 @@ def test_redo_sparse_matches_full_snapshot_reference():
             # document state.
             assert r1[0] == r2[0]
         elif op == "redo" and sparse_stack.can_redo():
+            pre_sparse = snapshot_state(sparse_focuses)
+            pre_full = snapshot_state(full_focuses)
             r1 = sparse_stack.redo(sparse_focuses, Focus.from_dict)
             r2 = full_stack.redo(full_focuses, Focus.from_dict)
             assert r1 is not None and r2 is not None
             assert r1[0] == r2[0]
+            # Round-trip: undo should restore the pre-redo state. This catches
+            # a redo that forgot to push back onto the undo stack.
+            sparse_stack.undo(sparse_focuses, Focus.from_dict)
+            full_stack.undo(full_focuses, Focus.from_dict)
+            assert snapshot_state(sparse_focuses) == pre_sparse
+            assert snapshot_state(full_focuses) == pre_full
 
         assert_in_sync()
 
@@ -709,3 +718,38 @@ def test_property_sparse_matches_full_snapshot_reference():
                 assert r1[0] == r2[0]
 
         assert_in_sync()
+
+
+def test_apply_with_corrupt_full_payload_returns_none():
+    """A full-snapshot entry whose payload decodes to None must
+    short-circuit before touching `focuses`, so the document is left
+    untouched and the entry is silently dropped."""
+    focuses = {1: _mk_focus(1, "focus_1", cost=10)}
+    stack = UndoStack()
+    stack._stack.append(("bad", "full", b"not a zlib blob", frozenset({1})))
+    pre_cost = focuses[1].cost
+    result = stack.undo(focuses, Focus.from_dict)
+    assert result is None
+    assert focuses[1].cost == pre_cost
+
+
+def test_decode_full_zlib_error_returns_none():
+    assert _decode_full(b"not a zlib blob") is None
+
+
+def test_decode_full_unicode_error_returns_none():
+    payload = zlib.compress(b'{"1": "\x80\x81\x82"}')
+    assert _decode_full(payload) is None
+
+
+def test_decode_full_invalid_json_returns_none():
+    payload = zlib.compress(b"{")
+    assert _decode_full(payload) is None
+
+
+def test_decode_full_non_dict_payload_returns_none():
+    """Documented contract: 'None if the payload is corrupt.'
+    A JSON-valid non-dict payload is corrupted-for-our-purposes and
+    must return None, not raise."""
+    for payload in (b"null", b"42", b"[1,2]", b'"a string"'):
+        assert _decode_full(zlib.compress(payload)) is None

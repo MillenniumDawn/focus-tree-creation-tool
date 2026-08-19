@@ -14,7 +14,7 @@ Redo
 ``push`` captures pre-state (the state to restore on undo). The first time
 ``undo`` is actually invoked we lazily snapshot the current (post-state)
 focuses and stash it on the redo stack; ``redo`` restores it. A new ``push``
-clears the redo stack — branching the undo history invalidates any redo
+clears the redo stack; a new edit branch invalidates any redo
 trail, matching every other editor's behavior.
 """
 
@@ -50,6 +50,8 @@ def _decode_full(payload: bytes) -> dict[int, dict] | None:
     """Decompress a full-snapshot blob; None if the payload is corrupt."""
     try:
         snapshot = json.loads(zlib.decompress(payload).decode("utf-8"))
+        if not isinstance(snapshot, dict):
+            return None
         return {int(k): v for k, v in snapshot.items()}
     except zlib.error, UnicodeDecodeError, ValueError:
         return None
@@ -87,7 +89,7 @@ class UndoStack:
     ``id_set``) so they can be deleted without ever having been snapshotted.
 
     Redo entries are the same shape but the snapshot is taken lazily on
-    the first ``undo`` — see the module docstring.
+    the first ``undo``; see the module docstring.
     """
 
     def __init__(self, maxlen=60):
