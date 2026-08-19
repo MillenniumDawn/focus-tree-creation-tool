@@ -33,6 +33,8 @@ class _AutosaveHarness:
     _autosave = m.App._autosave
     _apply = m.App._apply
     _log_error = m.App._log_error
+    _coerce_numeric = m.App._coerce_numeric
+    _set_field_error = m.App._set_field_error
 
     def __init__(self, root):
         self.selected: Focus | None = None
@@ -52,6 +54,10 @@ class _AutosaveHarness:
         self._fv_cancel = tk.BooleanVar(master=root)
         self._fv_continue = tk.BooleanVar(master=root)
         self._fv_cap = tk.BooleanVar(master=root)
+        # Entry widgets for inline error indicators
+        self._fv_cost_entry = None
+        self._fv_x_entry = None
+        self._fv_y_entry = None
         self._fv_ai_raw = tk.Text(root, height=2, width=20)
         self._fv_desc = tk.Text(root, height=2, width=20)
         self._fv_avail = tk.Text(root, height=2, width=20)
@@ -246,24 +252,64 @@ def test_autosave_preserves_float_cost_when_other_field_edits(tk_root, log_state
     assert log_state.get_error_entries() == []
 
 
-def test_autosave_logs_parse_errors_instead_of_swallowing(tk_root, log_state):
-    focus = _focus(cost=10, desc="stay")
+def test_autosave_applies_valid_fields_when_cost_is_invalid(tk_root, log_state):
+    """Invalid cost should not drop other valid edits."""
+    focus = _focus(cost=10, desc="old")
     h = _harness_with(tk_root, focus)
     baseline = h.focuses.revision
-    before = deepcopy(focus.to_dict())
     h._fv_cost.set("not-a-number")
     h._fv_desc.delete("1.0", "end")
-    h._fv_desc.insert("1.0", "should not apply")
+    h._fv_desc.insert("1.0", "edited desc")
 
     h._autosave()
 
-    assert focus.to_dict() == before
+    # Cost falls back to current value; desc edit is applied.
+    assert focus.cost == 10
+    assert focus.desc == "edited desc"
     assert h.focuses.revision == baseline
     entries = log_state.get_error_entries()
     assert len(entries) == 1
-    message = entries[0][1]
-    assert "Autosave failed for focus keep" in message
-    assert "not-a-number" in message
+    assert "not-a-number" in entries[0][1]
+
+
+def test_autosave_applies_valid_fields_when_x_is_invalid(tk_root, log_state):
+    """Invalid x should not drop other valid edits."""
+    focus = _focus(x=0, y=0, desc="old")
+    h = _harness_with(tk_root, focus)
+    baseline = h.focuses.revision
+    h._fv_x.set("not-a-number")
+    h._fv_desc.delete("1.0", "end")
+    h._fv_desc.insert("1.0", "edited desc")
+
+    h._autosave()
+
+    # X falls back to current value; desc edit is applied.
+    assert focus.x == 0
+    assert focus.desc == "edited desc"
+    assert h.focuses.revision == baseline
+    entries = log_state.get_error_entries()
+    assert len(entries) == 1
+    assert "not-a-number" in entries[0][1]
+
+
+def test_autosave_applies_valid_fields_when_y_is_invalid(tk_root, log_state):
+    """Invalid y should not drop other valid edits."""
+    focus = _focus(x=0, y=0, desc="old")
+    h = _harness_with(tk_root, focus)
+    baseline = h.focuses.revision
+    h._fv_y.set("not-a-number")
+    h._fv_desc.delete("1.0", "end")
+    h._fv_desc.insert("1.0", "edited desc")
+
+    h._autosave()
+
+    # Y falls back to current value; desc edit is applied.
+    assert focus.y == 0
+    assert focus.desc == "edited desc"
+    assert h.focuses.revision == baseline
+    entries = log_state.get_error_entries()
+    assert len(entries) == 1
+    assert "not-a-number" in entries[0][1]
 
 
 def test_read_sidebar_values_returns_none_for_blank_name(tk_root):
@@ -305,22 +351,23 @@ def test_autosave_keeps_position_when_target_cell_occupied(tk_root, log_state):
     assert log_state.get_error_entries() == []
 
 
-def test_apply_bad_cost_does_not_mutate_or_push_undo(tk_root, monkeypatch):
+def test_apply_bad_cost_applies_other_fields_uses_fallback(tk_root, monkeypatch):
+    """Invalid cost should not block other valid field edits."""
     focus = _focus(name="keep", icon="⚔", gfx="GFX_goal_generic_political_pressure")
     h = _harness_with(tk_root, focus)
-    before = deepcopy(focus.to_dict())
-    boxes = _MessageBox()
-    monkeypatch.setattr(m, "messagebox", boxes)
     h._fv_name.set("renamed")
     h._fv_icon.set("★")
     h._fv_cost.set("nope")
 
     h._apply()
 
-    assert focus.to_dict() == before
-    assert h._undo_pushes == []
-    assert len(boxes.errors) == 1
-    assert boxes.warnings == []
+    # Valid fields are applied; cost falls back to current value.
+    assert focus.name == "renamed"
+    assert focus.icon == "★"
+    assert focus.cost == 10
+    assert h._undo_pushes == [("edit focus", (focus.id,))]
+    assert h.focuses.first_by_name == {"renamed": focus.id}
+    assert h._list_invalidations == 1
 
 
 def test_apply_empty_name_does_not_push_undo(tk_root, monkeypatch):

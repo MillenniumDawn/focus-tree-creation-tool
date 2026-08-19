@@ -381,7 +381,9 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
         self._shared_focuses = self.workspace.main_tree.metadata.shared_focuses
         self._joint_focuses = self.workspace.main_tree.metadata.joint_focuses
         # Extra loaded trees (shared/joint trees loaded alongside the main tree)
-        self._extra_trees = []  # list of dicts: {type, file_path, tree_id, cfp_x, cfp_y, shared_focuses, joint_focuses, country_tag, country_raw, tree_extras, had_wrapper, focus_ids}
+        self._extra_trees = (
+            []
+        )  # list of dicts: {type, file_path, tree_id, cfp_x, cfp_y, shared_focuses, joint_focuses, country_tag, country_raw, tree_extras, had_wrapper, focus_ids}
         self._tree_badge_table = None  # rebuilt by _get_tree_badge on change
         toolbar = tk.Frame(self, bg=BG_DARK)
         toolbar.pack(fill="x")
@@ -1048,7 +1050,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
             xyrow, text="X:", bg=BG_PANEL, fg=TEXT_DIM, font=("Helvetica", 10), width=2
         ).pack(side="left")
         self._fv_x = tk.StringVar(value="0")
-        tk.Entry(
+        self._fv_x_entry = tk.Entry(
             xyrow,
             textvariable=self._fv_x,
             bg=BG_CARD,
@@ -1059,12 +1061,13 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
             highlightthickness=1,
             highlightbackground=BORDER_G,
             width=5,
-        ).pack(side="left", ipady=4, padx=(0, 6))
+        )
+        self._fv_x_entry.pack(side="left", ipady=4, padx=(0, 6))
         tk.Label(
             xyrow, text="Y:", bg=BG_PANEL, fg=TEXT_DIM, font=("Helvetica", 10), width=2
         ).pack(side="left")
         self._fv_y = tk.StringVar(value="0")
-        tk.Entry(
+        self._fv_y_entry = tk.Entry(
             xyrow,
             textvariable=self._fv_y,
             bg=BG_CARD,
@@ -1075,7 +1078,8 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
             highlightthickness=1,
             highlightbackground=BORDER_G,
             width=5,
-        ).pack(side="left", ipady=4)
+        )
+        self._fv_y_entry.pack(side="left", ipady=4)
         tk.Label(
             xyrow,
             text=tr("focus.field.grid_hint", "(grid)"),
@@ -1129,7 +1133,9 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
         )
 
         self._fv_cost = self._sb_entry(
-            tr("focus.field.cost", "Cost (1 = 7 days):"), "10"
+            tr("focus.field.cost", "Cost (1 = 7 days):"),
+            "10",
+            store_as="_fv_cost_entry",
         )
 
         # AI will_do raw block
@@ -1582,14 +1588,14 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
             anchor="w",
         ).pack(fill="x", pady=(4, 1))
 
-    def _sb_entry(self, label, default):
+    def _sb_entry(self, label, default, store_as=None):
         f = tk.Frame(self._sb_frm, bg=BG_PANEL)
         f.pack(fill="x", padx=8, pady=2)
         tk.Label(
             f, text=label, bg=BG_PANEL, fg=TEXT_DIM, font=("Helvetica", 9), anchor="w"
         ).pack(fill="x")
         var = tk.StringVar(value=default)
-        tk.Entry(
+        entry = tk.Entry(
             f,
             textvariable=var,
             bg=BG_CARD,
@@ -1599,7 +1605,10 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
             relief="flat",
             highlightthickness=1,
             highlightbackground=BORDER_G,
-        ).pack(fill="x", ipady=3)
+        )
+        entry.pack(fill="x", ipady=3)
+        if store_as:
+            setattr(self, store_as, entry)
         return var
 
     def _sb_optmenu(self, label, options):
@@ -1926,20 +1935,37 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
 
         Returns None when the name field is empty so autosave cannot blank an
         existing focus id on a half-cleared form.
+
+        Numeric fields (cost, x, y) are coerced individually with per-field
+        fallbacks to the current focus value when parsing fails, so a single
+        invalid entry does not silently drop the other edits.
         """
         raw = self._fv_name.get().strip()
         if not raw:
             return None
         raw_ai = self._fv_ai_raw.get("1.0", "end").strip()
+
+        # Parse numeric fields individually; on failure, fall back to the
+        # current focus value so other edits are not silently dropped.
+        f = self.selected
+        cost, cost_err = self._coerce_numeric(
+            self._fv_cost, parse_focus_cost, f.cost if f else 0, "cost"
+        )
+        x, x_err = self._coerce_numeric(self._fv_x, int, f.x if f else 0, "x")
+        y, y_err = self._coerce_numeric(self._fv_y, int, f.y if f else 0, "y")
+        self._set_field_error("_fv_cost_entry", cost_err)
+        self._set_field_error("_fv_x_entry", x_err)
+        self._set_field_error("_fv_y_entry", y_err)
+
         return FocusSidebarValues(
             name=re.sub(r"[^A-Za-z0-9_]", "_", raw),
             icon=self._fv_icon.get(),
             gfx=self._fv_gfx.get().strip() or "GFX_goal_generic_political_pressure",
-            cost=parse_focus_cost(self._fv_cost.get()),
+            cost=cost,
             ai_will_do=parse_ai_will_do(raw_ai),
             ai_will_do_raw=raw_ai,
-            x=int(self._fv_x.get()),
-            y=int(self._fv_y.get()),
+            x=x,
+            y=y,
             desc=self._fv_desc.get("1.0", "end").strip(),
             search_filters=self._fv_search.get().strip() or "FOCUS_FILTER_POLITICAL",
             available_cond=self._fv_avail.get("1.0", "end").strip(),
@@ -1950,6 +1976,28 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
             available_if_capitulated=self._fv_cap.get(),
             offsets=tuple(self._read_offsets_from_form()),
         )
+
+    def _coerce_numeric(self, var, parser, fallback, field_name):
+        """Parse a numeric sidebar field with per-field fallback.
+
+        Returns (value, has_error). On parse failure, returns fallback
+        and marks the field with an inline error indicator.
+        """
+        try:
+            return parser(var.get()), False
+        except ValueError, TypeError:
+            self._log_error(
+                f"Invalid {field_name} value {var.get()!r}; "
+                f"using fallback {fallback}"
+            )
+            return fallback, True
+
+    def _set_field_error(self, entry_attr, has_error):
+        """Toggle the highlight colour of a sidebar entry widget."""
+        entry = getattr(self, entry_attr, None)
+        if entry is None:
+            return
+        entry.config(highlightbackground=RED if has_error else BORDER_G)
 
     def _autosave(self):
         if not self.selected:
@@ -2692,19 +2740,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
         if not self.selected:
             return
         f = self.selected
-        # Validate the whole form before mutating or pushing undo so a bad
-        # cost/x/y cannot leave name/icon/gfx half-applied.
-        try:
-            values = self._read_sidebar_values()
-        except ValueError:
-            messagebox.showerror(
-                tr("dialog.error.title", "Error"),
-                tr(
-                    "dialog.focus_numeric_fields",
-                    "Cost, X and Y must be numbers (AI Will Do is taken from the raw block).",
-                ),
-            )
-            return
+        values = self._read_sidebar_values()
         if values is None:
             messagebox.showerror(
                 tr("dialog.error.title", "Error"),
@@ -4758,9 +4794,9 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):
                     add_error(f"Write failed: {result.plan.focus_path}: {result.error}")
                 continue
             if result.plan.extra_tree_idx is not None:
-                self._extra_trees[result.plan.extra_tree_idx - 1]["file_path"] = (
-                    result.plan.focus_path
-                )
+                self._extra_trees[result.plan.extra_tree_idx - 1][
+                    "file_path"
+                ] = result.plan.focus_path
             if MOD.loaded and MOD.root:
                 for path in result.written_paths:
                     MOD.note_file_written(path)
