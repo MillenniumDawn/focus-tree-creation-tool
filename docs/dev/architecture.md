@@ -238,8 +238,9 @@ there's only ever one thread creating focuses at a time, because the modal
 grab blocks the user from triggering focus creation on the Tk thread while
 the worker runs.
 
-Cancel is cooperative, not a kill. `cancellable=True` (Load All Trees) adds
-a Cancel button and routes window-close to `request_cancel`. Neither
+Cancel is cooperative, not a kill. `make_cancel_handle` owns the Event and
+`request_cancel` with no Tk objects. `cancellable=True` (Load All Trees) adds
+a Cancel button and routes window-close to that handle. Neither
 destroys the window nor drops the grab; they set `cancelled` so the worker
 can stop between files. The in-flight file finishes, `_batch_load_trees_worker`
 returns the results it already built, and `on_done` still runs on the Tk

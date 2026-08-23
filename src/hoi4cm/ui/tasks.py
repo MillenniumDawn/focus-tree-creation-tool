@@ -149,6 +149,20 @@ def make_progress(widget, fn, *, scope="application"):
     return _progress
 
 
+def make_cancel_handle(*, cancellable=False, on_cancel=None):
+    """Return a pollable cancel flag. No Tk objects."""
+    cancelled = threading.Event()
+
+    def request_cancel():
+        if not cancellable or cancelled.is_set():
+            return
+        cancelled.set()
+        if on_cancel is not None:
+            on_cancel()
+
+    return SimpleNamespace(cancelled=cancelled, request_cancel=request_cancel)
+
+
 def progress_modal(parent, title, *, determinate=True, cancellable=False):
     """Open a small modal progress dialog; return a handle to drive it.
 
@@ -179,13 +193,9 @@ def progress_modal(parent, title, *, determinate=True, cancellable=False):
     win.resizable(False, False)
     win.grab_set()
 
-    cancelled = threading.Event()
     cancel_btn = None
 
-    def request_cancel():
-        if not cancellable:
-            return
-        cancelled.set()
+    def mark_cancelling():
         if cancel_btn is None:
             return
         try:
@@ -197,6 +207,12 @@ def progress_modal(parent, title, *, determinate=True, cancellable=False):
         except tk.TclError:
             pass
 
+    handle = make_cancel_handle(
+        cancellable=cancellable,
+        on_cancel=mark_cancelling if cancellable else None,
+    )
+    cancelled = handle.cancelled
+    request_cancel = handle.request_cancel
     win.protocol("WM_DELETE_WINDOW", request_cancel if cancellable else lambda: None)
 
     tk.Label(
@@ -259,6 +275,7 @@ def progress_modal(parent, title, *, determinate=True, cancellable=False):
 
 __all__ = [
     "get_executor",
+    "make_cancel_handle",
     "make_progress",
     "progress_modal",
     "run_bg",
