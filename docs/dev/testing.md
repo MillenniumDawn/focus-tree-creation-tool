@@ -208,6 +208,9 @@ targets in `performance.md` only show up at MD's size:
 - Import the largest tree (`usa.txt`, 776 focus blocks) standalone.
 - "Load All Trees" across the full `common/national_focus` directory while
   interacting with the canvas (pan/zoom) during and after the batch.
+- Cancel a Load All Trees batch mid-run. The modal stays up until the
+  current file finishes, then already-parsed trees stay loaded and the
+  summary says it was cancelled.
 - Repeat edit, move, and undo five times (`edit/move/undo x5`),
   watching for undo-stack correctness and canvas redraw glitches.
 - Export to a scratch copy of a file and diff it against the original to

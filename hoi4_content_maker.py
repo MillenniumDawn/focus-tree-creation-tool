@@ -4767,6 +4767,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         extra_trees_start_idx,
         country_tag,
         progress,
+        cancelled=None,
     ):
         """Parse and build selected trees sequentially on a worker thread."""
         total = len(to_load)
@@ -4774,7 +4775,11 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         build_context = BuildContext(existing)
         tree_idx = extra_trees_start_idx
         results = []
+        stopped_early = False
         for i, (path, ttype) in enumerate(to_load, start=1):
+            if cancelled is not None and cancelled.is_set():
+                stopped_early = True
+                break
             progress(i, total, os.path.basename(path))
             try:
                 raw = read_file(path)
@@ -4808,7 +4813,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
                 )
             except Exception as e:
                 results.append({"path": path, "type": ttype, "ok": False, "error": e})
-        return results
+        return results, stopped_early
 
     def _load_all_trees(self):
         """Scan national_focus directory and show a checklist so the user can batch-load trees."""
@@ -4982,7 +4987,9 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             extra_trees_start_idx = len(self._extra_trees)
             country_tag = getattr(self, "_tree_country_tag", "")
 
-            modal = progress_modal(self, tr("load_all.title", "Load All Trees"))
+            modal = progress_modal(
+                self, tr("load_all.title", "Load All Trees"), cancellable=True
+            )
 
             def _update_progress(i, total, label):
                 modal.set_text(
@@ -5005,10 +5012,12 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
                     extra_trees_start_idx,
                     country_tag,
                     progress,
+                    cancelled=modal.cancelled,
                 )
 
-            def on_done(results):
+            def on_done(payload):
                 modal.close()
+                results, was_cancelled = payload
                 ok, fail = [], []
                 pending_focuses = []
                 for r in results:
@@ -5077,6 +5086,11 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
                         + tr("load_all.failed_header", "Failed:")
                         + "\n"
                         + "\n".join(f"  ✕ {e}" for e in fail)
+                    )
+                if was_cancelled:
+                    msg += "\n\n" + tr(
+                        "load_all.cancelled",
+                        "Cancelled. Loaded files were kept.",
                     )
                 messagebox.showinfo(tr("load_all.title", "Load All Trees"), msg)
                 # Zoom to fit all focuses

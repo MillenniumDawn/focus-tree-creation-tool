@@ -211,10 +211,12 @@ dicts/lists.
 
 `make_progress(widget, fn)` returns a callable safe to invoke from a worker;
 calling it marshals `fn(*args, **kwargs)` onto the Tk thread via
-`_safe_after`, in call order. `progress_modal(parent, title)` opens a small
-`Toplevel` with a status label and a bar, `grab_set()`, and
-`WM_DELETE_WINDOW` blocked: the same shape as the inline dialog in
-`_load_mod`, factored out.
+`_safe_after`, in call order. `progress_modal(parent, title, *, determinate=True,
+cancellable=False)` opens a small `Toplevel` with a status label and a bar,
+`grab_set()`, and `WM_DELETE_WINDOW` blocked: the same shape as the inline
+dialog in `_load_mod`, factored out. The handle always exposes `cancelled`
+(a `threading.Event`) and `request_cancel()`. Import, export, and Save All
+leave `cancellable` off.
 
 `_safe_after`/`_safe_after_idle` (`ui/widgets.py`) only swallow
 destroyed-widget `AttributeError` and `TclError`, not arbitrary exceptions
@@ -235,6 +237,16 @@ despite `Focus.__init__` bumping the shared `Focus._next` class counter:
 there's only ever one thread creating focuses at a time, because the modal
 grab blocks the user from triggering focus creation on the Tk thread while
 the worker runs.
+
+Cancel is cooperative, not a kill. `cancellable=True` (Load All Trees) adds
+a Cancel button and routes window-close to `request_cancel`. Neither
+destroys the window nor drops the grab; they set `cancelled` so the worker
+can stop between files. The in-flight file finishes, `_batch_load_trees_worker`
+returns the results it already built, and `on_done` still runs on the Tk
+thread and applies that partial load. `run_bg` does not take a cancel token:
+`work` stays a zero-arg callable that closes over the event. `Future.cancel()`
+only drops queued jobs, and skipping `on_done` would throw away the partial
+result.
 
 ### Executor lifecycle
 
