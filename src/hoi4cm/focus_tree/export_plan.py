@@ -32,6 +32,7 @@ class ExportPlan:
     focus_lookup: Mapping[int, Focus]
     focus_name_lookup: Mapping[str, Focus]
     loc_path: str | None = None
+    loc_language: str = "english"
     extra_tree_idx: int | None = None
 
 
@@ -58,6 +59,7 @@ def make_main_export_plan(
     tree_info: Mapping[str, object],
     focus_lookup: Mapping[int, Focus],
     focus_name_lookup: Mapping[str, Focus],
+    loc_language: str = "english",
 ) -> ExportPlan:
     """Create a main-tree plan after the UI has resolved its destinations."""
     return ExportPlan(
@@ -69,6 +71,7 @@ def make_main_export_plan(
         tree_info=dict(tree_info),
         focus_lookup=dict(focus_lookup),
         focus_name_lookup=dict(focus_name_lookup),
+        loc_language=loc_language,
     )
 
 
@@ -118,6 +121,7 @@ def render_export_plan(
             existing_loc_text,
             plan.focuses,
             str(plan.tree_info["country_tag"]),
+            language=plan.loc_language,
         )
         writes = [(plan.focus_path, out_text, "utf-8")]
         if new_loc_text is not None and plan.loc_path is not None:

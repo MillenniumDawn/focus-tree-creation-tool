@@ -24,6 +24,7 @@ def isolate_mod(tmp_path, monkeypatch):
     snapshot = copy.deepcopy(MOD.__dict__)
     MOD.loaded = True
     MOD.root = str(tmp_path)
+    MOD.loc_language = "english"
     yield
     MOD.__dict__.clear()
     MOD.__dict__.update(snapshot)
@@ -189,6 +190,25 @@ def test_apply_income_creates_missing_sloc_and_yml(tmp_path):
     assert os.path.isfile(yml)
     assert "additional_income_summary_NEW_spirit" in _read(sloc)
     assert "[additional_income_summary_NEW_spirit]" in _read(yml)
+
+
+def test_apply_income_creates_configured_language_yml(tmp_path):
+    root = str(tmp_path)
+    MOD.root = root
+    MOD.loaded = True
+    MOD.loc_language = "french"
+    MOD.md_money_system_file = _money_system_with_block(root)
+    MOD.md_money_scripted_loc_file = ""
+    MOD.md_money_yml_file = ""
+
+    saved, errs = _FakeApp()._apply_md_additional_income(
+        "NEW_spirit", "var_new", "2.0", "NEW_tt"
+    )
+
+    yml = os.path.join(root, "localisation", "french", "MD_money_l_french.yml")
+    assert not errs
+    assert any("MD_money_l_french.yml" in path for path in saved)
+    assert _read(yml).startswith("\ufeffl_french:\n")
 
 
 def test_apply_income_appends_to_existing_tooltip(tmp_path):

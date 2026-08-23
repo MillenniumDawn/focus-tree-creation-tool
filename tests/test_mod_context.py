@@ -13,7 +13,7 @@ import threading
 
 import pytest
 
-from hoi4cm.mod import MOD
+from hoi4cm.mod import MOD, detect_loc_file, find_loc_files
 from hoi4cm.mod import context as ctx_mod
 from hoi4cm.mod import scan_cache as scan_cache_mod
 
@@ -171,6 +171,49 @@ def test_scan_discovers_md_money_files(mod_tree):
     assert MOD.md_money_system_file.endswith("00_money_system.txt")
     assert "money_scripted_localization" in MOD.md_money_scripted_loc_file
     assert MOD.md_money_yml_file.endswith("MD_money_l_english.yml")
+
+
+def test_find_loc_files_is_recursive_and_filters_configured_language(tmp_path):
+    french = tmp_path / "localisation" / "french" / "nested" / "focuses.yml"
+    english = tmp_path / "localisation" / "english" / "focuses.yml"
+    french.parent.mkdir(parents=True)
+    english.parent.mkdir(parents=True)
+    french.write_text("l_french:\n")
+    english.write_text("l_english:\n")
+
+    assert find_loc_files(str(tmp_path), language="french") == [str(french)]
+
+
+def test_find_loc_files_accepts_configured_suffix_outside_standard_dir(tmp_path):
+    loc_file = tmp_path / "localisation" / "custom" / "TAG_l_french.yml"
+    loc_file.parent.mkdir(parents=True)
+    loc_file.write_text("l_french:\n")
+
+    assert find_loc_files(str(tmp_path), language="french") == [str(loc_file)]
+
+
+def test_detect_loc_file_finds_configured_language_recursively(tmp_path):
+    loc_file = (
+        tmp_path / "localisation" / "french" / "focuses" / "MD_focus_FRA_l_french.yml"
+    )
+    loc_file.parent.mkdir(parents=True)
+    loc_file.write_text("l_french:\n")
+    raw = "focus_tree = { focus = { id = FRA_example } }"
+
+    assert detect_loc_file(str(tmp_path), raw, language="french") == str(loc_file)
+    assert detect_loc_file(str(tmp_path), raw) == ""
+
+
+def test_scan_discovers_configured_language_md_money_file(tmp_path, monkeypatch):
+    monkeypatch.setattr(ctx_mod, "cfg_load", lambda: {"loc_language": "french"})
+    loc_file = tmp_path / "localisation" / "french" / "MD_money_l_french.yml"
+    loc_file.parent.mkdir(parents=True)
+    loc_file.write_text("l_french:\n")
+    context = ctx_mod.ModContext()
+
+    context.scan(str(tmp_path))
+
+    assert context.md_money_yml_file == str(loc_file)
 
 
 def test_md_detection_by_name(tmp_path, monkeypatch):

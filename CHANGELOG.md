@@ -22,6 +22,17 @@
 
 ## Application Modernization — Bug Fixes
 
+### Configurable HOI4 localisation export (issue #20)
+
+**[ENHANCEMENT] Localisation writers now use the language selected in Settings**
+
+- Focus trees and all five wizards share one explicit HOI4 language target for
+  headers, directories, and filename suffixes; English remains the default.
+- Localisation discovery is recursive and filters for the configured language,
+  so conventional `localisation/<language>/` layouts appear in edit targets.
+- The setting supports English, French, German, Spanish, Brazilian Portuguese,
+  Polish, Russian, Japanese, and Simplified Chinese.
+
 ### Extra-tree unload removes connector lines (issue #80)
 
 **[BUG FIX] Unloading a shared or joint tree now removes its connection lines**

@@ -13,7 +13,7 @@ from tkinter import filedialog, messagebox
 from typing import Any, cast
 
 from hoi4cm.core import default_hoi4_mod_dir, tr
-from hoi4cm.mod import MOD, notifying_workspace_files
+from hoi4cm.mod import MOD, find_loc_files, notifying_workspace_files
 from hoi4cm.ui import (
     BG_CARD,
     BG_DARK,
@@ -465,7 +465,10 @@ class ModLoadingMixin:
                 for f in file_list:
                     lb.insert("end", "  " + f)
                 # Highlight current selection if it matches
-                cur = os.path.basename(path_var.get())
+                try:
+                    cur = os.path.relpath(path_var.get(), browse_dir)
+                except ValueError:
+                    cur = os.path.basename(path_var.get())
                 for i, f in enumerate(file_list):
                     if f == cur:
                         lb.selection_set(i)
@@ -573,27 +576,18 @@ class ModLoadingMixin:
         loc_files = []
         loc_dir = ""
         if MOD.root and os.path.isdir(MOD.root):
-            _ld = os.path.join(MOD.root, "localisation")
-            if os.path.isdir(_ld):
-                loc_dir = _ld
-                try:
-                    loc_files = sorted(
-                        f
-                        for f in os.listdir(_ld)
-                        if f.lower().endswith(".yml") and "english" in f.lower()
-                    )
-                    if not loc_files:
-                        loc_files = sorted(
-                            f for f in os.listdir(_ld) if f.lower().endswith(".yml")
-                        )
-                except OSError:
-                    loc_files = []
+            loc_dir = MOD.root
+            loc_files = [
+                os.path.relpath(path, MOD.root)
+                for path in find_loc_files(MOD.root, language=MOD.loc_language)
+            ]
 
         _make_section(
             body,
             tr(
                 "edit_targets.loc_file",
-                "Localisation file  (new loc entries appended at end, english):",
+                "Localisation file  (new {language} entries appended at end):",
+                language=MOD.loc_target.display_name,
             ),
             loc_path_var,
             loc_files,
@@ -738,7 +732,7 @@ class ModLoadingMixin:
         Execute the full 5-step MD Additional Income workflow automatically:
         1. Edit 00_money_system.txt → insert into calculate_additional_income_rate
         2. Edit money_scripted_localization.txt → append defined_text block
-        3. Edit MD_money_l_english.yml → append [additional_income_summary_X]
+        3. Edit the configured-language MD_money localisation file and append
            to ADDITIONAL_INCOME_REVENUES_TOOLTIP
         Returns (list_of_saved_paths, list_of_errors)
         """
@@ -878,15 +872,17 @@ class ModLoadingMixin:
         except (OSError, ValueError, RuntimeError, UnicodeDecodeError) as exc:
             errs.append(f"❌ money_scripted_localization.txt: {exc}")
 
-        # ── Step 3: MD_money_l_english.yml ───────────────────────────
+        # ── Step 3: configured-language MD_money localisation ────────
+        loc_target = MOD.loc_target
+        yml_name = loc_target.filename("MD_money")
         yml = MOD.md_money_yml_file
         if not yml:
-            yml_dir = os.path.join(MOD.root, "localisation", "english")
+            yml_dir = os.path.join(MOD.root, "localisation", loc_target.dirname())
             try:
                 os.makedirs(yml_dir, exist_ok=True)
             except OSError:
                 pass
-            yml = os.path.join(yml_dir, "MD_money_l_english.yml")
+            yml = os.path.join(yml_dir, yml_name)
         try:
             summary_token = f"[additional_income_summary_{idea_id}]"
             tooltip_loc_key = "ADDITIONAL_INCOME_REVENUES_TOOLTIP"
@@ -896,8 +892,7 @@ class ModLoadingMixin:
                     yml_text = fp.read()
             if summary_token in yml_text:
                 saved.append(
-                    f"MD_money_l_english.yml — "
-                    f"'{summary_token}' already present (skipped)"
+                    f"{yml_name} — " f"'{summary_token}' already present (skipped)"
                 )
             else:
                 # Find ADDITIONAL_INCOME_REVENUES_TOOLTIP and append token
@@ -923,7 +918,7 @@ class ModLoadingMixin:
                     # Key not found — append as new entry at end of file
                     entry = f' {tooltip_loc_key}: "{summary_token}\\n"\n'
                     if not yml_text:
-                        entry = "l_english:\n" + entry
+                        entry = loc_target.header() + "\n" + entry
                     wf.append_text(yml, entry, encoding="utf-8-sig")
                     rel = os.path.relpath(yml, MOD.root)
                     saved.append(
@@ -931,6 +926,6 @@ class ModLoadingMixin:
                         f"(key not found, added at end)"
                     )
         except (OSError, ValueError, RuntimeError, UnicodeDecodeError) as exc:
-            errs.append(f"❌ MD_money_l_english.yml: {exc}")
+            errs.append(f"❌ {yml_name}: {exc}")
 
         return saved, errs

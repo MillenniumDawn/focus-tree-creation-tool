@@ -27,8 +27,8 @@ active exploit.
 Output filenames were built straight from IDs and tags, some of which come from
 parsed (untrusted) mod content. A value like `../../evil` could escape the
 intended folder. The clearest case: the focus-tree exporter builds
-`MD_focus_{country_tag}_l_english.yml` where `country_tag` falls back to a tag
-parsed from the imported file with only `.upper().strip()`.
+`MD_focus_{country_tag}_l_{language}.yml` where `country_tag` falls back to a
+tag parsed from the imported file with only `.upper().strip()`.
 
 Fix: new `src/hoi4cm/core/safe_path.py`.
 

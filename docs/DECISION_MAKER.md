@@ -172,7 +172,8 @@ Produces two files:
 - `TAG_categories.txt` — the categories file (category metadata only)
 
 ### Copy `.yml`
-Copies a `l_english:` YAML block with all `name:0` and `desc:0` keys for every category and decision.
+Copies a YAML block using the configured HOI4 localisation header, with all
+`name:0` and `desc:0` keys for every category and decision.
 
 ### Save to Mod
 Writes output directly to your mod's `common/decisions/` and `localisation/` folders (requires a mod to be loaded).

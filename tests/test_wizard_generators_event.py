@@ -228,6 +228,12 @@ def test_generate_event_loc_yml_empty_returns_empty_string():
     assert generate_event_loc_yml([]) == ""
 
 
+def test_generate_event_loc_yml_uses_configured_language_header():
+    out = generate_event_loc_yml([_make_event()], loc_language="french")
+
+    assert out.startswith("l_french:")
+
+
 @pytest.mark.parametrize(
     "flag,line",
     [

@@ -81,7 +81,8 @@ def open_additional_income_wizard(app):
         hdr,
         text=tr(
             "wizard.additional_income.subtitle",
-            "Wires up 00_money_system.txt · money_scripted_localization.txt · MD_money_l_english.yml",
+            "Wires up 00_money_system.txt · money_scripted_localization.txt · {filename}",
+            filename=MOD.loc_target.filename("MD_money"),
         ),
         bg="#0d2b1a",
         fg=TEXT_DIM,
@@ -391,7 +392,8 @@ def open_additional_income_wizard(app):
             f"  money_scripted_loc.txt    {'✅ found  — ' + os.path.basename(MOD.md_money_scripted_loc_file) if MOD.md_money_scripted_loc_file else '❌ not found (will create)'}"
         )
         lines.append(
-            f"  MD_money_l_english.yml    {'✅ found' if MOD.md_money_yml_file else '❌ not found (will create)'}"
+            f"  {MOD.loc_target.filename('MD_money')}    "
+            f"{'✅ found' if MOD.md_money_yml_file else '❌ not found (will create)'}"
         )
         status_lbl.config(text="\n".join(lines), fg=TEXT_DIM)
 
@@ -544,11 +546,15 @@ def open_additional_income_wizard(app):
 
         # ── Also write localisation for tooltip ──────────────────────
         if tooltip_text and tooltip_key:
+            loc_target = MOD.loc_target
             loc_path = (
                 MOD.edit_loc_file
                 if MOD.edit_loc_file and os.path.isfile(MOD.edit_loc_file)
                 else os.path.join(
-                    MOD.root, "localisation", "english", f"{idea_id}_l_english.yml"
+                    MOD.root,
+                    "localisation",
+                    loc_target.dirname(),
+                    loc_target.filename(idea_id),
                 )
             )
             try:
@@ -567,7 +573,9 @@ def open_additional_income_wizard(app):
                         f"$$[?{variable_name}|+3] from §Y${idea_id}$§!\\n"
                     )
                 if not os.path.isfile(loc_path):
-                    wf.write_text(loc_path, "l_english:\n", encoding="utf-8-sig")
+                    wf.write_text(
+                        loc_path, loc_target.header() + "\n", encoding="utf-8-sig"
+                    )
                 if to_write:
                     wf.append_text(
                         loc_path,

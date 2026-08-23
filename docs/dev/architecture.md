@@ -20,7 +20,9 @@
   text. Pure, no tkinter: `parse.py` tokenizes and parses, `build.py` turns
   a `ParsedFocusTree` into `Focus` objects, `export.py` renders focuses back
   to script text given a caller-supplied effect renderer, `loc.py` builds
-  the matching `l_english.yml` localisation text (`build_loc_yml`),
+  matching configured-language localisation text (`build_loc_yml`).
+  `loc.py` also owns `LocTarget`, the explicit HOI4 language table used to
+  resolve each header, directory, and filename suffix,
   `drawio.py` walks a draw.io mxGraph XML export into the same `Focus`
   shape (`parse_drawio_graph`, `drawio_to_focus_data`,
   `build_drawio_focuses`), and `batch_load.py` walks a file list into
@@ -61,8 +63,14 @@ file text
   -> App.focuses                            (App owns the live list, keyed by tree)
   -> CanvasMixin draw                       (Focus -> canvas items, dirty-key redraw)
   -> focus_tree.export.export_focus_tree    (Focus -> script text, on save/export)
-  -> loc export                             (id -> l_english.yml entries)
+  -> loc export                             (id -> configured-language YML entries)
 ```
+
+The selected HOI4 localisation language is persisted as `loc_language` on
+`ModContext`. UI code snapshots that string into export plans and pure wizard
+generators; worker code does not read mutable global settings. Existing edit
+targets remain explicit overrides, while automatic discovery recursively
+filters `localisation/` for the configured language.
 
 Parsing and export are pure and tested without a display. Everything from
 `App.focuses` onward touches Tk and is exercised manually (see

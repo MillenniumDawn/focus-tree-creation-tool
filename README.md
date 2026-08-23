@@ -156,7 +156,7 @@ The main screen is the Focus Tree Editor — a zoomable, pannable canvas where y
 - Per-focus properties panel: ID, localisation, icon, cost, prerequisites, completion effects, AI weights
 - GFX browser for picking focus icons from your mod's `gfx/interface/goals/`
 - Inline code view with syntax highlighting
-- Export to `national_focus/*.txt` and `localisation/*_l_english.yml`
+- Export to `national_focus/*.txt` and configured-language localisation YML
 
 ---
 
@@ -172,7 +172,7 @@ A three-panel editor: **category/decision tree** (left), **properties editor** (
 - Category visibility toggles — hide categories to reduce preview complexity while working
 - **Solo** button — show only the currently selected category in the preview
 - Import existing `.txt` decision files (preserves all fields)
-- Export to `common/decisions/TAG_decisions.txt`, `common/decisions/categories/TAG_categories.txt`, and `localisation/*_l_english.yml`
+- Export to `common/decisions/TAG_decisions.txt`, `common/decisions/categories/TAG_categories.txt`, and configured-language localisation YML
 - Apply edits: paste/edit raw Paradox script directly in the Code tab and sync back to the editor
 - Undo/redo support
 
@@ -220,6 +220,7 @@ Access via *File → Settings* or the gear icon in the toolbar.
 | Setting | Description |
 |---|---|
 | **Mod Root Path** | Override the auto-detected mod folder path |
+| **HOI4 Localisation** | Choose the language used for localisation headers, folders, filenames, and discovery |
 | **GFX Paths** | Customise where the app looks for goal icons, idea sprites, and event pictures |
 | **Extra GFX Directories** | Add additional folders to scan for sprites |
 | **Country Tag Names** | Map TAG codes to display names for the preview renderer |
@@ -303,7 +304,8 @@ your_mod/
 ├── events/
 │   └── TAG_events.txt               ← Event Maker export
 └── localisation/
-    └── TAG_l_english.yml            ← All wizards export loc here
+    └── <language>/
+        └── TAG_l_<language>.yml      ← All wizards use the configured language
 ```
 
 Use **Save to Mod** (where available) to write directly to the correct path inside your loaded mod folder, or use the **Export** / **Copy to Clipboard** buttons to place output manually.
