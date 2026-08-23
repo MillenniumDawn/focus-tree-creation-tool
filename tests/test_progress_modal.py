@@ -1,10 +1,6 @@
-"""Headless tests for progress_modal cancel handling.
+"""Headless tests for cooperative cancel. Does not construct Tk widgets."""
 
-The Event/request_cancel contract lives in ``make_cancel_handle``. These
-tests never construct a Toplevel.
-"""
-
-from hoi4cm.ui.tasks import make_cancel_handle
+from hoi4cm.focus_tree.batch_load import make_cancel_handle
 
 
 def test_non_cancellable_handle_ignores_request_cancel():

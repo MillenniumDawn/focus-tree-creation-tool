@@ -5,6 +5,7 @@ parse_focus_tree (text -> ParsedFocusTree) -> build_focuses (-> Focus objects)
 -> export_focus_tree (Focus objects -> script text).
 """
 
+from .batch_load import batch_load_trees, make_cancel_handle
 from .build import BuildContext, build_focuses
 from .codec import apply_focus_code, render_focus_block, render_focus_body
 from .drawio import (
@@ -37,6 +38,8 @@ from .validate import (
 )
 
 __all__ = [
+    "batch_load_trees",
+    "make_cancel_handle",
     "parse_focus_tree",
     "ParsedFocusTree",
     "EmptyFocusTreeError",

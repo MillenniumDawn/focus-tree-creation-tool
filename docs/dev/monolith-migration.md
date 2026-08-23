@@ -164,8 +164,8 @@ methods group into:
 - **Multi-tree** (shared/joint trees loaded alongside the main one):
   `_get_tree_badge`, `_install_extra_tree`, `_load_extra_tree`,
   `_unload_extra_tree`, `_refresh_loaded_trees_panel`,
-  `_export_extra_tree`, `_batch_load_trees_worker`, `_load_all_trees`,
-  `_save_all_trees`.
+  `_export_extra_tree`, `_batch_load_trees_worker` (one-line delegate into
+  `focus_tree/batch_load.py`), `_load_all_trees`, `_save_all_trees`.
 - **Focus list panel**: `_refresh_focus_list_debounced`,
   `_refresh_focus_list`, `_update_focus_list_selection`,
   `_toggle_focus_list`.

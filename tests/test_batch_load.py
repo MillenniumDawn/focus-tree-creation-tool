@@ -1,13 +1,12 @@
-"""Tests for cooperative cancel in the Load All Trees worker."""
+"""Headless tests for cooperative cancel in the batch-load worker."""
 
 from __future__ import annotations
 
 import threading
-from types import SimpleNamespace
 
 import pytest
 
-import hoi4_content_maker as m
+from hoi4cm.focus_tree.batch_load import batch_load_trees
 from hoi4cm.models import Focus
 
 _TREE = """\
@@ -36,17 +35,12 @@ def _write_tree(path, name):
     return str(path)
 
 
-def _worker():
-    host = SimpleNamespace()
-    return m.App._batch_load_trees_worker.__get__(host, SimpleNamespace)
-
-
 def test_batch_load_worker_returns_all_files_when_not_cancelled(tmp_path):
     first = _write_tree(tmp_path / "a.txt", "a")
     second = _write_tree(tmp_path / "b.txt", "b")
     seen = []
 
-    results, stopped = _worker()(
+    results, stopped = batch_load_trees(
         [(first, "shared"), (second, "joint")],
         [],
         0,
@@ -67,7 +61,7 @@ def test_batch_load_worker_stops_before_any_file_when_already_cancelled(tmp_path
     flag.set()
     seen = []
 
-    results, stopped = _worker()(
+    results, stopped = batch_load_trees(
         [(first, "shared"), (second, "joint")],
         [],
         0,
@@ -91,7 +85,7 @@ def test_batch_load_worker_finishes_current_file_then_stops(tmp_path):
         seen.append(label)
         flag.set()
 
-    results, stopped = _worker()(
+    results, stopped = batch_load_trees(
         [(first, "shared"), (second, "joint")],
         [],
         0,

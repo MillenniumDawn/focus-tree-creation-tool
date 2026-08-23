@@ -26,7 +26,6 @@ focuses on a worker thread is only safe because a ``progress_modal``'s
 counter) concurrently on the Tk thread.
 """
 
-import threading
 import tkinter as tk
 import traceback
 from concurrent.futures import Future
@@ -34,6 +33,7 @@ from types import SimpleNamespace
 
 from hoi4cm.core.i18n import tr
 from hoi4cm.core.logger import add_error, get_logger
+from hoi4cm.focus_tree.batch_load import make_cancel_handle
 from hoi4cm.ui.lifecycle import ApplicationLifecycle, find_lifecycle
 from hoi4cm.ui.theme import BG_DARK, BLUE, BORDER_G, TEXT, TEXT_DIM
 from hoi4cm.ui.widgets import _safe_after
@@ -147,20 +147,6 @@ def make_progress(widget, fn, *, scope="application"):
             _safe_after(widget, 0, callback)
 
     return _progress
-
-
-def make_cancel_handle(*, cancellable=False, on_cancel=None):
-    """Return a pollable cancel flag. No Tk objects."""
-    cancelled = threading.Event()
-
-    def request_cancel():
-        if not cancellable or cancelled.is_set():
-            return
-        cancelled.set()
-        if on_cancel is not None:
-            on_cancel()
-
-    return SimpleNamespace(cancelled=cancelled, request_cancel=request_cancel)
 
 
 def progress_modal(parent, title, *, determinate=True, cancellable=False):
