@@ -20,10 +20,11 @@
   text. Pure, no tkinter: `parse.py` tokenizes and parses, `build.py` turns
   a `ParsedFocusTree` into `Focus` objects, `export.py` renders focuses back
   to script text given a caller-supplied effect renderer, `loc.py` builds
-  the matching `l_english.yml` localisation text (`build_loc_yml`), and
+  the matching `l_english.yml` localisation text (`build_loc_yml`),
   `drawio.py` walks a draw.io mxGraph XML export into the same `Focus`
   shape (`parse_drawio_graph`, `drawio_to_focus_data`,
-  `build_drawio_focuses`).
+  `build_drawio_focuses`), and `batch_load.py` walks a file list into
+  parsed trees (`batch_load_trees`, `make_cancel_handle`).
 - **`mod/`**: `ModContext` (the `MOD` singleton): walks a mod's directory
   tree once and indexes sprites, focus/event/idea/decision/dyn-mod IDs,
   country tags, and MD money-system paths. `scan_cache.py` is the SQLite
@@ -211,10 +212,12 @@ dicts/lists.
 
 `make_progress(widget, fn)` returns a callable safe to invoke from a worker;
 calling it marshals `fn(*args, **kwargs)` onto the Tk thread via
-`_safe_after`, in call order. `progress_modal(parent, title)` opens a small
-`Toplevel` with a status label and a bar, `grab_set()`, and
-`WM_DELETE_WINDOW` blocked: the same shape as the inline dialog in
-`_load_mod`, factored out.
+`_safe_after`, in call order. `progress_modal(parent, title, *, determinate=True,
+cancellable=False)` opens a small `Toplevel` with a status label and a bar,
+`grab_set()`, and `WM_DELETE_WINDOW` blocked: the same shape as the inline
+dialog in `_load_mod`, factored out. The handle always exposes `cancelled`
+(a `threading.Event`) and `request_cancel()`. Import, export, and Save All
+leave `cancellable` off.
 
 `_safe_after`/`_safe_after_idle` (`ui/widgets.py`) only swallow
 destroyed-widget `AttributeError` and `TclError`, not arbitrary exceptions
@@ -235,6 +238,18 @@ despite `Focus.__init__` bumping the shared `Focus._next` class counter:
 there's only ever one thread creating focuses at a time, because the modal
 grab blocks the user from triggering focus creation on the Tk thread while
 the worker runs.
+
+Cancel is cooperative, not a kill. `make_cancel_handle` and
+`batch_load_trees` live in `focus_tree/batch_load.py` with no Tk objects.
+`cancellable=True` (Load All Trees) adds a Cancel button and routes
+window-close to that handle. Neither destroys the window nor drops the grab;
+they set `cancelled` so the worker can stop between files. The in-flight
+file finishes, `batch_load_trees` returns the results it already built, and
+`on_done` still runs on the Tk thread and applies that partial load. `run_bg`
+does not take a cancel token: `work` stays a zero-arg callable that closes over
+the event. `Future.cancel()`
+only drops queued jobs, and skipping `on_done` would throw away the partial
+result.
 
 ### Executor lifecycle
 

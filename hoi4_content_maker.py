@@ -69,13 +69,13 @@ if _os.path.isdir(_SRC) and _SRC not in _sys.path:
 from hoi4_logger import log, log_startup
 from hoi4cm.core import (
     EFFECT_CATS,
-    BuildContext,
     EmptyDrawioGraphError,
     EmptyFocusTreeError,
     Focus,
     UndoStack,
     add_error,
     apply_focus_code,
+    batch_load_trees,
     build_drawio_focuses,
     build_focus_name_lookup,
     build_focuses,
@@ -4767,48 +4767,17 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         extra_trees_start_idx,
         country_tag,
         progress,
+        cancelled=None,
     ):
         """Parse and build selected trees sequentially on a worker thread."""
-        total = len(to_load)
-        existing = list(existing_seed)
-        build_context = BuildContext(existing)
-        tree_idx = extra_trees_start_idx
-        results = []
-        for i, (path, ttype) in enumerate(to_load, start=1):
-            progress(i, total, os.path.basename(path))
-            try:
-                raw = read_file(path)
-                t0 = time.perf_counter()
-                parsed = parse_focus_tree(raw, path)
-                t1 = time.perf_counter()
-                new_focuses = build_focuses(
-                    parsed,
-                    tree_idx + 1,
-                    country_tag=country_tag,
-                    context=build_context,
-                )
-                tree_idx += 1
-                t2 = time.perf_counter()
-                log.debug(
-                    "install tree %s: parse %.1fms build %.1fms (%d focuses)",
-                    path,
-                    (t1 - t0) * 1000,
-                    (t2 - t1) * 1000,
-                    len(new_focuses),
-                )
-                existing.extend(new_focuses)
-                results.append(
-                    {
-                        "path": path,
-                        "type": ttype,
-                        "ok": True,
-                        "parsed": parsed,
-                        "new_focuses": new_focuses,
-                    }
-                )
-            except Exception as e:
-                results.append({"path": path, "type": ttype, "ok": False, "error": e})
-        return results
+        return batch_load_trees(
+            to_load,
+            existing_seed,
+            extra_trees_start_idx,
+            country_tag,
+            progress,
+            cancelled=cancelled,
+        )
 
     def _load_all_trees(self):
         """Scan national_focus directory and show a checklist so the user can batch-load trees."""
@@ -4982,7 +4951,9 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             extra_trees_start_idx = len(self._extra_trees)
             country_tag = getattr(self, "_tree_country_tag", "")
 
-            modal = progress_modal(self, tr("load_all.title", "Load All Trees"))
+            modal = progress_modal(
+                self, tr("load_all.title", "Load All Trees"), cancellable=True
+            )
 
             def _update_progress(i, total, label):
                 modal.set_text(
@@ -5005,10 +4976,12 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
                     extra_trees_start_idx,
                     country_tag,
                     progress,
+                    cancelled=modal.cancelled,
                 )
 
-            def on_done(results):
+            def on_done(payload):
                 modal.close()
+                results, was_cancelled = payload
                 ok, fail = [], []
                 pending_focuses = []
                 for r in results:
@@ -5077,6 +5050,11 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
                         + tr("load_all.failed_header", "Failed:")
                         + "\n"
                         + "\n".join(f"  ✕ {e}" for e in fail)
+                    )
+                if was_cancelled:
+                    msg += "\n\n" + tr(
+                        "load_all.cancelled",
+                        "Cancelled. Loaded files were kept.",
                     )
                 messagebox.showinfo(tr("load_all.title", "Load All Trees"), msg)
                 # Zoom to fit all focuses

@@ -31,7 +31,9 @@ import traceback
 from concurrent.futures import Future
 from types import SimpleNamespace
 
+from hoi4cm.core.i18n import tr
 from hoi4cm.core.logger import add_error, get_logger
+from hoi4cm.focus_tree.batch_load import make_cancel_handle
 from hoi4cm.ui.lifecycle import ApplicationLifecycle, find_lifecycle
 from hoi4cm.ui.theme import BG_DARK, BLUE, BORDER_G, TEXT, TEXT_DIM
 from hoi4cm.ui.widgets import _safe_after
@@ -147,7 +149,7 @@ def make_progress(widget, fn, *, scope="application"):
     return _progress
 
 
-def progress_modal(parent, title, *, determinate=True):
+def progress_modal(parent, title, *, determinate=True, cancellable=False):
     """Open a small modal progress dialog; return a handle to drive it.
 
     Mirrors the Toplevel built inline in ``ui/mod_loading.py``'s
@@ -158,18 +160,46 @@ def progress_modal(parent, title, *, determinate=True):
     worker to compute against a snapshot of ``self.focuses`` without the
     user mutating the live dict concurrently on the Tk thread.
 
+    ``cancellable=True`` adds a Cancel button and routes window-close to
+    ``request_cancel``. Neither drops the grab nor destroys the window;
+    they set ``cancelled`` so a worker can stop between items.
+
     Returns a ``SimpleNamespace`` with:
       - ``set_text(msg)``: update the status label.
       - ``set_fraction(frac)``: move a determinate bar to ``frac`` (0.0-1.0).
       - ``close()``: release the grab and destroy the window.
+      - ``cancelled``: a ``threading.Event`` workers may poll.
+      - ``request_cancel()``: set ``cancelled`` when the modal is
+        cancellable; no-op otherwise.
     """
     win = tk.Toplevel(parent)
     win.title(title)
     win.configure(bg=BG_DARK)
-    win.geometry("420x140")
+    win.geometry("420x180" if cancellable else "420x140")
     win.resizable(False, False)
     win.grab_set()
-    win.protocol("WM_DELETE_WINDOW", lambda: None)
+
+    cancel_btn = None
+
+    def mark_cancelling():
+        if cancel_btn is None:
+            return
+        try:
+            cancel_btn.config(
+                text=tr("common.cancelling", "Cancelling..."),
+                state="disabled",
+            )
+            win.update_idletasks()
+        except tk.TclError:
+            pass
+
+    handle = make_cancel_handle(
+        cancellable=cancellable,
+        on_cancel=mark_cancelling if cancellable else None,
+    )
+    cancelled = handle.cancelled
+    request_cancel = handle.request_cancel
+    win.protocol("WM_DELETE_WINDOW", request_cancel if cancellable else lambda: None)
 
     tk.Label(
         win,
@@ -185,6 +215,21 @@ def progress_modal(parent, title, *, determinate=True):
     bar_frame.pack(pady=8)
     bar_fill = tk.Frame(bar_frame, bg=BLUE, height=6, width=0 if determinate else 40)
     bar_fill.place(x=0, y=0, height=6)
+
+    if cancellable:
+        cancel_btn = tk.Button(
+            win,
+            text=tr("common.cancel", "Cancel"),
+            command=request_cancel,
+            bg="#450a0a",
+            fg="#f87171",
+            font=("Helvetica", 9),
+            relief="flat",
+            padx=12,
+            pady=4,
+            cursor="hand2",
+        )
+        cancel_btn.pack(pady=(4, 8))
 
     def set_text(msg):
         status_lbl.config(text=msg)
@@ -209,11 +254,14 @@ def progress_modal(parent, title, *, determinate=True):
         set_text=set_text,
         set_fraction=set_fraction,
         close=close,
+        cancelled=cancelled,
+        request_cancel=request_cancel,
     )
 
 
 __all__ = [
     "get_executor",
+    "make_cancel_handle",
     "make_progress",
     "progress_modal",
     "run_bg",
