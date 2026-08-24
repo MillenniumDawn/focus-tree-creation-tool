@@ -8,6 +8,7 @@ from tkinter import filedialog, messagebox, ttk
 from hoi4cm.core.config import CONFIG_PATH
 from hoi4cm.core.i18n import I18N_LANGS, get_language, set_language, tr
 from hoi4cm.core.paths import default_hoi4_mod_dir
+from hoi4cm.focus_tree.loc import LOC_LANGUAGE_NAMES
 from hoi4cm.mod import MOD
 from hoi4cm.ui.theme import (
     BG_CARD,
@@ -280,6 +281,51 @@ def open_settings(app):
             )
 
     lang_combo.bind("<<ComboboxSelected>>", _apply_lang)
+
+    loc_lang_row = tk.Frame(frm, bg=BG_PANEL)
+    loc_lang_row.pack(fill="x", padx=10, pady=4)
+    tk.Label(
+        loc_lang_row,
+        text=tr("settings.loc_language.label", "HOI4 localisation:"),
+        bg=BG_PANEL,
+        fg=TEXT_DIM,
+        font=("Helvetica", 9),
+        width=18,
+        anchor="w",
+    ).pack(side="left")
+    loc_lang_var = tk.StringVar(value=MOD.loc_language)
+    loc_lang_combo = ttk.Combobox(
+        loc_lang_row,
+        textvariable=loc_lang_var,
+        state="readonly",
+        values=list(LOC_LANGUAGE_NAMES),
+        width=16,
+    )
+    loc_lang_combo.pack(side="left")
+    loc_lang_name = tk.Label(
+        loc_lang_row,
+        text=LOC_LANGUAGE_NAMES.get(loc_lang_var.get(), ""),
+        bg=BG_PANEL,
+        fg=TEXT_DIM,
+        font=("Helvetica", 8),
+        padx=8,
+    )
+    loc_lang_name.pack(side="left")
+
+    def _apply_loc_lang(*_):
+        MOD.loc_language = loc_lang_var.get()
+        loc_lang_name.config(text=LOC_LANGUAGE_NAMES.get(MOD.loc_language, ""))
+        MOD.save_config()
+        if MOD.root:
+            MOD._scan_md_money_files()
+
+    loc_lang_combo.bind("<<ComboboxSelected>>", _apply_loc_lang)
+    _lbl(
+        tr(
+            "settings.loc_language.hint",
+            "  Controls localisation headers, folders, filenames, and discovery.",
+        )
+    )
 
     _sec(tr("settings.mod_detection", "MOD DETECTION"))
     md_color = "#a78bfa" if MOD.is_md else TEXT_DIM

@@ -250,6 +250,12 @@ def test_generate_decision_loc_yml_includes_descriptions():
     assert ' TAG_decision_desc: "Dec desc"' in out
 
 
+def test_generate_decision_loc_yml_uses_configured_language_header():
+    out = generate_decision_loc_yml([_cat()], [_dec()], loc_language="german")
+
+    assert out.startswith("l_german:")
+
+
 def test_generate_decision_scripted_loc_emits_name_and_desc_blocks():
     cats = [_cat()]
     decs = [_dec()]

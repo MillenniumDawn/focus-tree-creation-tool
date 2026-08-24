@@ -60,6 +60,12 @@ def test_build_dyn_mod_output_emits_three_file_sections():
     assert out.count("TAG_test = {") == 1
 
 
+def test_build_dyn_mod_output_uses_configured_localisation_path():
+    out = build_dyn_mod_output(mod_id="TAG_test", loc_language="japanese")
+
+    assert "localisation/japanese/TAG_l_japanese.yml" in out
+
+
 def test_build_dyn_mod_output_emits_scope_and_icon_when_set():
     out = build_dyn_mod_output(mod_id="TAG_x", scope="state", icon="GFX_idea_x")
     assert "\tscope = state" in out

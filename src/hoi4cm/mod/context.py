@@ -51,32 +51,68 @@ _DECISION_KEYWORDS = frozenset(
 )
 
 
-def detect_loc_file(mod_root, raw_text):
+def find_loc_files(mod_root, *, language="english"):
+    """Return configured-language localisation files below a mod root."""
+    from hoi4cm.focus_tree.loc import LocTarget
+
+    if not mod_root:
+        return []
+    loc_root = os.path.join(mod_root, "localisation")
+    if not os.path.isdir(loc_root):
+        return []
+
+    target = LocTarget(language)
+    target_dir = target.dirname().casefold()
+    target_suffix = target.filename("").casefold()
+    directory_matches = []
+    suffix_matches = []
+    try:
+        for directory, dirnames, filenames in os.walk(loc_root):
+            dirnames.sort(
+                key=lambda name: (name.casefold() != target_dir, name.casefold())
+            )
+            relative_dir = os.path.relpath(directory, loc_root)
+            first_part = relative_dir.split(os.sep, 1)[0].casefold()
+            in_target_dir = relative_dir != "." and first_part == target_dir
+            for filename in sorted(filenames, key=str.casefold):
+                lower_name = filename.casefold()
+                if not lower_name.endswith(".yml"):
+                    continue
+                path = os.path.join(directory, filename)
+                if in_target_dir:
+                    directory_matches.append(path)
+                elif lower_name.endswith(target_suffix):
+                    suffix_matches.append(path)
+    except OSError:
+        return []
+    return directory_matches + suffix_matches
+
+
+def detect_loc_file(mod_root, raw_text, *, language="english"):
     """Guess the localisation .yml matching an imported focus-tree file.
 
     Looks for a country tag in ``raw_text`` (the first ``TAG_something``
-    identifier) and checks a few conventional filenames under
-    ``mod_root/localisation/english/``. Returns the matched path, or ``""``
-    if no mod root, no tag, or no matching file was found.
+    identifier) and checks configured-language files recursively below
+    ``mod_root/localisation/``. Returns the matched path, or ``""`` if no mod
+    root, no tag, or no matching file was found.
     """
+    from hoi4cm.focus_tree.loc import LocTarget
+
     if not mod_root:
         return ""
     tag_m = re.search(r"\b([A-Z]{2,4})_[A-Za-z]", raw_text)
     if not tag_m:
         return ""
     tag = tag_m.group(1)
-    candidates = (
-        f"MD_focus_{tag}_l_english.yml",
-        f"{tag}_focus_l_english.yml",
-        f"{tag}_focuses_l_english.yml",
-    )
-    loc_dir = os.path.join(mod_root, "localisation", "english")
-    if not os.path.isdir(loc_dir):
-        return ""
-    for cand in candidates:
-        cand_path = os.path.join(loc_dir, cand)
-        if os.path.isfile(cand_path):
-            return cand_path
+    target = LocTarget(language)
+    candidates = {
+        target.filename(f"MD_focus_{tag}").casefold(),
+        target.filename(f"{tag}_focus").casefold(),
+        target.filename(f"{tag}_focuses").casefold(),
+    }
+    for path in find_loc_files(mod_root, language=target.language):
+        if os.path.basename(path).casefold() in candidates:
+            return path
     return ""
 
 
@@ -113,6 +149,7 @@ class ModContext:
         self.loc_token_style = (
             "colon"  # "colon" = [TAG:NameWithFlag], "dot" = [TAG.GetName]
         )
+        self.loc_language = "english"
 
         # Configurable scan paths (can be changed in Settings)
         self.path_goals = os.path.join("gfx", "interface", "goals")
@@ -160,6 +197,7 @@ class ModContext:
         ("custom_gfx_dirs", "custom_gfx_dirs", True),
         ("country_tag_names", "country_tag_names", True),
         ("loc_token_style", "loc_token_style", True),
+        ("loc_language", "loc_language", True),
         ("is_md_override", "is_md", False),
         ("sidebar_refresh_skip", "sidebar_refresh_skip", True),
     )
@@ -170,6 +208,9 @@ class ModContext:
         for key, attr, allow_falsy in self._PERSISTED_ATTRS:
             if key in cfg and (allow_falsy or cfg[key]):
                 setattr(self, attr, cfg[key])
+        from hoi4cm.focus_tree.loc import LocTarget
+
+        self.loc_language = LocTarget(self.loc_language).language
         # Window geometry is restored separately by the App on startup.
         self._saved_geometry = cfg.get("window_geometry", "")
         self._recent_mods = cfg.get("recent_mods", [])
@@ -485,8 +526,32 @@ class ModContext:
                 if "money" in fn.lower() and fn.endswith(".txt"):
                     self.md_money_scripted_loc_file = os.path.join(sloc_dir, fn)
                     break
-        yml = os.path.join(r, "localisation", "english", "MD_money_l_english.yml")
-        self.md_money_yml_file = yml if os.path.isfile(yml) else ""
+        target = self.loc_target
+        yml = os.path.join(
+            r,
+            "localisation",
+            target.dirname(),
+            target.filename("MD_money"),
+        )
+        if os.path.isfile(yml):
+            self.md_money_yml_file = yml
+        else:
+            target_name = target.filename("MD_money").casefold()
+            self.md_money_yml_file = next(
+                (
+                    path
+                    for path in find_loc_files(r, language=target.language)
+                    if os.path.basename(path).casefold() == target_name
+                ),
+                "",
+            )
+
+    @property
+    def loc_target(self):
+        """Return the normalized localisation target for current settings."""
+        from hoi4cm.focus_tree.loc import LocTarget
+
+        return LocTarget(self.loc_language)
 
     # ── Load image for a sprite ───────────────────────────────────────
     def get_image(self, gfx_name, size=(64, 64)):
@@ -619,4 +684,4 @@ class ModContext:
         )
 
 
-__all__ = ["ModContext", "detect_loc_file"]
+__all__ = ["ModContext", "detect_loc_file", "find_loc_files"]

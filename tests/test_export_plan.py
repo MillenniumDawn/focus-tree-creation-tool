@@ -25,7 +25,7 @@ def _focus(name, tree_idx=0):
     return focus
 
 
-def _main_plan(tmp_path):
+def _main_plan(tmp_path, *, loc_language="english"):
     focus = _focus("TST_root")
     return make_main_export_plan(
         label="Main: TST_focus_tree",
@@ -44,6 +44,7 @@ def _main_plan(tmp_path):
         },
         focus_lookup={focus.id: focus},
         focus_name_lookup={focus.name: focus},
+        loc_language=loc_language,
     )
 
 
@@ -85,6 +86,15 @@ def test_main_plan_writes_tree_and_localisation_as_one_group(tmp_path):
     ]
     assert "TST_root" in calls[0][0][1]
     assert "TST_root" in calls[0][1][1]
+
+
+def test_main_plan_snapshots_non_english_localisation_header(tmp_path):
+    plan = _main_plan(tmp_path, loc_language="french")
+    calls = []
+
+    execute_export_plans([plan], lambda entries: calls.append(tuple(entries)))
+
+    assert calls[0][1][1].startswith("l_french:\n")
 
 
 def test_batch_continues_after_one_plan_fails(tmp_path):

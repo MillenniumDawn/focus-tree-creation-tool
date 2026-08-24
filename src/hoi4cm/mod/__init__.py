@@ -5,7 +5,7 @@ The :class:`~hoi4cm.mod.context.ModContext` instance lives at module level as
 ``MOD.sprites``, ``MOD.idea_ids``, etc. just like it did in the monolith.
 """
 
-from hoi4cm.mod.context import ModContext, detect_loc_file
+from hoi4cm.mod.context import ModContext, detect_loc_file, find_loc_files
 from hoi4cm.mod.graphics_catalog import (
     AssetRef,
     GraphicsCatalog,
@@ -31,5 +31,6 @@ __all__ = [
     "WorkspaceFiles",
     "WriteEntry",
     "detect_loc_file",
+    "find_loc_files",
     "notifying_workspace_files",
 ]

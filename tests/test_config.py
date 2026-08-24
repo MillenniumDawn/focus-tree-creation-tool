@@ -106,3 +106,23 @@ def test_sidebar_refresh_skip_roundtrips_through_save_config(monkeypatch):
 
     c2 = ctx_mod.ModContext()
     assert c2.sidebar_refresh_skip is False
+
+
+def test_loc_language_defaults_persists_and_normalizes(monkeypatch):
+    from hoi4cm.mod import context as ctx_mod
+
+    saved = {}
+    monkeypatch.setattr(ctx_mod, "cfg_save", lambda data: saved.update(data))
+    monkeypatch.setattr(ctx_mod, "cfg_load", lambda: dict(saved))
+    monkeypatch.setattr(ctx_mod.GraphicsCatalog, "flush_cache", lambda self: None)
+
+    context = ctx_mod.ModContext()
+    assert context.loc_language == "english"
+
+    context.loc_language = "french"
+    context.save_config()
+    assert saved["loc_language"] == "french"
+    assert ctx_mod.ModContext().loc_language == "french"
+
+    saved["loc_language"] = "invalid"
+    assert ctx_mod.ModContext().loc_language == "english"

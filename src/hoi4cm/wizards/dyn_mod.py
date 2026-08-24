@@ -22,7 +22,7 @@ from hoi4cm.core import (
 )
 from hoi4cm.core.image import PIL_OK, PILImage, PILImageTk
 from hoi4cm.core.paths import read_file
-from hoi4cm.mod import MOD
+from hoi4cm.mod import MOD, find_loc_files
 from hoi4cm.script.syntax import match_brace, parse_script, serialize_block
 from hoi4cm.ui import (
     BG_CARD,
@@ -993,7 +993,7 @@ def open_dyn_mod_wizard(app):
             },
             {"enable": v_enable, "mods": v_mods, "const": v_const},
         )
-        return build_dyn_mod_output(**state)
+        return build_dyn_mod_output(**state, loc_language=MOD.loc_language)
 
     def _preview(*_):
         if _dm_edit_mode[0]:
@@ -1144,27 +1144,25 @@ def open_dyn_mod_wizard(app):
             results.append((dm_rel, action, f"{len(mod_entries)} variable modifiers"))
 
         # ════════════════════════════════════════════════════════
-        # FILE 2 — localisation/english/
-        # Strategy: scan ALL .yml files under localisation/english/
+        # FILE 2 — configured localisation language
+        # Strategy: scan all configured-language .yml files
         # for existing keys; only add missing ones.
-        # Write to mid_l_english.yml (create or append).
+        # Write to the configured target filename (create or append).
         # ════════════════════════════════════════════════════════
-        loc_dir = os.path.join(mod_root, "localisation", "english")
+        loc_target = MOD.loc_target
         existing_keys = set()
 
         # Collect all keys already in any loc file
         # Accept both modern `key: "value"` and legacy `key:0 "value"` forms
-        if os.path.isdir(loc_dir):
-            for fname in os.listdir(loc_dir):
-                if fname.endswith(".yml"):
-                    content = read_existing(
-                        os.path.join("localisation", "english", fname), "utf-8-sig"
-                    )
-                    if content:
-                        for m in re.finditer(
-                            r'^\s+(\S+?)(?::\d+)?\s*[=:]?\s*"', content, re.MULTILINE
-                        ):
-                            existing_keys.add(m.group(1))
+        for loc_path in find_loc_files(mod_root, language=MOD.loc_language):
+            try:
+                content = read_file(loc_path)
+            except OSError, ValueError, UnicodeDecodeError:
+                continue
+            for m in re.finditer(
+                r'^\s+(\S+?)(?::\d+)?\s*[=:]?\s*"', content, re.MULTILINE
+            ):
+                existing_keys.add(m.group(1))
 
         # Build only the missing entries
         if MOD.edit_loc_file and os.path.isfile(MOD.edit_loc_file):
@@ -1174,7 +1172,11 @@ def open_dyn_mod_wizard(app):
                 else MOD.edit_loc_file
             )
         else:
-            loc_rel = os.path.join("localisation", "english", f"{mid}_l_english.yml")
+            loc_rel = os.path.join(
+                "localisation",
+                loc_target.dirname(),
+                loc_target.filename(mid),
+            )
         loc_existing = read_existing(loc_rel, "utf-8-sig")
 
         new_loc_lines = []
@@ -1192,7 +1194,7 @@ def open_dyn_mod_wizard(app):
 
         if new_loc_lines:
             if loc_existing is None:
-                loc_final = "l_english:\n" + "\n".join(new_loc_lines) + "\n"
+                loc_final = loc_target.header() + "\n" + "\n".join(new_loc_lines) + "\n"
                 loc_action = "created"
             else:
                 # Append after last non-empty line, preserving file
@@ -1447,25 +1449,21 @@ def open_dyn_mod_wizard(app):
 
             # Look up loc strings
             loc_name = loc_desc = ""
-            loc_dir = os.path.join(MOD.root, "localisation", "english")
-            if os.path.isdir(loc_dir):
-                for lf in sorted(os.listdir(loc_dir)):
-                    if not lf.endswith(".yml"):
-                        continue
-                    try:
-                        loc_src = read_file(os.path.join(loc_dir, lf))
-                        for m in re.finditer(
-                            r'^\s+(\S+?)(?::\d+)?\s+"(.*)"', loc_src, re.MULTILINE
-                        ):
-                            k2, v2 = m.group(1), m.group(2)
-                            if k2 == modifier_id and not loc_name:
-                                loc_name = v2
-                            elif k2 == f"{modifier_id}_desc" and not loc_desc:
-                                loc_desc = v2
-                        if loc_name and loc_desc:
-                            break
-                    except OSError, ValueError, UnicodeDecodeError:
-                        pass
+            for loc_path in find_loc_files(MOD.root, language=MOD.loc_language):
+                try:
+                    loc_src = read_file(loc_path)
+                    for m in re.finditer(
+                        r'^\s+(\S+?)(?::\d+)?\s+"(.*)"', loc_src, re.MULTILINE
+                    ):
+                        k2, v2 = m.group(1), m.group(2)
+                        if k2 == modifier_id and not loc_name:
+                            loc_name = v2
+                        elif k2 == f"{modifier_id}_desc" and not loc_desc:
+                            loc_desc = v2
+                    if loc_name and loc_desc:
+                        break
+                except OSError, ValueError, UnicodeDecodeError:
+                    pass
             v_loc_name.set(loc_name)
             v_loc_desc.set(loc_desc)
 

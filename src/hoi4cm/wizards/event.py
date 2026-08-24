@@ -1063,7 +1063,9 @@ def open_event_wizard(app):
         return _generators.generate_events_txt(collect_event_state(events))
 
     def _generate_yml():
-        return _generators.generate_event_loc_yml(collect_event_state(events))
+        return _generators.generate_event_loc_yml(
+            collect_event_state(events), loc_language=MOD.loc_language
+        )
 
     # ── Top bar actions ───────────────────────────────────────────────
     def _new_event():
@@ -1117,7 +1119,8 @@ def open_event_wizard(app):
         messagebox.showinfo(
             "Copied",
             "Localisation YML copied to clipboard.\n\nPaste into:\n"
-            "  localisation/english/[modname]_l_english.yml",
+            f"  localisation/{MOD.loc_target.dirname()}/"
+            f"{MOD.loc_target.filename('[modname]')}",
             parent=win,
         )
 
@@ -1147,8 +1150,12 @@ def open_event_wizard(app):
         if MOD.edit_loc_file and os.path.isfile(MOD.edit_loc_file):
             loc_file = MOD.edit_loc_file
         else:
+            loc_target = MOD.loc_target
             loc_file = os.path.join(
-                mod_root, "localisation", "english", f"{ns}_l_english.yml"
+                mod_root,
+                "localisation",
+                loc_target.dirname(),
+                loc_target.filename(ns),
             )
         os.makedirs(os.path.dirname(ev_file), exist_ok=True)
         os.makedirs(os.path.dirname(loc_file), exist_ok=True)
@@ -1205,8 +1212,9 @@ def open_event_wizard(app):
         # ── LOCALISATION: safe append — skip keys already present ─────────
         try:
             yml_new_lines = []
+            loc_header = MOD.loc_target.header()
             for line in _generate_yml().splitlines():
-                if not line.strip() or line.strip().startswith("l_english"):
+                if not line.strip() or line.strip() == loc_header:
                     continue
                 yml_new_lines.append(line)
 
@@ -1232,7 +1240,7 @@ def open_event_wizard(app):
 
             if to_add:
                 if not yml_exists:
-                    wf.write_text(loc_file, "l_english:\n", encoding="utf-8-sig")
+                    wf.write_text(loc_file, loc_header + "\n", encoding="utf-8-sig")
                 # Only add the section header if it's not already there
                 needs_hdr = True
                 try:

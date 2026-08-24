@@ -2,7 +2,7 @@
 
 from types import SimpleNamespace
 
-from hoi4cm.focus_tree.loc import build_loc_yml
+from hoi4cm.focus_tree.loc import LOC_LANGUAGE_NAMES, LocTarget, build_loc_yml
 
 
 def _focus(name, desc=""):
@@ -89,6 +89,43 @@ def test_custom_language_header_for_fresh_file():
     focuses = [_focus("TST_alpha")]
     text, _count = build_loc_yml(None, focuses, "TST", language="french")
     assert text.startswith("l_french:\n")
+
+
+def test_loc_target_covers_every_supported_hoi4_language():
+    assert tuple(LOC_LANGUAGE_NAMES) == (
+        "english",
+        "french",
+        "german",
+        "spanish",
+        "braz_por",
+        "polish",
+        "russian",
+        "japanese",
+        "simp_chinese",
+    )
+
+
+def test_loc_target_resolves_header_directory_and_filename():
+    target = LocTarget("french")
+
+    assert target.header() == "l_french:"
+    assert target.dirname() == "french"
+    assert target.filename("TAG_focus") == "TAG_focus_l_french.yml"
+
+
+def test_loc_target_uses_explicit_brazilian_portuguese_mapping():
+    target = LocTarget("braz_por")
+
+    assert target.header() == "l_braz_por:"
+    assert target.dirname() == "braz_por"
+    assert target.filename("TAG") == "TAG_l_braz_por.yml"
+
+
+def test_loc_target_invalid_language_falls_back_to_english():
+    target = LocTarget("not-a-language")
+
+    assert target.language == "english"
+    assert target.header() == "l_english:"
 
 
 def test_name_title_cased_with_underscores_replaced():

@@ -17,12 +17,13 @@ from tkinter import filedialog, messagebox
 from hoi4cm.core import (
     append_scripted_loc,
     autosave_path,
+    read_file,
     sanitize_component,
     tr,
 )
 from hoi4cm.core.image import PIL_OK, PILImage, PILImageTk
 from hoi4cm.core.logger import get_logger
-from hoi4cm.mod import MOD, WorkspaceFiles
+from hoi4cm.mod import MOD, WorkspaceFiles, find_loc_files
 from hoi4cm.script.syntax import extract_named_block, find_blocks
 from hoi4cm.ui import (
     BG_CARD,
@@ -4303,7 +4304,9 @@ def open_decision_wizard(app):
 
     def _gen_yml():
         _collect()
-        return _generators.generate_decision_loc_yml(dm_cats, dm_decs)
+        return _generators.generate_decision_loc_yml(
+            dm_cats, dm_decs, loc_language=MOD.loc_language
+        )
 
     # ── import / export ───────────────────────────────────────────────────────
     def _browse_mod_decisions():
@@ -4509,11 +4512,10 @@ def open_decision_wizard(app):
         for path in paths:
             if path.lower().endswith(".yml"):
                 try:
-                    with open(path, encoding="utf-8-sig", errors="replace") as f:
-                        for line in f:
-                            lm = _re.match(r'\s+([\w]+):(?:\d+)?\s+"(.*?)"', line)
-                            if lm:
-                                loc[lm.group(1)] = lm.group(2)
+                    for line in read_file(path).splitlines():
+                        lm = _re.match(r'\s+([\w]+):(?:\d+)?\s+"(.*?)"', line)
+                        if lm:
+                            loc[lm.group(1)] = lm.group(2)
                 except (OSError, ValueError) as exc:
                     get_logger("decision").debug("loc read failed %s: %s", path, exc)
 
@@ -4525,24 +4527,16 @@ def open_decision_wizard(app):
             for _ in range(5):
                 loc_dir = os.path.join(folder, "localisation")
                 if os.path.isdir(loc_dir):
-                    for fn in os.listdir(loc_dir):
-                        if fn.endswith(".yml") or fn.endswith("_l_english.yml"):
-                            try:
-                                with open(
-                                    os.path.join(loc_dir, fn),
-                                    encoding="utf-8-sig",
-                                    errors="replace",
-                                ) as f:
-                                    for line in f:
-                                        lm = _re.match(
-                                            r'\s+([\w]+):(?:\d+)?\s+"(.*?)"', line
-                                        )
-                                        if lm:
-                                            loc[lm.group(1)] = lm.group(2)
-                            except (OSError, ValueError) as exc:
-                                get_logger("decision").debug(
-                                    "loc dir read failed %s: %s", fn, exc
-                                )
+                    for loc_path in find_loc_files(folder, language=MOD.loc_language):
+                        try:
+                            for line in read_file(loc_path).splitlines():
+                                lm = _re.match(r'\s+([\w]+):(?:\d+)?\s+"(.*?)"', line)
+                                if lm:
+                                    loc[lm.group(1)] = lm.group(2)
+                        except (OSError, ValueError) as exc:
+                            get_logger("decision").debug(
+                                "loc dir read failed %s: %s", loc_path, exc
+                            )
                     break
                 folder = os.path.dirname(folder)
 
@@ -4896,11 +4890,15 @@ def open_decision_wizard(app):
         except OSError as e:
             errs.append(str(e))
             get_logger("decision").error("save categories failed: %s", e, exc_info=True)
+        loc_target = MOD.loc_target
         yml_path = (
             MOD.edit_loc_file
             if MOD.edit_loc_file and os.path.isfile(MOD.edit_loc_file)
             else os.path.join(
-                mod_root, "localisation", "english", f"{ns}_decisions_l_english.yml"
+                mod_root,
+                "localisation",
+                loc_target.dirname(),
+                loc_target.filename(f"{ns}_decisions"),
             )
         )
         os.makedirs(os.path.dirname(yml_path), exist_ok=True)
@@ -4916,11 +4914,13 @@ def open_decision_wizard(app):
                         if m:
                             existing_loc_keys.add(m.group(1))
             else:
-                wf.write_text(yml_path, "l_english:\n", encoding="utf-8-sig")
+                wf.write_text(
+                    yml_path, loc_target.header() + "\n", encoding="utf-8-sig"
+                )
             new_lines = [
                 l
                 for l in _gen_yml().splitlines()
-                if l.strip() and not l.strip().startswith("l_english")
+                if l.strip() and l.strip() != loc_target.header()
             ]
             # Only add lines whose key isn't already in the file
             to_write = []

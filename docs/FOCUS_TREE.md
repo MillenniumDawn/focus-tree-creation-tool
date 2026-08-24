@@ -109,7 +109,9 @@ The **Code** tab in the right panel shows the raw Paradox script for the selecte
 Writes a `national_focus/*.txt` file with the complete focus tree.
 
 ### Export .yml
-Writes a `localisation/*_l_english.yml` file with all focus display names and descriptions.
+Writes a `localisation/<language>/*_l_<language>.yml` file with all focus
+display names and descriptions. Choose the HOI4 localisation language in
+Settings; English is the default.
 
 ### Save to Mod
 Writes both files directly into your loaded mod folder at the correct paths.

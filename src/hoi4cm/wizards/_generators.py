@@ -11,6 +11,8 @@ are extracted verbatim, only relocated — so widget-driven callers and
 headless callers agree byte-for-byte.
 """
 
+from hoi4cm.focus_tree.loc import LocTarget
+
 
 def _indent_lines(text, n=1):
     """Indent every non-blank line by n tabs."""
@@ -112,11 +114,11 @@ def generate_events_txt(events):
     return "\n".join(lines)
 
 
-def generate_event_loc_yml(events):
-    """Render the l_english.yml block for a list of event data objects."""
+def generate_event_loc_yml(events, *, loc_language="english"):
+    """Render a localisation YML block for a list of event data objects."""
     if not events:
         return ""
-    lines = ["l_english:", ""]
+    lines = [LocTarget(loc_language).header(), ""]
     for ev in events:
         lines.append(f' {ev.eid}.t: "{ev.title_text}"')
         lines.append(f' {ev.eid}.d: "{ev.desc_text}"')
@@ -381,6 +383,7 @@ def build_dyn_mod_output(
     const="",
     loc_name="",
     loc_desc="",
+    loc_language="english",
 ):
     """Render the three-file dyn-mod wizard preview (modifier def, focus
     snippet, localisation) in the original wizard's exact format.
@@ -392,6 +395,7 @@ def build_dyn_mod_output(
     const = const.strip()
     name = loc_name.strip()
     desc = loc_desc.strip()
+    loc_target = LocTarget(loc_language)
 
     mod_entries = parse_dyn_mod_lines(mods_raw)
 
@@ -453,7 +457,8 @@ def build_dyn_mod_output(
     dm += [
         "",
         "# ============================================================",
-        "# LOCALISATION — paste into localisation/english/TAG_l_english.yml",
+        "# LOCALISATION — paste into "
+        f"localisation/{loc_target.dirname()}/{loc_target.filename('TAG')}",
         "# File must be UTF-8-BOM encoded",
         "# ============================================================",
         "",
@@ -492,6 +497,7 @@ def build_national_spirit_output(
     rule="",
     extra_modifiers="",
     modifiers=None,
+    loc_language="english",
 ):
     """Render the national-spirit (idea) wizard preview output.
 
@@ -508,6 +514,7 @@ def build_national_spirit_output(
     loc_n = (loc_name or "").strip()
     loc_d = (loc_desc or "").strip()
     ai_f = (ai_factor or "").strip()
+    loc_target = LocTarget(loc_language)
 
     def _block(name, body, indent="\t\t\t"):
         lines = [f"{indent}{name} = {{"]
@@ -584,7 +591,10 @@ def build_national_spirit_output(
     out.append("}")
     out.append("")
     out.append("# ============================================================")
-    out.append(f"# LOCALISATION  localisation/english/{sid}_l_english.yml")
+    out.append(
+        "# LOCALISATION  "
+        f"localisation/{loc_target.dirname()}/{loc_target.filename(sid)}"
+    )
     out.append("# ============================================================")
     out.append("")
     out.append(f' {sid}: "{loc_n}"')
@@ -720,9 +730,9 @@ def generate_decisions_file(cats, decs, *, targeted=None, cost_type=None):
     return "\n".join(out)
 
 
-def generate_decision_loc_yml(cats, decs):
-    """Render the l_english.yml block for the decision wizard."""
-    lines = ["l_english:"]
+def generate_decision_loc_yml(cats, decs, *, loc_language="english"):
+    """Render a localisation YML block for the decision wizard."""
+    lines = [LocTarget(loc_language).header()]
     for cat in cats:
         cid = _strip_val(cat["cat_id"])
         if cid:

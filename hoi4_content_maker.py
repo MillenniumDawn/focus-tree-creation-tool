@@ -4326,7 +4326,9 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         MOD.edit_focus_file = path
         # If mod is loaded, also try to auto-detect the matching localisation file
         if MOD.loaded and MOD.root:
-            _loc_path = detect_loc_file(MOD.root, raw)
+            _loc_path = detect_loc_file(
+                MOD.root, raw, language=MOD.loc_language
+            )
             if _loc_path:
                 MOD.edit_loc_file = _loc_path
 
@@ -5270,7 +5272,8 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         if MOD.edit_loc_file and os.path.isfile(MOD.edit_loc_file):
             loc_path = MOD.edit_loc_file
         else:
-            loc_filename = f"MD_focus_{country_tag}_l_english.yml"
+            loc_target = MOD.loc_target
+            loc_filename = loc_target.filename(f"MD_focus_{country_tag}")
             saved_dir = os.path.dirname(os.path.abspath(path))
             mod_root = MOD.root if MOD.root and os.path.isdir(MOD.root) else None
             if mod_root is None:
@@ -5284,7 +5287,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
                         break
             if mod_root:
                 loc_path = os.path.join(
-                    mod_root, "localisation", "english", loc_filename
+                    mod_root, "localisation", loc_target.dirname(), loc_filename
                 )
             else:
                 loc_path = filedialog.asksaveasfilename(
@@ -5296,7 +5299,8 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
                     initialfile=loc_filename,
                     title=tr(
                         "filedialog.save_localisation_yml",
-                        "Save Localisation .yml  (should go in localisation/english/)",
+                        "Save Localisation .yml  (should go in localisation/{language}/)",
+                        language=loc_target.dirname(),
                     ),
                 )
                 if not loc_path:
@@ -5318,6 +5322,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             },
             focus_lookup=focus_lookup,
             focus_name_lookup=focus_name_lookup,
+            loc_language=MOD.loc_language,
         )
 
     def _make_extra_export_plan(

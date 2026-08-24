@@ -177,6 +177,12 @@ def test_build_national_spirit_emits_loc_block():
     assert ' TAG_s_desc: "What it does."' in out
 
 
+def test_build_national_spirit_uses_configured_localisation_path():
+    out = build_national_spirit_output(mod_id="TAG_s", loc_language="braz_por")
+
+    assert "localisation/braz_por/TAG_s_l_braz_por.yml" in out
+
+
 def test_build_national_spirit_skips_modifier_missing_key():
     out = build_national_spirit_output(
         mod_id="TAG_s",
