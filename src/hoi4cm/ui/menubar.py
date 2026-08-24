@@ -6,10 +6,8 @@ from collections.abc import Callable
 
 from hoi4cm.core.i18n import tr
 from hoi4cm.mod import MOD
-from hoi4cm.ui.theme import BG_CARD, BG_DARK, BORDER_G, TEXT, TEXT_DIM
+from hoi4cm.ui.theme import BG_CARD, BG_DARK, BORDER_G, TEXT, TEXT_DIM, YELLOW
 from hoi4cm.ui.widgets import Tooltip
-
-MENU_PREVIEW_HIGHLIGHT = "#90711f"  # muted amber against the dark dropdown
 
 
 class MenuController:
@@ -152,7 +150,7 @@ def build_menubar(app, toolbar, tutorial_command=None) -> MenuController:
                 drop,
                 bg="#0d1218",
                 highlightthickness=3 if preview else 1,
-                highlightbackground=MENU_PREVIEW_HIGHLIGHT if preview else BORDER_G,
+                highlightbackground=YELLOW if preview else BORDER_G,
             )
             inner.pack(fill="both", expand=True)
             min_w = 340
@@ -188,7 +186,7 @@ def build_menubar(app, toolbar, tutorial_command=None) -> MenuController:
                             and controller.is_preview_item(menu_key, item_key)
                             else 0
                         ),
-                        highlightbackground=MENU_PREVIEW_HIGHLIGHT,
+                        highlightbackground=YELLOW,
                     )
                     row_f.pack(fill="x")
 
