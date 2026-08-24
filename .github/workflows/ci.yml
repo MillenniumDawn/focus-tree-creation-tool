@@ -17,6 +17,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         # v5.6.0
         with:
@@ -44,6 +46,8 @@ jobs:
       HOI4CM_REQUIRE_TK: "1"
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         # v5.6.0
         with:
@@ -87,6 +91,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         # v5.6.0
@@ -138,42 +144,42 @@ jobs:
           HOI4ContentMaker-linux > SHA256SUMS.txt
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65  # yamllint disable-line rule:line-length # v2.6.2
-        with:
-          tag_name: ${{ github.ref_name }}
-          name: HOI4 Content Maker ${{ github.ref_name }}
-          body: |
-            ## HOI4 Content Maker ${{ github.ref_name }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          gh release create "$RELEASE_TAG" \
+            artifacts/HOI4ContentMaker.exe \
+            artifacts/HOI4ContentMaker-mac \
+            artifacts/HOI4ContentMaker-linux \
+            artifacts/SHA256SUMS.txt \
+            --title "HOI4 Content Maker $RELEASE_TAG" \
+            --notes-file - <<EOF
+          ## HOI4 Content Maker $RELEASE_TAG
 
-            ### Downloads
-            | Platform | File |
-            |----------|------|
-            | Windows | `HOI4ContentMaker.exe` |
-            | macOS | `HOI4ContentMaker-mac` |
-            | Linux | `HOI4ContentMaker-linux` |
+          ### Downloads
+          | Platform | File |
+          |----------|------|
+          | Windows | \`HOI4ContentMaker.exe\` |
+          | macOS | \`HOI4ContentMaker-mac\` |
+          | Linux | \`HOI4ContentMaker-linux\` |
 
-            ### Running
-            - **Windows**: Double-click `HOI4ContentMaker.exe`
-            - **macOS**: `chmod +x HOI4ContentMaker-mac &&
-              ./HOI4ContentMaker-mac`
-            - **Linux**: `chmod +x HOI4ContentMaker-linux &&
-              ./HOI4ContentMaker-linux`
+          ### Running
+          - **Windows**: Double-click \`HOI4ContentMaker.exe\`
+          - **macOS**: \`chmod +x HOI4ContentMaker-mac &&
+            ./HOI4ContentMaker-mac\`
+          - **Linux**: \`chmod +x HOI4ContentMaker-linux &&
+            ./HOI4ContentMaker-linux\`
 
-            No Python installation required.
+          No Python installation required.
 
-            ### Verifying
-            `SHA256SUMS.txt` has the SHA-256 of each binary. Put it next to the
-            download and check it:
+          ### Verifying
+          \`SHA256SUMS.txt\` has the SHA-256 of each binary. Put it next to the
+          download and check it:
 
-            - **Linux**: `sha256sum --ignore-missing -c SHA256SUMS.txt`
-            - **macOS**: `shasum -a 256 -c SHA256SUMS.txt` (it will
-              complain about the two files you didn't download)
-            - **Windows**: `certutil -hashfile HOI4ContentMaker.exe SHA256`,
-              then compare against the matching line.
-          files: |
-            artifacts/HOI4ContentMaker.exe
-            artifacts/HOI4ContentMaker-mac
-            artifacts/HOI4ContentMaker-linux
-            artifacts/SHA256SUMS.txt
-          draft: false
-          prerelease: false
+          - **Linux**: \`sha256sum --ignore-missing -c SHA256SUMS.txt\`
+          - **macOS**: \`shasum -a 256 -c SHA256SUMS.txt\` (it will
+            complain about the two files you didn't download)
+          - **Windows**: \`certutil -hashfile HOI4ContentMaker.exe SHA256\`,
+            then compare against the matching line.
+          EOF
