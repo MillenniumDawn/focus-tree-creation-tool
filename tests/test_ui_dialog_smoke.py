@@ -166,17 +166,36 @@ def test_open_settings_constructs(tk_root, tmp_path, monkeypatch):
 
 def test_build_menubar_constructs(tk_root, monkeypatch):
     _make_fake_app_for_chrome(tk_root, monkeypatch)
+    invoked: list[str] = []
+    tk_root._national_spirit_wizard = lambda: invoked.append("wizard")  # type: ignore[attr-defined]
     from hoi4cm.ui.menubar import build_menubar
 
     toolbar = tk.Frame(tk_root)
     toolbar.pack()
     tk_root.update()
     before_children = set(toolbar.winfo_children())
-    build_menubar(tk_root, toolbar)
+    controller = build_menubar(tk_root, toolbar, tutorial_command=lambda: None)
     tk_root.update()
     assert len(toolbar.winfo_children()) > len(before_children)
     texts = _collect_texts(toolbar)
     assert any("HOI4 CONTENT MAKER" in t for t in texts)
+    assert any("Help" in t for t in texts)
+    preview_rows = controller.show_preview(
+        "tools", ("national_spirit_builder", "validate_tree")
+    )
+    tk_root.update()
+    assert len(preview_rows) == 2
+    assert controller.preview_active
+    preview_button = next(
+        child
+        for child in preview_rows[0].winfo_children()[0].winfo_children()
+        if isinstance(child, tk.Button)
+    )
+    preview_button.invoke()
+    tk_root.update()
+    assert invoked == []
+    controller.close()
+    tk_root.update()
     before: set[tk.Misc] = set(tk_root.winfo_children())
     for child in toolbar.winfo_children():
         for sub in child.winfo_children():  # type: ignore[union-attr]
@@ -185,6 +204,7 @@ def test_build_menubar_constructs(tk_root, monkeypatch):
                 tk_root.update()
                 _destroy_toplevels(_new_toplevels(before, tk_root), tk_root)
                 break
+    controller.close()
     toolbar.destroy()
     tk_root.update()
 

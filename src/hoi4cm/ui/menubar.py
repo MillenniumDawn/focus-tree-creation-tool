@@ -1,7 +1,8 @@
 # ruff: noqa: E501, B023
-"""Top menu bar: File/Edit/View/Tools dropdowns, error-log button, mod label."""
+"""Top menu bar and programmatic dropdown previews for the guided tutorial."""
 
 import tkinter as tk
+from collections.abc import Callable
 
 from hoi4cm.core.i18n import tr
 from hoi4cm.mod import MOD
@@ -9,8 +10,58 @@ from hoi4cm.ui.theme import BG_CARD, BG_DARK, BORDER_G, TEXT, TEXT_DIM
 from hoi4cm.ui.widgets import Tooltip
 
 
-def build_menubar(app, toolbar):
-    """Build menu bar with File/Edit/View/Tools dropdowns."""
+class MenuController:
+    """Coordinate normal dropdowns and non-interactive tutorial previews."""
+
+    def __init__(self) -> None:
+        self._close_callback: Callable[[], None] = lambda: None
+        self._openers: dict[str, Callable[[bool], None]] = {}
+        self._rows: dict[tuple[str, str], tk.Widget] = {}
+        self.buttons: dict[str, tk.Button] = {}
+        self.preview_active = False
+
+    def set_close_callback(self, callback: Callable[[], None]) -> None:
+        self._close_callback = callback
+
+    def register_menu(
+        self,
+        key: str,
+        button: tk.Button,
+        opener: Callable[[bool], None],
+    ) -> None:
+        self.buttons[key] = button
+        self._openers[key] = opener
+
+    def begin_open(self, *, preview: bool) -> None:
+        self.preview_active = preview
+        self._rows.clear()
+
+    def register_row(self, menu_key: str, item_key: str, row: tk.Widget) -> None:
+        self._rows[(menu_key, item_key)] = row
+
+    def show_preview(
+        self, menu_key: str, item_keys: tuple[str, ...]
+    ) -> list[tk.Widget]:
+        """Open *menu_key* without allowing its commands to run."""
+        self.close()
+        opener = self._openers.get(menu_key)
+        if opener is None:
+            return []
+        opener(True)
+        return [
+            row
+            for item_key in item_keys
+            if (row := self._rows.get((menu_key, item_key))) is not None
+        ]
+
+    def close(self) -> None:
+        self._close_callback()
+        self.preview_active = False
+        self._rows.clear()
+
+
+def build_menubar(app, toolbar, tutorial_command=None) -> MenuController:
+    """Build the menu bar and return its dropdown controller."""
     # ── MENU BAR ──────────────────────────────────────────────
     menubar = tk.Frame(toolbar, bg="#080b10", height=30)
     menubar.pack(fill="x")
@@ -31,6 +82,7 @@ def build_menubar(app, toolbar):
     # ── Menu helpers ──────────────────────────────────────────
     open_menu_win = None
     open_menu_btn = None
+    controller = MenuController()
 
     def _close_menu():
         nonlocal open_menu_win, open_menu_btn
@@ -49,7 +101,9 @@ def build_menubar(app, toolbar):
             except tk.TclError, RuntimeError, AttributeError:
                 pass
 
-    def _menu_btn(parent, label, items):
+    controller.set_close_callback(_close_menu)
+
+    def _menu_btn(parent, menu_key, label, items):
         btn = tk.Button(
             parent,
             text=label,
@@ -66,12 +120,15 @@ def build_menubar(app, toolbar):
         )
         btn.pack(side="left")
 
-        def _open(b=btn):
+        def _open(preview=False, b=btn):
             nonlocal open_menu_win, open_menu_btn
-            # If this menu is already open, close it
-            if open_menu_btn is b:
-                _close_menu()
+            if controller.preview_active and not preview:
                 return
+            # If this menu is already open, close it
+            if open_menu_btn is b and not preview:
+                controller.close()
+                return
+            controller.begin_open(preview=preview)
             _close_menu()
             b.config(bg="#1a2030", fg=TEXT)
             # Build a Toplevel dropdown
@@ -111,13 +168,19 @@ def build_menubar(app, toolbar):
                     lbl_i, cmd_i, *rest = item
                     kbd = rest[0] if len(rest) > 0 else ""
                     tip_txt = rest[1] if len(rest) > 1 else ""
+                    item_key = rest[2] if len(rest) > 2 else ""
                     item_bg_n = "#0d1218"
                     item_bg_h = "#141c2a"
                     row_f = tk.Frame(inner, bg=item_bg_n)
                     row_f.pack(fill="x")
 
+                    if item_key:
+                        controller.register_row(menu_key, item_key, row_f)
+
                     def _make_cmd(c=cmd_i):
                         def _do():
+                            if controller.preview_active:
+                                return
                             _close_menu()
                             if c:
                                 app.after(10, c)
@@ -198,7 +261,11 @@ def build_menubar(app, toolbar):
                 "<FocusOut>",
                 lambda e: app.after(
                     100,
-                    lambda: _close_menu() if open_menu_win is drop else None,
+                    lambda: (
+                        _close_menu()
+                        if open_menu_win is drop and not controller.preview_active
+                        else None
+                    ),
                 ),
             )
             open_menu_win = drop
@@ -215,11 +282,13 @@ def build_menubar(app, toolbar):
                 b.config(fg=TEXT_DIM, bg="#080b10") if open_menu_btn is not b else None
             ),
         )
+        controller.register_menu(menu_key, btn, _open)
         return btn
 
     # ── FILE MENU ─────────────────────────────────────────────
     _menu_btn(
         menubar,
+        "file",
         tr("menu.file", "File"),
         [
             tr("menu.section.project", "Project"),
@@ -270,6 +339,7 @@ def build_menubar(app, toolbar):
                     "menu.export_txt.tip",
                     "Write HOI4-ready script to a .txt file for your mod folder.",
                 ),
+                "export_txt",
             ),
             (
                 tr("menu.export_mod", "Export to Mod"),
@@ -279,6 +349,7 @@ def build_menubar(app, toolbar):
                     "menu.export_mod.tip",
                     "Write directly into your loaded mod's national_focus folder.",
                 ),
+                "export_mod",
             ),
             (
                 tr("menu.import_txt", "Import .txt"),
@@ -304,6 +375,7 @@ def build_menubar(app, toolbar):
     # ── EDIT MENU ─────────────────────────────────────────────
     _menu_btn(
         menubar,
+        "edit",
         tr("menu.edit", "Edit"),
         [
             (
@@ -359,6 +431,7 @@ def build_menubar(app, toolbar):
     # ── VIEW MENU ─────────────────────────────────────────────
     _menu_btn(
         menubar,
+        "view",
         tr("menu.view", "View"),
         [
             (
@@ -404,6 +477,7 @@ def build_menubar(app, toolbar):
     # ── TOOLS MENU ────────────────────────────────────────────
     _menu_btn(
         menubar,
+        "tools",
         tr("menu.tools", "Tools"),
         [
             (
@@ -414,6 +488,7 @@ def build_menubar(app, toolbar):
                     "menu.national_spirit_builder.tip",
                     "Create ideas/spirits with a modifier editor and live HOI4 preview.",
                 ),
+                "national_spirit_builder",
             ),
             (
                 tr("menu.dynamic_modifier", "Dynamic Modifier"),
@@ -423,6 +498,7 @@ def build_menubar(app, toolbar):
                     "menu.dynamic_modifier.tip",
                     "Build add_dynamic_modifier effects with variable-driven scaling.",
                 ),
+                "dynamic_modifier",
             ),
             (
                 tr("menu.decision_maker", "Decision Maker"),
@@ -432,6 +508,7 @@ def build_menubar(app, toolbar):
                     "menu.decision_maker.tip",
                     "Build decisions and decision categories with GFX placement editor.",
                 ),
+                "decision_maker",
             ),
             (
                 tr("menu.event_maker", "Event Maker"),
@@ -441,6 +518,7 @@ def build_menubar(app, toolbar):
                     "menu.event_maker.tip",
                     "Build country_event / news_event blocks with options and live preview.",
                 ),
+                "event_maker",
             ),
             None,
             (
@@ -451,6 +529,7 @@ def build_menubar(app, toolbar):
                     "menu.validate_tree.tip",
                     "Check for broken prerequisites, missing effects, and bad GFX references.",
                 ),
+                "validate_tree",
             ),
             (
                 tr("menu.load_mod", "Load Mod"),
@@ -460,6 +539,7 @@ def build_menubar(app, toolbar):
                     "menu.load_mod.tip",
                     "Point to your mod root folder to browse GFX and enable direct export.",
                 ),
+                "load_mod",
             ),
             (
                 tr("menu.set_edit_targets", "Set Edit Targets"),
@@ -469,6 +549,7 @@ def build_menubar(app, toolbar):
                     "menu.set_edit_targets.tip",
                     "Choose which existing ideas/events files new content should be appended to.",
                 ),
+                "set_edit_targets",
             ),
             (
                 tr("menu.settings", "Settings"),
@@ -478,6 +559,26 @@ def build_menubar(app, toolbar):
                     "menu.settings.tip",
                     "Configure mod path, GFX directories, MD detection, and UI options.",
                 ),
+                "settings",
+            ),
+        ],
+    )
+
+    # ── HELP MENU ─────────────────────────────────────────────
+    _menu_btn(
+        menubar,
+        "help",
+        tr("menu.help", "Help"),
+        [
+            (
+                tr("menu.start_tutorial", "Start Tutorial"),
+                tutorial_command,
+                "",
+                tr(
+                    "menu.start_tutorial.tip",
+                    "Walk through the basic focus-tree workflow again.",
+                ),
+                "start_tutorial",
             ),
         ],
     )
@@ -521,7 +622,11 @@ def build_menubar(app, toolbar):
         "<Button-1>",
         lambda e: (
             _close_menu()
-            if open_menu_win and not str(e.widget).startswith(str(open_menu_win))
+            if (
+                open_menu_win
+                and not controller.preview_active
+                and not str(e.widget).startswith(str(open_menu_win))
+            )
             else None
         ),
         add="+",
@@ -541,6 +646,7 @@ def build_menubar(app, toolbar):
         padx=10,
     )
     app._hint_lbl.pack(fill="x", pady=1)
+    return controller
 
 
-__all__ = ["build_menubar"]
+__all__ = ["MenuController", "build_menubar"]

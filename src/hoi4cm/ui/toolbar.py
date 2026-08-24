@@ -50,7 +50,7 @@ def build_toolbar_row2(app, toolbar):
         return b
 
     _tb_lbl(tr("toolbar.section.canvas", "Canvas"))
-    _tb_btn(
+    app._add_focus_btn = _tb_btn(
         tr("toolbar.add_focus", "+ Focus"),
         app._add_focus,
         TEXT,
