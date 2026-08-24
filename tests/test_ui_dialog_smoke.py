@@ -19,7 +19,7 @@ import pytest
 
 from hoi4cm.mod import MOD
 from hoi4cm.mod import scan_cache as scan_cache_mod
-from hoi4cm.ui.theme import YELLOW
+from hoi4cm.ui.menubar import MENU_PREVIEW_HIGHLIGHT
 
 
 @pytest.fixture(autouse=True)
@@ -189,10 +189,10 @@ def test_build_menubar_constructs(tk_root, monkeypatch):
     assert controller.preview_active
     preview_menu = preview_rows[0].master
     assert int(preview_menu.cget("highlightthickness")) == 3
-    assert preview_menu.cget("highlightbackground") == YELLOW
+    assert preview_menu.cget("highlightbackground") == MENU_PREVIEW_HIGHLIGHT
     for row in preview_rows:
         assert int(row.cget("highlightthickness")) == 2
-        assert row.cget("highlightbackground") == YELLOW
+        assert row.cget("highlightbackground") == MENU_PREVIEW_HIGHLIGHT
     preview_button = next(
         child
         for child in preview_rows[0].winfo_children()[0].winfo_children()
