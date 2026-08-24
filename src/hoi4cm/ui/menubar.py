@@ -6,7 +6,7 @@ from collections.abc import Callable
 
 from hoi4cm.core.i18n import tr
 from hoi4cm.mod import MOD
-from hoi4cm.ui.theme import BG_CARD, BG_DARK, BORDER_G, TEXT, TEXT_DIM
+from hoi4cm.ui.theme import BG_CARD, BG_DARK, BORDER_G, TEXT, TEXT_DIM, YELLOW
 from hoi4cm.ui.widgets import Tooltip
 
 
@@ -17,6 +17,7 @@ class MenuController:
         self._close_callback: Callable[[], None] = lambda: None
         self._openers: dict[str, Callable[[bool], None]] = {}
         self._rows: dict[tuple[str, str], tk.Widget] = {}
+        self._preview_items: set[tuple[str, str]] = set()
         self.buttons: dict[str, tk.Button] = {}
         self.preview_active = False
 
@@ -39,6 +40,9 @@ class MenuController:
     def register_row(self, menu_key: str, item_key: str, row: tk.Widget) -> None:
         self._rows[(menu_key, item_key)] = row
 
+    def is_preview_item(self, menu_key: str, item_key: str) -> bool:
+        return (menu_key, item_key) in self._preview_items
+
     def show_preview(
         self, menu_key: str, item_keys: tuple[str, ...]
     ) -> list[tk.Widget]:
@@ -47,6 +51,7 @@ class MenuController:
         opener = self._openers.get(menu_key)
         if opener is None:
             return []
+        self._preview_items = {(menu_key, item_key) for item_key in item_keys}
         opener(True)
         return [
             row
@@ -57,6 +62,7 @@ class MenuController:
     def close(self) -> None:
         self._close_callback()
         self.preview_active = False
+        self._preview_items.clear()
         self._rows.clear()
 
 
@@ -143,8 +149,8 @@ def build_menubar(app, toolbar, tutorial_command=None) -> MenuController:
             inner = tk.Frame(
                 drop,
                 bg="#0d1218",
-                highlightthickness=1,
-                highlightbackground=BORDER_G,
+                highlightthickness=3 if preview else 1,
+                highlightbackground=YELLOW if preview else BORDER_G,
             )
             inner.pack(fill="both", expand=True)
             min_w = 340
@@ -171,7 +177,17 @@ def build_menubar(app, toolbar, tutorial_command=None) -> MenuController:
                     item_key = rest[2] if len(rest) > 2 else ""
                     item_bg_n = "#0d1218"
                     item_bg_h = "#141c2a"
-                    row_f = tk.Frame(inner, bg=item_bg_n)
+                    row_f = tk.Frame(
+                        inner,
+                        bg=item_bg_n,
+                        highlightthickness=(
+                            2
+                            if preview
+                            and controller.is_preview_item(menu_key, item_key)
+                            else 0
+                        ),
+                        highlightbackground=YELLOW,
+                    )
                     row_f.pack(fill="x")
 
                     if item_key:
