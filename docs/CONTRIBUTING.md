@@ -80,11 +80,19 @@ linting until it is refactored into the package.
 
 ---
 
-## Licence Note
+## Licence and Code Submissions
 
-This project is **proprietary**. Submitting a contribution (pull request, patch, or otherwise) is taken as agreement that you grant the author (Blazer) full rights to use, modify, and distribute your contribution under the existing proprietary licence, with no obligation to credit contributors separately.
+This repository is source-available under
+[CC BY-ND 4.0](../LICENSE). That licence permits redistribution of unmodified
+material, but it does not grant permission to share adapted material.
 
-If you are not comfortable with these terms, please limit your participation to opening Issues.
+Before publishing a modified fork or submitting a patch or pull request, obtain
+separate permission from the maintainers. Contact them using the address below
+and wait for written confirmation of the terms that will apply to your
+submission.
+
+Bug reports and feature requests may be submitted as GitHub Issues without
+code-submission permission.
 
 ---
 

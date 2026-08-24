@@ -4,7 +4,7 @@
 
 ![Python](https://img.shields.io/badge/Python-3.14%2B-blue?logo=python)
 ![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
-![License](https://img.shields.io/badge/License-Proprietary-red)
+[![License: CC BY-ND 4.0](https://img.shields.io/badge/License-CC_BY--ND_4.0-blue)](LICENSE)
 ![Version](https://img.shields.io/badge/Version-2.0-gold)
 
 ---
@@ -27,7 +27,7 @@ HOI4 Content Maker is a standalone Python/Tkinter desktop application that lets 
 
 ## Screenshots
 
-> *Coming soon — contributions welcome.*
+> *Coming soon.*
 
 ---
 
@@ -335,7 +335,10 @@ Use **Save to Mod** (where available) to write directly to the correct path insi
 
 ## Contributing
 
-This project is currently proprietary. Forks and redistribution are not permitted without explicit written permission from the author.
+CC BY-ND 4.0 does not grant permission to share modified versions. Before
+publishing a modified fork or submitting code, read
+[CONTRIBUTING.md](docs/CONTRIBUTING.md) and obtain separate permission from the
+maintainers.
 
 If you find a bug or have a feature request, please open an **Issue** on GitHub.
 
@@ -349,9 +352,18 @@ See [CHANGELOG.md](CHANGELOG.md) for the full version history.
 
 ## License
 
-Copyright © 2025 Millennium Dawn Team. All Rights Reserved.
+Copyright © 2025 Millennium Dawn Team.
 
-This software is **open-source**. See the licence header in `hoi4_content_maker.py` for full terms.
+This repository is **source-available** under the
+[Creative Commons Attribution-NoDerivatives 4.0 International License](LICENSE).
+It is not open-source software under the conventional
+[Open Source Definition](https://opensource.org/osd).
+
+Subject to the licence terms, unmodified material may be copied and
+redistributed, including commercially, with attribution. Adapted material may
+be created for private use but may not be shared without separate permission.
+The `LICENSE` file contains the complete terms and controls if this summary
+differs from them.
 
 ---
 

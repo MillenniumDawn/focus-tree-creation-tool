@@ -5,35 +5,13 @@
 # =================================================================
 #
 #  COPYRIGHT NOTICE
-#  Copyright (c) 2025 Millennium Dawn Team. All Rights Reserved.
+#  Copyright (c) 2025 Millennium Dawn Team.
 #
-#  This software, including all source code, assets, and
-#  associated files, is the exclusive intellectual property
-#  of the Millennium Dawn Team ("the Author").
+#  SPDX-License-Identifier: CC-BY-ND-4.0
 #
-#  PROPRIETARY LICENCE — ALL RIGHTS RESERVED
-#
-#  This software is NOT open-source and is NOT free to use
-#  without explicit written permission from the Author.
-#
-#  Without prior written authorisation you may NOT:
-#    - Copy, reproduce, or redistribute this software
-#      or any portion of its source code
-#    - Modify, adapt, or create derivative works
-#    - Use this software commercially or include it in
-#      any other project, product, or distribution
-#    - Share, upload, or publish this software in source
-#      or compiled form on any platform
-#
-#  Permitted use is limited to:
-#    - Personal, private, non-commercial use by the
-#      individual who obtained the software directly
-#      from the Author
-#
-#  Unauthorised use, duplication, or distribution of this
-#  software, in whole or in part, is strictly prohibited
-#  and may result in civil and/or criminal penalties under
-#  applicable copyright law.
+#  Licensed under the Creative Commons Attribution-NoDerivatives
+#  4.0 International License. See LICENSE in the repository root
+#  for the complete terms.
 #
 #  CONTACT
 #  For licensing enquiries, permissions, or general contact:
@@ -45,7 +23,7 @@
 Content Maker for Hearts of Iron 4
 HOI4 Content Maker  —  v2.0  |  Millennium Dawn Team
 
-Copyright (c) 2025 Millennium Dawn Team. All Rights Reserved.
+Copyright (c) 2025 Millennium Dawn Team.
 
 Wiki    : https://hoi4.paradoxwikis.com/National_focus_modding
 Requires: Python 3.14+  (tkinter built-in, no pip install needed)
