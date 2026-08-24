@@ -349,7 +349,7 @@ See [CHANGELOG.md](CHANGELOG.md) for the full version history.
 
 Copyright © 2025 Millennium Dawn Team. All Rights Reserved.
 
-This software is **open-source**. See the licence header in `hoi4_content_maker.py` for full terms.
+See the licence header in `hoi4_content_maker.py` for full terms.
 
 ---
 
