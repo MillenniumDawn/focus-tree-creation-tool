@@ -239,7 +239,7 @@ def test_drag_click_without_grid_move_does_not_push_undo():
     CanvasMixin._foc_pr(
         cast(CanvasMixin, app), focus.id, SimpleNamespace(x=0, y=0, state=0)
     )
-    CanvasMixin._foc_mv(cast(CanvasMixin, app), focus.id, SimpleNamespace(x=4, y=4))
+    CanvasMixin._foc_mv(cast(CanvasMixin, app), focus.id, SimpleNamespace(x=3, y=3))
 
     app._push_undo.assert_not_called()
     assert (focus.x, focus.y) == (0, 0)
@@ -313,6 +313,9 @@ def test_drag_move_pushes_once_with_moved_focus_id():
     CanvasMixin._foc_pr(
         cast(CanvasMixin, app), focus.id, SimpleNamespace(x=0, y=0, state=0)
     )
+    CanvasMixin._foc_mv(cast(CanvasMixin, app), focus.id, SimpleNamespace(x=3, y=3))
+    app._push_undo.assert_not_called()
+
     CanvasMixin._foc_mv(
         cast(CanvasMixin, app), focus.id, SimpleNamespace(x=XGRID, y=YGRID)
     )
