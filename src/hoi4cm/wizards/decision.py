@@ -191,7 +191,7 @@ def open_decision_wizard(app):
     C_CARD = BG_CARD  # "#1e2435"
     C_TEXT = TEXT  # "#e2e8f0"
     C_DIM = TEXT_DIM  # "#6b7280"
-    C_BORD = BORDER  # "#2d3748"
+    C_BORDER = BORDER  # "#2d3748"
     C_BORDG = BORDER_G  # "#374151"
     C_BLUE = BLUE  # "#3b82f6"
     C_GREEN = GREEN  # "#22c55e"
@@ -747,7 +747,7 @@ def open_decision_wizard(app):
                 padx=5,
                 pady=1,
             ).pack()
-            tk.Frame(tree_inner, bg=C_BORD, height=1).pack(fill="x")
+            tk.Frame(tree_inner, bg=C_BORDER, height=1).pack(fill="x")
 
             _tree_rows[cat["uid"]] = (crow, lbar, inn, SEL_BG_TREE, C_PANEL)
 
@@ -807,7 +807,7 @@ def open_decision_wizard(app):
                         _tag(
                             tagrow, dec["chain"][:8], C_PURPLE, PURP_TAG_BG, PURP_TAG_BD
                         )
-                    tk.Frame(tree_inner, bg=C_BORD, height=1).pack(fill="x")
+                    tk.Frame(tree_inner, bg=C_BORDER, height=1).pack(fill="x")
                     _tree_rows[dec["uid"]] = (drow, dlbar, dinn, SEL_BG_TREE, C_PANEL)
 
                     def _on_dec(e, uid=dec["uid"]):
@@ -1360,11 +1360,11 @@ def open_decision_wizard(app):
         nc["cat_id"] = c["cat_id"] + "_copy"
         dm_cats.append(nc)
         for d in _decs_for(uid):
-            nd = copy.deepcopy(d)
-            nd["uid"] = str(uuid.uuid4())
-            nd["cat_uid"] = nc["uid"]
-            nd["dec_id"] = d["dec_id"] + "_copy"
-            dm_decs.append(nd)
+            new_dec = copy.deepcopy(d)
+            new_dec["uid"] = str(uuid.uuid4())
+            new_dec["cat_uid"] = nc["uid"]
+            new_dec["dec_id"] = d["dec_id"] + "_copy"
+            dm_decs.append(new_dec)
         sel["uid"] = nc["uid"]
         sel["type"] = "cat"
         _rebuild_tree()
@@ -1404,11 +1404,11 @@ def open_decision_wizard(app):
         d = _get_dec(uid)
         if not d:
             return
-        nd = copy.deepcopy(d)
-        nd["uid"] = str(uuid.uuid4())
-        nd["dec_id"] = d["dec_id"] + "_copy"
-        dm_decs.append(nd)
-        sel["uid"] = nd["uid"]
+        new_dec = copy.deepcopy(d)
+        new_dec["uid"] = str(uuid.uuid4())
+        new_dec["dec_id"] = d["dec_id"] + "_copy"
+        dm_decs.append(new_dec)
+        sel["uid"] = new_dec["uid"]
         sel["type"] = "dec"
         _rebuild_tree()
         _rebuild_editor()
@@ -3203,13 +3203,8 @@ def open_decision_wizard(app):
 
         # Convert literal \n escape sequences to real newlines
         text = text.replace("\\n", "\n").replace("\\\\n", "\n")
-        # Strip trailing backslashes (common in raw HOI4 strings)
-        text = text.rstrip("\\").strip()
-        # Strip trailing backslashes (common in raw HOI4 strings)
         text = text.rstrip("\\").strip()
 
-        # Estimate height needed: roughly 1 line per 45 chars of wraplength
-        max(1, wraplength // 7)
         est_lines = max(2, text.count("\n") + len(text) // max(1, wraplength // 7 * 6))
         height = min(max(2, est_lines), 12)
 
@@ -4628,11 +4623,11 @@ def open_decision_wizard(app):
                         d["fire_only_once"] = True
                     if _re.search(r"\bfire_only_once\b", dec_inner):
                         d["fire_only_once"] = True
-                    if _get_yes_no(dec_inner, "fixed_random_seed") is False:
+                    if _get_yes_no(dec_inner, "fixed_random_seed") in (False,):
                         d["fixed_random_seed"] = False
                     if _get_yes_no(dec_inner, "is_mission"):
                         d["is_mission"] = True
-                    if _get_yes_no(dec_inner, "selectable_mission") is False:
+                    if _get_yes_no(dec_inner, "selectable_mission") in (False,):
                         d["selectable_mission"] = False
                     if _get_yes_no(dec_inner, "is_good"):
                         d["is_good"] = True
@@ -4868,7 +4863,6 @@ def open_decision_wizard(app):
             dec_path = os.path.join(
                 mod_root, "common", "decisions", f"{ns}_decisions.txt"
             )
-        os.makedirs(os.path.dirname(dec_path), exist_ok=True)
         try:
             wf.write_text(dec_path, _gen_decisions_file(), encoding="utf-8")
             try:
@@ -4885,7 +4879,6 @@ def open_decision_wizard(app):
             cat_path = os.path.join(
                 mod_root, "common", "decisions", "categories", f"{ns}_categories.txt"
             )
-        os.makedirs(os.path.dirname(cat_path), exist_ok=True)
         try:
             wf.write_text(cat_path, _gen_categories_file(), encoding="utf-8")
             try:
@@ -4906,7 +4899,6 @@ def open_decision_wizard(app):
                 loc_target.filename(f"{ns}_decisions"),
             )
         )
-        os.makedirs(os.path.dirname(yml_path), exist_ok=True)
         try:
             import re as _re_loc2
 
