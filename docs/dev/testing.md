@@ -279,13 +279,19 @@ tests. Widget construction still needs a live `App` against a loaded mod:
   reopen the dialog to confirm every field reloads with what was just set.
   Confirm `relativize_to_mod_root` still normalizes an absolute GFX path
   typed into a browse field down to a mod-relative one.
-- **Menu sweep**: click every File/Edit/View/Tools item at least once
+- **Menu sweep**: click every File/Edit/View/Tools/Help item at least once
   (including the "Recent" submenu with zero and with several mods loaded)
   and confirm each does what its tooltip says, the dropdown closes on
   outside click, and the accelerator shown next to each item still matches
   its bound keybind (`_build_keybinds`). Confirm the error-log button still
   turns red after a deliberately triggered error and the mod label updates
   on load/unload.
+- **First-launch tutorial**: start with `tutorial_disabled` absent, dismiss any
+  autosave-recovery prompt, and confirm all eight translated steps appear in
+  order. The Tools/File steps must pin the real dropdown open, highlight the
+  intended rows, and leave those commands non-interactive. Resize or move the
+  app between steps, finish with "Don't show this again" selected, restart to
+  confirm it stays hidden, then use Help > Start Tutorial to relaunch it.
 - **Toolbar sweep**: click every toolbar row 2 button (Prereq, Mutex,
   wizard shortcuts, Multi, Del Selected, Clear All, +Shared, +Joint, Load
   All, Save All) and confirm each still opens the right dialog or performs

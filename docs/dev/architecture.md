@@ -45,6 +45,8 @@
   there are two GFX browsers instead of one), `settings_dialog.py`
   (`open_settings`), `menubar.py`/`toolbar.py` (`build_menubar`/
   `build_toolbar_row2`, the one-shot builders behind `App`'s top bar),
+  `tutorial.py` (the first-launch teaching controller and widget highlights;
+  it drives preview-only dropdowns through `menubar.MenuController`),
   `tasks.py` (the `run_bg`/`progress_modal` background-worker plumbing, see
   "Threading model" below), theme constants, and small shared widgets
   (`Tooltip`, `_safe_after`). One exception to "Tk-facing": `viewport.py`

@@ -114,6 +114,7 @@ from hoi4cm.ui import (
     TEXT_DIM,
     YELLOW,
     ApplicationLifecycle,
+    TutorialController,
     Tooltip,
     _safe_after,
     make_progress,
@@ -261,7 +262,12 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         self._schedule_validation()
         self._update_title()
         self._schedule_autosave()
-        self.after(800, self._maybe_offer_autosave_restore)
+        self.after(800, self._run_startup_prompts)
+
+    def _run_startup_prompts(self):
+        """Sequence recovery before any optional first-launch teaching."""
+        self._maybe_offer_autosave_restore()
+        self._tutorial.start()
 
     def _on_app_close(self):
         if self._is_dirty():
@@ -589,10 +595,16 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         self._tree_badge_table = None  # rebuilt by _get_tree_badge on change
         toolbar = tk.Frame(self, bg=BG_DARK)
         toolbar.pack(fill="x")
-        build_menubar(self, toolbar)
+        self._menu_controller = build_menubar(
+            self,
+            toolbar,
+            tutorial_command=lambda: self._tutorial.start(manual=True),
+        )
         build_toolbar_row2(self, toolbar)
         self._build_keybinds()
         self._build_layout()
+        self._tutorial = TutorialController(self, self._menu_controller)
+        self._lifecycle.add_resource(self._tutorial.close)
 
     def _build_keybinds(self):
         """Bind all global keyboard shortcuts."""
