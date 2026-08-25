@@ -10,23 +10,24 @@ from hoi4cm.wizards._image_loader import TkImageLoader
 class FakeOwner:
     def __init__(self) -> None:
         self.exists = True
-        self.callbacks: list[Callable[[], None]] = []
+        self.callbacks: list[Callable[..., object]] = []
         self.cancelled: list[object] = []
 
-    def after(self, milliseconds: int, callback: Callable[[], None]) -> object:
-        self.callbacks.append(callback)
-        return len(self.callbacks)
+    def after(self, ms: int, func: Callable[..., object] | None = None) -> object:
+        if func is not None:
+            self.callbacks.append(func)
+        return str(len(self.callbacks))
 
     def winfo_exists(self) -> int:
         return int(self.exists)
 
-    def after_cancel(self, identifier: object) -> None:
-        self.cancelled.append(identifier)
+    def after_cancel(self, job: object) -> None:
+        self.cancelled.append(job)
 
     def bind(
         self,
         sequence: str,
-        callback: Callable[[object], None],
+        func: Callable[..., object] | None = None,
         add: str | None = None,
     ) -> object:
         return None
@@ -150,5 +151,5 @@ def test_close_cancels_poll_and_drops_worker_result() -> None:
     loader.close()
     gate.set()
 
-    assert owner.cancelled == [1]
+    assert owner.cancelled == ["1"]
     assert applied == []
