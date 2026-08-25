@@ -248,7 +248,9 @@ def open_decision_wizard(app):
             highlight_states="",
         )
 
-    def _new_dec(cat_uid=""):
+    def _new_dec(cat_uid: object = ""):
+        if not isinstance(cat_uid, str):
+            cat_uid = ""
         return dict(
             uid=_uid(),
             cat_uid=cat_uid,
@@ -612,7 +614,8 @@ def open_decision_wizard(app):
     _tree_filter.trace_add("write", lambda *_: _rebuild_tree())
 
     _tree_rows = {}  # uid -> (crow, lbar) for fast highlight updates
-    _tree_icon_refs: list = []
+    _tree_icon_refs = []
+    _preview_img_refs = []
 
     def _update_tree_highlight():
         """Update tree row highlight colors without rebuilding."""
@@ -919,8 +922,6 @@ def open_decision_wizard(app):
         )
         return widget
 
-    PAD = dict(padx=14, pady=2)
-
     def _sec(label, color=C_GOLD):
         """Section header with coloured underline — matches SectionHeader in mockup."""
         f = tk.Frame(mid_frm, bg=C_PANEL)
@@ -938,7 +939,7 @@ def open_decision_wizard(app):
     def _field(label, var, mono=False, hint=""):
         """Labelled entry — matches Field component."""
         f = tk.Frame(mid_frm, bg=C_PANEL)
-        f.pack(fill="x", **PAD)
+        f.pack(fill="x", padx=14, pady=2)
         lbl_text = label.upper()
         tk.Label(
             f, text=lbl_text, bg=C_PANEL, fg=C_DIM, font=("Courier", 8), anchor="w"
@@ -994,7 +995,7 @@ def open_decision_wizard(app):
     def _triggerblock(label, key, initial="", hint=None, rows=2):
         """Trigger / code textarea — matches TriggerBlock."""
         f = tk.Frame(mid_frm, bg=C_PANEL)
-        f.pack(fill="x", **PAD)
+        f.pack(fill="x", padx=14, pady=2)
         hrow = tk.Frame(f, bg=C_PANEL)
         hrow.pack(fill="x")
         tk.Label(
@@ -1024,9 +1025,9 @@ def open_decision_wizard(app):
         return _reg_text(key, t, initial)
 
     def _effectblock(label, key, initial="", rows=4):
-        """Effect textarea + Effect Picker button — matches TextArea with extra button."""
+        """Effect textarea + Effect Picker button - matches TextArea with extra button."""
         f = tk.Frame(mid_frm, bg=C_PANEL)
-        f.pack(fill="x", **PAD)
+        f.pack(fill="x", padx=14, pady=2)
         tk.Label(
             f, text=label.upper(), bg=C_PANEL, fg=C_DIM, font=("Courier", 8), anchor="w"
         ).pack(fill="x")
@@ -1063,9 +1064,9 @@ def open_decision_wizard(app):
         return _reg_text(key, t, initial)
 
     def _gfx_field(label, key, initial="", prefix_note="", warn=""):
-        """GFX drop zone — matches GfxDropZone component."""
+        """GFX drop zone - matches GfxDropZone component."""
         f = tk.Frame(mid_frm, bg=C_PANEL)
-        f.pack(fill="x", **PAD)
+        f.pack(fill="x", padx=14, pady=2)
         tk.Label(
             f, text=label.upper(), bg=C_PANEL, fg=C_DIM, font=("Courier", 8), anchor="w"
         ).pack(fill="x", pady=(0, 2))
@@ -1134,8 +1135,12 @@ def open_decision_wizard(app):
                 get_logger("decision").debug("drop handling failed: %s", exc)
 
         try:
-            drop_outer.drop_target_register("DND_Files")
-            drop_outer.dnd_bind("<<Drop>>", _on_drop)
+            register = getattr(
+                drop_outer, "drop_target_register", lambda *_a, **_k: None
+            )
+            bind_dnd = getattr(drop_outer, "dnd_bind", lambda *_a, **_k: None)
+            register("DND_Files")
+            bind_dnd("<<Drop>>", _on_drop)
         except tk.TclError:
             pass
         if prefix_note:
@@ -1727,7 +1732,7 @@ def open_decision_wizard(app):
                 _evars["cost_type"] = tk.StringVar(value="pp")
                 # inline field inside cost_host
                 cf = tk.Frame(cost_host, bg=C_PANEL)
-                cf.pack(fill="x", **PAD)
+                cf.pack(fill="x", padx=14, pady=2)
                 tk.Label(
                     cf,
                     text=tr("decision.cost_pp", "COST (POLITICAL POWER)"),
@@ -2407,7 +2412,7 @@ def open_decision_wizard(app):
                 fg=C_RED,
                 font=("Courier", 9, "bold"),
                 padx=6,
-                pady=(8, 2),
+                pady="8 2",
             ).pack(fill="x")
 
             def _wt(lbl3, k3, v3):
@@ -2504,7 +2509,7 @@ def open_decision_wizard(app):
             # sub-frame approach — inline build:
             def _sub_effectblock(lbl3, k3, v3, rows2=3):
                 sf = tk.Frame(timer_host, bg=C_PANEL)
-                sf.pack(fill="x", **PAD)
+                sf.pack(fill="x", padx=14, pady=2)
                 tk.Label(
                     sf, text=lbl3.upper(), bg=C_PANEL, fg=C_DIM, font=("Courier", 8)
                 ).pack(fill="x")
@@ -2542,7 +2547,7 @@ def open_decision_wizard(app):
 
             def _sub_trigblock(lbl3, k3, v3):
                 sf = tk.Frame(timer_host, bg=C_PANEL)
-                sf.pack(fill="x", **PAD)
+                sf.pack(fill="x", padx=14, pady=2)
                 tk.Label(
                     sf, text=lbl3.upper(), bg=C_PANEL, fg=C_DIM, font=("Courier", 8)
                 ).pack(fill="x")
@@ -2673,7 +2678,7 @@ def open_decision_wizard(app):
 
     # ── rebuild_editor  (clears mid_frm and dispatches) ──────────────────────
     # Track what type is currently built so we know when to do a full rebuild
-    _editor_state = {"type": None, "uid": None}  # what the editor currently shows
+    _editor_state: dict[str, object] = {"type": None, "uid": None}
 
     def _set_var_silent(key, value):
         """Set a tkinter var without firing its write traces."""
@@ -2989,24 +2994,20 @@ def open_decision_wizard(app):
     _dec_prev_img_cache = {}
     _app_img_caches.append(_dec_prev_img_cache)  # register for mod-reload invalidation
 
-    # ── PIL / DDS capability check ────────────────────────────────────────
     _dds_supported = False
-    if PIL_OK:
+    if PILImage is not None:
         try:
-            from PIL import features as _pil_feat
-
-            _dds_supported = _pil_feat.check_feature("libtiff") or True
-            # Actually test by checking registered formats
-            from PIL import Image as _tpil
-
-            _dds_supported = (
-                "DDS" in _tpil.registered_extensions().get(".dds", "").upper()
-                if hasattr(_tpil, "registered_extensions")
-                else False
-            )
-        except (OSError, ValueError, AttributeError, ImportError) as exc:
+            extensions = getattr(PILImage, "registered_extensions", lambda: {})()
+            _dds_supported = "DDS" in str(extensions.get(".dds", "")).upper()
+        except (OSError, ValueError, AttributeError, TypeError) as exc:
             get_logger("decision").debug("dds check failed: %s", exc)
             _dds_supported = False
+
+    def _to_photo(pil):
+        tk_image = PILImageTk
+        if tk_image is None:
+            return None
+        return tk_image.PhotoImage(pil)
 
     def _decode_dec_icon(gfx_key, size=24):
         if not gfx_key or PILImage is None:
@@ -3337,6 +3338,7 @@ def open_decision_wizard(app):
     _dds_warned = [False]
 
     def _build_preview():
+        _preview_img_refs.clear()
         _collect()
         # ── DDS warning banner ────────────────────────────────────────────────
         if (
@@ -3402,7 +3404,6 @@ def open_decision_wizard(app):
                 frm, bg="#1a1f2e", highlightthickness=1, highlightbackground="#3a4a6a"
             )
             panel.pack(fill="x", padx=10, pady=8)
-            panel._img_refs = []  # keep images alive per-panel
 
             # ── Header: icon + name ───────────────────────────────────────────
             hdr = tk.Frame(panel, bg="#141929")
@@ -3411,7 +3412,7 @@ def open_decision_wizard(app):
             icon_key = cat.get("icon", "").strip()
             cat_img = _load_dec_icon(icon_key, 32) if icon_key else None
             if cat_img:
-                panel._img_refs.append(cat_img)
+                _preview_img_refs.append(cat_img)
                 ic_lbl = tk.Label(hdr, image=cat_img, bg="#141929", width=32, height=32)
             else:
                 ic_lbl = tk.Frame(hdr, bg="#2a3550", width=32, height=32)
@@ -3469,7 +3470,7 @@ def open_decision_wizard(app):
                     pic_box.pack_propagate(False)
                     cat_pic = _load_cat_picture(pic_key, 64, 64)
                     if cat_pic:
-                        panel._img_refs.append(cat_pic)
+                        _preview_img_refs.append(cat_pic)
                         tk.Label(pic_box, image=cat_pic, bg="#2a3550").pack(expand=True)
                     else:
                         # Show placeholder, try async load
@@ -3479,7 +3480,7 @@ def open_decision_wizard(app):
                         ph.pack(expand=True)
 
                         def _async_cat_pic(
-                            key=pic_key, box=pic_box, ph_lbl=ph, refs=panel._img_refs
+                            key=pic_key, box=pic_box, ph_lbl=ph, refs=_preview_img_refs
                         ):
                             try:
                                 if not box.winfo_exists():
@@ -3498,7 +3499,7 @@ def open_decision_wizard(app):
                             TkImageLoader(box).submit(
                                 (key, 64, 64),
                                 lambda item: _decode_cat_picture(*item),
-                                realizer=lambda pil: PILImageTk.PhotoImage(pil),
+                                realizer=_to_photo,
                                 apply=_paint,
                             )
 
@@ -3559,7 +3560,7 @@ def open_decision_wizard(app):
 
                     icon_box.bind("<Button-3>", _ctx_dec_icon)
                 if dec_img:
-                    panel._img_refs.append(dec_img)
+                    _preview_img_refs.append(dec_img)
                     tk.Label(icon_box, image=dec_img, bg="#2a3550").pack(expand=True)
                 else:
                     ic = CHAIN_ICONS.get(dec.get("chain", "").lower(), "⚖")
@@ -3573,7 +3574,7 @@ def open_decision_wizard(app):
                             key=dec_icon_key,
                             box=icon_box,
                             fb=fallback,
-                            refs=panel._img_refs,
+                            refs=_preview_img_refs,
                         ):
                             try:
                                 if not box.winfo_exists():
@@ -3592,7 +3593,7 @@ def open_decision_wizard(app):
                             TkImageLoader(box).submit(
                                 (key, 24),
                                 lambda item: _decode_dec_icon(*item),
-                                realizer=lambda pil: PILImageTk.PhotoImage(pil),
+                                realizer=_to_photo,
                                 apply=_paint,
                             )
 
@@ -4623,23 +4624,23 @@ def open_decision_wizard(app):
                         d["icon"] = iv
 
                     # ── boolean flags ──
-                    if _get_yes_no(dec_inner, "fire_only_once") is True:
+                    if _get_yes_no(dec_inner, "fire_only_once"):
                         d["fire_only_once"] = True
                     if _re.search(r"\bfire_only_once\b", dec_inner):
                         d["fire_only_once"] = True
                     if _get_yes_no(dec_inner, "fixed_random_seed") is False:
                         d["fixed_random_seed"] = False
-                    if _get_yes_no(dec_inner, "is_mission") is True:
+                    if _get_yes_no(dec_inner, "is_mission"):
                         d["is_mission"] = True
                     if _get_yes_no(dec_inner, "selectable_mission") is False:
                         d["selectable_mission"] = False
-                    if _get_yes_no(dec_inner, "is_good") is True:
+                    if _get_yes_no(dec_inner, "is_good"):
                         d["is_good"] = True
-                    if _get_yes_no(dec_inner, "cancel_if_not_visible") is True:
+                    if _get_yes_no(dec_inner, "cancel_if_not_visible"):
                         d["cancel_if_not_visible"] = True
-                    if _get_yes_no(dec_inner, "targets_dynamic") is True:
+                    if _get_yes_no(dec_inner, "targets_dynamic"):
                         d["targets_dynamic"] = True
-                    if _get_yes_no(dec_inner, "target_non_existing") is True:
+                    if _get_yes_no(dec_inner, "target_non_existing"):
                         d["target_non_existing"] = True
 
                     # ── cost type detection ──

@@ -12,16 +12,16 @@ from hoi4cm.ui.lifecycle import find_lifecycle
 
 
 class TkOwner(Protocol):
-    def after(self, milliseconds: int, callback: Callable[[], None]) -> object: ...
+    def after(self, ms: int, func: Callable[..., object] = ...) -> object: ...
 
-    def after_cancel(self, identifier: object) -> None: ...
+    def after_cancel(self, job: object, /) -> None: ...
 
     def winfo_exists(self) -> int: ...
 
     def bind(
         self,
         sequence: str,
-        callback: Callable[[object], None],
+        func: Callable[..., object] | None = None,
         add: str | None = None,
     ) -> object: ...
 
@@ -44,14 +44,14 @@ _Item = TypeVar("_Item")
 
 
 class TkImageLoader:
-    def __init__(self, owner: TkOwner, *, poll_interval: int = 16) -> None:
+    def __init__(self, owner: TkOwner | tk.Misc, *, poll_interval: int = 16) -> None:
         self._owner = owner
         self._poll_interval = poll_interval
         self._owner_thread = threading.get_ident()
         self._generation = 0
         self._pending_batches = 0
         self._poll_scheduled = False
-        self._poll_job: object | None = None
+        self._poll_job: str | None = None
         self._closed = False
         self._results: queue.SimpleQueue[_QueueItem] = queue.SimpleQueue()
         self._remove_resource: Callable[[], None] | None = None
@@ -145,7 +145,7 @@ class TkImageLoader:
             return
         self._poll_scheduled = True
         try:
-            self._poll_job = self._owner.after(self._poll_interval, self._poll)
+            self._poll_job = str(self._owner.after(self._poll_interval, self._poll))
         except AttributeError, RuntimeError, tk.TclError:
             self._closed = True
             self._poll_scheduled = False
