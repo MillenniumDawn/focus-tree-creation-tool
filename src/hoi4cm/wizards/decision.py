@@ -220,7 +220,7 @@ def open_decision_wizard(app):
     # ── data model ───────────────────────────────────────────────────────────
     dm_cats = []
     dm_decs = []
-    sel = {"uid": None, "type": None}
+    sel: dict[str, object] = {"uid": None, "type": None}
     _uid_n = [0]
 
     def _uid():
@@ -612,6 +612,7 @@ def open_decision_wizard(app):
     _tree_filter.trace_add("write", lambda *_: _rebuild_tree())
 
     _tree_rows = {}  # uid -> (crow, lbar) for fast highlight updates
+    _tree_icon_refs: list = []
 
     def _update_tree_highlight():
         """Update tree row highlight colors without rebuilding."""
@@ -626,6 +627,7 @@ def open_decision_wizard(app):
 
     def _rebuild_tree():
         _tree_rows.clear()
+        _tree_icon_refs.clear()
         for w in tree_inner.winfo_children():
             w.destroy()
         # Apply search filter
@@ -673,7 +675,7 @@ def open_decision_wizard(app):
             _cicon_img = _load_dec_icon(_cicon_key, 24) if _cicon_key else None
             if _cicon_img:
                 _cicon_lbl = tk.Label(inn, image=_cicon_img, bg=bg_c)
-                _cicon_lbl.image = _cicon_img  # keep ref
+                _tree_icon_refs.append(_cicon_img)
                 _cicon_lbl.pack(side="left", padx=(0, 2))
             else:
                 tk.Label(inn, text="📁", bg=bg_c, font=("Helvetica", 12)).pack(
@@ -772,7 +774,7 @@ def open_decision_wizard(app):
                     _dicon_img = _load_dec_icon(_dicon_key, 20) if _dicon_key else None
                     if _dicon_img:
                         _dicon_lbl = tk.Label(dinn, image=_dicon_img, bg=bg_d)
-                        _dicon_lbl.image = _dicon_img  # keep ref
+                        _tree_icon_refs.append(_dicon_img)
                         _dicon_lbl.pack(side="left", padx=(28, 2), pady=5)
                     else:
                         tk.Label(dinn, text="📋", bg=bg_d, font=("Helvetica", 10)).pack(
@@ -2957,7 +2959,7 @@ def open_decision_wizard(app):
     right_body = tk.Frame(right_f, bg=C_DARK)
     right_body.pack(fill="both", expand=True)
 
-    _rr_job = [None]
+    _rr_job: list[str | None] = [None]
 
     def _rebuild_right():
         # Debounce: cancel pending rebuild and schedule new one 80ms out
@@ -3007,7 +3009,7 @@ def open_decision_wizard(app):
             _dds_supported = False
 
     def _decode_dec_icon(gfx_key, size=24):
-        if not gfx_key or not PIL_OK:
+        if not gfx_key or PILImage is None:
             return None
         path = (
             MOD.decision_sprites.get(gfx_key)
@@ -3066,7 +3068,7 @@ def open_decision_wizard(app):
 
     def _load_dec_icon(gfx_key, size=24):
         """Load a decision icon image, returns PhotoImage or None. Cached."""
-        if not gfx_key or not PIL_OK:
+        if not gfx_key or PILImageTk is None:
             return None
         cache_key = (gfx_key, size)
         if cache_key in _dec_prev_img_cache:
@@ -3080,7 +3082,7 @@ def open_decision_wizard(app):
         return img
 
     def _decode_cat_picture(gfx_key, w=64, h=64):
-        if not gfx_key or not PIL_OK:
+        if not gfx_key or PILImage is None:
             return None
         # Try key as-is, then with common category prefixes
         path = (
@@ -3140,7 +3142,7 @@ def open_decision_wizard(app):
 
     def _load_cat_picture(gfx_key, w=64, h=64):
         """Load a category picture image. Cached."""
-        if not gfx_key or not PIL_OK:
+        if not gfx_key or PILImageTk is None:
             return None
         cache_key = (gfx_key, w, h)
         if cache_key in _dec_prev_img_cache:
@@ -3332,6 +3334,8 @@ def open_decision_wizard(app):
         txt.config(state="disabled")
         return txt
 
+    _dds_warned = [False]
+
     def _build_preview():
         _collect()
         # ── DDS warning banner ────────────────────────────────────────────────
@@ -3340,7 +3344,7 @@ def open_decision_wizard(app):
             and not _dds_supported
             and MOD.loaded
             and MOD.decision_sprites
-            and not getattr(_build_preview, "_dds_warned", False)
+            and not _dds_warned[0]
         ):
             # Check if any sprites are .dds — show warning only once per session
             has_dds = any(
@@ -3348,7 +3352,7 @@ def open_decision_wizard(app):
                 for v in list(MOD.decision_sprites.values())[:20]
             )
             if has_dds:
-                _build_preview._dds_warned = True
+                _dds_warned[0] = True
                 warn_f = tk.Frame(right_body, bg="#3a1a00")
                 warn_f.pack(fill="x")
                 tk.Label(
@@ -3886,7 +3890,7 @@ def open_decision_wizard(app):
             _mark(_HL_NUMBER, "kw_number")
 
         # Debounced — run highlight 400ms after last keystroke
-        _hl_job = [None]
+        _hl_job: list[str | None] = [None]
 
         def _sched_highlight(e=None):
             if _hl_job[0]:
