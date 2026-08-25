@@ -1,5 +1,10 @@
 """Low-level HOI4 script marshalling helpers."""
 
+import os
+import re
+
+from hoi4cm.mod.workspace_files import WorkspaceFiles
+
 from .effects import render_effect
 from .syntax import (
     emit_scalar,
@@ -154,11 +159,8 @@ def append_scripted_loc(sloc_path, blocks, saved, errs, mod_root=None):
     """
     if not sloc_path or not blocks:
         return
-    import os
-    import re
 
     try:
-        os.makedirs(os.path.dirname(sloc_path), exist_ok=True)
         existing = ""
         if os.path.isfile(sloc_path):
             with open(sloc_path, encoding="utf-8", errors="replace") as f:
@@ -189,8 +191,11 @@ def append_scripted_loc(sloc_path, blocks, saved, errs, mod_root=None):
             new_blocks.append("\n".join(lines))
         if new_blocks:
             sep = "\n\n" if existing.strip() else ""
-            with open(sloc_path, "a", encoding="utf-8") as f:
-                f.write(sep + "\n\n".join(new_blocks) + "\n")
+            WorkspaceFiles().append_text(
+                sloc_path,
+                sep + "\n\n".join(new_blocks) + "\n",
+                encoding="utf-8",
+            )
             rel = os.path.relpath(sloc_path, mod_root) if mod_root else sloc_path
             saved.append(rel + f"  (+{len(new_blocks)} scripted_loc blocks)")
     except (OSError, ValueError, TypeError, RuntimeError) as exc:

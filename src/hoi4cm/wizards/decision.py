@@ -44,6 +44,7 @@ from hoi4cm.ui import (
     open_gfx_placement_editor,
     open_universal_gfx_browser,
     report_error,
+    report_write_failure,
 )
 from hoi4cm.wizards import _generators
 from hoi4cm.wizards._graphics import find_catalog_image
@@ -3972,16 +3973,15 @@ def open_decision_wizard(app):
             if tab == "scripted_loc":
                 if MOD.edit_scripted_loc_file:
                     try:
-                        with open(
-                            MOD.edit_scripted_loc_file, "w", encoding="utf-8"
-                        ) as _f:
-                            _f.write(raw)
+                        WorkspaceFiles().write_text(
+                            MOD.edit_scripted_loc_file, raw, encoding="utf-8"
+                        )
                         _dm_status.config(
                             text=f"  ✓  Scripted loc saved to {os.path.basename(MOD.edit_scripted_loc_file)}"
                         )
-                    except OSError as _ex:
-                        report_error(
-                            f"Save error: {_ex}", _ex, parent=win, title="Save Error"
+                    except (OSError, ValueError, TypeError, RuntimeError) as _ex:
+                        report_write_failure(
+                            win, MOD.edit_scripted_loc_file, _ex, title="Save Error"
                         )
                 else:
                     win.clipboard_clear()

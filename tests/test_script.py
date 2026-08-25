@@ -1,5 +1,6 @@
 """Tests for hoi4cm.script marshalling helpers."""
 
+from hoi4cm.mod.workspace_files import WorkspaceFiles
 from hoi4cm.script import append_scripted_loc, dict_to_raw, normalize_effect_fields
 
 
@@ -114,15 +115,51 @@ def test_append_scripted_loc_skips_existing_name(tmp_path):
     assert saved == []  # nothing added
 
 
+def test_append_scripted_loc_preserves_existing_content(tmp_path):
+    sloc = tmp_path / "test_scripted_loc.txt"
+    sloc.write_text("defined_text = {\n\tname = OLD\n}\n", encoding="utf-8")
+    saved = []
+    errs = []
+    append_scripted_loc(str(sloc), [{"name": "NEW", "texts": []}], saved, errs)
+    assert not errs
+    assert len(saved) == 1
+    text = sloc.read_text(encoding="utf-8")
+    assert "name = OLD" in text
+    assert "name = NEW" in text
+
+
+def test_append_scripted_loc_uses_workspace_files(tmp_path, monkeypatch):
+    sloc = tmp_path / "test_scripted_loc.txt"
+    sloc.write_text("existing\n", encoding="utf-8")
+    calls = []
+
+    def capture(self, path, text, *, encoding):
+        calls.append((str(path), text, encoding))
+
+    monkeypatch.setattr(WorkspaceFiles, "append_text", capture)
+    saved = []
+    errs = []
+    append_scripted_loc(str(sloc), [{"name": "NEW", "texts": []}], saved, errs)
+    assert not errs
+    assert len(calls) == 1
+    path, text, encoding = calls[0]
+    assert path == str(sloc)
+    assert encoding == "utf-8"
+    assert "name = NEW" in text
+    assert sloc.read_text(encoding="utf-8") == "existing\n"
+
+
 def test_append_scripted_loc_reports_errors(tmp_path, monkeypatch):
     sloc = tmp_path / "file.txt"
+    sloc.write_text("old\n", encoding="utf-8")
     saved = []
     errs = []
 
-    def bad_makedirs(*args, **kwargs):
+    def boom(self, path, text, *, encoding):
         raise OSError("permission denied")
 
-    monkeypatch.setattr("os.makedirs", bad_makedirs)
+    monkeypatch.setattr(WorkspaceFiles, "append_text", boom)
     append_scripted_loc(str(sloc), [{"name": "x", "texts": []}], saved, errs)
     assert errs
     assert "Scripted Loc" in errs[0]
+    assert sloc.read_text(encoding="utf-8") == "old\n"
