@@ -1042,40 +1042,45 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             self._run_validation()
 
     def _run_validation(self):
+        """Validate the document on a worker thread; apply results in on_done.
+
+        sprites/loc_keys gathering stays on the Tk thread (it only reads
+        ``MOD`` and disk, not widgets, but is captured before dispatch same
+        as ``self.focuses``) so the worker only ever sees plain snapshots.
+        ``lifecycle.begin`` invalidates any older "validation"-scoped run
+        still in flight, so a stale result never overwrites a newer one.
+        """
         self._validation_job = None
-        try:
-            sprites = self._validation_sprites()
-            loc_keys = self._validation_loc_keys()
-            issues = validate_document(self.focuses, sprites=sprites, loc_keys=loc_keys)
-        except Exception:
-            return
+        self._lifecycle.begin("validation")
+        sprites = self._validation_sprites()
+        loc_keys = self._validation_loc_keys()
+        focuses = dict(self.focuses)
+
+        def work():
+            return validate_document(focuses, sprites=sprites, loc_keys=loc_keys)
+
+        run_bg(self, work, self._apply_validation_result, scope="validation")
+
+    def _apply_validation_result(self, issues):
         try:
             worst = worst_severity_per_focus(issues)
         except Exception:
             worst = {}
-        prev_issues = getattr(self, "_validation_issues", None)
-        prev_worst = getattr(self, "_validation_worst", None)
+        prev_issues = self._validation_issues
+        prev_worst = self._validation_worst
         changed = issues != prev_issues or worst != prev_worst
         self._validation_issues = issues
         self._validation_worst = worst
-        if not changed:
-            # still refresh dialog if open but avoid redraw churn
-            win = getattr(self, "_validation_win", None)
-            if win is not None and win.winfo_exists():
-                try:
-                    self._refresh_validation_dialog(win)
-                except Exception:
-                    pass
-            return
-        # refresh UI surfaces that depend on validation
-        try:
-            self._redraw()
-        except Exception:
-            pass
-        try:
-            self._invalidate_focus_list_structure()
-        except Exception:
-            pass
+        if changed:
+            # refresh UI surfaces that depend on validation
+            try:
+                self._redraw()
+            except Exception:
+                pass
+            try:
+                self._invalidate_focus_list_structure()
+            except Exception:
+                pass
         # if validation dialog is open, refresh its contents
         win = getattr(self, "_validation_win", None)
         if win is not None and win.winfo_exists():
@@ -6114,10 +6119,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         tk.Button(
             filt_row,
             text=tr("validation.revalidate", "Re-validate"),
-            command=lambda: (
-                self._run_validation(),
-                self._refresh_validation_dialog(win),
-            ),
+            command=self._run_validation,
             bg=BG_CARD,
             fg=TEXT,
             relief="flat",
