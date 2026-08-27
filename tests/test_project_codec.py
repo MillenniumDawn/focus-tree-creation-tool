@@ -162,3 +162,29 @@ def test_failed_project_write_keeps_the_previous_save(tmp_path, monkeypatch):
 
     assert path.read_text(encoding="utf-8") == original
     assert list(tmp_path.glob(".*.tmp")) == []
+
+
+# ── duplicate after load (issue #116) ────────────────────────────
+
+
+@pytest.fixture
+def reset_counter():
+    old = Focus._next
+    Focus._next = 0
+    yield
+    Focus._next = old
+
+
+def test_duplicate_after_save_load_gets_a_small_unique_id(reset_counter):
+    workspace = EditorWorkspace(
+        focuses=FocusDocument([Focus(1, 1), Focus(2, 2)]),
+        main_tree=TreeDocument(metadata=TreeMetadata(tree_id="TAG_focus_tree")),
+    )
+
+    restored = decode_project(encode_project(workspace))
+    existing_ids = set(restored.focuses)
+    original = restored.focuses[max(existing_ids)]
+    duplicate = original.duplicate()
+
+    assert duplicate.id not in existing_ids
+    assert duplicate.id < 100_000
