@@ -54,15 +54,18 @@ class Focus:
         return {k: v for k, v in self.__dict__.items() if not k.startswith("_")}
 
     @staticmethod
-    def from_dict(d):
+    def from_dict(d, *, legacy=False):
         f = object.__new__(Focus)
         for k, v in d.items():
             setattr(f, k, v)
-        # Migrate old pixel-based coords to grid integers
-        if f.x >= 96 and f.x % 96 == 0:
-            f.x = f.x // 96
-        if f.y >= 96 and f.y % 96 == 0:
-            f.y = f.y // 96
+        # Legacy pre-versioning project files stored pixel coords; grid
+        # coords are indistinguishable from a multiple-of-96 pixel coord, so
+        # this migration must never run on current-format or snapshot data.
+        if legacy:
+            if f.x >= 96 and f.x % 96 == 0:
+                f.x = f.x // 96
+            if f.y >= 96 and f.y % 96 == 0:
+                f.y = f.y // 96
         defaults = [
             ("mutex", []),
             ("cancel_if_invalid", True),
