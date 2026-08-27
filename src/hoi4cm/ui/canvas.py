@@ -41,6 +41,9 @@ from hoi4cm.ui.viewport import edge_visible, focus_visible, visible_world_rect
 # it, so nothing pops in/out right at the screen edge.
 _CULL_MARGIN_BOXES = 2
 _FOCUS_LOD_ZOOM = 0.4
+# Below this zoom a CFP marker is small enough (and its label already
+# suppressed) that it's not worth drawing — matches the LOD floor above.
+_CFP_MARKER_MIN_ZOOM = 0.3
 # Screens of grid generated beyond the viewport on each side. The grid is only
 # regenerated on zoom/resize/bounds change — a pan is a pure ``cv.move`` — so
 # the margin is what keeps lines under the cursor during a pan that has not
@@ -1185,7 +1188,7 @@ class CanvasMixin:
         self.cv.move("focus", dx, dy)
         self.cv.move("line", dx, dy)
         self.cv.move("templine", dx, dy)
-        self.cv.move("cfp", dx, dy)
+        self.cv.move("cfp_marker", dx, dy)
         # The dim mask and coordinate ruler are screen-anchored; a redraw of just
         # these two is cheap (a handful of items) and keeps them crisp.
         self._draw_canvas_bounds()
@@ -1367,14 +1370,19 @@ class CanvasMixin:
         We convert: grid_coord = cfp_value / GRID_SIZE.
         """
         self.cv.delete("cfp_marker")
-        cv = self.cv
         z = self.zoom
+        if z < _CFP_MARKER_MIN_ZOOM:
+            return
+        cv = self.cv
+        vis_rect = self._visible_rect()
         # 2× the old size: half-extent is now BOX*z instead of BOX*z/2
         h = BOX * z
         font_sz = max(8, int(9 * z))
         lw = max(2, int(2.5 * z))
 
         def _draw_box(gx, gy, color, label):
+            if vis_rect is not None and not focus_visible(gx, gy, vis_rect):
+                return
             cx, cy = self.w2c(gx, gy)
             # Subtle tinted fill via stipple (tkinter has no native alpha)
             cv.create_rectangle(
@@ -1389,17 +1397,16 @@ class CanvasMixin:
                 dash=(max(4, int(6 * z)), max(3, int(4 * z))),
                 tags="cfp_marker",
             )
-            if z >= 0.3:
-                cv.create_text(
-                    cx,
-                    cy,
-                    text=label,
-                    fill=color,
-                    anchor="center",
-                    font=("Helvetica", font_sz, "bold"),
-                    width=max(60, int(h * 1.8)),
-                    tags="cfp_marker",
-                )
+            cv.create_text(
+                cx,
+                cy,
+                text=label,
+                fill=color,
+                anchor="center",
+                font=("Helvetica", font_sz, "bold"),
+                width=max(60, int(h * 1.8)),
+                tags="cfp_marker",
+            )
 
         # Main tree CFP
         if (

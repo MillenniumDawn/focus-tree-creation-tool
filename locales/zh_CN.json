@@ -30,6 +30,7 @@
   "sidebar.no_extra_trees": "  未加载额外国策树",
   "sidebar.loaded_tree_summary": "  {file}  -  {count} 个国策",
   "sidebar.tree_references": "  国策树引用",
+  "sidebar.tree_refs_more": "  +{count} 更多",
   "sidebar.focus_properties": "  国策属性",
   "sidebar.no_selection": "\n\n  点击一个国策\n  编辑它的属性。\n\n  右键点击画布\n  创建新国策。",
   "tab.properties": "属性",
