@@ -13,8 +13,10 @@ Redo
 ----
 ``push`` captures pre-state (the state to restore on undo). The first time
 ``undo`` is actually invoked we lazily snapshot the current (post-state)
-focuses and stash it on the redo stack; ``redo`` restores it. A new ``push``
-clears the redo stack; a new edit branch invalidates any redo
+focuses and stash it on the redo stack, matching the entry's own kind: sparse
+entries capture just the touched ids, full entries still capture everything.
+``redo`` restores it and mirrors the same capture back onto the undo stack.
+A new ``push`` clears the redo stack; a new edit branch invalidates any redo
 trail, matching every other editor's behavior.
 """
 
@@ -145,7 +147,7 @@ class UndoStack:
         if not self._stack:
             return None
         entry = self._stack[-1]
-        self._redo.append((entry[0], _FULL, _encode_full(focuses), _id_set(focuses)))
+        self._redo.append(self._capture_counter(entry, focuses))
         self._stack.pop()
         return self._apply(entry, focuses, focus_factory)
 
@@ -162,9 +164,28 @@ class UndoStack:
         if not self._redo:
             return None
         entry = self._redo[-1]
-        self._stack.append((entry[0], _FULL, _encode_full(focuses), _id_set(focuses)))
+        self._stack.append(self._capture_counter(entry, focuses))
         self._redo.pop()
         return self._apply(entry, focuses, focus_factory)
+
+    @staticmethod
+    def _capture_counter(entry, focuses):
+        """Snapshot ``focuses`` for the opposite stack, matching ``entry``'s
+        own kind so undoing/redoing a sparse entry never full-encodes.
+
+        For a sparse entry the relevant ids are the ones it touched, plus
+        any ids created since (present now but absent from its ``id_set``,
+        which ``_apply`` is about to delete) so the reverse trip can bring
+        them back.
+        """
+        label, kind, payload, id_set = entry
+        if kind == _FULL:
+            return (label, _FULL, _encode_full(focuses), _id_set(focuses))
+        touched = set(payload) | {fid for fid in focuses if fid not in id_set}
+        snapshot = {
+            fid: _snapshot_focus(focuses[fid]) for fid in touched if fid in focuses
+        }
+        return (label, _SPARSE, snapshot, _id_set(focuses))
 
     @staticmethod
     def _apply(entry, focuses, focus_factory):
