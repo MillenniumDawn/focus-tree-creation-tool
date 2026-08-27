@@ -6,6 +6,7 @@ headless dev box.
 """
 
 import tkinter as tk
+from types import SimpleNamespace
 
 import pytest
 
@@ -14,7 +15,7 @@ from hoi4cm.models import Focus
 from hoi4cm.models.document import FocusDocument
 from hoi4cm.ui.canvas import CanvasMixin
 from hoi4cm.ui.canvas_scheduler import RedrawChannel
-from hoi4cm.ui.theme import XGRID
+from hoi4cm.ui.theme import XGRID, YGRID
 
 FAR_RECT = (0.0, 0.0, 10.0, 10.0)
 NEAR_RECT = (490.0, 490.0, 510.0, 510.0)
@@ -481,3 +482,46 @@ def test_full_redraw_cancels_pending_line_job(tk_root, monkeypatch):
 
     assert canceled == ["after#lines"]
     assert app._lines_job is None
+
+
+def test_pan_moves_the_cfp_marker_with_the_offset(tk_root):
+    cv = tk.Canvas(tk_root, width=200, height=200)
+    app = _FakeApp(cv)
+    app._cfp_x = XGRID * 5
+    app._cfp_y = YGRID * 5
+
+    app._draw_cfp_markers()
+    box = next(i for i in cv.find_withtag("cfp_marker") if cv.type(i) == "rectangle")
+
+    app._pan_pr(SimpleNamespace(x=0, y=0))
+    app._pan_mv(SimpleNamespace(x=30, y=-20))
+
+    x0, y0, x1, y1 = cv.coords(box)
+    center = ((x0 + x1) / 2, (y0 + y1) / 2)
+    # The marker sits at a fixed world position; after the pan its on-screen
+    # center must match that world position under the *new* offset.
+    assert center == pytest.approx(app.w2c(5, 5))
+
+
+def test_cfp_marker_hidden_below_the_zoom_floor(tk_root):
+    cv = tk.Canvas(tk_root, width=200, height=200)
+    app = _FakeApp(cv)
+    app.zoom = 0.2
+    app._cfp_x = XGRID * 5
+    app._cfp_y = YGRID * 5
+
+    app._draw_cfp_markers()
+
+    assert not cv.find_withtag("cfp_marker")
+
+
+def test_cfp_marker_culled_when_outside_the_viewport(tk_root, monkeypatch):
+    cv = tk.Canvas(tk_root, width=200, height=200)
+    app = _FakeApp(cv)
+    app._cfp_x = XGRID * 500
+    app._cfp_y = YGRID * 500
+    monkeypatch.setattr(app, "_visible_rect", lambda: FAR_RECT)
+
+    app._draw_cfp_markers()
+
+    assert not cv.find_withtag("cfp_marker")

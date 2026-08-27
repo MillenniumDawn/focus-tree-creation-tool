@@ -45,10 +45,16 @@ def test_to_dict_roundtrips():
     assert restored.id == f.id
 
 
-def test_from_dict_migrates_pixel_coords():
-    f = Focus.from_dict({"id": 5, "x": 192, "y": 384})
+def test_from_dict_migrates_pixel_coords_when_legacy():
+    f = Focus.from_dict({"id": 5, "x": 192, "y": 384}, legacy=True)
     assert f.x == 2
     assert f.y == 4
+
+
+def test_from_dict_leaves_grid_coords_alone_by_default():
+    f = Focus.from_dict({"id": 5, "x": 96, "y": 192})
+    assert f.x == 96
+    assert f.y == 192
 
 
 def test_from_dict_applies_defaults_for_missing_attrs():
