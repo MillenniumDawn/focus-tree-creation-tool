@@ -18,6 +18,7 @@ def _focus(  # type: ignore[no-untyped-def]
     prereqs=None,
     mutex=None,
     rel=None,
+    tree_idx=0,
 ):
     f = Focus(x, y)
     f.id = fid
@@ -27,6 +28,7 @@ def _focus(  # type: ignore[no-untyped-def]
     f.prereqs = prereqs if prereqs is not None else []
     f.mutex = mutex if mutex is not None else []
     f.relative_position_id = rel
+    f.tree_idx = tree_idx
     return f
 
 
@@ -173,6 +175,25 @@ def test_position_collision_with_three_occupants_single_issue():
     coll = [it for it in validate_document(doc) if it.code == "position_collision"]
     assert len(coll) == 1
     assert "5" in coll[0].message
+
+
+def test_position_collision_ignored_across_different_trees():
+    a = _focus(1, name="A", x=0, y=0, tree_idx=0)
+    b = _focus(2, name="B", x=0, y=0, tree_idx=1)
+    doc = FocusDocument([a, b])
+    issues = validate_document(doc)
+    assert not any(it.code == "position_collision" for it in issues)
+
+
+def test_position_collision_still_reported_within_same_tree():
+    a = _focus(1, name="A", x=0, y=0, tree_idx=1)
+    b = _focus(2, name="B", x=0, y=0, tree_idx=1)
+    c = _focus(3, name="C", x=0, y=0, tree_idx=2)
+    doc = FocusDocument([a, b, c])
+    coll = [it for it in validate_document(doc) if it.code == "position_collision"]
+    assert len(coll) == 1
+    assert "A" in coll[0].message and "B" in coll[0].message
+    assert "C" not in coll[0].message
 
 
 def test_plain_dict_fallback_for_occupied_positions():
@@ -418,3 +439,23 @@ def test_multiple_issues_per_focus_all_reported():
     assert "relative_position_unresolved" in codes
     assert "empty_effects" in codes
     assert "default_icon" in codes
+
+
+def test_issues_capped_with_truncation_notice():
+    focuses = [
+        _focus(fid, name=f"F{fid}", x=fid, gfx="", effects=[]) for fid in range(1, 11)
+    ]
+    doc = FocusDocument(focuses)
+    issues = validate_document(doc, max_issues=5)
+    assert len(issues) == 6
+    assert issues[-1].code == "issues_truncated"
+    assert issues[-1].severity == "info"
+    assert "15" in issues[-1].message
+    assert all(it.code != "issues_truncated" for it in issues[:-1])
+
+
+def test_issues_not_truncated_when_under_cap():
+    a = _focus(1, name="A", gfx="", effects=[])
+    doc = FocusDocument([a])
+    issues = validate_document(doc, max_issues=5)
+    assert not any(it.code == "issues_truncated" for it in issues)
