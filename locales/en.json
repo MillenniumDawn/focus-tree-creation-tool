@@ -30,6 +30,7 @@
   "sidebar.no_extra_trees": "  No extra trees loaded",
   "sidebar.loaded_tree_summary": "  {file}  -  {count} focuses",
   "sidebar.tree_references": "  TREE REFERENCES",
+  "sidebar.tree_refs_more": "  +{count} more",
   "sidebar.focus_properties": "  FOCUS PROPERTIES",
   "sidebar.no_selection": "\n\n  Click a focus to\n  edit its properties.\n\n  Right-click the canvas\n  to create a new focus.",
   "tab.properties": "Properties",
