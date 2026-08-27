@@ -147,7 +147,7 @@ def _decode_legacy(data: Mapping[str, Any]) -> EditorWorkspace:
     metadata = TreeMetadata(tree_id=data.get("tree_name", "TAG_focus_tree"))
     return EditorWorkspace(
         focuses=FocusDocument(
-            Focus.from_dict(focus) for focus in data.get("focuses", [])
+            Focus.from_dict(focus, legacy=True) for focus in data.get("focuses", [])
         ),
         main_tree=TreeDocument(metadata=metadata),
         extras={
