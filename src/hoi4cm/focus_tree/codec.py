@@ -252,13 +252,7 @@ def render_focus_body(
     elif completion_reward_policy == "main":
         out.append(f"{inner_indent}# TODO: add effects")
     elif completion_reward_policy == "extra":
-        out.extend(
-            (
-                f'{inner_indent}log = "[GetDateText]: [This.GetName]: '
-                f'focus {focus.name} executed"',
-                f"{inner_indent}# TODO: add effects",
-            )
-        )
+        pass
     else:
         out.append(f"{inner_indent}# add effects here")
     out.append(f"{indent}}}")
