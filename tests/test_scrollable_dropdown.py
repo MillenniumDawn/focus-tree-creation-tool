@@ -9,6 +9,8 @@ a scrollable Listbox popup sized to the screen.
 
 import tkinter as tk
 
+import pytest
+
 from hoi4cm.ui import ScrollableDropdown
 from hoi4cm.wizards.national_spirit import open_national_spirit_wizard
 
@@ -60,6 +62,7 @@ def test_open_popup_lists_every_item_in_a_capped_listbox(tk_root):
     popup.destroy()
 
 
+@pytest.mark.visible_tk
 def test_popup_geometry_stays_on_screen(tk_root):
     dd, _var = _make(tk_root)
     popup, lb = _open(dd)
@@ -87,6 +90,7 @@ def test_wheel_scrolls_without_committing_or_closing(tk_root):
     popup.destroy()
 
 
+@pytest.mark.visible_tk
 def test_arrow_keys_move_highlight_without_committing(tk_root):
     dd, var = _make(tk_root)
     popup, lb = _open(dd)
@@ -102,6 +106,7 @@ def test_arrow_keys_move_highlight_without_committing(tk_root):
     popup.destroy()
 
 
+@pytest.mark.visible_tk
 def test_return_commits_highlighted_entry_and_closes(tk_root):
     dd, var = _make(tk_root)
     popup, lb = _open(dd)
@@ -115,6 +120,7 @@ def test_return_commits_highlighted_entry_and_closes(tk_root):
     assert not popup.winfo_exists()
 
 
+@pytest.mark.visible_tk
 def test_escape_closes_without_committing(tk_root):
     dd, var = _make(tk_root)
     popup, lb = _open(dd)
@@ -127,6 +133,7 @@ def test_escape_closes_without_committing(tk_root):
     assert not popup.winfo_exists()
 
 
+@pytest.mark.visible_tk
 def test_click_release_commits_clicked_entry(tk_root):
     dd, var = _make(tk_root)
     popup, lb = _open(dd)

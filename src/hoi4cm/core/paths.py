@@ -37,7 +37,7 @@ def read_file(path, max_bytes=MAX_READ_BYTES):
         return ""
     for enc in ("utf-8-sig", "utf-8", "latin-1"):
         try:
-            with open(path, encoding=enc, errors="replace") as f:
+            with open(path, encoding=enc, errors="strict") as f:
                 if max_bytes is None:
                     return f.read()
                 data = f.read(max_bytes + 1)

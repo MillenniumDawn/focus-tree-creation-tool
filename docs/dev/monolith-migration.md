@@ -132,8 +132,8 @@
 What's left in `hoi4_content_maker.py` today is essentially: the `sys.path`
 shim and import block (lines ~62-152), two Windows-DPI helpers (~155-207),
 and `class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk)`
-(~241-5929, 108 methods, most bodies much smaller now), plus the
-`__main__` entry point that calls `show_splash(_launch)`. Those 108
+(~204-6336, 139 methods, most bodies much smaller now), plus the
+`__main__` entry point that calls `show_splash(_launch)`. Those 139
 methods group into:
 
 - **Sidebar** (still deferred, see below): `_build_sidebar`,

@@ -134,6 +134,7 @@ from hoi4cm.ui.checklist import (
 from hoi4cm.ui.effects_panel import EffectsMixin
 from hoi4cm.ui.focus_list import FocusListCache, FocusListItem, VirtualFocusList
 from hoi4cm.ui.gfx_browser import open_focus_icon_browser
+from hoi4cm.ui.loaded_trees import LoadedTreeRowItem, VirtualLoadedTreesList
 from hoi4cm.ui.menubar import build_menubar
 from hoi4cm.ui.mod_loading import ModLoadingMixin
 from hoi4cm.ui.settings_dialog import open_settings
@@ -204,6 +205,7 @@ def _apply_tk_dpi_scaling(root):
 class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[misc]
     CANVAS_MIN_SIZE = 10
     CANVAS_EXPAND_STEP = 5
+    TREE_META_REF_CAP = 50
 
     def __init__(self):
         log.info("App.__init__: calling tk.Tk.__init__...")
@@ -1040,40 +1042,45 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             self._run_validation()
 
     def _run_validation(self):
+        """Validate the document on a worker thread; apply results in on_done.
+
+        sprites/loc_keys gathering stays on the Tk thread (it only reads
+        ``MOD`` and disk, not widgets, but is captured before dispatch same
+        as ``self.focuses``) so the worker only ever sees plain snapshots.
+        ``lifecycle.begin`` invalidates any older "validation"-scoped run
+        still in flight, so a stale result never overwrites a newer one.
+        """
         self._validation_job = None
-        try:
-            sprites = self._validation_sprites()
-            loc_keys = self._validation_loc_keys()
-            issues = validate_document(self.focuses, sprites=sprites, loc_keys=loc_keys)
-        except Exception:
-            return
+        self._lifecycle.begin("validation")
+        sprites = self._validation_sprites()
+        loc_keys = self._validation_loc_keys()
+        focuses = dict(self.focuses)
+
+        def work():
+            return validate_document(focuses, sprites=sprites, loc_keys=loc_keys)
+
+        run_bg(self, work, self._apply_validation_result, scope="validation")
+
+    def _apply_validation_result(self, issues):
         try:
             worst = worst_severity_per_focus(issues)
         except Exception:
             worst = {}
-        prev_issues = getattr(self, "_validation_issues", None)
-        prev_worst = getattr(self, "_validation_worst", None)
+        prev_issues = self._validation_issues
+        prev_worst = self._validation_worst
         changed = issues != prev_issues or worst != prev_worst
         self._validation_issues = issues
         self._validation_worst = worst
-        if not changed:
-            # still refresh dialog if open but avoid redraw churn
-            win = getattr(self, "_validation_win", None)
-            if win is not None and win.winfo_exists():
-                try:
-                    self._refresh_validation_dialog(win)
-                except Exception:
-                    pass
-            return
-        # refresh UI surfaces that depend on validation
-        try:
-            self._redraw()
-        except Exception:
-            pass
-        try:
-            self._invalidate_focus_list_structure()
-        except Exception:
-            pass
+        if changed:
+            # refresh UI surfaces that depend on validation
+            try:
+                self._redraw()
+            except Exception:
+                pass
+            try:
+                self._invalidate_focus_list_structure()
+            except Exception:
+                pass
         # if validation dialog is open, refresh its contents
         win = getattr(self, "_validation_win", None)
         if win is not None and win.winfo_exists():
@@ -1139,44 +1146,43 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             w.destroy()
         for w in self._tree_meta_jf_box.winfo_children():
             w.destroy()
-        sflist = getattr(self, "_shared_focuses", [])
-        jflist = getattr(self, "_joint_focuses", [])
-        if sflist:
-            for sf in sflist:
-                tk.Label(
-                    self._tree_meta_sf_box,
-                    text=f"  {sf}",
-                    bg=BG_CARD,
-                    fg="#86efac",
-                    font=("Courier", 8),
-                    anchor="w",
-                ).pack(fill="x", padx=2, pady=1)
-        else:
+        self._fill_tree_meta_box(
+            self._tree_meta_sf_box, getattr(self, "_shared_focuses", []), "#86efac"
+        )
+        self._fill_tree_meta_box(
+            self._tree_meta_jf_box, getattr(self, "_joint_focuses", []), "#fbbf24"
+        )
+
+    def _fill_tree_meta_box(self, box, refs, color):
+        """Render up to TREE_META_REF_CAP ref labels into box, plus a "+N more"."""
+        if not refs:
             tk.Label(
-                self._tree_meta_sf_box,
+                box,
                 text=tr("common.none_parenthesized", "  (none)"),
                 bg=BG_CARD,
                 fg=TEXT_DIM,
                 font=("Helvetica", 8, "italic"),
             ).pack(anchor="w", padx=2)
-        if jflist:
-            for jf in jflist:
-                tk.Label(
-                    self._tree_meta_jf_box,
-                    text=f"  {jf}",
-                    bg=BG_CARD,
-                    fg="#fbbf24",
-                    font=("Courier", 8),
-                    anchor="w",
-                ).pack(fill="x", padx=2, pady=1)
-        else:
+            return
+        shown = refs[: self.TREE_META_REF_CAP]
+        for ref in shown:
             tk.Label(
-                self._tree_meta_jf_box,
-                text=tr("common.none_parenthesized", "  (none)"),
+                box,
+                text=f"  {ref}",
+                bg=BG_CARD,
+                fg=color,
+                font=("Courier", 8),
+                anchor="w",
+            ).pack(fill="x", padx=2, pady=1)
+        hidden = len(refs) - len(shown)
+        if hidden > 0:
+            tk.Label(
+                box,
+                text=tr("sidebar.tree_refs_more", "  +{count} more", count=hidden),
                 bg=BG_CARD,
                 fg=TEXT_DIM,
                 font=("Helvetica", 8, "italic"),
-            ).pack(anchor="w", padx=2)
+            ).pack(fill="x", padx=2, pady=1)
 
     # ── SIDEBAR ──────────────────────────────────────────────────
     def _build_sidebar(self, sb):
@@ -1192,9 +1198,27 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             font=("Helvetica", 7, "bold"),
             anchor="w",
         ).pack(fill="x", padx=4, pady=(3, 0))
-        self._loaded_trees_inner = tk.Frame(sb, bg=BG_PANEL)
-        self._loaded_trees_inner.pack(fill="x")
-        tk.Frame(sb, bg=BORDER_G, height=1).pack(fill="x")
+        self._loaded_trees_empty = tk.Label(
+            _lt_outer,
+            text=tr("sidebar.no_extra_trees", "  No extra trees loaded"),
+            bg=BG_PANEL,
+            fg=TEXT_DIM,
+            font=("Helvetica", 8, "italic"),
+            anchor="w",
+        )
+        # Fixed-height box (~3 rows before scrolling); wraps the pooled list
+        # instead of sizing it directly since Frame.configure(height=...)
+        # collides with _PooledList's own "_configure" Configure-event handler.
+        self._loaded_trees_box = tk.Frame(sb, bg=BG_DARK, height=150)
+        self._loaded_trees_box.pack_propagate(False)
+        self._loaded_trees_inner = VirtualLoadedTreesList(
+            self._loaded_trees_box,
+            on_export=self._export_extra_tree,
+            on_unload=self._unload_extra_tree,
+        )
+        self._loaded_trees_inner.pack(fill="both", expand=True)
+        self._loaded_trees_border = tk.Frame(sb, bg=BORDER_G, height=1)
+        self._loaded_trees_border.pack(fill="x")
         self._refresh_loaded_trees_panel()
 
         # ── Tree Meta Panel (shared/joint focuses) ────────────────────
@@ -1742,6 +1766,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         """Add a blank offset entry to the selected focus and refresh UI."""
         if not self.selected:
             return
+        self._push_undo("add offset", touched_ids=(self.selected.id,))
         self._save_offsets_to_focus()
         self.selected.offsets.append({"x": 0, "y": 0, "trigger": ""})
         self._refresh_offsets(self.selected)
@@ -1750,6 +1775,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         """Remove offset at idx from the selected focus and refresh UI."""
         if not self.selected:
             return
+        self._push_undo("remove offset", touched_ids=(self.selected.id,))
         self._save_offsets_to_focus()
         offs = getattr(self.selected, "offsets", [])
         if 0 <= idx < len(offs):
@@ -4622,85 +4648,30 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         """Rebuild the Loaded Trees panel list in the sidebar."""
         if not hasattr(self, "_loaded_trees_inner"):
             return
-        for w in self._loaded_trees_inner.winfo_children():
-            w.destroy()
-        if not self._extra_trees:
-            tk.Label(
-                self._loaded_trees_inner,
-                text=tr("sidebar.no_extra_trees", "  No extra trees loaded"),
-                bg=BG_PANEL,
-                fg=TEXT_DIM,
-                font=("Helvetica", 8, "italic"),
-                anchor="w",
-            ).pack(fill="x", padx=4, pady=2)
-            return
+        if self._extra_trees:
+            self._loaded_trees_empty.pack_forget()
+            self._loaded_trees_box.pack(fill="x", before=self._loaded_trees_border)
+        else:
+            self._loaded_trees_box.pack_forget()
+            self._loaded_trees_empty.pack(fill="x", padx=4, pady=2)
+        items = []
         for idx, et in enumerate(self._extra_trees, start=1):
             badge_txt, badge_col = self._get_tree_badge(idx)
-            row = tk.Frame(
-                self._loaded_trees_inner,
-                bg=BG_CARD,
-                highlightthickness=1,
-                highlightbackground=BORDER_G,
+            items.append(
+                LoadedTreeRowItem(
+                    tree_idx=idx,
+                    badge_text=badge_txt,
+                    badge_color=badge_col,
+                    tree_id=et["tree_id"],
+                    summary=tr(
+                        "sidebar.loaded_tree_summary",
+                        "  {file}  -  {count} focuses",
+                        file=os.path.basename(et["file_path"]),
+                        count=len(et["focus_ids"]),
+                    ),
+                )
             )
-            row.pack(fill="x", padx=4, pady=2)
-            tk.Label(
-                row,
-                text=f" [{badge_txt}]",
-                bg=badge_col,
-                fg="#000000",
-                font=("Courier", 8, "bold"),
-                padx=4,
-                pady=2,
-            ).pack(side="left")
-            info_f = tk.Frame(row, bg=BG_CARD)
-            info_f.pack(side="left", fill="x", expand=True)
-            tk.Label(
-                info_f,
-                text=et["tree_id"],
-                bg=BG_CARD,
-                fg=TEXT,
-                font=("Courier", 8, "bold"),
-                anchor="w",
-            ).pack(fill="x", padx=4, pady=(2, 0))
-            tk.Label(
-                info_f,
-                text=tr(
-                    "sidebar.loaded_tree_summary",
-                    "  {file}  -  {count} focuses",
-                    file=os.path.basename(et["file_path"]),
-                    count=len(et["focus_ids"]),
-                ),
-                bg=BG_CARD,
-                fg=TEXT_DIM,
-                font=("Helvetica", 7),
-                anchor="w",
-            ).pack(fill="x", padx=4, pady=(0, 2))
-            btn_f = tk.Frame(row, bg=BG_CARD)
-            btn_f.pack(side="right", padx=2)
-            tk.Button(
-                btn_f,
-                text=tr("common.save", "Save"),
-                command=lambda i=idx: self._export_extra_tree(i),
-                bg=BG_CARD,
-                fg=BLUE,
-                font=("Helvetica", 8),
-                relief="flat",
-                padx=4,
-                pady=1,
-                cursor="hand2",
-            ).pack(pady=(4, 0))
-            tk.Button(
-                btn_f,
-                text="✕",
-                command=lambda i=idx: self._unload_extra_tree(i),
-                bg=BG_CARD,
-                fg=TEXT_DIM,
-                font=("Helvetica", 8),
-                relief="flat",
-                padx=4,
-                pady=1,
-                cursor="hand2",
-            ).pack(pady=(0, 4))
+        self._loaded_trees_inner.set_items(items)
 
     def _export_extra_tree(
         self,
@@ -6150,10 +6121,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         tk.Button(
             filt_row,
             text=tr("validation.revalidate", "Re-validate"),
-            command=lambda: (
-                self._run_validation(),
-                self._refresh_validation_dialog(win),
-            ),
+            command=self._run_validation,
             bg=BG_CARD,
             fg=TEXT,
             relief="flat",

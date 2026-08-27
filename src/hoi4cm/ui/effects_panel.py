@@ -825,6 +825,7 @@ class EffectsMixin:
     def _rm_effect(self, idx):
         if not self.selected:
             return
+        self._push_undo("remove effect", touched_ids=(self.selected.id,))
         self.selected.effects.pop(idx)
         self._refresh_effects()
         self._focus_list_cache.invalidate()
