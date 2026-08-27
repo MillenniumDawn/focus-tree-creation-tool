@@ -1741,12 +1741,24 @@ class CanvasMixin:
         self._grid_key = None
         self._redraw_now(RedrawChannel.VIEW, reason="minimap-pan")
 
-    def _fit_all(self):
-        """Fit all focuses into view by resetting pan/zoom."""
+    def _fit_all(self, *, tree_idx=None):
+        """Fit focuses into view by resetting pan/zoom.
+
+        ``tree_idx``, if given, restricts the fitted bbox to one tree (e.g.
+        0 for the main tree) instead of every loaded focus. Loading dozens
+        of extra trees at once and still fitting all of them would zoom out
+        far enough that nothing is left outside the viewport for culling to
+        cull.
+        """
         if not self.focuses:
             return
-        xs = [f.x for f in self.focuses.values()]
-        ys = [f.y for f in self.focuses.values()]
+        focuses = list(self.focuses.values())
+        if tree_idx is not None:
+            scoped = [f for f in focuses if f.tree_idx == tree_idx]
+            if scoped:
+                focuses = scoped
+        xs = [f.x for f in focuses]
+        ys = [f.y for f in focuses]
         if not xs:
             return
         cw = self.cv.winfo_width() or 800
