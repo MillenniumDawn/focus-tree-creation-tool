@@ -15,7 +15,7 @@ from hoi4cm.core import read_file
 from hoi4cm.focus_tree.build import build_focuses
 from hoi4cm.focus_tree.export import export_focus_tree
 from hoi4cm.focus_tree.parse import parse_focus_tree
-from hoi4cm.models import Focus
+from hoi4cm.models import Focus, FocusDocument
 
 FIX_DIR = os.path.join(os.path.dirname(__file__), "fixtures", "focus_trees")
 
@@ -451,6 +451,71 @@ focus_tree = {
     assert "\treset_on_civilwar = no" in t1
     assert "base = 0" in t1
     assert "factor = 0" not in t1  # canned block must not appear alongside it
+
+
+def test_extra_tree_export_reflects_canvas_move():
+    """Issue #115: a canvas move (drag / sidebar X-Y edit) on an extra-tree
+    focus must be reflected in the exported raw/relative coordinates, not
+    the stale values captured at load."""
+    src = """\
+focus_tree = {
+\tid = TST_shared_tree
+\tcontinuous_focus_position = { x = 0 y = 0 }
+\tfocus = {
+\t\tid = TST_root
+\t\tx = 0
+\t\ty = 0
+\t\tcompletion_reward = {
+\t\t\tadd_political_power = 1
+\t\t}
+\t}
+\tfocus = {
+\t\tid = TST_child
+\t\tx = 1
+\t\ty = 1
+\t\trelative_position_id = TST_root
+\t\tcompletion_reward = {
+\t\t\tadd_political_power = 1
+\t\t}
+\t}
+}
+"""
+    parsed = parse_focus_tree(src, "/tmp/x.txt")
+    document = FocusDocument(build_focuses(parsed, tree_idx=1))
+    child = document.by_name["TST_child"]
+
+    assert document.move(child.id, child.x + 3, child.y - 2)
+
+    assert (child._raw_gx, child._raw_gy) == (4, -1)
+    assert (child._rel_dx, child._rel_dy) == (4, -1)
+
+    text = export_focus_tree(
+        list(document.values()),
+        _info(parsed, "shared"),
+        focus_lookup=dict(document.items()),
+        effect_renderer=raw_block_renderer,
+    )
+    assert "relative_position_id = TST_root" in text
+    assert "x = 4" in text
+    assert "y = -1" in text
+
+
+def test_extra_tree_export_empty_completion_reward_omits_todo_block():
+    """Issue #115: an extra-tree focus with no completion_reward must not
+    gain a synthesized log line + TODO comment on export."""
+    focus = Focus(0, 0)
+    focus.name = "TST_root"
+    info = _extra_tree_info()
+
+    text = export_focus_tree(
+        [focus],
+        info,
+        focus_lookup={focus.id: focus},
+        effect_renderer=raw_block_renderer,
+    )
+    assert "completion_reward = {\n\t\t}" in text
+    assert "TODO" not in text
+    assert "executed" not in text
 
 
 # ── Fixture-file round-trips (see tests/fixtures/focus_trees/) ────────────

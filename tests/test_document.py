@@ -139,6 +139,32 @@ def test_move_updates_positions_without_full_rebuild():
     _assert_indexes(document)
 
 
+def test_move_shifts_raw_and_relative_export_coords():
+    """Issue #115: a canvas move must carry through to the extra-tree raw
+    coordinates, not just the plain x/y used by the main-tree exporter."""
+    document = FocusDocument((_focus(1, x=0, y=0), _focus(2, x=1, y=1)))
+    root, child = document[1], document[2]
+    root._raw_gx, root._raw_gy = 0, 0
+    child._raw_gx, child._raw_gy = 1, 1
+    child._rel_dx, child._rel_dy = 1, 1
+    child.relative_position_id = root.name
+
+    assert document.move(child.id, 4, -1)
+
+    assert (child._raw_gx, child._raw_gy) == (4, -1)
+    assert (child._rel_dx, child._rel_dy) == (4, -1)
+    assert (root._raw_gx, root._raw_gy) == (0, 0)
+
+
+def test_move_leaves_focuses_without_raw_coords_untouched():
+    document = FocusDocument((_focus(1, x=0, y=0),))
+
+    assert document.move(1, 5, 5)
+
+    assert not hasattr(document[1], "_raw_gx")
+    assert not hasattr(document[1], "_rel_dx")
+
+
 def test_position_free_respects_except_id_and_occupants():
     document = FocusDocument((_focus(1, x=0, y=0), _focus(2, x=1, y=1)))
 

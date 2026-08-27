@@ -159,6 +159,16 @@ class FocusDocument(MutableMapping[int, Focus]):
         old = (focus.x, focus.y)
         if old == (x, y):
             return True
+        dgx, dgy = x - old[0], y - old[1]
+        # Extra-tree raw/relative export coords track the canvas move so a
+        # dragged (or sidebar-edited) focus doesn't re-export its stale file
+        # position; see _render_coordinates in focus_tree/codec.py.
+        if getattr(focus, "_raw_gx", None) is not None:
+            focus._raw_gx += dgx
+            focus._raw_gy += dgy
+        if getattr(focus, "_rel_dx", None) is not None:
+            focus._rel_dx += dgx
+            focus._rel_dy += dgy
         focus.x, focus.y = x, y
         # Only occupied_positions depends on x/y, so update it in place rather
         # than rebuilding every index. This keeps a drag cheap on a big tree.
