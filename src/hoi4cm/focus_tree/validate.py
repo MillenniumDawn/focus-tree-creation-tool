@@ -15,6 +15,7 @@ from hoi4cm.models import Focus
 
 Severity = Literal["error", "warning", "info"]
 DEFAULT_GFX = "GFX_goal_generic_political_pressure"
+MAX_ISSUES = 300
 _KEY_RE = re.compile(r"\s+(\S+?)(?::\d+)?\s*[=:]?\s*\"")
 
 SEVERITY_RANK = {"error": 0, "warning": 1, "info": 2}
@@ -54,12 +55,15 @@ def validate_document(
     sprites: Mapping[str, str] | None = None,
     loc_keys: set[str] | None = None,
     include_default_icon_warning: bool = True,
+    max_issues: int = MAX_ISSUES,
 ) -> list[Issue]:
     """Validate a focus document.
 
     doc: FocusDocument or plain mapping id->Focus.
     sprites: MOD.sprites dict (gfx_name -> path) or None to skip GFX check.
     loc_keys: set of localisation keys present in the .yml or None to skip.
+    max_issues: cap on the returned list; excess issues are dropped and
+        replaced with one trailing "issues_truncated" info issue.
     """
     issues: list[Issue] = []
     if not doc:
@@ -99,8 +103,16 @@ def validate_document(
         occupied = dict(occupied)
 
     for (x, y), occupants in occupied.items():
-        if len(occupants) > 1:
-            sorted_ids = sorted(occupants)
+        if len(occupants) <= 1:
+            continue
+        # focuses from different loaded trees legitimately share coordinates
+        by_tree: dict[int, list[int]] = defaultdict(list)
+        for fid in occupants:
+            by_tree[getattr(doc[fid], "tree_idx", 0)].append(fid)
+        for tree_occupants in by_tree.values():
+            if len(tree_occupants) <= 1:
+                continue
+            sorted_ids = sorted(tree_occupants)
             names = [doc[i].name for i in sorted_ids]
             issues.append(
                 Issue(
@@ -284,6 +296,18 @@ def validate_document(
             dfs(nid)
 
     issues.sort(key=lambda issue: issue.sort_key())
+    if len(issues) > max_issues:
+        hidden = len(issues) - max_issues
+        issues = issues[:max_issues]
+        issues.append(
+            Issue(
+                "info",
+                "issues_truncated",
+                None,
+                None,
+                f"{hidden} more issue(s) not shown (showing first {max_issues})",
+            )
+        )
     return issues
 
 
@@ -301,6 +325,7 @@ def worst_severity_per_focus(issues: list[Issue]) -> dict[int, Severity]:
 
 __all__ = [
     "DEFAULT_GFX",
+    "MAX_ISSUES",
     "Issue",
     "Severity",
     "collect_loc_keys_from_text",
