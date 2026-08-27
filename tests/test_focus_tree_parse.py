@@ -75,6 +75,91 @@ joint_focus = {
 }
 """
 
+# focus_tree = { } wrappers holding only shared_focus/joint_focus blocks (or a
+# mix), used to pin issue #123: had_wrapper must reflect that a wrapper was
+# parsed, not just that a plain `focus` key was found.
+WRAPPED_JOINT_ONLY = """\
+focus_tree = {
+\tid = TST_joint_tree
+\tcountry = {
+\t\tfactor = 0
+\t\tmodifier = {
+\t\t\tadd = 20
+\t\t\toriginal_tag = TST
+\t\t}
+\t}
+\tcontinuous_focus_position = { x = 0 y = 0 }
+\tjoint_focus = {
+\t\tid = TST_joint_one
+\t\ticon = GFX_x
+\t\tx = 0
+\t\ty = 0
+\t\tcost = 1
+\t\tcompletion_reward = {
+\t\t\tadd_political_power = 50
+\t\t}
+\t}
+}
+"""
+
+WRAPPED_SHARED_ONLY = """\
+focus_tree = {
+\tid = TST_shared_only_tree
+\tcountry = {
+\t\tfactor = 0
+\t\tmodifier = {
+\t\t\tadd = 20
+\t\t\toriginal_tag = TST
+\t\t}
+\t}
+\tcontinuous_focus_position = { x = 0 y = 0 }
+\tshared_focus = {
+\t\tid = TST_shared_one
+\t\ticon = GFX_x
+\t\tx = 0
+\t\ty = 0
+\t\tcost = 1
+\t\tcompletion_reward = {
+\t\t\tadd_political_power = 50
+\t\t}
+\t}
+}
+"""
+
+WRAPPED_MIXED = """\
+focus_tree = {
+\tid = TST_mixed_tree
+\tcountry = {
+\t\tfactor = 0
+\t\tmodifier = {
+\t\t\tadd = 20
+\t\t\toriginal_tag = TST
+\t\t}
+\t}
+\tcontinuous_focus_position = { x = 0 y = 0 }
+\tfocus = {
+\t\tid = TST_mixed_focus
+\t\ticon = GFX_x
+\t\tx = 0
+\t\ty = 0
+\t\tcost = 1
+\t\tcompletion_reward = {
+\t\t\tadd_political_power = 50
+\t\t}
+\t}
+\tshared_focus = {
+\t\tid = TST_mixed_shared
+\t\ticon = GFX_x
+\t\tx = 1
+\t\ty = 1
+\t\tcost = 1
+\t\tcompletion_reward = {
+\t\t\tadd_political_power = 25
+\t\t}
+\t}
+}
+"""
+
 
 def test_parse_tree_metadata():
     p = parse_focus_tree(WRAPPED, "/tmp/TST_shared_tree.txt")
@@ -204,6 +289,23 @@ def test_parse_no_wrapper_fallback():
     assert [f["id"] for f in p.focuses_data] == ["JNT_one"]
     assert "joint_trigger" in p.raw_rewards[("JNT_one", "_joint_extra")]
     assert "is_ai = no" in p.raw_rewards[("JNT_one", "_joint_extra")]
+
+
+@pytest.mark.parametrize(
+    "src,ids",
+    [
+        (WRAPPED_JOINT_ONLY, ["TST_joint_one"]),
+        (WRAPPED_SHARED_ONLY, ["TST_shared_one"]),
+        (WRAPPED_MIXED, ["TST_mixed_focus", "TST_mixed_shared"]),
+    ],
+)
+def test_had_wrapper_true_for_shared_or_joint_only_wrapper(src, ids):
+    """Issue #123: a wrapper holding only shared_focus/joint_focus blocks (or
+    a mix) must still be recorded as wrapped, not just one with a plain
+    `focus` key."""
+    p = parse_focus_tree(src, "/tmp/x.txt")
+    assert p.had_wrapper is True
+    assert [f["id"] for f in p.focuses_data] == ids
 
 
 def test_parse_strips_bom():
