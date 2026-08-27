@@ -224,6 +224,20 @@ def test_generate_event_loc_yml_uses_option_name_when_text_missing():
     assert ' ns.1.a: "ns.1.a"' in out
 
 
+def test_generate_event_loc_yml_escapes_quotes_in_values():
+    e = _make_event(
+        eid="ns.1",
+        title_text='The "Title"',
+        desc_text="What is happening.",
+        options=[
+            {"name": "ns.1.a", "text": 'Say "yes"', "effects": "", "ai_chance": "1"},
+        ],
+    )
+    out = generate_event_loc_yml([e])
+    assert ' ns.1.t: "The \\"Title\\""' in out
+    assert ' ns.1.a: "Say \\"yes\\""' in out
+
+
 def test_generate_event_loc_yml_empty_returns_empty_string():
     assert generate_event_loc_yml([]) == ""
 

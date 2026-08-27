@@ -11,6 +11,8 @@ are extracted verbatim, only relocated — so widget-driven callers and
 headless callers agree byte-for-byte.
 """
 
+import json
+
 from hoi4cm.focus_tree.loc import LocTarget
 
 
@@ -120,10 +122,11 @@ def generate_event_loc_yml(events, *, loc_language="english"):
         return ""
     lines = [LocTarget(loc_language).header(), ""]
     for ev in events:
-        lines.append(f' {ev.eid}.t: "{ev.title_text}"')
-        lines.append(f' {ev.eid}.d: "{ev.desc_text}"')
+        lines.append(f" {ev.eid}.t: {json.dumps(ev.title_text, ensure_ascii=False)}")
+        lines.append(f" {ev.eid}.d: {json.dumps(ev.desc_text, ensure_ascii=False)}")
         for opt in ev.options:
-            lines.append(f' {opt["name"]}: "{opt.get("text", opt["name"])}"')
+            opt_text = opt.get("text", opt["name"])
+            lines.append(f" {opt['name']}: {json.dumps(opt_text, ensure_ascii=False)}")
         lines.append("")
     return "\n".join(lines)
 
@@ -462,8 +465,8 @@ def build_dyn_mod_output(
         "# File must be UTF-8-BOM encoded",
         "# ============================================================",
         "",
-        f' {mid}: "{name}"',
-        f' {mid}_desc: "{desc}"',
+        f" {mid}: {json.dumps(name, ensure_ascii=False)}",
+        f" {mid}_desc: {json.dumps(desc, ensure_ascii=False)}",
         ' modifies_dynamic_modifier_tt: "Modifies $MODIFIER$"',
         ' adds_dynamic_modifier_tt: "Adds $MODIFIER$ which grants:"  # for activation focuses',  # noqa: E501
     ]
@@ -597,8 +600,8 @@ def build_national_spirit_output(
     )
     out.append("# ============================================================")
     out.append("")
-    out.append(f' {sid}: "{loc_n}"')
-    out.append(f' {sid}_desc: "{loc_d}"')
+    out.append(f" {sid}: {json.dumps(loc_n, ensure_ascii=False)}")
+    out.append(f" {sid}_desc: {json.dumps(loc_d, ensure_ascii=False)}")
     return "\n".join(out)
 
 
@@ -736,15 +739,20 @@ def generate_decision_loc_yml(cats, decs, *, loc_language="english"):
     for cat in cats:
         cid = _strip_val(cat["cat_id"])
         if cid:
-            lines.append(f' {cid}: "{cat["loc_name"]}"')
+            lines.append(f" {cid}: {json.dumps(cat['loc_name'], ensure_ascii=False)}")
             if _strip_val(cat.get("loc_desc", "")):
-                lines.append(f' {cid}_desc: "{_strip_val(cat["loc_desc"])}"')
+                cat_desc = _strip_val(cat["loc_desc"])
+                lines.append(f" {cid}_desc: {json.dumps(cat_desc, ensure_ascii=False)}")
         for dec in _decs_for_uid(decs, cat["uid"]):
             did = _strip_val(dec["dec_id"])
             if did:
-                lines.append(f' {did}: "{dec["loc_name"]}"')
+                dec_name = json.dumps(dec["loc_name"], ensure_ascii=False)
+                lines.append(f" {did}: {dec_name}")
                 if _strip_val(dec.get("loc_desc", "")):
-                    lines.append(f' {did}_desc: "{_strip_val(dec["loc_desc"])}"')
+                    dec_desc = _strip_val(dec["loc_desc"])
+                    lines.append(
+                        f" {did}_desc: {json.dumps(dec_desc, ensure_ascii=False)}"
+                    )
     return "\n".join(lines) + "\n"
 
 
@@ -776,7 +784,7 @@ def build_income_spirit_snippet(
         f"\t}}\n"
         f"\n"
         f"\t# Localisation needed:\n"
-        f'\t# {idea_id}: "{spirit_name}"\n'
-        f'\t# {idea_id}_desc: "{spirit_desc}"\n'
+        f"\t# {idea_id}: {json.dumps(spirit_name, ensure_ascii=False)}\n"
+        f"\t# {idea_id}_desc: {json.dumps(spirit_desc, ensure_ascii=False)}\n"
         f'\t# {tooltip_key}: "$$[?{variable_name}|+3] from \u00a7Y${idea_id}$\u00a7!\\n"'  # noqa: E501
     )

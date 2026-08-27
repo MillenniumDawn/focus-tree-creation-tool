@@ -1666,7 +1666,10 @@ def open_national_spirit_wizard(app):
                         MOD.loc_target.header() + "\n",
                         encoding="utf-8-sig",
                     )
-                loc_body = "".join(f' {k}: "{v}"\n' for k, v in to_add.items())
+                loc_body = "".join(
+                    f" {k}: {json.dumps(v, ensure_ascii=False)}\n"
+                    for k, v in to_add.items()
+                )
                 wf.append_text(loc_path, loc_body, encoding="utf-8-sig")
                 rel = os.path.relpath(loc_path, mod_root)
                 saved.append(rel + f"  (+{len(to_add)} keys)")

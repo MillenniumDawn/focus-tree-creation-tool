@@ -250,6 +250,16 @@ def test_generate_decision_loc_yml_includes_descriptions():
     assert ' TAG_decision_desc: "Dec desc"' in out
 
 
+def test_generate_decision_loc_yml_escapes_quotes_in_values():
+    cats = [_cat(loc_name='My "Cat"', loc_desc='Say "hi".')]
+    decs = [_dec(loc_name='My "Decision"', loc_desc='Say "bye".')]
+    out = generate_decision_loc_yml(cats, decs)
+    assert ' TAG_cat: "My \\"Cat\\""' in out
+    assert ' TAG_cat_desc: "Say \\"hi\\"."' in out
+    assert ' TAG_decision: "My \\"Decision\\""' in out
+    assert ' TAG_decision_desc: "Say \\"bye\\"."' in out
+
+
 def test_generate_decision_loc_yml_uses_configured_language_header():
     out = generate_decision_loc_yml([_cat()], [_dec()], loc_language="german")
 

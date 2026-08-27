@@ -177,6 +177,14 @@ def test_build_national_spirit_emits_loc_block():
     assert ' TAG_s_desc: "What it does."' in out
 
 
+def test_build_national_spirit_escapes_quotes_in_loc_values():
+    out = build_national_spirit_output(
+        mod_id="TAG_s", loc_name='My "Spirit"', loc_desc='Say "hi".'
+    )
+    assert ' TAG_s: "My \\"Spirit\\""' in out
+    assert ' TAG_s_desc: "Say \\"hi\\"."' in out
+
+
 def test_build_national_spirit_uses_configured_localisation_path():
     out = build_national_spirit_output(mod_id="TAG_s", loc_language="braz_por")
 

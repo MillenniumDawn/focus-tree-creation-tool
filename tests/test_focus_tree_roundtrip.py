@@ -9,7 +9,13 @@ survive and that key content actually made it into the exported text.
 import os
 
 import pytest
-from test_focus_tree_parse import NO_WRAPPER, WRAPPED
+from test_focus_tree_parse import (
+    NO_WRAPPER,
+    WRAPPED,
+    WRAPPED_JOINT_ONLY,
+    WRAPPED_MIXED,
+    WRAPPED_SHARED_ONLY,
+)
 
 from hoi4cm.core import read_file
 from hoi4cm.focus_tree.build import build_focuses
@@ -88,7 +94,13 @@ def _summary(focuses):
 
 @pytest.mark.parametrize(
     "src,tree_type",
-    [(WRAPPED, "shared"), (NO_WRAPPER, "joint")],
+    [
+        (WRAPPED, "shared"),
+        (NO_WRAPPER, "joint"),
+        (WRAPPED_JOINT_ONLY, "joint"),
+        (WRAPPED_SHARED_ONLY, "shared"),
+        (WRAPPED_MIXED, "shared"),
+    ],
 )
 def test_export_is_idempotent(src, tree_type):
     _f1, t1 = _load_and_export(src, tree_type)
@@ -98,12 +110,40 @@ def test_export_is_idempotent(src, tree_type):
 
 @pytest.mark.parametrize(
     "src,tree_type",
-    [(WRAPPED, "shared"), (NO_WRAPPER, "joint")],
+    [
+        (WRAPPED, "shared"),
+        (NO_WRAPPER, "joint"),
+        (WRAPPED_JOINT_ONLY, "joint"),
+        (WRAPPED_SHARED_ONLY, "shared"),
+        (WRAPPED_MIXED, "shared"),
+    ],
 )
 def test_structural_fields_survive(src, tree_type):
     f1, t1 = _load_and_export(src, tree_type)
     f2, _t2 = _load_and_export(t1, tree_type)
     assert _summary(f1) == _summary(f2)
+
+
+@pytest.mark.parametrize(
+    "src,tree_type,wrapper_kept",
+    [
+        (WRAPPED_JOINT_ONLY, "joint", False),
+        (WRAPPED_SHARED_ONLY, "shared", True),
+        (WRAPPED_MIXED, "shared", True),
+    ],
+)
+def test_shared_or_joint_only_wrapper_export(src, tree_type, wrapper_kept):
+    """Issue #123: a wrapped shared-only (or mixed) tree must keep its
+    focus_tree = { } wrapper, and with it the country/extras fields it holds.
+    Joint trees still unwrap to bare joint_focus = { } blocks by design.
+    """
+    _f, t1 = _load_and_export(src, tree_type)
+    assert ("focus_tree = {" in t1) is wrapper_kept
+    if wrapper_kept:
+        assert "country = {" in t1
+        assert "continuous_focus_position = {" in t1
+    else:
+        assert "joint_focus = {" in t1
 
 
 def test_wrapped_content_present():

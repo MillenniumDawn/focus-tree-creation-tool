@@ -11,6 +11,7 @@ import zlib
 
 import pytest
 
+import hoi4cm.core.undo as undo_module
 from hoi4cm.core.undo import UndoStack, _decode_full
 from hoi4cm.focus_tree.export import export_focus_tree
 from hoi4cm.models import Focus, FocusDocument
@@ -197,10 +198,9 @@ def test_redo_restores_created_focuses():
 
     label2, changed2, removed2 = stack.redo(focuses, Focus.from_dict)
     assert label2 == "add focus"
-    # `changed_ids` is the snapshot's full keyset, not just the diff: every
-    # focus gets a redraw, since the document was reloaded wholesale. The
-    # important invariant is that focus 2 came back and nothing was removed.
-    assert changed2 == {1, 2}
+    # The original push was sparse, so redo mirrors that: only focus 2 was
+    # ever touched, so it's the only one that needs a redraw.
+    assert changed2 == {2}
     assert removed2 == set()
     assert 2 in focuses
     assert focuses[2].to_dict() == new_dict
@@ -331,21 +331,20 @@ def test_undo_refreshes_id_set_cache_for_redo():
 
     result = stack.redo(focuses, Focus.from_dict)
     assert result is not None
-    # `changed_ids` is the snapshot's full keyset: focus 2 came back AND
-    # focus 1 was reloaded by `FocusDocument.load(restored)`. The redraw
-    # workload is the union; the important assertion is that focus 2 is in
-    # it and nothing was wrongly removed.
-    assert result[1] == {1, 2}
+    # The original push was sparse, so redo mirrors that: only focus 2 was
+    # ever touched, so it's the only one that needs a redraw.
+    assert result[1] == {2}
     assert result[2] == set()
     assert focuses.id_set == frozenset({1, 2})
 
 
 def test_redo_with_focus_document_uses_load_replace():
     """When applying a redo entry, calling `load` must replace, not append,
-    otherwise every redo would accumulate duplicates of the same focus."""
+    otherwise every redo would accumulate duplicates of the same focus.
+    Full kind (touched_ids=None) so both undo and redo take the `load` path."""
     focuses = FocusDocument([_mk_focus(1, "focus_1")])
     stack = UndoStack()
-    stack.push("edit", focuses, touched_ids=(1,))
+    stack.push("edit", focuses, touched_ids=None)
     focuses[1].cost = 42
 
     stack.undo(focuses, Focus.from_dict)
@@ -384,6 +383,39 @@ def test_focus_document_undo_batches_index_rebuilds():
 
     assert focuses.revision == before_undo + 1
     assert focuses.validate_indexes()
+
+
+def test_undo_of_sparse_entry_does_not_full_encode(monkeypatch):
+    """Ctrl+Z after loading tens of thousands of focuses must not
+    full-encode the document just to capture the redo entry (#120): the
+    redo/undo capture has to mirror the entry's own sparse/full kind."""
+    calls = []
+    monkeypatch.setattr(
+        undo_module, "_encode_full", lambda focuses: calls.append(focuses) or b""
+    )
+
+    focuses = FocusDocument(_mk_focus(i, f"focus_{i}") for i in range(5000))
+    stack = UndoStack()
+    stack.push("edit", focuses, touched_ids=(0,))
+    focuses[0].cost = 999
+
+    label, changed, removed = stack.undo(focuses, Focus.from_dict)
+
+    assert calls == []
+    assert label == "edit"
+    assert changed == {0}
+    assert removed == set()
+    assert focuses[0].cost == 10
+    assert stack._redo[-1][1] == "sparse"
+
+    label2, changed2, removed2 = stack.redo(focuses, Focus.from_dict)
+
+    assert calls == []
+    assert label2 == "edit"
+    assert changed2 == {0}
+    assert removed2 == set()
+    assert focuses[0].cost == 999
+    assert stack._stack[-1][1] == "sparse"
 
 
 def test_pushes_without_structural_change_share_one_id_set():
