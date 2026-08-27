@@ -6,6 +6,7 @@
 
 """MD Additional Income wizard."""
 
+import json
 import os
 import tkinter as tk
 from tkinter import messagebox
@@ -579,7 +580,10 @@ def open_additional_income_wizard(app):
                 if to_write:
                     wf.append_text(
                         loc_path,
-                        "".join(f' {k}: "{v}"\n' for k, v in to_write.items()),
+                        "".join(
+                            f" {k}: {json.dumps(v, ensure_ascii=False)}\n"
+                            for k, v in to_write.items()
+                        ),
                         encoding="utf-8-sig",
                     )
                     output_lines.append(

@@ -1183,7 +1183,7 @@ def open_dyn_mod_wizard(app):
 
         def add_loc(key, value):
             if key not in existing_keys:
-                new_loc_lines.append(f' {key}: "{value}"')
+                new_loc_lines.append(f" {key}: {json.dumps(value, ensure_ascii=False)}")
 
         add_loc(mid, name)
         add_loc(f"{mid}_desc", desc)
