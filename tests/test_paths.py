@@ -22,6 +22,13 @@ def test_read_file_missing_returns_empty(tmp_path):
     assert paths.read_file(str(tmp_path / "does_not_exist.txt")) == ""
 
 
+def test_read_file_falls_back_to_latin1(tmp_path):
+    p = tmp_path / "c.txt"
+    p.write_bytes("café".encode("latin-1"))  # 0xe9 is not valid UTF-8
+    assert paths.read_file(str(p)) == "café"
+    assert "�" not in paths.read_file(str(p))
+
+
 def test_default_mod_dir_linux(monkeypatch):
     monkeypatch.setattr(sys, "platform", "linux")
     expected = os.path.join(
