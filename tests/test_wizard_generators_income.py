@@ -29,4 +29,17 @@ def test_build_income_spirit_snippet_emits_loc_hints():
     )
     assert '# TAG_idea: "My Spirit"' in out
     assert '# TAG_idea_desc: "My description."' in out
-    assert '# tag_money_tt: "$$[?TAG_money_var|+3] from §Y$TAG_idea$\u00a7!\\n"' in out
+    assert '# tag_money_tt: "$$[?TAG_money_var|+3] from §Y$TAG_idea$§!\\n"' in out
+
+
+def test_build_income_spirit_snippet_escapes_quotes_in_loc_hints():
+    out = build_income_spirit_snippet(
+        idea_id="TAG_idea",
+        country_tag="TAG",
+        variable_name="TAG_money_var",
+        tooltip_key="tag_money_tt",
+        spirit_name='My "Spirit"',
+        spirit_desc='Say "hi".',
+    )
+    assert '# TAG_idea: "My \\"Spirit\\""' in out
+    assert '# TAG_idea_desc: "Say \\"hi\\"."' in out
