@@ -1,5 +1,7 @@
 """Focus data model — the canvas item at the heart of every focus tree."""
 
+import copy
+
 
 class Focus:
     """A single national focus in the editor canvas."""
@@ -52,6 +54,16 @@ class Focus:
 
     def to_dict(self):
         return {k: v for k, v in self.__dict__.items() if not k.startswith("_")}
+
+    def duplicate(self):
+        """Deep copy with a fresh counter id and no stale imported coordinates."""
+        nf = copy.deepcopy(self)
+        Focus._next += 1
+        nf.id = Focus._next
+        for attr in ("_raw_gx", "_raw_gy", "_rel_dx", "_rel_dy"):
+            if attr in nf.__dict__:
+                del nf.__dict__[attr]
+        return nf
 
     @staticmethod
     def from_dict(d, *, legacy=False):

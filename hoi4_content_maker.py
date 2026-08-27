@@ -184,7 +184,6 @@ from tkinter import filedialog, messagebox
 
 log.info("tkinter imported OK")
 import bisect
-import copy
 import re
 import time
 
@@ -5745,8 +5744,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             return
 
         f = self.selected
-        nf = copy.deepcopy(f)
-        nf.id = id(nf)
+        nf = f.duplicate()
         # Generate new unique name
         base = re.sub(r"_copy\d*$", "", f.name) + "_copy"
         existing_names = {foc.name for foc in self.focuses.values()}
