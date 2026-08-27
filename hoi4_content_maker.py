@@ -1766,6 +1766,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         """Add a blank offset entry to the selected focus and refresh UI."""
         if not self.selected:
             return
+        self._push_undo("add offset", touched_ids=(self.selected.id,))
         self._save_offsets_to_focus()
         self.selected.offsets.append({"x": 0, "y": 0, "trigger": ""})
         self._refresh_offsets(self.selected)
@@ -1774,6 +1775,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         """Remove offset at idx from the selected focus and refresh UI."""
         if not self.selected:
             return
+        self._push_undo("remove offset", touched_ids=(self.selected.id,))
         self._save_offsets_to_focus()
         offs = getattr(self.selected, "offsets", [])
         if 0 <= idx < len(offs):
