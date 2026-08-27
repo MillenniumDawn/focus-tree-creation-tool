@@ -211,9 +211,11 @@ def parse_focus_tree(raw, path):
     country_tag = "TAG"
     country_raw = ""
     tree_extras: dict = {}
+    wrapper_seen = False
     i = 0
     while i < len(tokens):
         if tokens[i] == "focus_tree" and i + 1 < len(tokens) and tokens[i + 1] == "=":
+            wrapper_seen = True
             block, i = parse_block(tokens, i + 2)
             _id_val = block.get("id")
             if isinstance(_id_val, str):
@@ -260,7 +262,7 @@ def parse_focus_tree(raw, path):
         else:
             i += 1
 
-    had_wrapper = bool(focuses_data)  # True if file had a focus_tree = { } wrapper
+    had_wrapper = wrapper_seen  # True if a focus_tree = { } wrapper was parsed
 
     # Fallback: top-level focus/shared_focus/joint_focus blocks (no wrapper).
     if not focuses_data:
