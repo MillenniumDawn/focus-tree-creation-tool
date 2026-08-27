@@ -348,6 +348,7 @@ def test_tk_checklist_custom_loaded_marker(tk_root) -> None:
     assert checklist._rows[1].marker.cget("text") == "（已加载）"
 
 
+@pytest.mark.visible_tk
 def test_tk_checklist_shrinks_pool_on_smaller_viewport(tk_root) -> None:
     tk_root.geometry("340x200")
     checklist = VirtualChecklist(tk_root, type_choices=TYPE_CHOICES)
