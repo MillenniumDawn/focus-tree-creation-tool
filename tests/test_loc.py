@@ -67,6 +67,98 @@ def test_all_keys_already_present_returns_none():
     assert count == 0
 
 
+def test_existing_desc_is_rewritten_when_focus_desc_changes():
+    existing = (
+        "l_english:\n"
+        ' TST_alpha: "Tst Alpha"\n'
+        ' TST_alpha_desc: "Old description."\n'
+    )
+    focuses = [_focus("TST_alpha", desc="New description.")]
+    text, count = build_loc_yml(existing, focuses, "TST")
+    assert count == 1
+    assert ' TST_alpha_desc: "New description."\n' in text
+    assert "Old description." not in text
+    assert ' TST_alpha: "Tst Alpha"\n' in text
+
+
+def test_existing_title_is_never_rewritten():
+    existing = (
+        "l_english:\n"
+        ' TST_alpha: "Hand-Edited Title"\n'
+        ' TST_alpha_desc: "Old description."\n'
+    )
+    focuses = [_focus("TST_alpha", desc="New description.")]
+    text, count = build_loc_yml(existing, focuses, "TST")
+    assert count == 1
+    assert ' TST_alpha: "Hand-Edited Title"\n' in text
+    assert ' TST_alpha_desc: "New description."\n' in text
+
+
+def test_blank_desc_never_overwrites_existing_desc():
+    existing = (
+        "l_english:\n"
+        ' TST_alpha: "Tst Alpha"\n'
+        ' TST_alpha_desc: "Hand-written description."\n'
+    )
+    focuses = [_focus("TST_alpha", desc="")]
+    text, count = build_loc_yml(existing, focuses, "TST")
+    assert text is None
+    assert count == 0
+
+
+def test_desc_matching_existing_value_is_not_rewritten():
+    existing = (
+        "l_english:\n"
+        ' TST_alpha: "Tst Alpha"\n'
+        ' TST_alpha_desc: "Same description."\n'
+    )
+    focuses = [_focus("TST_alpha", desc="Same description.")]
+    text, count = build_loc_yml(existing, focuses, "TST")
+    assert text is None
+    assert count == 0
+
+
+def test_rewritten_desc_value_with_quote_is_escaped():
+    existing = (
+        "l_english:\n"
+        ' TST_alpha: "Tst Alpha"\n'
+        ' TST_alpha_desc: "Old description."\n'
+    )
+    focuses = [_focus("TST_alpha", desc='Say "hello".')]
+    text, count = build_loc_yml(existing, focuses, "TST")
+    assert count == 1
+    assert ' TST_alpha_desc: "Say \\"hello\\"."\n' in text
+
+
+def test_rewritten_desc_preserves_pluralization_suffix():
+    existing = (
+        "l_english:\n"
+        ' TST_alpha: "Tst Alpha"\n'
+        ' TST_alpha_desc:0 "Old description."\n'
+    )
+    focuses = [_focus("TST_alpha", desc="New description.")]
+    text, count = build_loc_yml(existing, focuses, "TST")
+    assert count == 1
+    assert ' TST_alpha_desc:0 "New description."\n' in text
+
+
+def test_rewrite_and_add_combine_in_one_pass():
+    existing = (
+        "l_english:\n"
+        ' TST_alpha: "Tst Alpha"\n'
+        ' TST_alpha_desc: "Old description."\n'
+    )
+    focuses = [
+        _focus("TST_alpha", desc="New description."),
+        _focus("TST_beta"),
+    ]
+    text, count = build_loc_yml(existing, focuses, "TST")
+    assert count == 3
+    assert ' TST_alpha_desc: "New description."\n' in text
+    assert ' TST_beta: "Tst Beta"\n' in text
+    assert ' TST_beta_desc: "Complete the Tst Beta national focus."\n' in text
+
+
 def test_existing_key_detection_handles_pluralization_suffix():
     # HOI4 loc files sometimes suffix the version number: `key:0 "val"`.
     existing = 'l_english:\n TST_alpha:0 "Tst Alpha"\n'

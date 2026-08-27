@@ -8,7 +8,12 @@ import json
 import re
 from dataclasses import dataclass
 
-_KEY_RE = re.compile(r'\s+(\S+?)(?::\d+)?\s*[=:]?\s*"')
+_KEY_RE = re.compile(
+    r'^(?P<prefix>\s+(?P<key>\S+?)(?::\d+)?\s*[=:]?\s*")'
+    r'(?P<value>(?:[^"\\]|\\.)*)'
+    r'(?P<suffix>".*)$',
+    re.MULTILINE,
+)
 
 
 @dataclass(frozen=True)
@@ -70,42 +75,66 @@ class LocTarget:
 
 
 def build_loc_yml(existing_text, focuses, country_tag, *, language="english"):
-    """Return ``(new_text, added_count)`` for the focus-tree loc .yml.
+    """Return ``(new_text, changed_count)`` for the focus-tree loc .yml.
 
     ``existing_text`` is the current file contents, or ``None`` if the file
     doesn't exist yet (distinct from an existing-but-empty file, which still
     gets appended to rather than re-headered). ``focuses`` contributes a
     title-cased name key and a ``_desc`` key per focus (falling back to a
     generated sentence when the focus has no ``desc``). ``country_tag`` names
-    the section header. Returns ``(None, 0)`` when every key is already
-    present in ``existing_text`` — the caller should skip the write.
-    """
-    existing_keys = set()
-    if existing_text is not None:
-        for line in existing_text.splitlines():
-            m = _KEY_RE.match(line)
-            if m:
-                existing_keys.add(m.group(1))
+    the section header.
 
-    new_loc = {}
+    A missing key is appended. An existing ``_desc`` key is rewritten in
+    place when the focus has a non-empty ``desc`` that differs from the
+    value already on that line — a blank ``desc`` never overwrites a hand
+    edit. Title keys (the bare focus name) are never rewritten. Returns
+    ``(None, 0)`` when nothing needs to change — the caller should skip the
+    write.
+    """
+    existing_values = {}
+    if existing_text is not None:
+        for m in _KEY_RE.finditer(existing_text):
+            existing_values[m.group("key")] = m.group("value")
+
+    to_add = {}
+    to_update = {}
     for f in focuses:
         title = f.name.replace("_", " ").title()
         desc = f.desc if f.desc else f"Complete the {title} national focus."
-        new_loc[f.name] = title
-        new_loc[f"{f.name}_desc"] = desc
+        if f.name not in existing_values:
+            to_add[f.name] = title
 
-    to_add = {k: v for k, v in new_loc.items() if k not in existing_keys}
-    if not to_add:
+        desc_key = f"{f.name}_desc"
+        if desc_key not in existing_values:
+            to_add[desc_key] = desc
+        elif f.desc:
+            escaped = json.dumps(f.desc, ensure_ascii=False)[1:-1]
+            if existing_values[desc_key] != escaped:
+                to_update[desc_key] = f.desc
+
+    if not to_add and not to_update:
         return None, 0
 
     target = LocTarget(language)
     base = existing_text if existing_text is not None else target.header() + "\n"
     if base and not base.endswith("\n"):
         base += "\n"
+
+    if to_update:
+
+        def _rewrite(m):
+            key = m.group("key")
+            if key not in to_update:
+                return m.group(0)
+            new_value = json.dumps(to_update[key], ensure_ascii=False)[1:-1]
+            return m.group("prefix") + new_value + m.group("suffix")
+
+        base = _KEY_RE.sub(_rewrite, base)
+
     needs_header = f"##########Focuses - {country_tag}##########" not in base
     addition = []
     if needs_header:
         addition.append(f"\n ##########Focuses - {country_tag}##########\n")
     for k, v in to_add.items():
         addition.append(f" {k}: {json.dumps(v, ensure_ascii=False)}\n")
-    return base + "".join(addition), len(to_add)
+    return base + "".join(addition), len(to_add) + len(to_update)
