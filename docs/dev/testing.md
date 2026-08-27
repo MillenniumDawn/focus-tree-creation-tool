@@ -174,6 +174,21 @@ widget test out of the run and still report green: before Xvfb landed, 18
 tests skipped in CI and nobody saw it. Locally the variable is unset, so a
 headless dev box still skips cleanly.
 
+On a dev box that *does* have a display, the run used to map a window per
+widget test and cover the desktop for the length of the suite. It no longer
+does: `tests/conftest.py` withdraws the `tk_root` and every `Toplevel` built
+during a test, and turns `grab_set` into a no-op (Tk refuses to grab a
+window that is not viewable). The widget tree is built exactly the same
+way, it just never gets drawn.
+
+A handful of tests need the real thing, either because they measure
+geometry or because they generate pointer and key events that only land on
+a mapped window. Those carry `@pytest.mark.visible_tk` and get an ordinary
+visible root. `tests/test_canvas_tk.py`'s `mapped_canvas` fixture does the
+same job by calling `deiconify()` itself, and fails loudly if the canvas
+still has no size. To watch a whole run happen on screen, set
+`HOI4CM_SHOW_TK=1`.
+
 Widget tests are still the expensive kind, so the split stands: put logic
 in a pure function and test it headlessly wherever that's possible. Every
 pure module (`focus_tree/`, `models/`, `script/`, `mod/`, `data/`, all of
