@@ -159,6 +159,7 @@ def test_pool_always_holds_every_visible_row(
         assert len(visible) <= pool, f"top={top}"
 
 
+@pytest.mark.visible_tk
 def test_tk_list_reuses_bounded_pool_and_updates_only_selected_rows(tk_root) -> None:
     selected: list[Hashable] = []
     tk_root.geometry("220x180")

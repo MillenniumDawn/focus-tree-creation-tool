@@ -37,6 +37,9 @@ class _UndoCallSiteApp:
         self._refresh_prereqs = Mock()
         self._refresh_mutex = Mock()
         self._refresh_effects = Mock()
+        self._focus_list_cache = Mock()
+        self._save_offsets_to_focus = Mock()
+        self._refresh_offsets = Mock()
         self._populate = Mock()
         self._hint = Mock()
         self._draw_lines = Mock()
@@ -228,6 +231,108 @@ def test_remove_mutex_pushes_selected_and_partner_ids():
     )
     assert selected.mutex == []
     assert partner.mutex == []
+
+
+def test_rm_effect_pushes_focus_id():
+    focus = Focus()
+    focus.effects = [{"type": "add_ideas", "fields": {}}]
+    app = _UndoCallSiteApp([focus])
+    app.selected = focus
+
+    app_module.App._rm_effect(_as_app(app), 0)
+
+    app._push_undo.assert_called_once_with("remove effect", touched_ids=(focus.id,))
+    assert focus.effects == []
+
+
+def test_rm_effect_round_trip_through_real_undo_stack():
+    focus = Focus()
+    focus.effects = [{"type": "add_ideas", "fields": {}}]
+    app = _UndoCallSiteApp([focus])
+    app.selected = focus
+    app._undo_stack = UndoStack()
+
+    def push_undo(label="action", touched_ids=None):
+        app_module.App._push_undo(_as_app(app), label, touched_ids)
+
+    app._push_undo = push_undo
+
+    app_module.App._rm_effect(_as_app(app), 0)
+    assert focus.effects == []
+
+    app_module.App._undo(_as_app(app))
+
+    assert app.selected.effects == [{"type": "add_ideas", "fields": {}}]
+
+
+def test_add_offset_pushes_focus_id_and_appends_offset():
+    focus = Focus()
+    focus.offsets = [{"x": 1, "y": 2, "trigger": "has_war = yes"}]
+    app = _UndoCallSiteApp([focus])
+    app.selected = focus
+
+    app_module.App._add_offset(_as_app(app))
+
+    app._push_undo.assert_called_once_with("add offset", touched_ids=(focus.id,))
+    assert focus.offsets == [
+        {"x": 1, "y": 2, "trigger": "has_war = yes"},
+        {"x": 0, "y": 0, "trigger": ""},
+    ]
+
+
+def test_add_offset_round_trip_through_real_undo_stack():
+    focus = Focus()
+    focus.offsets = [{"x": 1, "y": 2, "trigger": ""}]
+    app = _UndoCallSiteApp([focus])
+    app.selected = focus
+    app._undo_stack = UndoStack()
+
+    def push_undo(label="action", touched_ids=None):
+        app_module.App._push_undo(_as_app(app), label, touched_ids)
+
+    app._push_undo = push_undo
+
+    app_module.App._add_offset(_as_app(app))
+    assert len(focus.offsets) == 2
+
+    app_module.App._undo(_as_app(app))
+
+    assert app.selected.offsets == [{"x": 1, "y": 2, "trigger": ""}]
+
+
+def test_del_offset_pushes_focus_id_and_removes_offset():
+    focus = Focus()
+    focus.offsets = [{"x": 1, "y": 2, "trigger": ""}, {"x": 3, "y": 4, "trigger": ""}]
+    app = _UndoCallSiteApp([focus])
+    app.selected = focus
+
+    app_module.App._del_offset(_as_app(app), 0)
+
+    app._push_undo.assert_called_once_with("remove offset", touched_ids=(focus.id,))
+    assert focus.offsets == [{"x": 3, "y": 4, "trigger": ""}]
+
+
+def test_del_offset_round_trip_through_real_undo_stack():
+    focus = Focus()
+    focus.offsets = [{"x": 1, "y": 2, "trigger": ""}, {"x": 3, "y": 4, "trigger": ""}]
+    app = _UndoCallSiteApp([focus])
+    app.selected = focus
+    app._undo_stack = UndoStack()
+
+    def push_undo(label="action", touched_ids=None):
+        app_module.App._push_undo(_as_app(app), label, touched_ids)
+
+    app._push_undo = push_undo
+
+    app_module.App._del_offset(_as_app(app), 0)
+    assert len(focus.offsets) == 1
+
+    app_module.App._undo(_as_app(app))
+
+    assert app.selected.offsets == [
+        {"x": 1, "y": 2, "trigger": ""},
+        {"x": 3, "y": 4, "trigger": ""},
+    ]
 
 
 def test_drag_click_without_grid_move_does_not_push_undo():
