@@ -121,6 +121,21 @@ def test_clear_empties_both_stacks():
     assert stack.redo(focuses, Focus.from_dict) is None
 
 
+def test_undo_then_redo_preserves_grid_coords_that_are_multiples_of_96():
+    """A focus legitimately at a grid coord that's a multiple of 96 (e.g.
+    x=96) must not be mistaken for a legacy pixel coord and halved."""
+    focuses = {1: _mk_focus(1, "focus_1", x=96, y=192)}
+    stack = UndoStack()
+    stack.push("edit cost", focuses, touched_ids=(1,))
+    focuses[1].cost = 99
+
+    stack.undo(focuses, Focus.from_dict)
+    assert (focuses[1].x, focuses[1].y) == (96, 192)
+
+    stack.redo(focuses, Focus.from_dict)
+    assert (focuses[1].x, focuses[1].y) == (96, 192)
+
+
 def test_undo_then_redo_roundtrip_restores_state_and_changed_set():
     """After undo, redo must reconstruct the post-edit focus and report it
     as `changed_ids` so the caller's redraw picks it up."""
