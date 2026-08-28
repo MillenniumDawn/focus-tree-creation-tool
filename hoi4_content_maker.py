@@ -5019,9 +5019,10 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
                         "Cancelled. Loaded files were kept.",
                     )
                 messagebox.showinfo(tr("load_all.title", "Load All Trees"), msg)
-                # Zoom to fit all focuses
+                # Fit the main tree only: fitting every loaded focus would
+                # zoom out far enough to defeat viewport culling (#113).
                 if ok:
-                    self._fit_all()
+                    self._fit_all(tree_idx=0)
 
             def on_error(exc):
                 # _batch_load_trees_worker catches per-file errors internally,

@@ -16,6 +16,7 @@ from hoi4cm.models.document import FocusDocument
 from hoi4cm.ui.canvas import CanvasMixin
 from hoi4cm.ui.canvas_scheduler import RedrawChannel
 from hoi4cm.ui.theme import XGRID, YGRID
+from hoi4cm.ui.viewport import focus_visible, visible_world_rect
 
 FAR_RECT = (0.0, 0.0, 10.0, 10.0)
 NEAR_RECT = (490.0, 490.0, 510.0, 510.0)
@@ -63,6 +64,7 @@ class _FakeApp(CanvasMixin):
         self._refresh_tree_meta_panel = lambda: None
         self._refresh_loaded_trees_panel = lambda: None
         self._invalidate_focus_list_structure = lambda: None
+        self._update_statusbar = lambda: None
         self._reset_canvas_bounds()
 
     def _get_tree_badge(self, tree_idx):
@@ -162,6 +164,46 @@ def test_low_zoom_uses_three_item_focus_lod(tk_root):
 
     assert len(app._focus_bundles[focus.id].items) == 3
     assert app._focus_bundles[focus.id].lod == "compact"
+
+
+def test_fit_all_scoped_to_main_tree_keeps_other_trees_culled(mapped_canvas):
+    app = _FakeApp(mapped_canvas)
+    main_focus = Focus(x=0, y=0)
+    extra_focus = Focus(x=10, y=4)
+    extra_focus.tree_idx = 1
+    app.focuses = {main_focus.id: main_focus, extra_focus.id: extra_focus}
+
+    app._fit_all(tree_idx=0)
+
+    rect = visible_world_rect(app.offset[0], app.offset[1], app.zoom, GRID_W, GRID_H)
+    assert focus_visible(main_focus.x, main_focus.y, rect)
+    assert not focus_visible(extra_focus.x, extra_focus.y, rect)
+
+
+def test_fit_all_without_scope_still_fits_every_tree(mapped_canvas):
+    app = _FakeApp(mapped_canvas)
+    main_focus = Focus(x=0, y=0)
+    extra_focus = Focus(x=10, y=4)
+    extra_focus.tree_idx = 1
+    app.focuses = {main_focus.id: main_focus, extra_focus.id: extra_focus}
+
+    app._fit_all()
+
+    rect = visible_world_rect(app.offset[0], app.offset[1], app.zoom, GRID_W, GRID_H)
+    assert focus_visible(main_focus.x, main_focus.y, rect)
+    assert focus_visible(extra_focus.x, extra_focus.y, rect)
+
+
+def test_fit_all_falls_back_to_every_focus_when_scope_is_empty(mapped_canvas):
+    app = _FakeApp(mapped_canvas)
+    extra_focus = Focus(x=10, y=4)
+    extra_focus.tree_idx = 1
+    app.focuses = {extra_focus.id: extra_focus}
+
+    app._fit_all(tree_idx=0)
+
+    rect = visible_world_rect(app.offset[0], app.offset[1], app.zoom, GRID_W, GRID_H)
+    assert focus_visible(extra_focus.x, extra_focus.y, rect)
 
 
 def test_wheel_redraw_requests_share_one_tk_job(tk_root, monkeypatch):
