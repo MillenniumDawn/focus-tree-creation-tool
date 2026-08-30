@@ -223,7 +223,7 @@ class _PooledList[T: _PooledRow](tk.Frame, ABC):
         self.canvas.configure(yscrollcommand=self._set_scrollbar)
         self.scrollbar.pack(side="right", fill="y")
         self.canvas.pack(side="left", fill="both", expand=True)
-        self.canvas.bind("<Configure>", self._configure)
+        self.canvas.bind("<Configure>", self._on_canvas_configure)
         for event in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
             self.canvas.bind(event, self._mousewheel)
         self.bind("<Destroy>", self._destroy, add="+")
@@ -305,7 +305,7 @@ class _PooledList[T: _PooledRow](tk.Frame, ABC):
             self.canvas.delete(window)
             row.frame.destroy()
 
-    def _configure(self, _event=None) -> None:
+    def _on_canvas_configure(self, _event=None) -> None:
         self._schedule_refresh()
 
     def _schedule_refresh(self) -> None:

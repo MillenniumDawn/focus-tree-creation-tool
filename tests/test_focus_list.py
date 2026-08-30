@@ -199,6 +199,15 @@ def test_tk_list_reuses_bounded_pool_and_updates_only_selected_rows(tk_root) -> 
     assert focus_list.materialized_count == 1
 
 
+@pytest.mark.visible_tk
+def test_tk_list_configure_updates_frame_options(tk_root) -> None:
+    focus_list = VirtualFocusList(tk_root, on_select=lambda _key: None)
+
+    focus_list.configure(bg="#102030")
+
+    assert focus_list.cget("bg") == "#102030"
+
+
 def test_tk_list_reselecting_the_same_key_touches_no_rows(tk_root) -> None:
     focus_list = VirtualFocusList(tk_root, on_select=lambda _key: None)
     focus_list.pack(fill="both", expand=True)
