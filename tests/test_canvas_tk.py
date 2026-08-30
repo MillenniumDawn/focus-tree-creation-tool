@@ -138,6 +138,22 @@ def test_draw_key_updates_changed_icon(tk_root):
     assert cv.itemcget(icon_item, "text") == "X"
 
 
+def test_draw_focus_uses_localized_label_with_name_fallback(tk_root):
+    cv = tk.Canvas(tk_root, width=200, height=200)
+    app = _FakeApp(cv)
+    f = Focus(x=5, y=5)
+    f.name = "script_name"
+    f.loc_name = "Title"
+
+    app._draw_focus(f, FAR_RECT)
+    label_item = app._focus_bundles[f.id].items[11]
+    assert cv.itemcget(label_item, "text") == "Title"
+
+    f.loc_name = "  "
+    app._draw_focus(f, FAR_RECT)
+    assert cv.itemcget(label_item, "text") == "script_name"
+
+
 def test_retained_focus_bundles_are_bounded_by_visible_set(tk_root):
     cv = tk.Canvas(tk_root, width=200, height=200)
     app = _FakeApp(cv)
