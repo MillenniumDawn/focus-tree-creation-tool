@@ -74,6 +74,16 @@ def _collect_texts(win: tk.Misc) -> list[str]:
     return texts
 
 
+def _find_button(win: tk.Misc, needle: str) -> tk.Button | None:
+    stack: list[tk.Misc] = [win]
+    while stack:
+        cur = stack.pop()
+        if isinstance(cur, tk.Button) and needle in cur.cget("text"):
+            return cur
+        stack.extend(cur.winfo_children())  # type: ignore[union-attr]
+    return None
+
+
 def _stub_mod_app(root: tk.Tk, monkeypatch: pytest.MonkeyPatch) -> tk.Tk:
     """Add the handful of attrs the dialogs read off ``app``."""
     root._error_entries = []  # type: ignore[attr-defined]
@@ -279,22 +289,24 @@ def test_open_universal_gfx_browser_select_flow(tk_root, tmp_path, monkeypatch):
     assert wins, "browser did not open"
     win = wins[0]
     try:
-        # The folder list auto-selects the first folder; drive selection via
-        # the search entry or by invoking the internal select callback.
-        # For a deterministic check, verify the dialog at least shows the
-        # expected folder label and that the confirm path is wired: set the
-        # selected var indirectly by finding the status label and confirming
-        # the on_select is callable (the browser keeps selected_var as
-        # StringVar). We exercise the wiring by ensuring the dialog's
-        # "Select" button exists and is initially disabled (no selection).
-        texts = _collect_texts(win)
-        assert any("select a folder" in t.lower() for t in texts) or any(
-            "Add Folder" in t for t in texts
-        )
-        # No selection yet so callback not called; dialog construction itself
-        # is the regression guard. The deeper flow (grid selection) is
-        # covered by VirtualThumbnailGrid unit tests.
-        assert seen == []
+        from hoi4cm.ui.thumbnail_grid import VirtualThumbnailGrid
+
+        grids: list[VirtualThumbnailGrid] = []
+        stack: list[tk.Misc] = [win]
+        while stack:
+            cur = stack.pop()
+            if isinstance(cur, VirtualThumbnailGrid):
+                grids.append(cur)
+            stack.extend(cur.winfo_children())
+        assert len(grids) == 1
+        grid = grids[0]
+        grid.select(1)
+        select_button = _find_button(win, "Select")
+        assert select_button is not None
+        assert select_button.cget("state") == "normal"
+        select_button.invoke()
+        assert seen == [("GFX_beta", str(gfx_dir / "beta.png"))]
+        assert not win.winfo_exists()
     finally:
         _destroy_toplevels(wins, tk_root)
 
@@ -344,32 +356,15 @@ def test_open_gfx_placement_editor_confirm_flow(tk_root, tmp_path, monkeypatch):
     assert wins
     win = wins[0]
     try:
-        # Find the Confirm button (text varies but contains Confirm) and invoke
-        for txt in _collect_texts(win):
-            if "Confirm" in txt:
-                break
-        # Drive the confirm path by invoking the first button with Confirm text
-        stack: list[tk.Misc] = [win]
-        invoked = False
-        while stack:
-            cur = stack.pop()
-            if isinstance(cur, tk.Button):
-                try:
-                    if "Confirm" in cur.cget("text"):
-                        cur.invoke()
-                        invoked = True
-                        tk_root.update()
-                        break
-                except Exception:
-                    pass
-            try:
-                stack.extend(cur.winfo_children())  # type: ignore[union-attr]
-            except Exception:
-                pass
-        # Placement editor may keep dialog open if validation fails (missing
-        # file), so we just assert the button was found and wiring didn't
-        # crash; deeper validation is covered by headless exporter tests.
-        assert invoked
+        confirm_button = _find_button(win, "Confirm Placement")
+        assert confirm_button is not None
+        confirm_button.invoke()
+        tk_root.update()
+        assert len(confirmed) == 1
+        assert len(confirmed[0]) == 1
+        assert confirmed[0][0]["gfx_key"] == "GFX_test"
+        assert confirmed[0][0]["role"] == "icon"
+        assert not win.winfo_exists()
     finally:
         _destroy_toplevels(wins, tk_root)
 
@@ -448,8 +443,8 @@ def test_show_splash_constructs(tk_root, monkeypatch):
     tk_root.update()
 
 
-def test_show_splash_wrapper_logs_on_failure():
-    """Splash catches App-construction failures and logs them (headless path)."""
+def test_show_splash_wrapper_logs_on_failure(monkeypatch):
+    """The real splash callback wrapper logs failures without re-raising."""
     import logging
 
     import hoi4cm.ui.splash as splash_mod
@@ -462,23 +457,35 @@ def test_show_splash_wrapper_logs_on_failure():
         def emit(self, record: logging.LogRecord) -> None:
             self.messages.append(self.format(record))
 
+    class _FakeRoot(tk.Tk):  # type: ignore[type-arg]
+        def __init__(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+            super().__init__(*args, **kwargs)
+            self.withdraw()
+
+        def mainloop(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+            return None
+
+        def after(self, ms, func=None, *args):  # type: ignore[no-untyped-def]  # pylint: disable=keyword-arg-before-vararg
+            if func is not None:
+                func(*args)
+            return "after_id"
+
     handler = _Capture()
     splash_mod.log.addHandler(handler)
+    called: list[bool] = []
+
+    def bad() -> None:
+        called.append(True)
+        raise RuntimeError("boom from splash callback")
+
+    monkeypatch.setattr(splash_mod.tk, "Tk", _FakeRoot)
     try:
-
-        def bad() -> None:
-            raise RuntimeError("boom")
-
-        try:
-            bad()
-        except Exception:
-            splash_mod.log.exception(
-                "Splash: fatal exception during app construction "
-                "— check log for details"
-            )
+        splash_mod.show_splash(bad)
     finally:
         splash_mod.log.removeHandler(handler)
+    assert called == [True]
     assert any("fatal exception" in m for m in handler.messages)
+    assert any("boom from splash callback" in m for m in handler.messages)
 
 
 # ── mod_loading ──────────────────────────────────────────────────────────
@@ -528,10 +535,26 @@ def test_show_post_load_prompt_constructs(tk_root, tmp_path, monkeypatch):
         _destroy_toplevels(wins, tk_root)
 
 
-def test_load_mod_path_handles_missing_dir(tk_root, monkeypatch):
+def test_load_mod_path_removes_stale_recent_entry_and_saves_config(
+    tk_root, tmp_path, monkeypatch
+):
     _stub_mod_app(tk_root, monkeypatch)
     from hoi4cm.ui.mod_loading import ModLoadingMixin
 
-    monkeypatch.setattr("hoi4cm.ui.mod_loading.report_error", lambda *a, **kw: None)
-    ModLoadingMixin._load_mod_path(tk_root, "/tmp/does_not_exist_hoi4cm_test")  # type: ignore[arg-type]
+    missing = str(tmp_path / "removed-mod")
+    MOD._recent_mods = [missing, str(tmp_path / "still-valid")]  # type: ignore[attr-defined]
+    report_calls = []
+    save_config = MagicMock()
+    monkeypatch.setattr(
+        "hoi4cm.ui.mod_loading.report_error",
+        lambda *args, **kwargs: report_calls.append((args, kwargs)),
+    )
+    monkeypatch.setattr(MOD, "save_config", save_config)
+
+    ModLoadingMixin._load_mod_path(tk_root, missing)  # type: ignore[arg-type]
     tk_root.update()
+
+    assert report_calls
+    assert missing in str(report_calls[0])
+    assert MOD._recent_mods == [str(tmp_path / "still-valid")]  # type: ignore[attr-defined]
+    save_config.assert_called_once_with()
