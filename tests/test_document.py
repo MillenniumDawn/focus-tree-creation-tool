@@ -53,6 +53,19 @@ def _assert_indexes(document):
     assert document.validate_indexes()
 
 
+def test_link_prerequisite_and_mode_validation():
+    parent_a = _focus(1)
+    parent_b = _focus(2)
+    child = _focus(3)
+    document = FocusDocument((parent_a, parent_b, child))
+
+    document.link_prerequisite(child.id, (parent_a.id, parent_b.id), mode="and")
+
+    assert child.prereqs == [[parent_a.id], [parent_b.id]]
+    with pytest.raises(ValueError, match="mode must be 'or' or 'and'"):
+        document.link_prerequisite(child.id, (parent_a.id,), mode="invalid")
+
+
 def test_duplicate_name_lookup_has_explicit_first_and_last_policy():
     first = _focus(10, name="duplicate")
     last = _focus(20, name="duplicate")

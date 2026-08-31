@@ -197,24 +197,6 @@ class FocusDocument(MutableMapping[int, Focus]):
         self._changed()
         self.rebuild_indexes()
 
-    def link(
-        self,
-        kind: str,
-        source_id: int,
-        target_ids: Iterable[int],
-        *,
-        mode: str = "or",
-    ) -> None:
-        targets = list(target_ids)
-        if kind == "prerequisite":
-            self.link_prerequisite(source_id, targets, mode=mode)
-            return
-        if kind == "mutex":
-            for target_id in targets:
-                self.link_mutex(source_id, target_id)
-            return
-        raise ValueError("kind must be 'prerequisite' or 'mutex'")
-
     def unlink_prerequisite_group(self, child_id: int, group_index: int) -> None:
         self._focuses[child_id].prereqs.pop(group_index)
         self._changed()
