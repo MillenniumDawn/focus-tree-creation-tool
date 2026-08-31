@@ -51,6 +51,7 @@ from hoi4cm.wizards._shared import (
     _ev_imgsize_cache,
     notifying_workspace_files,
     open_effect_picker,
+    open_trigger_picker,
 )
 
 
@@ -857,6 +858,10 @@ def open_event_wizard(app):
     def _open_effect_picker(target_text):
         """Open the shared effect picker, wired to this wizard's preview."""
         open_effect_picker(win, target_text, on_insert=_schedule_preview)
+
+    def _open_trigger_picker(target_text):
+        """Open the shared trigger picker, wired to this wizard's preview."""
+        open_trigger_picker(win, target_text, on_insert=_schedule_preview)
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     # BUILD UI — all functions defined above, safe to reference them now
@@ -2805,6 +2810,20 @@ def open_event_wizard(app):
         )
     )
     t_trigger = _textbox("", height=3)
+    tk.Button(
+        F,
+        text=tr("trigger_picker.button", "+ Insert trigger"),
+        bg=BG_CARD,
+        fg=BLUE,
+        relief="flat",
+        font=("Helvetica", 8),
+        cursor="hand2",
+        padx=6,
+        pady=1,
+        highlightthickness=1,
+        highlightbackground=BORDER,
+        command=lambda: _open_trigger_picker(t_trigger),
+    ).pack(anchor="e", padx=8, pady=(0, 2))
     _hsep()
     imm_hdr = tk.Frame(F, bg=BG_PANEL)
     imm_hdr.pack(fill="x", padx=8, pady=(4, 0))

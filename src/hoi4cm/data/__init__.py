@@ -12,6 +12,7 @@ from .effects import (
     md_resource_cost_hint,
     modifiers_in_cat,
 )
+from .triggers import TRIGGER_CATS, TRIGGER_DEFS, triggers_in_cat
 
 __all__ = [
     "EFFECT_DEFS",
@@ -24,4 +25,7 @@ __all__ = [
     "MD_RESOURCE_COST_PER_UNIT",
     "md_building_cost_hint",
     "md_resource_cost_hint",
+    "TRIGGER_DEFS",
+    "TRIGGER_CATS",
+    "triggers_in_cat",
 ]

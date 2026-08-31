@@ -7,10 +7,13 @@ from hoi4cm.data import (
     MD_RESOURCE_COST_PER_UNIT,
     MODIFIER_CATS,
     MODIFIER_DEFS,
+    TRIGGER_CATS,
+    TRIGGER_DEFS,
     effects_in_cat,
     md_building_cost_hint,
     md_resource_cost_hint,
     modifiers_in_cat,
+    triggers_in_cat,
 )
 from hoi4cm.focus_tree import (
     BuildContext,
@@ -88,6 +91,8 @@ __all__ = [
     "MD_RESOURCE_COST_PER_UNIT",
     "MODIFIER_CATS",
     "MODIFIER_DEFS",
+    "TRIGGER_CATS",
+    "TRIGGER_DEFS",
     "ParsedFocusTree",
     "UndoStack",
     "add_error",
@@ -135,4 +140,5 @@ __all__ = [
     "set_language",
     "show_splash",
     "tr",
+    "triggers_in_cat",
 ]

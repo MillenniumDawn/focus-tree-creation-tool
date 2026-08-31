@@ -43,6 +43,7 @@ from hoi4cm.wizards._graphics import browser_folders, collect_image_pairs
 from hoi4cm.wizards._image_loader import TkImageLoader
 from hoi4cm.wizards._shared import (
     notifying_workspace_files,
+    open_trigger_picker,
     svar_get,
     text_get,
 )
@@ -633,6 +634,20 @@ def open_dyn_mod_wizard(app):
         wrap="none",
     )
     v_enable.pack(fill="x", padx=12, pady=2)
+    tk.Button(
+        frm,
+        text=tr("trigger_picker.button", "+ Insert trigger"),
+        command=lambda: open_trigger_picker(win, v_enable, on_insert=_preview),
+        bg=BG_CARD,
+        fg=BLUE,
+        relief="flat",
+        font=("Helvetica", 8),
+        cursor="hand2",
+        padx=6,
+        pady=1,
+        highlightthickness=1,
+        highlightbackground=BORDER_G,
+    ).pack(anchor="e", padx=12, pady=(0, 2))
 
     sep()
     lbl(

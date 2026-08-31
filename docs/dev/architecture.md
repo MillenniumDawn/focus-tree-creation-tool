@@ -10,8 +10,8 @@
   caches. Re-exported flat through `core/__init__.py` (the "facade", see
   below). Everything else in the package can depend on `core`; core submodules
   other than the facade depend on nothing else in `hoi4cm`.
-- **`data/`**: static tables: `EFFECT_DEFS`/`MODIFIER_DEFS` and the MD
-  building/resource cost tables. No logic beyond lookup helpers.
+- **`data/`**: static tables: `EFFECT_DEFS`/`MODIFIER_DEFS`/`TRIGGER_DEFS` and
+  the MD building/resource cost tables. No logic beyond lookup helpers.
 - **`models/`**: `Focus`, the plain-data class behind every canvas item.
   `to_dict`/`from_dict` for JSON round-trips (autosave, tree files).
 - **`script/`**: low-level HOI4 script marshalling: `dict_to_raw`,
@@ -37,7 +37,8 @@
   below).
 - **`wizards/`**: the five `open_*_wizard(app)` entry points (decision,
   event, national spirit, dynamic modifier, additional income) plus
-  `_shared.py` for cross-wizard state. The package `__init__` resolves the
+  `_shared.py` for cross-wizard state, including shared effect/trigger pickers.
+  The package `__init__` resolves the
   five names through a module-level `__getattr__`, so importing one wizard
   doesn't load the other four; keep it that way when adding a sixth. See
   `wizards.md`.
