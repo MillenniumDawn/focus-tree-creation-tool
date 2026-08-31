@@ -177,6 +177,33 @@ def test_confirm_discard_no_dirty_returns_true_without_prompt(monkeypatch):
     assert called == []
 
 
+def test_confirm_discard_fingerprint_error_prompts(monkeypatch):
+    app = _fake_app()
+    app._workspace_fingerprint = lambda: (_ for _ in ()).throw(
+        RuntimeError("fingerprint failed")
+    )
+    called = []
+    monkeypatch.setattr(
+        m.messagebox, "askyesnocancel", lambda *a, **kw: called.append(1) or False
+    )
+    assert app._is_dirty() is True
+    assert app._confirm_discard("loading") is True
+    assert called == [1]
+
+
+def test_mark_clean_fingerprint_error_reports(monkeypatch):
+    app = _fake_app()
+    app._workspace_fingerprint = lambda: (_ for _ in ()).throw(
+        RuntimeError("fingerprint failed")
+    )
+    errors = []
+    monkeypatch.setattr(m, "add_error", errors.append)
+
+    app._mark_clean()
+
+    assert errors == ["Failed to update workspace fingerprint: fingerprint failed"]
+
+
 def test_confirm_discard_dirty_cancel_returns_false(monkeypatch):
     app = _fake_app()
     app.focuses.add(Focus(0, 0))

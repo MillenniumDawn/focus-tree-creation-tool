@@ -350,13 +350,14 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
                 self, "_saved_fingerprint", None
             )
         except Exception:
-            return False
+            return True
 
     def _mark_clean(self) -> None:
         self._saved_revision = self.focuses.revision
         try:
             self._saved_fingerprint = self._workspace_fingerprint()
-        except Exception:
+        except Exception as e:
+            add_error(f"Failed to update workspace fingerprint: {e}")
             self._saved_fingerprint = None
         self._update_title()
 
@@ -5413,14 +5414,11 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             log.error("project save failed: %s", e, exc_info=True)
             report_write_failure(self, path, e)
             return False
-        try:
-            self._last_project_path = path
-        except Exception:
-            pass
+        self._last_project_path = path
         try:
             self._mark_clean()
-        except Exception:
-            pass
+        except Exception as e:
+            add_error(f"Failed to mark workspace clean: {e}")
         try:
             clear_workspace_autosave()
         except Exception:
@@ -5496,14 +5494,11 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         self._grid_key = None
         self._grid_img = None
         self._install_workspace(workspace)
-        try:
-            self._last_project_path = path
-        except Exception:
-            pass
+        self._last_project_path = path
         try:
             self._mark_clean()
-        except Exception:
-            pass
+        except Exception as e:
+            add_error(f"Failed to mark workspace clean: {e}")
         try:
             clear_workspace_autosave()
         except Exception:
