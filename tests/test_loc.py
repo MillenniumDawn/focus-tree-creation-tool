@@ -18,6 +18,7 @@ def test_missing_file_gets_header_and_all_keys():
     focuses = [_focus("TST_alpha")]
     text, count = build_loc_yml(None, focuses, "TST")
     assert count == 2
+    assert text is not None
     assert text.startswith("l_english:\n")
     assert "##########Focuses - TST##########" in text
     assert ' TST_alpha: "Tst Alpha"\n' in text
@@ -27,6 +28,7 @@ def test_missing_file_gets_header_and_all_keys():
 def test_desc_falls_back_to_generated_sentence_when_blank():
     focuses = [_focus("TST_alpha", desc="")]
     text, _count = build_loc_yml(None, focuses, "TST")
+    assert text is not None
     assert ' TST_alpha_desc: "Complete the Tst Alpha national focus."\n' in text
 
 
@@ -51,6 +53,7 @@ def test_blank_localized_name_uses_title_case_fallback():
 def test_desc_uses_focus_desc_when_present():
     focuses = [_focus("TST_alpha", desc="Do the thing.")]
     text, _count = build_loc_yml(None, focuses, "TST")
+    assert text is not None
     assert ' TST_alpha_desc: "Do the thing."\n' in text
 
 
@@ -59,6 +62,7 @@ def test_existing_file_without_header_appends_and_adds_header():
     focuses = [_focus("TST_alpha")]
     text, count = build_loc_yml(existing, focuses, "TST")
     assert count == 2
+    assert text is not None
     assert text.startswith(existing)
     assert "##########Focuses - TST##########" in text
     assert ' TST_alpha: "Tst Alpha"\n' in text
@@ -73,6 +77,7 @@ def test_existing_header_is_not_duplicated():
     # TST_alpha (title) and TST_alpha_desc are still missing? No: TST_alpha
     # key is present, so only the _desc key plus all of TST_beta's keys are new.
     assert count == 3
+    assert text is not None
     assert text.count("##########Focuses - TST##########") == 1
 
 
@@ -95,6 +100,7 @@ def test_existing_desc_is_rewritten_when_focus_desc_changes():
     focuses = [_focus("TST_alpha", desc="New description.")]
     text, count = build_loc_yml(existing, focuses, "TST")
     assert count == 1
+    assert text is not None
     assert ' TST_alpha_desc: "New description."\n' in text
     assert "Old description." not in text
     assert ' TST_alpha: "Tst Alpha"\n' in text
@@ -155,6 +161,7 @@ def test_rewritten_desc_value_with_quote_is_escaped():
     focuses = [_focus("TST_alpha", desc='Say "hello".')]
     text, count = build_loc_yml(existing, focuses, "TST")
     assert count == 1
+    assert text is not None
     assert ' TST_alpha_desc: "Say \\"hello\\"."\n' in text
 
 
@@ -165,6 +172,7 @@ def test_rewritten_desc_preserves_pluralization_suffix():
     focuses = [_focus("TST_alpha", desc="New description.")]
     text, count = build_loc_yml(existing, focuses, "TST")
     assert count == 1
+    assert text is not None
     assert ' TST_alpha_desc:0 "New description."\n' in text
 
 
@@ -178,6 +186,7 @@ def test_rewrite_and_add_combine_in_one_pass():
     ]
     text, count = build_loc_yml(existing, focuses, "TST")
     assert count == 3
+    assert text is not None
     assert ' TST_alpha_desc: "New description."\n' in text
     assert ' TST_beta: "Tst Beta"\n' in text
     assert ' TST_beta_desc: "Complete the Tst Beta national focus."\n' in text
@@ -190,20 +199,31 @@ def test_existing_key_detection_handles_pluralization_suffix():
     text, count = build_loc_yml(existing, focuses, "TST")
     # The name key is detected as already present; only _desc is new.
     assert count == 1
+    assert text is not None
     assert "TST_alpha_desc" in text
 
 
-def test_empty_but_existing_file_does_not_get_header_line():
-    """A present-but-empty file is appended to, not re-created with a header."""
+def test_empty_but_existing_file_gets_header_line():
+    """A present-but-empty file gets the language header before new entries."""
     focuses = [_focus("TST_alpha")]
     text, _count = build_loc_yml("", focuses, "TST")
-    assert not text.startswith("l_english:")
+    assert text is not None
+    assert text.startswith("l_english:\n")
     assert "##########Focuses - TST##########" in text
+
+
+def test_existing_content_without_language_header_gets_one():
+    existing = ' TST_other: "Something Else"\n'
+    text, _count = build_loc_yml(existing, [_focus("TST_alpha")], "TST")
+    assert text is not None
+    assert text.startswith("l_english:\n")
+    assert ' TST_other: "Something Else"\n' in text
 
 
 def test_custom_language_header_for_fresh_file():
     focuses = [_focus("TST_alpha")]
     text, _count = build_loc_yml(None, focuses, "TST", language="french")
+    assert text is not None
     assert text.startswith("l_french:\n")
 
 
@@ -247,11 +267,13 @@ def test_loc_target_invalid_language_falls_back_to_english():
 def test_name_title_cased_with_underscores_replaced():
     focuses = [_focus("TST_some_focus_name")]
     text, _count = build_loc_yml(None, focuses, "TST")
+    assert text is not None
     assert ' TST_some_focus_name: "Tst Some Focus Name"\n' in text
 
 
 def test_values_are_escaped():
     text, _count = build_loc_yml(None, [_focus("TST_alpha", 'Say "hello"\\now')], "TST")
+    assert text is not None
     assert ' TST_alpha_desc: "Say \\"hello\\"\\\\now"\n' in text
 
 
@@ -280,4 +302,5 @@ def test_hydrate_focus_localization_leaves_missing_values_untouched():
 
 def test_existing_content_without_newline_gets_separator():
     text, _count = build_loc_yml("l_english:", [_focus("TST_alpha")], "TST")
+    assert text is not None
     assert text.startswith("l_english:\n")

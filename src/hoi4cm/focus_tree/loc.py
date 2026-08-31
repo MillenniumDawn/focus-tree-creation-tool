@@ -95,11 +95,9 @@ def build_loc_yml(existing_text, focuses, country_tag, *, language="english"):
     """Return ``(new_text, changed_count)`` for the focus-tree loc .yml.
 
     ``existing_text`` is the current file contents, or ``None`` if the file
-    doesn't exist yet (distinct from an existing-but-empty file, which still
-    gets appended to rather than re-headered). ``focuses`` contributes a
-    localized or title-cased name key and a ``_desc`` key per focus (falling
-    back to a generated sentence when the focus has no ``desc``). ``country_tag``
-    names the section header.
+    doesn't exist yet. ``focuses`` contributes a localized or title-cased name
+    key and a ``_desc`` key per focus (falling back to a generated sentence
+    when the focus has no ``desc``). ``country_tag`` names the section header.
 
     A missing key is appended. Existing title and ``_desc`` keys are rewritten
     in place when their non-empty focus values differ from the value already
@@ -136,7 +134,9 @@ def build_loc_yml(existing_text, focuses, country_tag, *, language="english"):
         return None, 0
 
     target = LocTarget(language)
-    base = existing_text if existing_text is not None else target.header() + "\n"
+    base = existing_text if existing_text is not None else ""
+    if target.header() not in base:
+        base = target.header() + "\n" + base
     if base and not base.endswith("\n"):
         base += "\n"
 

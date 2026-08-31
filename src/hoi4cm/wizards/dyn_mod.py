@@ -1159,6 +1159,8 @@ def open_dyn_mod_wizard(app):
                 content = read_file(loc_path)
             except OSError, ValueError, UnicodeDecodeError:
                 continue
+            if not content:
+                continue
             for m in re.finditer(
                 r'^\s+(\S+?)(?::\d+)?\s*[=:]?\s*"', content, re.MULTILINE
             ):

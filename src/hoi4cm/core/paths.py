@@ -21,12 +21,11 @@ def default_hoi4_mod_dir():
     return os.path.join(os.path.expanduser("~"), "Documents", base)
 
 
-def read_file(path, max_bytes=MAX_READ_BYTES):
-    """Read *path* as text, trying several encodings. Returns "" if unreadable.
+def read_file(path: str, max_bytes: int | None = MAX_READ_BYTES) -> str | None:
+    """Read *path* as text, trying several encodings.
 
-    Files larger than *max_bytes* (or streaming pseudo-files like ``/dev/zero``)
-    are skipped and logged rather than read into memory. Pass ``max_bytes=None``
-    to disable the cap.
+    Missing files return ``""``. Files that cannot be read or exceed
+    *max_bytes* return ``None``. Pass ``max_bytes=None`` to disable the cap.
     """
     try:
         size = os.path.getsize(path)
@@ -34,7 +33,7 @@ def read_file(path, max_bytes=MAX_READ_BYTES):
         size = None
     if max_bytes is not None and size is not None and size > max_bytes:
         _log.warning("skipping oversize file (%d bytes): %s", size, path)
-        return ""
+        return None
     for enc in ("utf-8-sig", "utf-8", "latin-1"):
         try:
             with open(path, encoding=enc, errors="strict") as f:
@@ -43,11 +42,13 @@ def read_file(path, max_bytes=MAX_READ_BYTES):
                 data = f.read(max_bytes + 1)
                 if len(data) > max_bytes:
                     _log.warning("skipping oversize/streaming file: %s", path)
-                    return ""
+                    return None
                 return data
+        except FileNotFoundError:
+            return ""
         except OSError, ValueError, UnicodeDecodeError:
             pass
-    return ""
+    return None
 
 
 def autosave_path(name):

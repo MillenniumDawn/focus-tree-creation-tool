@@ -4520,7 +4520,10 @@ def open_decision_wizard(app):
         for path in paths:
             if path.lower().endswith(".yml"):
                 try:
-                    for line in read_file(path).splitlines():
+                    content = read_file(path)
+                    if not content:
+                        continue
+                    for line in content.splitlines():
                         lm = _re.match(r'\s+([\w]+):(?:\d+)?\s+"(.*?)"', line)
                         if lm:
                             loc[lm.group(1)] = lm.group(2)
@@ -4537,7 +4540,10 @@ def open_decision_wizard(app):
                 if os.path.isdir(loc_dir):
                     for loc_path in find_loc_files(folder, language=MOD.loc_language):
                         try:
-                            for line in read_file(loc_path).splitlines():
+                            content = read_file(loc_path)
+                            if not content:
+                                continue
+                            for line in content.splitlines():
                                 lm = _re.match(r'\s+([\w]+):(?:\d+)?\s+"(.*?)"', line)
                                 if lm:
                                     loc[lm.group(1)] = lm.group(2)

@@ -101,7 +101,7 @@ def make_extra_export_plan(
 def render_export_plan(
     plan: ExportPlan,
     *,
-    read_text: Callable[[str], str] = read_file,
+    read_text: Callable[[str], str | None] = read_file,
     is_file: Callable[[str], bool] = os.path.isfile,
 ) -> tuple[tuple[WriteEntry, ...], int]:
     """Render a plan into the atomic write group it needs."""
@@ -112,17 +112,24 @@ def render_export_plan(
             focus_lookup=plan.focus_lookup,
             focus_name_lookup=plan.focus_name_lookup,
         )
-        existing_loc_text = (
-            read_text(plan.loc_path)
-            if plan.loc_path is not None and is_file(plan.loc_path)
-            else None
-        )
-        new_loc_text, added_count = build_loc_yml(
-            existing_loc_text,
-            plan.focuses,
-            str(plan.tree_info["country_tag"]),
-            language=plan.loc_language,
-        )
+        if plan.loc_path is not None and is_file(plan.loc_path):
+            existing_loc_text = read_text(plan.loc_path)
+            if existing_loc_text is None:
+                new_loc_text, added_count = None, 0
+            else:
+                new_loc_text, added_count = build_loc_yml(
+                    existing_loc_text,
+                    plan.focuses,
+                    str(plan.tree_info["country_tag"]),
+                    language=plan.loc_language,
+                )
+        else:
+            new_loc_text, added_count = build_loc_yml(
+                None,
+                plan.focuses,
+                str(plan.tree_info["country_tag"]),
+                language=plan.loc_language,
+            )
         writes = [(plan.focus_path, out_text, "utf-8")]
         if new_loc_text is not None and plan.loc_path is not None:
             writes.append((plan.loc_path, new_loc_text, "utf-8-sig"))
@@ -142,7 +149,7 @@ def execute_export_plans(
     write_texts: WriteTexts,
     *,
     progress: ProgressCallback | None = None,
-    read_text: Callable[[str], str] = read_file,
+    read_text: Callable[[str], str | None] = read_file,
     is_file: Callable[[str], bool] = os.path.isfile,
 ) -> list[ExportResult]:
     """Render and write each plan, continuing after individual failures."""
