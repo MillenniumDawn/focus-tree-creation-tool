@@ -116,6 +116,28 @@ def test_export_writes_both_tracked_files(dialogs, mod_files):
     assert dialogs.error == []
 
 
+def test_default_localisation_filename_is_generic(mod_files, monkeypatch):
+    MOD = m.MOD
+    MOD.edit_focus_file = ""
+    MOD.edit_loc_file = ""
+    focus_path = mod_files.root / "common" / "national_focus" / "05_TST.txt"
+    monkeypatch.setattr(
+        m.filedialog,
+        "asksaveasfilename",
+        lambda **_kwargs: str(focus_path),
+    )
+
+    app = _App([_focus("TST_root")])
+    focuses = list(app.focuses.values())
+    names = {focus.name: focus for focus in focuses}
+    plan = m.App._make_main_export_plan.__get__(app, _App)(
+        focuses, app.focuses, names, show_dialog=False
+    )
+
+    assert plan is not None
+    assert plan.loc_path.endswith("TST_focus_l_english.yml")
+
+
 def test_failed_export_leaves_the_tracked_files_untouched(
     dialogs, mod_files, monkeypatch
 ):

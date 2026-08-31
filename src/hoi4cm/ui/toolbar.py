@@ -4,6 +4,7 @@
 import tkinter as tk
 
 from hoi4cm.core.i18n import tr
+from hoi4cm.mod import MOD
 from hoi4cm.ui.theme import BG_CARD, BLUE, BORDER_G, ORANGE, TEXT, TEXT_DIM
 from hoi4cm.ui.widgets import Tooltip
 
@@ -16,7 +17,9 @@ def build_toolbar_row2(app, toolbar):
     row2.pack_propagate(False)
 
     def _tb_sep():
-        tk.Frame(row2, bg=BORDER_G, width=1, height=20).pack(side="left", padx=5)
+        separator = tk.Frame(row2, bg=BORDER_G, width=1, height=20)
+        separator.pack(side="left", padx=5)
+        return separator
 
     def _tb_lbl(t):
         tk.Label(
@@ -107,7 +110,7 @@ def build_toolbar_row2(app, toolbar):
         BG_CARD,
         tr("toolbar.events.tip", "Event Maker wizard."),
     )
-    _tb_btn(
+    app._additional_income_btn = _tb_btn(
         tr("toolbar.add_income", "Add Income"),
         app._additional_income_wizard,
         "#4ade80",
@@ -117,7 +120,9 @@ def build_toolbar_row2(app, toolbar):
             "MD Additional Income Wizard - creates/links a spirit and wires up all money system files automatically.",
         ),
     )
-    _tb_sep()
+    app._additional_income_separator = _tb_sep()
+    if not MOD.is_md:
+        app._additional_income_btn.pack_forget()
     _tb_lbl(tr("toolbar.section.select", "Select"))
     app._msel_btn = _tb_btn(
         tr("toolbar.multi", "Multi"),

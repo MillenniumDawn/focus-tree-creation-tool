@@ -114,8 +114,8 @@ from hoi4cm.ui import (
     TEXT_DIM,
     YELLOW,
     ApplicationLifecycle,
-    TutorialController,
     Tooltip,
+    TutorialController,
     _safe_after,
     make_progress,
     progress_modal,
@@ -5234,7 +5234,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             loc_path = MOD.edit_loc_file
         else:
             loc_target = MOD.loc_target
-            loc_filename = loc_target.filename(f"MD_focus_{country_tag}")
+            loc_filename = loc_target.filename(f"{country_tag}_focus")
             saved_dir = os.path.dirname(os.path.abspath(path))
             mod_root = MOD.root if MOD.root and os.path.isdir(MOD.root) else None
             if mod_root is None:
@@ -5582,6 +5582,17 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             EFFECT_CATS[:] = base_cats + sorted(md_cats)
         else:
             EFFECT_CATS[:] = base_cats
+        income_btn = getattr(self, "_additional_income_btn", None)
+        if income_btn is not None:
+            if MOD.is_md:
+                if income_btn.winfo_manager() != "pack":
+                    separator = getattr(self, "_additional_income_separator", None)
+                    pack_options = {"side": "left", "padx": 2, "pady": 3}
+                    if separator is not None:
+                        pack_options["before"] = separator
+                    income_btn.pack(**pack_options)
+            else:
+                income_btn.pack_forget()
 
     def _open_settings(self):
         """Settings panel — GFX paths, MD detection, extra dirs."""
@@ -5589,6 +5600,8 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
 
     def _additional_income_wizard(self):
         """Open the MD Additional Income wizard."""
+        if not MOD.is_md:
+            return
         from hoi4cm.wizards import open_additional_income_wizard
 
         open_additional_income_wizard(self)

@@ -61,6 +61,8 @@ def collect_additional_income_state(svars):
 
 def open_additional_income_wizard(app):
     """MD Additional Income Wizard — creates/links a spirit and wires up all 3 money system files."""
+    if not MOD.is_md:
+        return
     win = tk.Toplevel(app)
     win.title(tr("wizard.additional_income.title", "MD Additional Income Wizard"))
     win.configure(bg=BG_DARK)

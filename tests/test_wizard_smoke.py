@@ -85,6 +85,8 @@ def _open_and_assert(
     monkeypatch.setattr("tkinter.messagebox.showerror", lambda *a, **kw: None)
     monkeypatch.setattr("tkinter.messagebox.askyesno", lambda *a, **kw: False)
 
+    if opener_name == "open_additional_income_wizard":
+        MOD.is_md = True
     before: set[tk.Misc] = set(tk_root.winfo_children())
     opener = getattr(mod, opener_name)
     opener(tk_root)

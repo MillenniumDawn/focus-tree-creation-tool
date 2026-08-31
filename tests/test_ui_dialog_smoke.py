@@ -230,8 +230,46 @@ def test_build_toolbar_row2_constructs(tk_root, monkeypatch):
     texts = _collect_texts(toolbar)
     assert any("Prereq" in t for t in texts)
     assert any("Ideas" in t for t in texts)
+    assert tk_root._additional_income_btn.winfo_manager() == ""  # type: ignore[attr-defined]
     toolbar.destroy()
     tk_root.update()
+
+
+def test_md_toolbar_and_wizard_follow_mode_changes(tk_root, monkeypatch):
+    _make_fake_app_for_chrome(tk_root, monkeypatch)
+    import hoi4_content_maker as main_mod
+    from hoi4cm.core import EFFECT_CATS
+    from hoi4cm.ui.toolbar import build_toolbar_row2
+
+    toolbar = tk.Frame(tk_root)
+    toolbar.pack()
+    original_categories = list(EFFECT_CATS)
+    try:
+        build_toolbar_row2(tk_root, toolbar)
+        button = tk_root._additional_income_btn  # type: ignore[attr-defined]
+        apply_visibility = main_mod.App._apply_md_visibility.__get__(tk_root)
+
+        MOD.is_md = True
+        apply_visibility()
+        assert button.winfo_manager() == "pack"
+        MOD.is_md = False
+        apply_visibility()
+        assert button.winfo_manager() == ""
+
+        opened = []
+        monkeypatch.setattr(
+            "hoi4cm.wizards.open_additional_income_wizard",
+            lambda app: opened.append(app),
+        )
+        tk_root._additional_income_wizard = (  # type: ignore[attr-defined]
+            main_mod.App._additional_income_wizard.__get__(tk_root)
+        )
+        tk_root._additional_income_wizard()  # type: ignore[attr-defined]
+        assert opened == []
+    finally:
+        EFFECT_CATS[:] = original_categories
+        toolbar.destroy()
+        tk_root.update()
 
 
 # ── GFX browsers ─────────────────────────────────────────────────────────
