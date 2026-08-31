@@ -97,6 +97,15 @@ def test_main_plan_snapshots_non_english_localisation_header(tmp_path):
     assert calls[0][1][1].startswith("l_french:\n")
 
 
+def test_main_plan_exports_german_localisation_header(tmp_path):
+    plan = _main_plan(tmp_path, loc_language="german")
+    calls = []
+
+    execute_export_plans([plan], lambda entries: calls.append(tuple(entries)))
+
+    assert calls[0][1][1].startswith("l_german:\n")
+
+
 def test_batch_continues_after_one_plan_fails(tmp_path):
     first = _extra_plan(tmp_path, "TST_first")
     second = _extra_plan(tmp_path, "TST_second")

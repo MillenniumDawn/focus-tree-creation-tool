@@ -27,6 +27,7 @@ _log = get_logger("i18n")
 I18N_LANGS = {
     "en": "English",
     "zh_CN": "简体中文",
+    "de": "Deutsch",
 }
 I18N_LANG = None
 I18N_STRINGS: dict[str, str] = {}
