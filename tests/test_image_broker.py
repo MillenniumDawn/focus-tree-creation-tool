@@ -1,13 +1,24 @@
 from __future__ import annotations
 
+import logging
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
+from hoi4cm.core.logger import get_logger
 from hoi4cm.mod.graphics_catalog import AssetRef, FileStamp
 from hoi4cm.ui.image_broker import ImageBroker, ImageTransform
+
+
+class _RecordHandler(logging.Handler):
+    def __init__(self) -> None:
+        super().__init__(level=logging.ERROR)
+        self.records: list[logging.LogRecord] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self.records.append(record)
 
 
 def _asset(*, generation: int = 1, stamp: int = 1) -> AssetRef:
@@ -219,6 +230,9 @@ def test_zero_stamp_cache_misses_after_generation_change() -> None:
 
 
 def test_release_cancels_queued_decode() -> None:
+    logger = get_logger("image_broker")
+    handler = _RecordHandler()
+    logger.addHandler(handler)
     started = threading.Event()
     unblock = threading.Event()
     calls = []
@@ -230,26 +244,33 @@ def test_release_cancels_queued_decode() -> None:
             unblock.wait(timeout=2)
         return object()
 
-    with ThreadPoolExecutor(max_workers=1) as executor:
-        broker = ImageBroker(
-            executor,
-            generation=lambda: 1,
-            decoder=decode,
-            realizer=lambda image: image,
-            pillow_available=True,
-        )
-        broker.request(
-            _asset(), "/tmp/first.png", owner="first", callback=lambda _: None
-        )
-        assert started.wait(timeout=2)
-        broker.request(
-            _asset(stamp=2), "/tmp/second.png", owner="second", callback=lambda _: None
-        )
-        broker.release("second")
-        unblock.set()
-        _drain_when_ready(broker)
+    try:
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            broker = ImageBroker(
+                executor,
+                generation=lambda: 1,
+                decoder=decode,
+                realizer=lambda image: image,
+                pillow_available=True,
+            )
+            broker.request(
+                _asset(), "/tmp/first.png", owner="first", callback=lambda _: None
+            )
+            assert started.wait(timeout=2)
+            broker.request(
+                _asset(stamp=2),
+                "/tmp/second.png",
+                owner="second",
+                callback=lambda _: None,
+            )
+            broker.release("second")
+            unblock.set()
+            _drain_when_ready(broker)
 
-    assert calls == ["/tmp/first.png"]
+        assert calls == ["/tmp/first.png"]
+        assert not handler.records
+    finally:
+        logger.removeHandler(handler)
 
 
 def test_failed_decode_delivers_none_to_subscribers() -> None:
@@ -343,6 +364,7 @@ def test_cache_and_pins_are_bounded() -> None:
 def test_missing_pillow_does_not_submit_or_realize() -> None:
     decoded = []
     realized = []
+    delivered: list[object] = []
     with ThreadPoolExecutor(max_workers=1) as executor:
         broker = ImageBroker(
             executor,
@@ -352,12 +374,14 @@ def test_missing_pillow_does_not_submit_or_realize() -> None:
             pillow_available=False,
         )
         result = broker.request(
-            _asset(), "/tmp/icon.png", owner=1, callback=lambda _: None
+            _asset(), "/tmp/icon.png", owner=1, callback=delivered.append
         )
+        _drain_when_ready(broker)
 
     assert result is None
     assert decoded == []
     assert realized == []
+    assert delivered == [None]
 
 
 def test_close_drops_inflight_owner_callback_without_waiting() -> None:

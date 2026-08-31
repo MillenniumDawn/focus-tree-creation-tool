@@ -189,6 +189,10 @@ class ImageBroker:
             self._forget_request_locked(owner)
             if not self._pillow_available:
                 self._cache_locked(key, None)
+                pending = self._pending.setdefault(key, _Pending({}))
+                pending.subscribers[owner] = _Subscriber(asset.generation, callback)
+                self._owner_requests[owner] = key
+                self._completed.put((key, None, True))
                 return None
 
             pending = self._pending.get(key)
@@ -266,6 +270,8 @@ class ImageBroker:
             return None
 
     def _queue_result(self, key: _ImageKey, future: Future[object | None]) -> None:
+        if future.cancelled():
+            return
         try:
             decoded = future.result()
         except OSError, ValueError, RuntimeError, AttributeError, TypeError:
