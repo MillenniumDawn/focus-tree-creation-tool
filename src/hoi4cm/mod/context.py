@@ -1,9 +1,10 @@
 """The ``ModContext`` class — mod asset discovery and image loading.
 
 When a mod is loaded, the context walks the mod's directory tree once,
-indexes GFX sprites, idea/decision/event IDs, character IDs, dynamic
-modifiers, country tags, and MD money-system file paths. The App and every
-wizard read from this single instance (``MOD``).
+indexes GFX sprites, idea/decision/event IDs, character IDs, scripted effects
+and triggers, on-action hooks, dynamic modifiers, country tags, and MD
+money-system file paths. The App and every wizard read from this single
+instance (``MOD``).
 
 The scanner is pure-Python: no tkinter. The image loader uses Pillow when
 available; without it ``get_image`` returns ``None`` and the rest of the
@@ -128,6 +129,9 @@ class ModContext:
         self.idea_ids = []  # all idea/spirit IDs
         self.decision_ids = []  # all decision IDs
         self.decision_cats = []  # all decision category IDs
+        self.scripted_effect_ids = []  # common/scripted_effects/*
+        self.scripted_trigger_ids = []  # common/scripted_triggers/*
+        self.on_action_ids = []  # common/on_actions/* hook names
         self.dyn_mod_ids = []  # common/dynamic_modifiers/*
         self.character_ids = []  # all character IDs
         self.country_tags = []  # TAG list
@@ -437,6 +441,44 @@ class ModContext:
         return [m.group(1) for m in _BLOCK_RE.finditer(src)]
 
     @staticmethod
+    def _extract_scripted_names(src):
+        parsed = ModContext._parse_text(src)
+        return [
+            name
+            for name, value in parsed.items()
+            if isinstance(name, str)
+            and name != "_values"
+            and isinstance(value, (dict, list))
+        ]
+
+    @staticmethod
+    def _extract_on_actions(src):
+        parsed = ModContext._parse_text(src)
+        if "on_actions" in parsed:
+            blocks = parsed["on_actions"]
+            if isinstance(blocks, dict):
+                blocks = (blocks,)
+            elif isinstance(blocks, list):
+                blocks = tuple(block for block in blocks if isinstance(block, dict))
+            else:
+                blocks = ()
+            return [
+                name
+                for block in blocks
+                for name, value in block.items()
+                if isinstance(name, str)
+                and name != "_values"
+                and isinstance(value, (dict, list))
+            ]
+        return [
+            name
+            for name, value in parsed.items()
+            if isinstance(name, str)
+            and name != "_values"
+            and isinstance(value, (dict, list))
+        ]
+
+    @staticmethod
     def _extract_tags(src):
         return [m.group(1) for m in _TAG_RE.finditer(src)]
 
@@ -538,6 +580,58 @@ class ModContext:
                 cats_seen[cid] = None
         self.decision_ids = list(ids_seen)
         self.decision_cats = list(cats_seen)
+
+    def _scan_scripted_effects(self):
+        self.scripted_effect_ids.clear()
+        root = self.root
+        if not root:
+            return
+        d = os.path.join(root, "common", "scripted_effects")
+        if not os.path.isdir(d):
+            return
+        paths = self._txt_paths(d)
+        results = self._scan_files_cached(
+            "scripted_effects", paths, self._extract_scripted_names
+        )
+        seen = {}
+        for p in paths:
+            for effect_id in results[p]:
+                seen[effect_id] = None
+        self.scripted_effect_ids = list(seen)
+
+    def _scan_scripted_triggers(self):
+        self.scripted_trigger_ids.clear()
+        root = self.root
+        if not root:
+            return
+        d = os.path.join(root, "common", "scripted_triggers")
+        if not os.path.isdir(d):
+            return
+        paths = self._txt_paths(d)
+        results = self._scan_files_cached(
+            "scripted_triggers", paths, self._extract_scripted_names
+        )
+        seen = {}
+        for p in paths:
+            for trigger_id in results[p]:
+                seen[trigger_id] = None
+        self.scripted_trigger_ids = list(seen)
+
+    def _scan_on_actions(self):
+        self.on_action_ids.clear()
+        root = self.root
+        if not root:
+            return
+        d = os.path.join(root, "common", "on_actions")
+        if not os.path.isdir(d):
+            return
+        paths = self._txt_paths(d)
+        results = self._scan_files_cached("on_actions", paths, self._extract_on_actions)
+        seen = {}
+        for p in paths:
+            for hook_name in results[p]:
+                seen[hook_name] = None
+        self.on_action_ids = list(seen)
 
     def _scan_dyn_mods(self):
         root = self.root
@@ -678,6 +772,9 @@ class ModContext:
         self.idea_ids.clear()
         self.decision_ids.clear()
         self.decision_cats.clear()
+        self.scripted_effect_ids.clear()
+        self.scripted_trigger_ids.clear()
+        self.on_action_ids.clear()
         self.dyn_mod_ids.clear()
         self.character_ids.clear()
         self.country_tags.clear()
@@ -714,6 +811,9 @@ class ModContext:
             ("Events", self._scan_events),
             ("Ideas/Spirits", self._scan_ideas),
             ("Characters", self._scan_characters),
+            ("Scripted Effects", self._scan_scripted_effects),
+            ("Scripted Triggers", self._scan_scripted_triggers),
+            ("On Actions", self._scan_on_actions),
             ("Decisions", self._scan_decisions),
             ("Dynamic Modifiers", self._scan_dyn_mods),
             ("Country Tags", self._scan_tags),

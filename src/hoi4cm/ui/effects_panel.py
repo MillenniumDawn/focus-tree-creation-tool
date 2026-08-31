@@ -36,6 +36,26 @@ def _augment_character_suggestions(suggestions, fname, *, loaded, character_ids)
     return sorted(set(suggestions).union(character_ids))
 
 
+def _augment_scripted_suggestions(
+    suggestions,
+    fname,
+    *,
+    loaded,
+    scripted_effect_ids,
+    scripted_trigger_ids,
+    on_action_ids,
+):
+    if not loaded:
+        return suggestions
+    if fname in ("effect", "scripted_effect", "effect_name"):
+        return sorted(set(suggestions).union(scripted_effect_ids))
+    if fname in ("limit", "trigger", "scripted_trigger", "trigger_name"):
+        return sorted(set(suggestions).union(scripted_trigger_ids))
+    if fname in ("on_action", "on_actions"):
+        return sorted(set(suggestions).union(on_action_ids))
+    return suggestions
+
+
 def _effects_signature(focus, effects):
     """Value signature of a focus's effects for the refresh-skip.
 
@@ -524,11 +544,19 @@ class EffectsMixin:
             self._draw_eff_card(i, eff)
 
     def _get_effect_suggestions(self, etype, fname):
-        return _augment_character_suggestions(
+        suggestions = _augment_character_suggestions(
             self._get_mod_suggestions(etype, fname),
             fname,
             loaded=MOD.loaded,
             character_ids=MOD.character_ids,
+        )
+        return _augment_scripted_suggestions(
+            suggestions,
+            fname,
+            loaded=MOD.loaded,
+            scripted_effect_ids=MOD.scripted_effect_ids,
+            scripted_trigger_ids=MOD.scripted_trigger_ids,
+            on_action_ids=MOD.on_action_ids,
         )
 
     def _draw_eff_card(self, i, eff):

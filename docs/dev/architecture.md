@@ -28,12 +28,13 @@
   `build_drawio_focuses`), and `batch_load.py` walks a file list into
   parsed trees (`batch_load_trees`, `make_cancel_handle`).
 - **`mod/`**: `ModContext` (the `MOD` singleton): walks a mod's directory
-  tree once and indexes sprites, focus/event/idea/decision/dyn-mod IDs,
-  country tags, and MD money-system paths. MD mode is detected from the
-  mod identity or money-system file, unless `md_mode_override` is configured.
-  `scan_cache.py` is the SQLite
-  per-file cache backing warm reloads. `workspace_files.py` is the single
-  writer every mod-file save goes through (see "Writing mod files" below).
+  tree once and indexes sprites, focus/event/idea/decision IDs, scripted
+  effects, scripted triggers, on-action hooks, dyn-mod IDs, country tags, and
+  MD money-system paths. MD mode is detected from the mod identity or
+  money-system file, unless `md_mode_override` is configured. `scan_cache.py`
+  is the SQLite per-file cache backing warm reloads. `workspace_files.py` is
+  the single writer every mod-file save goes through (see "Writing mod files"
+  below).
 - **`wizards/`**: the five `open_*_wizard(app)` entry points (decision,
   event, national spirit, dynamic modifier, additional income) plus
   `_shared.py` for cross-wizard state. The package `__init__` resolves the
