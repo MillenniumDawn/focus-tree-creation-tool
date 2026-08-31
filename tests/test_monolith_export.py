@@ -72,6 +72,24 @@ class _App:
         self._extra_trees = []
 
 
+class _Catalog:
+    def __init__(self, paths):
+        self.paths = paths
+        self.written = []
+
+    def resolve(self, _name):
+        return None
+
+    def query(self, *, under):
+        return [path for path in self.paths if str(path).startswith(under)]
+
+    def path_for(self, path):
+        return str(path)
+
+    def note_written(self, path, *, read_text):
+        self.written.append(path)
+
+
 def _focus(name, x=0, y=0):
     focus = Focus(x, y)
     focus.name = name
@@ -79,7 +97,16 @@ def _focus(name, x=0, y=0):
     return focus
 
 
+def _configure_custom_focus_gfx(monkeypatch, mod_files, image=None):
+    monkeypatch.setattr(m.MOD, "loaded", True)
+    monkeypatch.setattr(m.MOD, "sprites", {})
+    catalog = _Catalog([image] if image is not None else [])
+    monkeypatch.setattr(m.MOD, "graphics_catalog", catalog)
+    return catalog
+
+
 def _bind_export_shells(app):
+    app._focus_gfx_export = m.App._focus_gfx_export.__get__(app, _App)
     app._make_main_export_plan = m.App._make_main_export_plan.__get__(app, _App)
     app._make_extra_export_plan = m.App._make_extra_export_plan.__get__(app, _App)
     app._apply_export_results = m.App._apply_export_results.__get__(app, _App)
@@ -131,14 +158,104 @@ def test_default_localisation_filename_is_generic(mod_files, monkeypatch):
     )
 
     app = _App([_focus("TST_root")])
+    _bind_export_shells(app)
     focuses = list(app.focuses.values())
     names = {focus.name: focus for focus in focuses}
-    plan = m.App._make_main_export_plan.__get__(app, _App)(
-        focuses, app.focuses, names, show_dialog=False
-    )
+    plan = app._make_main_export_plan(focuses, app.focuses, names, show_dialog=False)
 
     assert plan is not None
     assert plan.loc_path.endswith("TST_focus_l_english.yml")
+
+
+def test_export_accepts_custom_focus_icon_declaration(dialogs, mod_files, monkeypatch):
+    image = mod_files.root / "gfx" / "interface" / "goals" / "custom.dds"
+    image.parent.mkdir(parents=True)
+    image.write_bytes(b"image")
+    catalog = _configure_custom_focus_gfx(monkeypatch, mod_files, image)
+    monkeypatch.setattr(m.messagebox, "askyesno", lambda *_args, **_kwargs: True)
+
+    focus = _focus("TST_root")
+    focus.gfx = "GFX_focus_custom"
+    _export(_App([focus]))
+
+    gfx = mod_files.root / "interface" / "TST_focus.gfx"
+    assert gfx.exists()
+    assert 'name = "GFX_focus_custom"' in gfx.read_text()
+    assert 'texturefile = "gfx/interface/goals/custom.dds"' in gfx.read_text()
+    assert str(gfx) in catalog.written
+
+
+def test_noninteractive_export_does_not_prompt_for_custom_focus_icon(
+    dialogs, mod_files, monkeypatch
+):
+    image = mod_files.root / "gfx" / "interface" / "goals" / "custom.dds"
+    image.parent.mkdir(parents=True)
+    image.write_bytes(b"image")
+    _configure_custom_focus_gfx(monkeypatch, mod_files, image)
+    monkeypatch.setattr(
+        m.messagebox,
+        "askyesno",
+        lambda *_args, **_kwargs: pytest.fail("noninteractive export prompted"),
+    )
+
+    focus = _focus("TST_root")
+    focus.gfx = "GFX_focus_custom"
+    _export(_App([focus]), show_dialog=False)
+
+    assert not (mod_files.root / "interface" / "TST_focus.gfx").exists()
+
+
+def test_export_declining_custom_focus_icon_declaration_leaves_no_gfx_file(
+    dialogs, mod_files, monkeypatch
+):
+    image = mod_files.root / "gfx" / "interface" / "goals" / "custom.dds"
+    image.parent.mkdir(parents=True)
+    image.write_bytes(b"image")
+    _configure_custom_focus_gfx(monkeypatch, mod_files, image)
+    monkeypatch.setattr(m.messagebox, "askyesno", lambda *_args, **_kwargs: False)
+
+    focus = _focus("TST_root")
+    focus.gfx = "GFX_focus_custom"
+    _export(_App([focus]))
+
+    assert not (mod_files.root / "interface" / "TST_focus.gfx").exists()
+
+
+def test_export_deduplicates_existing_custom_focus_icon(
+    dialogs, mod_files, monkeypatch
+):
+    image = mod_files.root / "gfx" / "interface" / "goals" / "custom.dds"
+    image.parent.mkdir(parents=True)
+    image.write_bytes(b"image")
+    gfx = mod_files.root / "interface" / "TST_focus.gfx"
+    gfx.parent.mkdir(parents=True)
+    gfx.write_text(
+        "spriteTypes = {\n"
+        '\tspriteType = { name = "GFX_focus_custom" '
+        'texturefile = "gfx/interface/goals/custom.dds" }\n'
+        "}\n"
+    )
+    _configure_custom_focus_gfx(monkeypatch, mod_files, image)
+    monkeypatch.setattr(m.messagebox, "askyesno", lambda *_args, **_kwargs: True)
+
+    focus = _focus("TST_root")
+    focus.gfx = "GFX_focus_custom"
+    _export(_App([focus]))
+
+    assert gfx.read_text().count('name = "GFX_focus_custom"') == 1
+
+
+def test_export_does_not_generate_unresolved_custom_focus_icon(
+    dialogs, mod_files, monkeypatch
+):
+    _configure_custom_focus_gfx(monkeypatch, mod_files)
+    monkeypatch.setattr(m.messagebox, "askyesno", lambda *_args, **_kwargs: True)
+
+    focus = _focus("TST_root")
+    focus.gfx = "GFX_focus_missing"
+    _export(_App([focus]))
+
+    assert not (mod_files.root / "interface" / "TST_focus.gfx").exists()
 
 
 def test_failed_export_leaves_the_tracked_files_untouched(
@@ -220,6 +337,7 @@ def test_failed_extra_tree_export_keeps_the_source_file(dialogs, tmp_path, monke
 
 def test_run_export_plans_uses_document_scope_and_closes_modal(monkeypatch, mod_files):
     app = _App([_focus("TST_root")])
+    _bind_export_shells(app)
     plan = m.App._make_main_export_plan.__get__(app, _App)(
         list(app.focuses.values()),
         dict(app.focuses),

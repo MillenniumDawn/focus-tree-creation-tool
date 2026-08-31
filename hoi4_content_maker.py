@@ -70,6 +70,7 @@ from hoi4cm.core import (  # noqa: E402
     parse_focus_tree,
     read_file,
     render_focus_block,
+    safe_join,
     sanitize_component,
     set_error_callback,
     show_splash,
@@ -87,7 +88,13 @@ from hoi4cm.focus_tree.validate import (  # noqa: E402
     validate_document,
     worst_severity_per_focus,
 )
-from hoi4cm.mod import MOD, detect_loc_file  # noqa: E402
+from hoi4cm.mod import (  # noqa: E402
+    DEFAULT_FOCUS_ICON,
+    MOD,
+    build_focus_sprite_entries,
+    detect_loc_file,
+    resolve_focus_image_paths,
+)
 from hoi4cm.mod.workspace_files import WorkspaceFiles  # noqa: E402
 from hoi4cm.models import (  # noqa: E402
     EditorWorkspace,
@@ -5206,6 +5213,61 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         else:
             on_done([])
 
+    def _focus_gfx_export(self, focuses, country_tag, *, show_dialog=True):
+        """Offer declarations for selected focus icons missing from the mod."""
+        if not show_dialog or not getattr(MOD, "loaded", False):
+            return None, ()
+        mod_root = getattr(MOD, "root", "") or ""
+        if not os.path.isdir(mod_root):
+            return None, ()
+        declared_names = getattr(MOD, "sprites", {}) or {}
+        icon_names = [getattr(focus, "gfx", "") for focus in focuses]
+        missing_names = sorted(
+            {
+                name
+                for name in icon_names
+                if name and name != DEFAULT_FOCUS_ICON and name not in declared_names
+            }
+        )
+        if not missing_names:
+            return None, ()
+        catalog = getattr(MOD, "graphics_catalog", None)
+        image_paths = {}
+        if catalog is not None:
+            image_paths = resolve_focus_image_paths(
+                missing_names,
+                catalog=catalog,
+                mod_root=mod_root,
+                goals_path=getattr(MOD, "path_goals", "")
+                or os.path.join("gfx", "interface", "goals"),
+            )
+        entries, unresolved = build_focus_sprite_entries(
+            missing_names,
+            declared_names=declared_names,
+            image_paths=image_paths,
+            mod_root=mod_root,
+        )
+        body = (
+            "The export uses focus icon keys that are not declared in the loaded mod:\n\n"
+            + "\n".join(f"  {name}" for name in missing_names)
+            + f"\n\nGenerate spriteType entries in interface/{country_tag}_focus.gfx?"
+        )
+        if unresolved:
+            body += (
+                "\n\nNo declaration will be generated for icons whose texture "
+                "cannot be resolved under the mod:\n"
+                + "\n".join(f"  {name}" for name in unresolved)
+            )
+        if not messagebox.askyesno("Generate focus icon declarations?", body):
+            return None, ()
+        if not entries:
+            return None, ()
+        try:
+            gfx_path = safe_join(mod_root, "interface", f"{country_tag}_focus.gfx")
+        except ValueError:
+            return None, ()
+        return gfx_path, entries
+
     def _make_main_export_plan(
         self, main_focuses, focus_lookup, focus_name_lookup, *, show_dialog
     ):
@@ -5292,6 +5354,9 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
                 )
                 if not loc_path:
                     loc_path = os.path.join(saved_dir, loc_filename)
+        gfx_path, gfx_entries = self._focus_gfx_export(
+            main_focuses, country_tag, show_dialog=show_dialog
+        )
         return make_main_export_plan(
             label=f"Main: {tree_id}",
             focus_path=path,
@@ -5310,6 +5375,8 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             focus_lookup=focus_lookup,
             focus_name_lookup=focus_name_lookup,
             loc_language=MOD.loc_language,
+            gfx_path=gfx_path,
+            gfx_entries=gfx_entries,
         )
 
     def _make_extra_export_plan(
@@ -5341,6 +5408,13 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             )
         if not path:
             return None
+        country_tag = sanitize_component(
+            str(info.get("country_tag", "TAG")).upper(), fallback="TAG"
+        )
+        if show_dialog:
+            gfx_path, gfx_entries = self._focus_gfx_export(focuses_in_tree, country_tag)
+        else:
+            gfx_path, gfx_entries = None, ()
         return make_extra_export_plan(
             label=f"{info['type'].capitalize()}: {info['tree_id']}",
             focus_path=path,
@@ -5349,6 +5423,8 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             focus_lookup=focus_lookup,
             focus_name_lookup=focus_name_lookup,
             extra_tree_idx=tree_idx,
+            gfx_path=gfx_path,
+            gfx_entries=gfx_entries,
         )
 
     # ── SAVE / LOAD ─────────────────────────────────────────────

@@ -32,9 +32,9 @@
   effects, scripted triggers, on-action hooks, dyn-mod IDs, country tags, and
   MD money-system paths. MD mode is detected from the mod identity or
   money-system file, unless `md_mode_override` is configured. `scan_cache.py`
-  is the SQLite per-file cache backing warm reloads. `workspace_files.py` is
-  the single writer every mod-file save goes through (see "Writing mod files"
-  below).
+  is the SQLite per-file cache backing warm reloads. `gfx_writer.py` preserves
+  and extends sprite declarations. `workspace_files.py` is the single writer
+  every mod-file save goes through (see "Writing mod files" below).
 - **`wizards/`**: the five `open_*_wizard(app)` entry points (decision,
   event, national spirit, dynamic modifier, additional income) plus
   `_shared.py` for cross-wizard state, including shared effect/trigger pickers.
@@ -108,6 +108,10 @@ truncate-in-place write destroys it if the process dies mid-write (issue #46).
 `hoi4cm.wizards._shared` for the wizards) builds a writer whose `on_written`
 hook pokes the graphics catalog — but only when the save target is the
 currently loaded mod, so writing elsewhere never touches live state.
+
+`mod.gfx_writer.append_sprite_types` renders declarations into new or existing
+`spriteTypes` wrappers without replacing user content. Callers still pass the
+result through `WorkspaceFiles`.
 
 The other half of the contract is that a failure is **reported**, not
 swallowed or raised as a traceback: `hoi4cm.ui.file_errors`'s

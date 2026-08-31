@@ -6,6 +6,15 @@ The :class:`~hoi4cm.mod.context.ModContext` instance lives at module level as
 """
 
 from hoi4cm.mod.context import ModContext, detect_loc_file, find_loc_files
+from hoi4cm.mod.gfx_writer import (
+    DEFAULT_FOCUS_ICON,
+    SpriteTypeEntry,
+    append_sprite_types,
+    build_focus_sprite_entries,
+    build_sprite_type,
+    resolve_focus_image_paths,
+    resolve_mod_texture_path,
+)
 from hoi4cm.mod.graphics_catalog import (
     AssetRef,
     GraphicsCatalog,
@@ -24,13 +33,20 @@ MOD = ModContext()
 
 __all__ = [
     "AssetRef",
+    "DEFAULT_FOCUS_ICON",
     "GraphicsCatalog",
     "GraphicsScanConfig",
     "ModContext",
     "MOD",
+    "SpriteTypeEntry",
     "WorkspaceFiles",
     "WriteEntry",
+    "append_sprite_types",
+    "build_focus_sprite_entries",
+    "build_sprite_type",
     "detect_loc_file",
     "find_loc_files",
     "notifying_workspace_files",
+    "resolve_focus_image_paths",
+    "resolve_mod_texture_path",
 ]
