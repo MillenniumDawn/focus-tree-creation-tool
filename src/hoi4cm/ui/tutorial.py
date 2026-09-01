@@ -131,12 +131,10 @@ TUTORIAL_STEPS = (
         "tutorial.step.mod.body",
         (
             "Load Mod points the app at your mod root so it can find focus icons, "
-            "localisation, and valid install folders. Settings adjusts those paths, "
-            "and "
-            "Set Edit Targets chooses existing files used by wizard-generated content."
+            "localisation, and valid install folders."
         ),
-        menu_key="tools",
-        menu_item_keys=("load_mod", "set_edit_targets", "settings"),
+        menu_key="file",
+        menu_item_keys=("load_mod",),
     ),
     TutorialStep(
         "tutorial.step.export.title",
