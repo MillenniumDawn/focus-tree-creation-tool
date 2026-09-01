@@ -40,15 +40,14 @@ def test_catalog_image_paths_uses_in_memory_query(tmp_path):
 
 
 def test_catalog_folder_groups_include_event_pictures_when_scanned(tmp_path):
-    # Once the catalog scans a custom event-pictures dir (even one outside
-    # gfx/), its images show up here and the browser keeps the group. A folder
-    # with no catalogued images is still dropped.
+    # Folder list comes from catalog directory records, not a full image query.
+    # A candidate with no catalogued directory under it is still dropped.
     gfx = tmp_path / "gfx"
     event_pics = tmp_path / "event_pictures"
     paths = (
-        str(gfx / "ideas" / "a.dds"),
-        str(gfx / "ideas" / "nested" / "b.dds"),
-        str(event_pics / "war.dds"),
+        str(gfx / "ideas"),
+        str(gfx / "ideas" / "nested"),
+        str(event_pics),
     )
     candidates = (
         ("ideas", str(gfx / "ideas"), "GFX_idea_"),

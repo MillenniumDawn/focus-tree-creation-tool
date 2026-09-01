@@ -21,10 +21,12 @@ class _UndoCallSiteApp:
     _undo_stack: UndoStack
     _drag: dict[str, object]
     w2c: Any
+    c2w: Any
     _fv_x: Any
     _fv_y: Any
     _hint: Any
     _draw_lines_throttled: Any
+    _new_focus_at: Any
 
     def __init__(self, focuses=()):
         self.focuses = FocusDocument(focuses)
@@ -435,3 +437,41 @@ def test_drag_move_pushes_once_with_moved_focus_id():
 
     app._push_undo.assert_called_once_with("move focus", touched_ids=(focus.id,))
     assert (focus.x, focus.y) == (2, 2)
+
+
+def test_drag_start_snapshots_occupied_positions():
+    focus = Focus()
+    other = Focus(3, 4)
+    app = _UndoCallSiteApp([focus, other])
+    app.zoom = 1.0
+    app.mutex_mode = False
+
+    CanvasMixin._foc_pr(
+        cast(CanvasMixin, app), focus.id, SimpleNamespace(x=0, y=0, state=0)
+    )
+
+    assert app._drag["occupied"] == {(3, 4)}
+
+
+def test_rmb_on_occupied_cell_does_not_place():
+    focus = Focus(2, 3)
+    app = _UndoCallSiteApp([focus])
+    app._new_focus_at = Mock()
+    app.c2w = lambda _x, _y: (2, 3)
+    app.cv.find_overlapping.return_value = ()
+
+    CanvasMixin._rmb(cast(CanvasMixin, app), SimpleNamespace(x=10, y=10))
+
+    app._new_focus_at.assert_not_called()
+
+
+def test_rmb_on_free_cell_places():
+    focus = Focus(2, 3)
+    app = _UndoCallSiteApp([focus])
+    app._new_focus_at = Mock()
+    app.c2w = lambda _x, _y: (5, 5)
+    app.cv.find_overlapping.return_value = ()
+
+    CanvasMixin._rmb(cast(CanvasMixin, app), SimpleNamespace(x=10, y=10))
+
+    app._new_focus_at.assert_called_once_with(5, 5)
