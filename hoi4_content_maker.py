@@ -5248,7 +5248,8 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             mod_root=mod_root,
         )
         body = (
-            "The export uses focus icon keys that are not declared in the loaded mod:\n\n"
+            "The export uses focus icon keys that are not declared in the "
+            "loaded mod:\n\n"
             + "\n".join(f"  {name}" for name in missing_names)
             + f"\n\nGenerate spriteType entries in interface/{country_tag}_focus.gfx?"
         )

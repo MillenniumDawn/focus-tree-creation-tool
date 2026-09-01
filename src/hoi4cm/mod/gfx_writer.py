@@ -21,6 +21,8 @@ SpriteTypeEntry = tuple[str, str]
 
 def build_sprite_type(name: str, texture_path: str) -> str:
     """Return one indented ``spriteType`` declaration."""
+    _validate_quoted_scalar(name, label="sprite name")
+    _validate_quoted_scalar(texture_path, label="texture path")
     return (
         "\tspriteType = {\n"
         f'\t\tname = "{name}"\n'
@@ -130,7 +132,12 @@ def build_focus_sprite_entries(
         if texture_path is None:
             unresolved.append(name)
         else:
-            entries.append((name, texture_path))
+            try:
+                build_sprite_type(name, texture_path)
+            except ValueError:
+                unresolved.append(name)
+            else:
+                entries.append((name, texture_path))
     return tuple(entries), tuple(unresolved)
 
 
@@ -193,6 +200,12 @@ def _focus_icon_stem(name: str) -> str:
         if name.startswith(prefix):
             return name[len(prefix) :]
     return name
+
+
+def _validate_quoted_scalar(value: str, *, label: str) -> None:
+    """Reject values Clausewitz cannot safely represent inside quotes."""
+    if not value or any(character in value for character in '"\r\n'):
+        raise ValueError(f"{label} cannot be empty or contain quotes/newlines")
 
 
 def _declared_sprite_names(source: str) -> set[str]:

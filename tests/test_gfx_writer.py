@@ -1,9 +1,12 @@
 from importlib import import_module
 
+import pytest
+
 _gfx_writer = import_module("hoi4cm.mod.gfx_writer")
 DEFAULT_FOCUS_ICON = _gfx_writer.DEFAULT_FOCUS_ICON
 append_sprite_types = _gfx_writer.append_sprite_types
 build_focus_sprite_entries = _gfx_writer.build_focus_sprite_entries
+build_sprite_type = _gfx_writer.build_sprite_type
 resolve_focus_image_paths = _gfx_writer.resolve_focus_image_paths
 resolve_mod_texture_path = _gfx_writer.resolve_mod_texture_path
 
@@ -94,6 +97,20 @@ def test_append_sprite_types_skips_existing_names_without_rewriting():
     assert added == 0
 
 
+@pytest.mark.parametrize(
+    ("name", "texture_path"),
+    [
+        ('GFX_focus_bad"name', "gfx/interface/goals/custom.dds"),
+        ("GFX_focus_bad\nname", "gfx/interface/goals/custom.dds"),
+        ("GFX_focus_custom", 'gfx/interface/goals/bad"path.dds'),
+        ("GFX_focus_custom", "gfx/interface/goals/bad\npath.dds"),
+    ],
+)
+def test_build_sprite_type_rejects_unsafe_quoted_values(name, texture_path):
+    with pytest.raises(ValueError):
+        build_sprite_type(name, texture_path)
+
+
 def test_build_focus_sprite_entries_filters_default_declared_and_unresolved(tmp_path):
     image = tmp_path / "gfx" / "interface" / "goals" / "custom.dds"
     image.parent.mkdir(parents=True)
@@ -113,6 +130,22 @@ def test_build_focus_sprite_entries_filters_default_declared_and_unresolved(tmp_
 
     assert entries == (("GFX_focus_custom", "gfx/interface/goals/custom.dds"),)
     assert unresolved == ("GFX_focus_missing",)
+
+
+def test_build_focus_sprite_entries_reports_unsafe_name_as_unresolved(tmp_path):
+    image = tmp_path / "gfx" / "interface" / "goals" / "custom.dds"
+    image.parent.mkdir(parents=True)
+    image.write_bytes(b"image")
+
+    entries, unresolved = build_focus_sprite_entries(
+        ['GFX_focus_bad"name'],
+        declared_names=set(),
+        image_paths={'GFX_focus_bad"name': str(image)},
+        mod_root=str(tmp_path),
+    )
+
+    assert entries == ()
+    assert unresolved == ('GFX_focus_bad"name',)
 
 
 def test_resolve_focus_image_paths_uses_catalog_stem_fallback(tmp_path):
