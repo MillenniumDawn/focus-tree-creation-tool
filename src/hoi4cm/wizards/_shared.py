@@ -8,7 +8,13 @@ coupling and gives the App a single place to clear caches on mod reload.
 import re
 import tkinter as tk
 
-from hoi4cm.core import EFFECT_CATS, EFFECT_DEFS, effects_in_cat, tr
+from hoi4cm.core import (
+    EFFECT_CATS,
+    EFFECT_DEFS,
+    TRIGGER_CATS,
+    TRIGGER_DEFS,
+    tr,
+)
 from hoi4cm.mod import notifying_workspace_files
 from hoi4cm.ui import (
     BG_CARD,
@@ -80,17 +86,55 @@ _app_img_caches.extend([_ev_gfx_cache, _ev_imgsize_cache])
 _LOC_KEY_RE = re.compile(r'\s+(\S+?)(?::\d+)?\s*"')
 
 
-# ── Effect picker popup (event + decision wizards) ─────────────────
-def open_effect_picker(parent, target_text, on_insert=None):
-    """Popup effect selector shared by the event and decision wizards.
+def render_script_snippet(key, definition, values, *, is_trigger=False):
+    """Render a catalogue entry from its field values without Tk widgets."""
+    if not definition:
+        return f"\t{key} = yes\n"
+    fields = definition.get("fields", [])
+    if is_trigger and not fields:
+        return f"\t{key} = yes\n"
 
-    Inserts rendered HOI4 code into ``target_text`` (a ``tk.Text`` widget).
-    ``on_insert``, if given, is called after a snippet is inserted (the
-    event wizard uses it to refresh its live preview). Returns the popup
-    ``Toplevel`` (tests drive it from there; wizard call sites ignore it).
+    if is_trigger and len(fields) == 1 and not definition.get("_block"):
+        value = values.get(fields[0][0], "").strip()
+        if value.startswith(("<", ">", "=")):
+            return f"\t{key} {value}\n"
+
+    if definition.get("_block") or len(fields) != 1:
+        lines = [f"\t{key} = {{"]
+        if definition.get("_block") and len(fields) == 1:
+            content = values.get(fields[0][0], "").strip()
+            lines.extend(f"\t\t{line}" for line in content.splitlines())
+        else:
+            for fname, _wtype, _default, _hint in fields:
+                value = values.get(fname, "").strip()
+                operator = (
+                    " " if is_trigger and value.startswith(("<", ">", "=")) else " = "
+                )
+                lines.append(f"\t\t{fname}{operator}{value}")
+        lines.append("\t}")
+        return "\n".join(lines) + "\n"
+    return f"\t{key} = {values.get(fields[0][0], '').strip()}\n"
+
+
+# ── Script picker popups (event, decision and condition wizards) ────────────
+def open_script_picker(
+    parent,
+    target_text,
+    definitions,
+    categories,
+    *,
+    picker_name="Effect",
+    on_insert=None,
+):
+    """Open a catalogue picker that inserts a script snippet into a Text.
+
+    The browser and field form are shared by effects and triggers. Keeping the
+    target widget as an explicit argument means each button inserts only into
+    the field that opened it, without replacing existing text.
     """
     pwin = tk.Toplevel(parent)
-    pwin.title(tr("effect_picker.title", "Effect Picker"))
+    picker_key = picker_name.lower()
+    pwin.title(tr(f"{picker_key}_picker.title", f"{picker_name} Picker"))
     pwin.configure(bg=BG_DARK)
     pwin.geometry("620x580")
     pwin.resizable(True, True)
@@ -102,7 +146,12 @@ def open_effect_picker(parent, target_text, on_insert=None):
     tk.Label(hdr, text="🔍", bg=BG_DARK, fg=TEXT_DIM, font=("Helvetica", 11)).pack(
         side="left", padx=(0, 4)
     )
-    _search_ph = tr("focus.effects.search_placeholder", "Search effects...")
+    search_key = (
+        "focus.effects.search_placeholder"
+        if picker_key == "effect"
+        else f"{picker_key}_picker.search_placeholder"
+    )
+    _search_ph = tr(search_key, f"Search {picker_name.lower()}s...")
     eff_search_var = tk.StringVar(value=_search_ph)
     eff_search_ent = tk.Entry(
         hdr,
@@ -140,9 +189,9 @@ def open_effect_picker(parent, target_text, on_insert=None):
         fg=TEXT_DIM,
         font=("Helvetica", 9),
     ).pack(side="left")
-    eff_cat = tk.StringVar(value=EFFECT_CATS[0])
+    eff_cat = tk.StringVar(value=categories[0])
     cat_menu = tk.OptionMenu(
-        cat_row, eff_cat, *EFFECT_CATS, command=lambda _: _rebuild_dd()
+        cat_row, eff_cat, *categories, command=lambda _: _rebuild_dd()
     )
     cat_menu.config(
         bg=BG_CARD,
@@ -168,7 +217,11 @@ def open_effect_picker(parent, target_text, on_insert=None):
         for w in dd_frame.winfo_children():
             w.destroy()
         if items is None:
-            items = effects_in_cat(eff_cat.get())
+            items = [
+                (key, definition["label"])
+                for key, definition in definitions.items()
+                if definition.get("cat") == eff_cat.get()
+            ]
         if not items:
             return
         eff_type.set(items[0][0])
@@ -205,7 +258,7 @@ def open_effect_picker(parent, target_text, on_insert=None):
         q = raw.strip().lower()
         matches = [
             (k, v["label"])
-            for k, v in EFFECT_DEFS.items()
+            for k, v in definitions.items()
             if q in k.lower()
             or q in v["label"].lower()
             or q in v.get("cat", "").lower()
@@ -213,9 +266,14 @@ def open_effect_picker(parent, target_text, on_insert=None):
         for w in dd_frame.winfo_children():
             w.destroy()
         if not matches:
+            none_key = (
+                "focus.effects.none_found"
+                if picker_key == "effect"
+                else f"{picker_key}_picker.none_found"
+            )
             tk.Label(
                 dd_frame,
-                text=tr("focus.effects.none_found", "No effects found"),
+                text=tr(none_key, f"No {picker_name.lower()}s found"),
                 bg=BG_DARK,
                 fg=TEXT_DIM,
                 font=("Helvetica", 9),
@@ -226,7 +284,7 @@ def open_effect_picker(parent, target_text, on_insert=None):
         menu = om["menu"]
         menu.delete(0, "end")
         for k, lbl in matches:
-            cat = EFFECT_DEFS[k].get("cat", "")
+            cat = definitions[k].get("cat", "")
             menu.add_command(
                 label=f"[{cat}]  {k}  —  {lbl}",
                 command=lambda v=k: [eff_type.set(v), _refresh_fields()],
@@ -288,15 +346,33 @@ def open_effect_picker(parent, target_text, on_insert=None):
             w.destroy()
         _fvars.clear()
         key = eff_type.get()
-        defn = EFFECT_DEFS.get(key, {})
+        defn = definitions.get(key, {})
         if not defn:
+            if picker_key == "effect":
+                unknown_text = tr(
+                    "effect_picker.unknown_effect",
+                    "\n".join(
+                        (
+                            "  Unknown effect: {effect}",
+                            "  Will be inserted as raw snippet.",
+                        )
+                    ),
+                    effect=repr(key),
+                )
+            else:
+                unknown_text = tr(
+                    "trigger_picker.unknown_trigger",
+                    "\n".join(
+                        (
+                            "  Unknown trigger: {trigger}",
+                            "  Will be inserted as raw snippet.",
+                        )
+                    ),
+                    trigger=repr(key),
+                )
             tk.Label(
                 fields_frm,
-                text=tr(
-                    "effect_picker.unknown_effect",
-                    "  Unknown effect: {effect}\n  Will be inserted as raw snippet.",
-                    effect=repr(key),
-                ),
+                text=unknown_text,
                 bg=BG_PANEL,
                 fg=ORANGE,
                 font=("Helvetica", 9, "italic"),
@@ -395,31 +471,18 @@ def open_effect_picker(parent, target_text, on_insert=None):
     # ── render HOI4 snippet ────────────────────────────────────────
     def _render_snippet():
         key = eff_type.get().strip()
-        defn = EFFECT_DEFS.get(key, {})
-        if not defn:
-            return f"\t{key} = yes\n"
-        fields = defn.get("fields", [])
-        if len(fields) == 1:
-            fname, wtype, _, _ = fields[0]
+        defn = definitions.get(key, {})
+        values = {}
+        for fname in (field[0] for field in defn.get("fields", [])):
             kind, ref = _fvars.get(fname, ("var", tk.StringVar()))
-            val = (
+            values[fname] = (
                 ref.get("1.0", "end-1c").strip()
                 if kind == "text"
                 else ref.get().strip()
             )
-            return f"\t{key} = {val}\n"
-        else:
-            lines = [f"\t{key} = {{"]
-            for fname, _wtype, _, _ in fields:
-                kind, ref = _fvars.get(fname, ("var", tk.StringVar()))
-                val = (
-                    ref.get("1.0", "end-1c").strip()
-                    if kind == "text"
-                    else ref.get().strip()
-                )
-                lines.append(f"\t\t{fname} = {val}")
-            lines.append("\t}")
-            return "\n".join(lines) + "\n"
+        return render_script_snippet(
+            key, defn, values, is_trigger=picker_key == "trigger"
+        )
 
     # ── live preview ───────────────────────────────────────────────
     tk.Frame(pwin, bg=BORDER_G, height=1).pack(fill="x", padx=8)
@@ -427,7 +490,7 @@ def open_effect_picker(parent, target_text, on_insert=None):
     prev_frame.pack(fill="x", padx=8, pady=(4, 0))
     tk.Label(
         prev_frame,
-        text=tr("effect_picker.preview", "  Preview:"),
+        text=tr(f"{picker_key}_picker.preview", "  Preview:"),
         bg=BG_DARK,
         fg=TEXT_DIM,
         font=("Helvetica", 8, "bold"),
@@ -489,7 +552,14 @@ def open_effect_picker(parent, target_text, on_insert=None):
 
     tk.Button(
         bot,
-        text=tr("effect_picker.insert_effect", "+ Insert Effect"),
+        text=tr(
+            (
+                "effect_picker.insert_effect"
+                if picker_key == "effect"
+                else f"{picker_key}_picker.insert_item"
+            ),
+            f"+ Insert {picker_name}",
+        ),
         command=_insert_effect,
         bg="#14532d",
         fg=GREEN,
@@ -502,7 +572,14 @@ def open_effect_picker(parent, target_text, on_insert=None):
 
     tk.Label(
         bot,
-        text=tr("effect_picker.insert_hint", "Inserts snippet at end of effects box"),
+        text=tr(
+            (
+                "effect_picker.insert_hint"
+                if picker_key == "effect"
+                else f"{picker_key}_picker.insert_hint"
+            ),
+            f"Inserts snippet at end of {picker_name.lower()}s box",
+        ),
         bg=BG_DARK,
         fg=TEXT_DIM,
         font=("Helvetica", 8, "italic"),
@@ -513,6 +590,30 @@ def open_effect_picker(parent, target_text, on_insert=None):
     return pwin
 
 
+def open_effect_picker(parent, target_text, on_insert=None):
+    """Open the shared effect picker."""
+    return open_script_picker(
+        parent,
+        target_text,
+        EFFECT_DEFS,
+        EFFECT_CATS,
+        picker_name="Effect",
+        on_insert=on_insert,
+    )
+
+
+def open_trigger_picker(parent, target_text, on_insert=None):
+    """Open the shared trigger picker for a condition Text widget."""
+    return open_script_picker(
+        parent,
+        target_text,
+        TRIGGER_DEFS,
+        TRIGGER_CATS,
+        picker_name="Trigger",
+        on_insert=on_insert,
+    )
+
+
 __all__ = [
     "_app_img_caches",
     "_ev_gfx_cache",
@@ -520,6 +621,9 @@ __all__ = [
     "_LOC_KEY_RE",
     "notifying_workspace_files",
     "open_effect_picker",
+    "open_script_picker",
+    "open_trigger_picker",
+    "render_script_snippet",
     "svar_get",
     "text_get",
 ]

@@ -53,6 +53,7 @@ from hoi4cm.wizards._shared import (
     _app_img_caches,
     notifying_workspace_files,
     open_effect_picker,
+    open_trigger_picker,
 )
 
 
@@ -1022,6 +1023,22 @@ def open_decision_wizard(app):
             undo=True,
         )
         t.pack(fill="x", pady=(2, 0))
+        tk.Button(
+            hrow,
+            text=tr("trigger_picker.button", "+ Insert trigger"),
+            command=lambda tw=t: open_trigger_picker(
+                win, tw, on_insert=lambda: (_collect(), _rebuild_right())
+            ),
+            bg=C_CARD,
+            fg=C_BLUE,
+            relief="flat",
+            font=("Courier", 8),
+            cursor="hand2",
+            padx=6,
+            pady=1,
+            highlightthickness=1,
+            highlightbackground=TEAL_TAG_BD,
+        ).pack(side="right")
         return _reg_text(key, t, initial)
 
     def _effectblock(label, key, initial="", rows=4):

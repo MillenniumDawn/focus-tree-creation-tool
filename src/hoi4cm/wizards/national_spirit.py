@@ -50,6 +50,7 @@ from hoi4cm.wizards._graphics import browser_folders, collect_image_pairs
 from hoi4cm.wizards._image_loader import TkImageLoader
 from hoi4cm.wizards._shared import (
     notifying_workspace_files,
+    open_trigger_picker,
     svar_get,
     text_get,
 )
@@ -347,16 +348,17 @@ def open_national_spirit_wizard(app):
         om["menu"].config(bg=BG_CARD, fg=TEXT, activebackground=BORDER_G)
         om.pack(side="left", fill="x", expand=True)
 
-    def _trigger_field(label, height=2):
+    def _trigger_field(label, height=2, picker=False):
         row = tk.Frame(lfrm, bg=BG_PANEL)
         row.pack(fill="x", padx=10, pady=2)
+        label_row = tk.Frame(row, bg=BG_PANEL)
+        label_row.pack(fill="x")
         tk.Label(
-            row,
+            label_row,
             text=label,
             bg=BG_PANEL,
             fg=TEXT_DIM,
             font=("Helvetica", 9),
-            width=14,
             anchor="nw",
         ).pack(side="left")
         t = tk.Text(
@@ -371,7 +373,24 @@ def open_national_spirit_wizard(app):
             height=height,
             wrap="none",
         )
-        t.pack(side="left", fill="x", expand=True, ipady=2)
+        t.pack(fill="x", ipady=2)
+        if picker:
+            tk.Button(
+                label_row,
+                text=tr("trigger_picker.button", "+ Insert trigger"),
+                command=lambda tw=t: open_trigger_picker(
+                    win, tw, on_insert=_refresh_preview
+                ),
+                bg=BG_CARD,
+                fg=BLUE,
+                relief="flat",
+                font=("Helvetica", 8),
+                cursor="hand2",
+                padx=6,
+                pady=1,
+                highlightthickness=1,
+                highlightbackground=BORDER_G,
+            ).pack(side="right")
         t.bind("<KeyRelease>", lambda e: _refresh_preview())
         return t
 
@@ -838,10 +857,18 @@ def open_national_spirit_wizard(app):
     _sep()
     # ── TRIGGERS ──────────────────────────────────────────────────────
     _sec(tr("spirit.section.triggers", "TRIGGERS  (optional)"))
-    t_allowed = _trigger_field(tr("spirit.field.allowed", "allowed:"), height=2)
-    t_available = _trigger_field(tr("spirit.field.available", "available:"), height=2)
-    t_cancel = _trigger_field(tr("spirit.field.cancel", "cancel:"), height=2)
-    t_visible = _trigger_field(tr("spirit.field.visible", "visible:"), height=2)
+    t_allowed = _trigger_field(
+        tr("spirit.field.allowed", "allowed:"), height=2, picker=True
+    )
+    t_available = _trigger_field(
+        tr("spirit.field.available", "available:"), height=2, picker=True
+    )
+    t_cancel = _trigger_field(
+        tr("spirit.field.cancel", "cancel:"), height=2, picker=True
+    )
+    t_visible = _trigger_field(
+        tr("spirit.field.visible", "visible:"), height=2, picker=True
+    )
     t_allowed.insert("1.0", "original_tag = TAG")
 
     _sep()

@@ -149,6 +149,7 @@ from hoi4cm.ui.mod_loading import ModLoadingMixin  # noqa: E402
 from hoi4cm.ui.settings_dialog import open_settings  # noqa: E402
 from hoi4cm.ui.toolbar import build_toolbar_row2  # noqa: E402
 from hoi4cm.ui.tree_badges import build_tree_badges  # noqa: E402
+from hoi4cm.wizards._shared import open_trigger_picker  # noqa: E402
 
 log_startup()
 
@@ -1774,6 +1775,20 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             )
             trig_text.pack(fill="x", padx=4, pady=(0, 2))
             trig_text.insert("1.0", off.get("trigger", ""))
+            tk.Button(
+                row,
+                text=tr("trigger_picker.button", "+ Insert trigger"),
+                command=lambda tw=trig_text: open_trigger_picker(self, tw),
+                bg=BG_PANEL,
+                fg=BLUE,
+                relief="flat",
+                font=("Helvetica", 8),
+                cursor="hand2",
+                padx=6,
+                pady=1,
+                highlightthickness=1,
+                highlightbackground=BORDER_G,
+            ).pack(anchor="e", padx=4, pady=(0, 2))
             tk.Label(
                 row, text="}", bg=BG_CARD, fg=TEXT_DIM, font=("Courier", 8), anchor="w"
             ).pack(fill="x", padx=4)
@@ -2084,6 +2099,20 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             undo=True,
         )
         t.pack(fill="x")
+        tk.Button(
+            hdr,
+            text=tr("trigger_picker.button", "+ Insert trigger"),
+            command=lambda tw=t: open_trigger_picker(self, tw),
+            bg=BG_CARD,
+            fg=BLUE,
+            relief="flat",
+            font=("Helvetica", 8),
+            cursor="hand2",
+            padx=6,
+            pady=1,
+            highlightthickness=1,
+            highlightbackground=BORDER_G,
+        ).pack(side="right", padx=(4, 0))
         return t
 
     def _sb_check(self, parent, label, default):
