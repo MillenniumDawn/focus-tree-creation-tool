@@ -24,7 +24,7 @@ from hoi4cm.core import (
 from hoi4cm.core.image import PIL_OK, PILImage, PILImageTk
 from hoi4cm.core.logger import get_logger
 from hoi4cm.mod import MOD, WorkspaceFiles, find_loc_files
-from hoi4cm.script.syntax import extract_named_block, find_blocks
+from hoi4cm.script.syntax import extract_named_block, find_blocks, tokenize
 from hoi4cm.ui import (
     BG_CARD,
     BG_DARK,
@@ -4010,13 +4010,21 @@ def open_decision_wizard(app):
             _snapshot()
             old_cats = list(dm_cats)
             old_decs = list(dm_decs)
-            dm_cats.clear()
-            dm_decs.clear()
             imported = 0
             try:
-                for cat_name, cat_inner, _ in find_blocks(raw):
-                    if cat_name in ("add_namespace", "namespace"):
-                        continue
+                tokens = tokenize(raw)
+                if tokens.count("{") != tokens.count("}"):
+                    raise ValueError("unbalanced braces in decisions text")
+                decision_blocks = [
+                    block
+                    for block in find_blocks(raw)
+                    if block[0] not in ("add_namespace", "namespace")
+                ]
+                if not decision_blocks:
+                    raise ValueError("no decision blocks found")
+                dm_cats.clear()
+                dm_decs.clear()
+                for cat_name, cat_inner, _ in decision_blocks:
                     c = _new_cat()
                     c["cat_id"] = cat_name
                     c["loc_name"] = cat_name  # preserve existing loc name if we can
@@ -4826,7 +4834,7 @@ def open_decision_wizard(app):
                 ]
             )
             _dm_status.config(text="  ✓  Exported")
-        except OSError as e:
+        except (OSError, ValueError, TypeError, RuntimeError) as e:
             report_error(str(e), e, parent=win, title="Export Error")
 
     def _copy_yml():
