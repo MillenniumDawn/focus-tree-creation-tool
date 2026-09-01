@@ -217,6 +217,16 @@ def test_catalog_query_uses_loaded_snapshot(graphics_tree, monkeypatch):
     ]
 
 
+def test_directory_paths_lists_existing_catalogued_directories(graphics_tree):
+    catalog = GraphicsCatalog()
+    catalog.refresh(str(graphics_tree), _config(), read_text=read_file)
+
+    paths = {os.path.normcase(path) for path in catalog.directory_paths()}
+    assert os.path.normcase(str(graphics_tree / "gfx" / "interface" / "goals")) in paths
+    assert os.path.normcase(str(graphics_tree / "gfx" / "interface" / "ideas")) in paths
+    assert os.path.normcase(str(graphics_tree / "gfx" / "missing")) not in paths
+
+
 def test_catalog_query_under_uses_directory_prefix_match(graphics_tree):
     goals = graphics_tree / "gfx" / "interface" / "goals"
     sibling = graphics_tree / "gfx" / "interface" / "goals_backup"

@@ -69,8 +69,8 @@ def make_main_export_plan(
         loc_path=loc_path,
         focuses=tuple(focuses),
         tree_info=dict(tree_info),
-        focus_lookup=dict(focus_lookup),
-        focus_name_lookup=dict(focus_name_lookup),
+        focus_lookup=focus_lookup,
+        focus_name_lookup=focus_name_lookup,
         loc_language=loc_language,
     )
 
@@ -92,8 +92,8 @@ def make_extra_export_plan(
         focus_path=focus_path,
         focuses=tuple(focuses),
         tree_info=dict(tree_info),
-        focus_lookup=dict(focus_lookup),
-        focus_name_lookup=dict(focus_name_lookup),
+        focus_lookup=focus_lookup,
+        focus_name_lookup=focus_name_lookup,
         extra_tree_idx=extra_tree_idx,
     )
 

@@ -1216,7 +1216,7 @@ class CanvasMixin:
         if any("focus" in self.cv.gettags(i) for i in hits):
             return
         gx, gy = self.c2w(e.x, e.y)
-        if any(f.x == gx and f.y == gy for f in self.focuses.values()):
+        if not self.focuses.position_free(gx, gy):
             return
         self._new_focus_at(gx, gy)
 
@@ -1261,9 +1261,13 @@ class CanvasMixin:
             "moved": False,
             "undo_pushed": False,
             "last_snap": (f.x, f.y),
-            # Other focuses don't move during a drag, so snapshot their grid
+            # Other focuses don't move during a drag, so snapshot occupied
             # cells once for O(1) collision checks per motion event.
-            "occupied": {(o.x, o.y) for o in self.focuses.values() if o.id != fid},
+            "occupied": {
+                cell
+                for cell, ids in self.focuses.occupied_positions.items()
+                if any(occupant != fid for occupant in ids)
+            },
         }
         self._select(f)
 
