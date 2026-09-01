@@ -50,24 +50,22 @@ exclude_also = [
   "@abstractmethod",
 ]
 
-# Linting/formatting is scoped to the modular package + tests. The legacy
-# monolith (hoi4_content_maker.py) and build scripts are excluded until they
-# are refactored into the package.
+# Build scripts are excluded from linting and formatting.
 [tool.black]
 line-length = 88
 target-version = ["py314"]
-extend-exclude = "hoi4_content_maker\\.py|^/build/"
+extend-exclude = "^/build/"
 
 [tool.ruff]
 line-length = 88
-extend-exclude = ["hoi4_content_maker.py", "build"]
+extend-exclude = ["build"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B"]
 
-# Type checking is scoped to the modular package + tests, same as ruff/black.
-# The monolith and build scripts stay out until they are refactored into the
-# package. `mypy_path` puts src/ on the search path so tests can import hoi4cm.
+# Type checking is scoped to the modular package + tests. The monolith and
+# build scripts stay out until they are refactored into the package. `mypy_path`
+# puts src/ on the search path so tests can import hoi4cm.
 [tool.mypy]
 python_version = "3.14"
 mypy_path = ["src"]

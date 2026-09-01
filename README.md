@@ -111,8 +111,8 @@ black --check .        # formatting
 ```
 
 `pyproject.toml` puts `src/` on the path for pytest, so the suite runs from a clean
-checkout with no install. Tests live under `tests/`. Ruff and Black are scoped to the
-`src/hoi4cm` package and `tests/` (the legacy monolith is excluded for now).
+checkout with no install. Tests live under `tests/`. Ruff and Black check all Python
+code except the build scripts.
 
 CI runs the same checks on every pull request, then builds the three executables
 (`.github/workflows/ci.yml`). A `v*` tag runs that whole gate and publishes the binaries
@@ -151,6 +151,7 @@ The main screen is the Focus Tree Editor — a zoomable, pannable canvas where y
 | Undo | Ctrl + Z |
 
 **Features:**
+
 - Live prerequisite lines drawn between focuses
 - Mutex group linking (exclusive focus sets)
 - Per-focus properties panel: ID, localisation, icon, cost, prerequisites, completion effects, AI weights
@@ -165,6 +166,7 @@ The main screen is the Focus Tree Editor — a zoomable, pannable canvas where y
 A three-panel editor: **category/decision tree** (left), **properties editor** (centre), **live preview** (right).
 
 **Features:**
+
 - Create and organise decision categories and decisions
 - Drag-and-drop GFX icon picker
 - Live HOI4-themed preview renders your decisions as they appear in-game
@@ -177,6 +179,7 @@ A three-panel editor: **category/decision tree** (left), **properties editor** (
 - Undo/redo support
 
 **Country tag name mapping** (Settings → Country Tag Names):
+
 - Map country tags to display names (`SOV` → `Soviet Union`) for readable preview rendering
 - One-click "Load Vanilla Tags" fills ~45 common HOI4 tags
 
@@ -187,6 +190,7 @@ A three-panel editor: **category/decision tree** (left), **properties editor** (
 Builds `ideas = { ... }` blocks for country-specific national spirits and advisors.
 
 **Features:**
+
 - Fields for slot, picture, modifier blocks, allowed/cancel triggers
 - GFX browser integration
 - Generates ready-to-paste ideas script and localisation
@@ -204,6 +208,7 @@ Builds `dynamic_modifiers = { ... }` entries used for runtime modifiers.
 A full event authoring tool.
 
 **Features:**
+
 - Event type selector (country, news, state, unit leader)
 - Option builder — add multiple options with individual effects
 - Scripted localisation import/export
@@ -240,7 +245,6 @@ src/hoi4cm/                 ← modular package (logging + shared core)
     logger.py               ← logging setup, error buffer, excepthook
     config.py               ← persistent user config load/save
     paths.py                ← mod-dir defaults + tolerant file reading
-hoi4_logger.py              ← back-compat shim → hoi4cm.core.logger
 tests/                      ← pytest suite
   test_logger.py            ← logging module tests
 pyproject.toml              ← dependencies (extras: image/dev/build), metadata, pytest config
@@ -315,19 +319,23 @@ Use **Save to Mod** (where available) to write directly to the correct path insi
 ## Troubleshooting
 
 **Icons don't appear in the GFX picker or preview**
+
 - Install Pillow: `pip install Pillow`
 - For `.dds` files: `pip install pillow-dds`
 - Make sure your mod folder is loaded (*File → Load Mod Folder*)
 
 **"No module named tkinter"**
+
 - Windows: reinstall Python and ensure "tcl/tk and IDLE" is checked in the installer
 - Linux: `sudo apt install python3-tk`
 - macOS: use the official python.org installer (Homebrew Python sometimes omits tkinter)
 
 **Autosave restore shows empty tree**
+
 - This was a known bug fixed in v2.0. Update to the latest version.
 
 **App is slow with large mods**
+
 - Use the category visibility toggles (👁 / 🚫 buttons) to hide categories you aren't currently editing
 - The **Solo** button shows only one category at a time
 

@@ -44,8 +44,7 @@ _SRC = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "src")
 if _os.path.isdir(_SRC) and _SRC not in _sys.path:
     _sys.path.insert(0, _SRC)
 
-from hoi4_logger import log, log_startup
-from hoi4cm.core import (
+from hoi4cm.core import (  # noqa: E402
     EFFECT_CATS,
     EmptyDrawioGraphError,
     EmptyFocusTreeError,
@@ -63,6 +62,8 @@ from hoi4cm.core import (
     group_focuses_by_tree,
     hydrate_focus_localization,
     install_excepthook,
+    log,
+    log_startup,
     make_extra_export_plan,
     make_main_export_plan,
     parse_drawio_graph,
@@ -74,21 +75,21 @@ from hoi4cm.core import (
     show_splash,
     tr,
 )
-from hoi4cm.editor import (
+from hoi4cm.editor import (  # noqa: E402
     clear_workspace_autosave,
     read_project,
     sibling_autosave_path,
     workspace_autosave_path,
     write_project,
 )
-from hoi4cm.focus_tree.validate import (
+from hoi4cm.focus_tree.validate import (  # noqa: E402
     collect_loc_keys_from_text,
     validate_document,
     worst_severity_per_focus,
 )
-from hoi4cm.mod import MOD, detect_loc_file
-from hoi4cm.mod.workspace_files import WorkspaceFiles
-from hoi4cm.models import (
+from hoi4cm.mod import MOD, detect_loc_file  # noqa: E402
+from hoi4cm.mod.workspace_files import WorkspaceFiles  # noqa: E402
+from hoi4cm.models import (  # noqa: E402
     EditorWorkspace,
     FocusSidebarValues,
     TreeDocument,
@@ -98,7 +99,7 @@ from hoi4cm.models import (
     parse_focus_cost,
     sidebar_values_match_focus,
 )
-from hoi4cm.ui import (
+from hoi4cm.ui import (  # noqa: E402
     BG_CARD,
     BG_DARK,
     BG_PANEL,
@@ -124,30 +125,37 @@ from hoi4cm.ui import (
     report_write_failure,
     run_bg,
 )
-from hoi4cm.ui.canvas import CanvasMixin
-from hoi4cm.ui.checklist import (
+from hoi4cm.ui.canvas import CanvasMixin  # noqa: E402
+from hoi4cm.ui.checklist import (  # noqa: E402
     ChecklistItem,
     VirtualChecklist,
     apply_select_mode,
     default_tree_type,
     is_loadable,
 )
-from hoi4cm.ui.effects_panel import EffectsMixin
-from hoi4cm.ui.focus_list import FocusListCache, FocusListItem, VirtualFocusList
-from hoi4cm.ui.gfx_browser import open_focus_icon_browser
-from hoi4cm.ui.loaded_trees import LoadedTreeRowItem, VirtualLoadedTreesList
-from hoi4cm.ui.menubar import build_menubar
-from hoi4cm.ui.mod_loading import ModLoadingMixin
-from hoi4cm.ui.settings_dialog import open_settings
-from hoi4cm.ui.toolbar import build_toolbar_row2
-from hoi4cm.ui.tree_badges import build_tree_badges
+from hoi4cm.ui.effects_panel import EffectsMixin  # noqa: E402
+from hoi4cm.ui.focus_list import (  # noqa: E402
+    FocusListCache,
+    FocusListItem,
+    VirtualFocusList,
+)
+from hoi4cm.ui.gfx_browser import open_focus_icon_browser  # noqa: E402
+from hoi4cm.ui.loaded_trees import (  # noqa: E402
+    LoadedTreeRowItem,
+    VirtualLoadedTreesList,
+)
+from hoi4cm.ui.menubar import build_menubar  # noqa: E402
+from hoi4cm.ui.mod_loading import ModLoadingMixin  # noqa: E402
+from hoi4cm.ui.settings_dialog import open_settings  # noqa: E402
+from hoi4cm.ui.toolbar import build_toolbar_row2  # noqa: E402
+from hoi4cm.ui.tree_badges import build_tree_badges  # noqa: E402
 
 log_startup()
 
 # Re-import os/sys for the rest of the file (the _os/_sys aliases above
 # were only for the sys.path shim).
-import os
-import sys
+import os  # noqa: E402
+import sys  # noqa: E402
 
 
 def _enable_windows_dpi_awareness():
@@ -180,13 +188,13 @@ def _enable_windows_dpi_awareness():
 
 _enable_windows_dpi_awareness()
 log.info("Importing tkinter...")
-import tkinter as tk
-from tkinter import filedialog, messagebox
+import tkinter as tk  # noqa: E402
+from tkinter import filedialog, messagebox  # noqa: E402
 
 log.info("tkinter imported OK")
-import bisect
-import re
-import time
+import bisect  # noqa: E402
+import re  # noqa: E402
+import time  # noqa: E402
 
 
 def _apply_tk_dpi_scaling(root):
@@ -437,7 +445,8 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             tr("dialog.autosave_restore.title", "Restore Autosave?"),
             tr(
                 "dialog.autosave_restore.body",
-                "An autosaved workspace was found ({count} focuses, tree '{tree}').\n\nRestore it?",
+                "An autosaved workspace was found "
+                "({count} focuses, tree '{tree}').\n\nRestore it?",
                 count=focus_count,
                 tree=tree_id,
             ),
@@ -591,7 +600,9 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         self._shared_focuses = self.workspace.main_tree.metadata.shared_focuses
         self._joint_focuses = self.workspace.main_tree.metadata.joint_focuses
         # Extra loaded trees (shared/joint trees loaded alongside the main tree)
-        self._extra_trees = []  # list of dicts: {type, file_path, tree_id, cfp_x, cfp_y, shared_focuses, joint_focuses, country_tag, country_raw, tree_extras, had_wrapper, focus_ids}
+        # Each dict has type, file_path, tree_id, cfp_x/y, shared_focuses,
+        # joint_focuses, country_tag/raw, tree_extras, had_wrapper, and focus_ids.
+        self._extra_trees = []
         self._tree_badge_table = None  # rebuilt by _get_tree_badge on change
         toolbar = tk.Frame(self, bg=BG_DARK)
         toolbar.pack(fill="x")
@@ -1297,7 +1308,8 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             wrap,
             text=tr(
                 "sidebar.no_selection",
-                "\n\n  Click a focus to\n  edit its properties.\n\n  Right-click the canvas\n  to create a new focus.",
+                "\n\n  Click a focus to\n  edit its properties.\n\n"
+                "  Right-click the canvas\n  to create a new focus.",
             ),
             bg=BG_PANEL,
             fg=TEXT_DIM,
@@ -1647,7 +1659,10 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         ).pack(fill="x", padx=8, pady=(2, 10))
 
     def _refresh_offsets(self, f=None):
-        """Rebuild the OFFSETS UI rows from f.offsets. Clears and repopulates _offset_box."""
+        """Rebuild the OFFSETS UI rows from f.offsets.
+
+        Clear and repopulate _offset_box.
+        """
         if f is None:
             f = self.selected
         offsets = getattr(f, "offsets", []) if f else []
@@ -2119,7 +2134,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
 
     # ── GFX Picker sidebar widget ────────────────────────────────────
     def _sb_gfx_picker(self):
-        """Icon GFX name entry — plain text, no sidebar preview (shown on canvas only)."""
+        """Build the plain-text icon GFX name entry without a sidebar preview."""
         f = tk.Frame(self._sb_frm, bg=BG_PANEL)
         f.pack(fill="x", padx=8, pady=2)
         tk.Label(
@@ -2447,7 +2462,10 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             badge_txt, badge_col = self._get_tree_badge(t_idx)
             if hasattr(self, "_tree_src_lbl"):
                 self._tree_src_lbl.config(
-                    text=f"[{badge_txt}] {et['type']}  {os.path.basename(et['file_path'])}",
+                    text=(
+                        f"[{badge_txt}] {et['type']}  "
+                        f"{os.path.basename(et['file_path'])}"
+                    ),
                     fg=badge_col,
                 )
         else:
@@ -2467,7 +2485,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             self._fv_ai_raw.insert("1.0", raw)
         else:
             # MD convention: ai_will_do uses `base = X` at top level
-            self._fv_ai_raw.insert("1.0", "    base = %s" % f.ai_will_do)
+            self._fv_ai_raw.insert("1.0", f"    base = {f.ai_will_do}")
         self._fv_desc.delete("1.0", "end")
         self._fv_desc.insert("1.0", f.desc)
         self._fv_search.set(getattr(f, "search_filters", "FOCUS_FILTER_POLITICAL"))
@@ -2500,7 +2518,10 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         self._code_txt.config(state="disabled")
 
     def _apply_focus_code(self, f, new_code):
-        """Parse an edited focus block back into the focus object. Returns True on success."""
+        """Parse an edited focus block back into the focus object.
+
+        Return True on success.
+        """
         try:
             apply_focus_code(
                 f,
@@ -2528,7 +2549,8 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             report_error(
                 tr(
                     "dialog.parse_error.body",
-                    "Could not parse your edits:\n{error}\n\nCheck Error Log for details.",
+                    "Could not parse your edits:\n{error}\n\n"
+                    "Check Error Log for details.",
                     error=ex,
                 ),
                 ex,
@@ -2983,18 +3005,18 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             tag = var_tag.get().strip().upper()
             name = var_name.get().strip().lower().replace(" ", "_")
             if tag:
-                tree_id = ("%s_focus" % name) if name else ("%s_focus" % tag.lower())
+                tree_id = f"{name}_focus" if name else f"{tag.lower()}_focus"
                 foc_pfx = tag + "_"
                 var_tree.set(tree_id)
                 var_foc.set(foc_pfx)
                 preview_lbl.config(
                     text=(
                         "focus_tree = {\n"
-                        "    id = %s\n"
+                        f"    id = {tree_id}\n"
                         "    country = {\n"
                         "        factor = 0\n"
-                        "        modifier = { add = 20  original_tag = %s }\n"
-                        "    }\n}" % (tree_id, tag)
+                        f"        modifier = {{ add = 20  original_tag = {tag} }}\n"
+                        "    }\n}"
                     )
                 )
             else:
@@ -3016,7 +3038,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
                 )
                 return
             name = var_name.get().strip().lower().replace(" ", "_")
-            tree_id = var_tree.get().strip() or ("%s_focus" % tag.lower())
+            tree_id = var_tree.get().strip() or f"{tag.lower()}_focus"
             foc_pfx = var_foc.get().strip() or (tag + "_")
 
             if self._is_dirty() or self.focuses:
@@ -3025,7 +3047,8 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
                         tr("dialog.unsaved_changes.title", "Unsaved Changes"),
                         tr(
                             "dialog.unsaved_changes.new_tree_body",
-                            "You have unsaved changes.\n\nSave before starting a new tree?",
+                            "You have unsaved changes.\n\n"
+                            "Save before starting a new tree?",
                         ),
                         parent=win,
                     )
@@ -3059,7 +3082,8 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             self._hint(
                 tr(
                     "hint.new_tree_ready",
-                    "New tree ready - right-click canvas to add your first focus - prefix: {prefix}",
+                    "New tree ready - right-click canvas to add your first focus "
+                    "- prefix: {prefix}",
                     prefix=foc_pfx,
                 )
             )
@@ -3072,7 +3096,8 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
                 tr("dialog.tree_created.title", "Tree Created"),
                 tr(
                     "dialog.tree_created.body",
-                    "Tree ID: {tree}\nCountry: {tag}\nFocus prefix: {prefix}\n\nRight-click the canvas to place your first focus!",
+                    "Tree ID: {tree}\nCountry: {tag}\nFocus prefix: {prefix}\n\n"
+                    "Right-click the canvas to place your first focus!",
                     tree=tree_id,
                     tag=tag,
                     prefix=foc_pfx,
@@ -3124,7 +3149,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         f = Focus(wx, wy)
         pfx = self._default_focus_prefix
         if pfx:
-            f.name = pfx + "focus_%d" % f.id
+            f.name = f"{pfx}focus_{f.id:d}"
         self.focuses.add(f)
         self._redraw()
         self._select(f)
@@ -3186,7 +3211,8 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             self._hint(
                 tr(
                     "hint.multi_select_on",
-                    "Multi-select ON - Ctrl+click focuses to select - Del to delete selected",
+                    "Multi-select ON - Ctrl+click focuses to select - "
+                    "Del to delete selected",
                 )
             )
         else:
@@ -3197,7 +3223,8 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             self._hint(
                 tr(
                     "hint.canvas_controls",
-                    "Right-click canvas to place a focus  -  Ctrl+drag to pan  -  Scroll to zoom",
+                    "Right-click canvas to place a focus  -  Ctrl+drag to pan  -  "
+                    "Scroll to zoom",
                 )
             )
         self._redraw()
@@ -3209,7 +3236,8 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
                 tr("dialog.no_selection.title", "No Selection"),
                 tr(
                     "dialog.no_focuses_selected",
-                    "No focuses selected.\nCtrl+click focuses (or enable Multi-Select mode) to select them.",
+                    "No focuses selected.\nCtrl+click focuses "
+                    "(or enable Multi-Select mode) to select them.",
                 ),
                 parent=self,
             )
@@ -3222,7 +3250,8 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             tr("dialog.delete_selected.title", "Delete Selected"),
             tr(
                 "dialog.delete_selected.body",
-                "Delete {count} selected focus(es)?\n\n{names}\n\nThis will also remove all prerequisite links to/from these focuses.",
+                "Delete {count} selected focus(es)?\n\n{names}\n\n"
+                "This will also remove all prerequisite links to/from these focuses.",
                 count=n,
                 names=names,
             ),
@@ -3418,9 +3447,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
 
         def _update_counter(*_):
             n = len(focus_list.selected_keys)
-            _counter_var.set(
-                tr("common.selected_count", "{count} selected", count=n)
-            )
+            _counter_var.set(tr("common.selected_count", "{count} selected", count=n))
 
         focus_list = VirtualFocusList(
             frm,
@@ -3455,7 +3482,8 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             text=tr(
                 "focus.prereq.and_or_explanation",
                 "  OR group: ANY ONE of the selected focuses must be completed\n"
-                "  AND group: ALL selected focuses must each be completed (added as separate blocks)",
+                "  AND group: ALL selected focuses must each be completed "
+                "(added as separate blocks)",
             ),
             bg="#0d1525",
             fg=TEXT_DIM,
@@ -3613,7 +3641,8 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         self._hint(
             tr(
                 "hint.canvas_controls",
-                "Right-click canvas to place a focus  -  Ctrl+drag to pan  -  Scroll to zoom",
+                "Right-click canvas to place a focus  -  Ctrl+drag to pan  -  "
+                "Scroll to zoom",
             )
         )
         self._redraw()
@@ -3688,7 +3717,8 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
                     tr("dialog.drawio_import.title", "Draw.io Import"),
                     tr(
                         "dialog.drawio_no_shapes",
-                        "No shapes found in the diagram.\n\nMake sure your shapes have labels and are saved as XML.",
+                        "No shapes found in the diagram.\n\n"
+                        "Make sure your shapes have labels and are saved as XML.",
                     ),
                 )
             elif isinstance(exc, (ET.ParseError, ValueError)):
@@ -3696,7 +3726,8 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
                     tr("dialog.drawio_import.title", "Draw.io Import"),
                     tr(
                         "dialog.drawio_parse_error",
-                        "Could not parse XML:\n{error}\n\nExport as Editable Vector XML from Draw.io.",
+                        "Could not parse XML:\n{error}\n\n"
+                        "Export as Editable Vector XML from Draw.io.",
                         error=exc,
                     ),
                 )
@@ -4047,7 +4078,8 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             code_lines.append("\tfocus = {")
             code_lines.append(f"\t\tid = {fid}")
             code_lines.append(
-                "\t\ticon = GFX_goal_generic_political_pressure  # TODO: replace with real icon"
+                "\t\ticon = GFX_goal_generic_political_pressure  "
+                "# TODO: replace with real icon"
             )
             code_lines.append("")
             code_lines.append(f"\t\tx = {gx}")
@@ -4113,7 +4145,8 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             prev_win,
             text=tr(
                 "drawio.preview.note",
-                "  Shapes become focuses with generic icons. Click each focus in the sidebar to add effects and icons.",
+                "  Shapes become focuses with generic icons. Click each focus in "
+                "the sidebar to add effects and icons.",
             ),
             bg="#0d1117",
             fg="#6e7681",
@@ -4213,7 +4246,9 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         self._hint(
             tr(
                 "drawio.imported.hint",
-                "Imported {count} focuses from Draw.io  -  Tag: {tag}  -  Prefix: {prefix}{shift_note}  -  Click any focus to add effects and icons",
+                "Imported {count} focuses from Draw.io  -  Tag: {tag}  -  "
+                "Prefix: {prefix}{shift_note}  -  Click any focus to add "
+                "effects and icons",
                 count=len(self.focuses),
                 tag=tag,
                 prefix=prefix,
@@ -4235,7 +4270,9 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
                 tr("drawio.auto_shift.title", "Auto-Shift Notice"),
                 tr(
                     "drawio.auto_shift.body",
-                    "{count} focus(es) were automatically moved to\navoid overlapping another focus:\n\n{detail}\n\nYou can drag them to better positions on the canvas.",
+                    "{count} focus(es) were automatically moved to\n"
+                    "avoid overlapping another focus:\n\n{detail}\n\n"
+                    "You can drag them to better positions on the canvas.",
                     count=len(auto_shifted),
                     detail=detail,
                 ),
@@ -4386,7 +4423,10 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
                 tr("dialog.import_complete.title", "Import Complete"),
                 tr(
                     "dialog.import_complete.body",
-                    "Imported {count} focuses from:\n{file}\n\nTree ID: {tree}{shared}{joint}\n\nNote: available/bypass conditions and complex effects\nmay need manual review.",
+                    "Imported {count} focuses from:\n{file}\n\n"
+                    "Tree ID: {tree}{shared}{joint}\n\n"
+                    "Note: available/bypass conditions and complex effects\n"
+                    "may need manual review.",
                     count=len(self.focuses),
                     file=os.path.basename(path),
                     tree=parsed.tree_id,
@@ -4413,7 +4453,9 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         self._tree_badge_table = None
 
     def _get_tree_badge(self, tree_idx):
-        """Return (badge_text, color) for a given tree_idx. Returns ('', FC_BORDER) for main tree.
+        """Return the badge text and color for a tree index.
+
+        Return ('', FC_BORDER) for the main tree.
 
         The canvas asks once per visible focus per redraw (plus once per
         minimap dot and legend row), so the whole table is built once per
@@ -4463,7 +4505,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         return len(new_focuses), parsed.tree_id
 
     def _load_extra_tree(self, tree_type):
-        """Load a shared or joint focus tree file onto the canvas alongside the main tree."""
+        """Load a shared or joint tree onto the canvas beside the main tree."""
         init_dir = None
         if MOD.loaded and MOD.root:
             nf_dir = os.path.join(MOD.root, "common", "national_focus")
@@ -4695,7 +4737,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         )
 
     def _load_all_trees(self):
-        """Scan national_focus directory and show a checklist so the user can batch-load trees."""
+        """Scan national_focus and show a checklist for batch-loading trees."""
         # Determine scan directory
         init_dir = None
         if MOD.loaded and MOD.root:
@@ -5070,9 +5112,9 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
                     add_error(f"Write failed: {result.plan.focus_path}: {result.error}")
                 continue
             if result.plan.extra_tree_idx is not None:
-                self._extra_trees[result.plan.extra_tree_idx - 1]["file_path"] = (
-                    result.plan.focus_path
-                )
+                self._extra_trees[result.plan.extra_tree_idx - 1][
+                    "file_path"
+                ] = result.plan.focus_path
             if MOD.loaded and MOD.root:
                 for path in result.written_paths:
                     MOD.note_file_written(path)
@@ -5145,7 +5187,8 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
                     tr("dialog.export.title", "Export"),
                     tr(
                         "dialog.no_main_focuses_export",
-                        "No main-tree focuses to export.\nUse 'Save All' or the Loaded Trees panel to export shared/joint trees.",
+                        "No main-tree focuses to export.\nUse 'Save All' or the "
+                        "Loaded Trees panel to export shared/joint trees.",
                     ),
                 )
             return None
@@ -5213,7 +5256,8 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
                     initialfile=loc_filename,
                     title=tr(
                         "filedialog.save_localisation_yml",
-                        "Save Localisation .yml  (should go in localisation/{language}/)",
+                        "Save Localisation .yml  "
+                        "(should go in localisation/{language}/)",
                         language=loc_target.dirname(),
                     ),
                 )
@@ -5959,9 +6003,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             sev_icon = (
                 "🔴"
                 if it.severity == "error"
-                else "🟡"
-                if it.severity == "warning"
-                else "🔵"
+                else "🟡" if it.severity == "warning" else "🔵"
             )
             focus_txt = it.focus_name or "—"
             tree.insert(
@@ -6143,7 +6185,8 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             win,
             text=tr(
                 "validation.hint",
-                "Click a row to select the focus on the canvas. Double-click to center.",
+                "Click a row to select the focus on the canvas. "
+                "Double-click to center.",
             ),
             bg=BG_DARK,
             fg=TEXT_DIM,

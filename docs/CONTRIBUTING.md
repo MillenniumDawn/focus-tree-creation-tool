@@ -64,8 +64,7 @@ If you have been granted permission to submit code:
 
 ### Tests and linting
 
-New code in the `src/hoi4cm` package and `tests/` is checked by Ruff and Black. Before
-submitting:
+Python code is checked by Ruff and Black. Before submitting:
 
 ```bash
 pip install ".[dev]"
@@ -75,8 +74,7 @@ black --check .
 ```
 
 CI (`.github/workflows/ci.yml`) runs these on every pull request, and a tagged release
-runs the same jobs before it builds anything. The legacy monolith is excluded from
-linting until it is refactored into the package.
+runs the same jobs before it builds anything.
 
 ---
 
@@ -98,4 +96,4 @@ code-submission permission.
 
 ## Contact
 
-For questions not suited to a public Issue: **ThatGuyBlazer@gmail.com**
+For questions not suited to a public Issue: **<ThatGuyBlazer@gmail.com>**
