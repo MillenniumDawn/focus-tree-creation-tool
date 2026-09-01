@@ -6,6 +6,7 @@ quietly dropping every widget test from the run. The rest of this module
 keeps those windows off the screen on a machine that has a real desktop.
 """
 
+import gc
 import os
 import types
 
@@ -16,6 +17,8 @@ try:
     import tkinter as tk
 except ImportError:
     tk = None
+
+TclError = tk.TclError if tk is not None else RuntimeError
 
 
 def _hidden() -> bool:
@@ -53,7 +56,7 @@ def hide_tk_windows(request, monkeypatch):
     def optional_grab_set(self):
         try:
             grab_set(self)
-        except tk.TclError:
+        except TclError:
             pass
 
     monkeypatch.setattr(tk.Toplevel, "__init__", hidden_init)
@@ -76,7 +79,7 @@ def tk_root(request):
         pytest.skip("tkinter is unavailable")
     try:
         root = tk.Tk()
-    except tk.TclError as exc:
+    except TclError as exc:
         if os.environ.get("HOI4CM_REQUIRE_TK") == "1":
             pytest.fail(f"HOI4CM_REQUIRE_TK=1 but Tk is unavailable: {exc}")
         pytest.skip("Tk display is unavailable")
@@ -86,3 +89,4 @@ def tk_root(request):
         yield root
     finally:
         root.destroy()
+        gc.collect()
