@@ -1,6 +1,7 @@
 """Tests for the monolith's Tk shells around the export-plan pipeline."""
 
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -59,6 +60,8 @@ def mod_files(tmp_path, monkeypatch):
 
 
 class _App:
+    _run_export_plans: Any = None
+
     def _begin_document_generation(self):
         pass
 
@@ -114,6 +117,28 @@ def test_export_writes_both_tracked_files(dialogs, mod_files):
     assert "TST_root" in mod_files.loc.read_text(encoding="utf-8-sig")
     assert len(dialogs.info) == 1
     assert dialogs.error == []
+
+
+def test_default_localisation_filename_is_generic(mod_files, monkeypatch):
+    MOD = m.MOD
+    MOD.edit_focus_file = ""
+    MOD.edit_loc_file = ""
+    focus_path = mod_files.root / "common" / "national_focus" / "05_TST.txt"
+    monkeypatch.setattr(
+        m.filedialog,
+        "asksaveasfilename",
+        lambda **_kwargs: str(focus_path),
+    )
+
+    app = _App([_focus("TST_root")])
+    focuses = list(app.focuses.values())
+    names = {focus.name: focus for focus in focuses}
+    plan = m.App._make_main_export_plan.__get__(app, _App)(
+        focuses, app.focuses, names, show_dialog=False
+    )
+
+    assert plan is not None
+    assert plan.loc_path.endswith("TST_focus_l_english.yml")
 
 
 def test_failed_export_leaves_the_tracked_files_untouched(
@@ -261,3 +286,39 @@ def test_save_all_uses_one_plan_per_loaded_tree(dialogs, mod_files, tmp_path):
     assert "TST_main" in mod_files.focus.read_text(encoding="utf-8")
     assert "TST_shared" in shared.read_text(encoding="utf-8")
     assert len(dialogs.info) == 1
+
+
+def test_save_all_shares_one_lookup_across_plans(dialogs, mod_files, tmp_path):
+    shared = tmp_path / "MD_shared_focuses.txt"
+    shared.write_text("shared_focus = { }\n", encoding="utf-8")
+    main = _focus("TST_main")
+    extra = _focus("TST_shared")
+    extra.tree_idx = 1
+    app = _App([main, extra])
+    app._extra_trees = [
+        {
+            "type": "shared",
+            "file_path": str(shared),
+            "tree_id": "TST_shared_focuses",
+            "country_tag": "TST",
+            "country_raw": "",
+            "cfp_x": None,
+            "cfp_y": None,
+            "had_wrapper": False,
+        }
+    ]
+    captured = []
+
+    def run_export_plans(plans, on_done, *, title):
+        captured.extend(plans)
+        results = execute_export_plans(plans, WorkspaceFiles().write_texts)
+        on_done(results)
+        return results
+
+    _bind_export_shells(app)
+    app._run_export_plans = run_export_plans
+    m.App._save_all_trees.__get__(app, _App)()
+
+    assert len(captured) == 2
+    assert captured[0].focus_lookup is captured[1].focus_lookup
+    assert captured[0].focus_name_lookup is captured[1].focus_name_lookup

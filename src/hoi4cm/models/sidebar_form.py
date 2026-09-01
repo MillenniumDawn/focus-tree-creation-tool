@@ -49,6 +49,7 @@ class FocusSidebarValues:
     ai_will_do_raw: str
     x: int
     y: int
+    loc_name: str
     desc: str
     search_filters: str
     available_cond: str
@@ -71,6 +72,7 @@ def sidebar_values_match_focus(focus: Focus, values: FocusSidebarValues) -> bool
         and focus.ai_will_do == values.ai_will_do
         and focus.x == values.x
         and focus.y == values.y
+        and getattr(focus, "loc_name", "") == values.loc_name
         and focus.desc == values.desc
         and getattr(focus, "search_filters", _DEFAULT_SEARCH) == values.search_filters
         and getattr(focus, "available_cond", "") == values.available_cond
@@ -96,6 +98,7 @@ def apply_sidebar_values(focus: Focus, values: FocusSidebarValues) -> bool:
     focus.cost = values.cost
     focus.ai_will_do_raw = values.ai_will_do_raw
     focus.ai_will_do = values.ai_will_do
+    focus.loc_name = values.loc_name
     focus.desc = values.desc
     focus.search_filters = values.search_filters
     focus.available_cond = values.available_cond

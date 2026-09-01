@@ -24,6 +24,7 @@ def isolate_scan_cache(tmp_path_factory, monkeypatch):
     monkeypatch.setattr(
         scan_cache_mod, "STATE_DIR", str(tmp_path_factory.mktemp("hoi4cm_state"))
     )
+    monkeypatch.setattr(MOD, "md_mode_override", None)
 
 
 @pytest.fixture
@@ -105,18 +106,6 @@ def mod_tree(tmp_path):
         }
         """,
     )
-    write(
-        "common/scripted_effects/00_money_system.txt",
-        "## MD money system placeholder\n",
-    )
-    write(
-        "common/scripted_localisation/money_scripted_localization.txt",
-        "## MD sloc placeholder\n",
-    )
-    write(
-        "localisation/english/MD_money_l_english.yml",
-        "l_english:\n  x: y\n",
-    )
     # A single focus goal .dds so the GFX scanner has something to index
     (tmp_path / "gfx" / "interface" / "goals").mkdir(parents=True, exist_ok=True)
     (tmp_path / "gfx" / "interface" / "goals" / "USA_first_focus.dds").write_bytes(b"")
@@ -166,11 +155,28 @@ def test_scan_loads_event_ids(mod_tree):
     assert MOD.event_ids.get("USA_events") == ["usa_events.1", "usa_events.2"]
 
 
-def test_scan_discovers_md_money_files(mod_tree):
-    MOD.scan(str(mod_tree))
-    assert MOD.md_money_system_file.endswith("00_money_system.txt")
-    assert "money_scripted_localization" in MOD.md_money_scripted_loc_file
-    assert MOD.md_money_yml_file.endswith("MD_money_l_english.yml")
+def test_scan_discovers_md_money_files(tmp_path):
+    money = tmp_path / "common" / "scripted_effects" / "00_money_system.txt"
+    money.parent.mkdir(parents=True)
+    money.write_text("## MD money system placeholder\n")
+    sloc = (
+        tmp_path
+        / "common"
+        / "scripted_localisation"
+        / "money_scripted_localization.txt"
+    )
+    sloc.parent.mkdir(parents=True)
+    sloc.write_text("## MD sloc placeholder\n")
+    yml = tmp_path / "localisation" / "english" / "MD_money_l_english.yml"
+    yml.parent.mkdir(parents=True)
+    yml.write_text("l_english:\n  x: y\n")
+
+    MOD.scan(str(tmp_path))
+
+    assert MOD.is_md
+    assert MOD.md_money_system_file == str(money)
+    assert MOD.md_money_scripted_loc_file == str(sloc)
+    assert MOD.md_money_yml_file == str(yml)
 
 
 def test_find_loc_files_is_recursive_and_filters_configured_language(tmp_path):
@@ -206,6 +212,9 @@ def test_detect_loc_file_finds_configured_language_recursively(tmp_path):
 
 def test_scan_discovers_configured_language_md_money_file(tmp_path, monkeypatch):
     monkeypatch.setattr(ctx_mod, "cfg_load", lambda: {"loc_language": "french"})
+    money = tmp_path / "common" / "scripted_effects" / "00_money_system.txt"
+    money.parent.mkdir(parents=True)
+    money.write_text("scripted_effect = {}\n")
     loc_file = tmp_path / "localisation" / "french" / "MD_money_l_french.yml"
     loc_file.parent.mkdir(parents=True)
     loc_file.write_text("l_french:\n")
@@ -223,13 +232,105 @@ def test_md_detection_by_name(tmp_path, monkeypatch):
     md_root = tmp_path / "Millennium_Dawn"
     (md_root / "common").mkdir(parents=True)
     (md_root / "descriptor.mod").write_text('name = "Some Other Mod"')
-    MOD.scan(str(md_root))
-    assert MOD.is_md
+    context = ctx_mod.ModContext()
+    context.scan(str(md_root))
+    assert context.is_md
+
+
+def test_md_detection_from_money_system(tmp_path, monkeypatch):
+    monkeypatch.setattr(ctx_mod, "cfg_load", lambda: {})
+    money = tmp_path / "common" / "scripted_effects" / "00_money_system.txt"
+    money.parent.mkdir(parents=True)
+    money.write_text("scripted_effect = {}\n")
+
+    context = ctx_mod.ModContext()
+    context.scan(str(tmp_path))
+
+    assert context.is_md
+
+
+@pytest.mark.parametrize(
+    ("legacy_value", "money_file"),
+    [(True, False), (False, True)],
+)
+def test_legacy_md_override_is_ignored(tmp_path, monkeypatch, legacy_value, money_file):
+    monkeypatch.setattr(ctx_mod, "cfg_load", lambda: {"is_md_override": legacy_value})
+    if money_file:
+        money = tmp_path / "common" / "scripted_effects" / "00_money_system.txt"
+        money.parent.mkdir(parents=True)
+        money.write_text("scripted_effect = {}\n")
+
+    context = ctx_mod.ModContext()
+    context.scan(str(tmp_path))
+
+    assert context.md_mode_override is None
+    assert context.is_md is money_file
 
 
 def test_md_detection_false_for_normal_mod(mod_tree):
     MOD.scan(str(mod_tree))
     assert not MOD.is_md
+    assert MOD.md_money_system_file == ""
+    assert MOD.md_money_scripted_loc_file == ""
+    assert MOD.md_money_yml_file == ""
+
+
+def test_md_money_scan_is_gated_for_normal_mod(tmp_path, monkeypatch):
+    monkeypatch.setattr(ctx_mod, "cfg_load", lambda: {})
+    context = ctx_mod.ModContext()
+    scanned = []
+    monkeypatch.setattr(
+        context, "_scan_md_money_files", lambda: scanned.append("money")
+    )
+
+    context.scan(str(tmp_path))
+
+    assert scanned == []
+
+
+def test_md_override_wins_over_detection_and_survives_rescans(tmp_path, monkeypatch):
+    monkeypatch.setattr(ctx_mod, "cfg_load", lambda: {})
+    context = ctx_mod.ModContext()
+    money = tmp_path / "common" / "scripted_effects" / "00_money_system.txt"
+    money.parent.mkdir(parents=True)
+    money.write_text("scripted_effect = {}\n")
+
+    context.md_mode_override = False
+    context.scan(str(tmp_path))
+    assert not context.is_md
+    assert not context.md_money_system_file
+
+    context.md_mode_override = True
+    context.scan(str(tmp_path))
+    assert context.is_md
+    assert context.md_money_system_file == str(money)
+
+    context.md_mode_override = False
+    context.scan(str(tmp_path))
+    assert not context.is_md
+    assert not context.md_money_system_file
+
+
+def test_md_override_persists_across_context_restart(tmp_path, monkeypatch):
+    saved = {}
+    monkeypatch.setattr(ctx_mod, "cfg_load", lambda: dict(saved))
+    monkeypatch.setattr(ctx_mod, "cfg_save", lambda data: saved.update(data))
+    monkeypatch.setattr(ctx_mod.GraphicsCatalog, "flush_cache", lambda self: None)
+
+    context = ctx_mod.ModContext()
+    context.md_mode_override = False
+    context.save_config()
+    assert saved["md_mode_override"] is False
+
+    money = tmp_path / "common" / "scripted_effects" / "00_money_system.txt"
+    money.parent.mkdir(parents=True)
+    money.write_text("scripted_effect = {}\n")
+    restarted = ctx_mod.ModContext()
+    assert restarted.is_md is False
+    restarted.scan(str(tmp_path))
+
+    assert restarted.md_mode_override is False
+    assert not restarted.is_md
 
 
 def test_summary_includes_counts(mod_tree):

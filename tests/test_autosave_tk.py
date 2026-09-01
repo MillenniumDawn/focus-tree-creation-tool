@@ -50,6 +50,7 @@ class _AutosaveHarness:
         self._fv_cost = tk.StringVar(master=root)
         self._fv_x = tk.StringVar(master=root)
         self._fv_y = tk.StringVar(master=root)
+        self._fv_loc_name = tk.StringVar(master=root)
         self._fv_search = tk.StringVar(master=root)
         self._fv_cancel = tk.BooleanVar(master=root)
         self._fv_continue = tk.BooleanVar(master=root)
@@ -85,6 +86,7 @@ class _AutosaveHarness:
         self._fv_cost.set(str(focus.cost))
         self._fv_x.set(str(focus.x))
         self._fv_y.set(str(focus.y))
+        self._fv_loc_name.set(getattr(focus, "loc_name", ""))
         self._fv_search.set(focus.search_filters)
         self._fv_cancel.set(focus.cancel_if_invalid)
         self._fv_continue.set(focus.continue_if_invalid)
@@ -176,6 +178,19 @@ def test_autosave_writes_desc_edit_without_touch(tk_root, log_state):
     assert focus.desc == "edited from form"
     assert h.focuses.revision == baseline
     assert h.focuses.validate_indexes()
+    assert log_state.get_error_entries() == []
+
+
+def test_autosave_writes_localized_name_without_touch(tk_root, log_state):
+    focus = _focus(loc_name="Old title")
+    h = _harness_with(tk_root, focus)
+    baseline = h.focuses.revision
+    h._fv_loc_name.set("New title")
+
+    h._autosave()
+
+    assert focus.loc_name == "New title"
+    assert h.focuses.revision == baseline
     assert log_state.get_error_entries() == []
 
 

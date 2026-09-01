@@ -97,6 +97,15 @@ def test_main_plan_snapshots_non_english_localisation_header(tmp_path):
     assert calls[0][1][1].startswith("l_french:\n")
 
 
+def test_main_plan_exports_german_localisation_header(tmp_path):
+    plan = _main_plan(tmp_path, loc_language="german")
+    calls = []
+
+    execute_export_plans([plan], lambda entries: calls.append(tuple(entries)))
+
+    assert calls[0][1][1].startswith("l_german:\n")
+
+
 def test_batch_continues_after_one_plan_fails(tmp_path):
     first = _extra_plan(tmp_path, "TST_first")
     second = _extra_plan(tmp_path, "TST_second")
@@ -131,6 +140,52 @@ def test_failed_main_plan_preserves_the_atomic_write_group(tmp_path):
         plan.focus_path,
         plan.loc_path,
     ]
+
+
+def test_export_plans_share_lookup_mappings(tmp_path):
+    focus = _focus("TST_root")
+    lookup = {focus.id: focus}
+    names = {focus.name: focus}
+    main = make_main_export_plan(
+        label="Main: TST_focus_tree",
+        focus_path=str(tmp_path / "05_TST.txt"),
+        loc_path=str(tmp_path / "MD_focus_TST_l_english.yml"),
+        focuses=[focus],
+        tree_info={
+            "tree_id": "TST_focus_tree",
+            "country_tag": "TST",
+            "cfp_x": None,
+            "cfp_y": None,
+            "country_raw": "",
+            "tree_extras": {},
+            "shared_focuses": [],
+            "joint_focuses": [],
+        },
+        focus_lookup=lookup,
+        focus_name_lookup=names,
+    )
+    extra = make_extra_export_plan(
+        label="Shared: TST_shared_focuses",
+        focus_path=str(tmp_path / "TST_shared.txt"),
+        focuses=[focus],
+        tree_info={
+            "type": "shared",
+            "tree_id": "TST_shared_focuses",
+            "country_tag": "TST",
+            "country_raw": "",
+            "cfp_x": None,
+            "cfp_y": None,
+            "had_wrapper": False,
+        },
+        focus_lookup=lookup,
+        focus_name_lookup=names,
+        extra_tree_idx=1,
+    )
+
+    assert main.focus_lookup is lookup
+    assert extra.focus_lookup is lookup
+    assert main.focus_name_lookup is names
+    assert extra.focus_name_lookup is names
 
 
 def test_batch_reports_progress_for_each_plan(tmp_path):
