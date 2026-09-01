@@ -1,6 +1,9 @@
 """Tests for hoi4cm.core.i18n — locale loading and translation lookup."""
 
 import json
+import re
+from collections import Counter
+from pathlib import Path
 
 import pytest
 
@@ -44,6 +47,31 @@ def _read_json_or_empty(path):
         return {}
 
 
+def _locale_files():
+    locale_dir = Path(__file__).parents[1] / "locales"
+    return (
+        json.loads((locale_dir / "en.json").read_text()),
+        json.loads((locale_dir / "de.json").read_text()),
+    )
+
+
+_PLACEHOLDER_RE = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}")
+
+
+def test_german_locale_has_exact_english_key_parity():
+    english, german = _locale_files()
+    assert set(german) == set(english)
+
+
+def test_german_locale_preserves_named_placeholders():
+    english, german = _locale_files()
+
+    for key, english_text in english.items():
+        assert Counter(_PLACEHOLDER_RE.findall(german[key])) == Counter(
+            _PLACEHOLDER_RE.findall(english_text)
+        ), key
+
+
 def test_tr_returns_default_when_key_missing(restore_i18n_state):
     assert i18n_mod.tr("definitely.not.a.key", "fallback text") == "fallback text"
 
@@ -74,6 +102,16 @@ def test_set_language_persists_and_loads(restore_i18n_state, fake_config):
     i18n_mod.set_language("zh_CN")
     assert i18n_mod.I18N_LANG == "zh_CN"
     assert _read_json_or_empty(fake_config).get("language") == "zh_CN"
+
+
+def test_german_language_is_selectable_and_loaded(restore_i18n_state, fake_config):
+    assert i18n_mod.I18N_LANGS["de"] == "Deutsch"
+
+    i18n_mod.set_language("de")
+
+    assert i18n_mod.I18N_LANG == "de"
+    assert i18n_mod.tr("common.cancel") == "Abbrechen"
+    assert _read_json_or_empty(fake_config).get("language") == "de"
 
 
 def test_set_language_rejects_unknown(restore_i18n_state, fake_config, monkeypatch):
