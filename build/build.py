@@ -86,7 +86,6 @@ a = Analysis(
     binaries=[],
     datas=[({locales_path!r}, 'locales')],
     hiddenimports=[
-        'hoi4_logger',
         'hoi4cm', 'hoi4cm.core', 'hoi4cm.core.logger',
         'hoi4cm.core.config', 'hoi4cm.core.paths', 'logging.handlers',
         # hoi4cm.wizards resolves these through a module-level __getattr__,

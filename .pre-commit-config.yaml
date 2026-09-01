@@ -23,9 +23,9 @@ repos:
     hooks:
       - id: black
         # Files are passed explicitly by pre-commit, which bypasses black's
-        # --extend-exclude; --force-exclude makes it honor the monolith/build
-        # exclusions (matched against the relative paths pre-commit passes).
-        args: [--force-exclude, 'hoi4_content_maker\.py|build/']
+        # --extend-exclude; --force-exclude makes it honor the build exclusion
+        # (matched against the relative paths pre-commit passes).
+        args: [--force-exclude, "build/"]
 
   - repo: https://github.com/pre-commit/mirrors-mypy
     rev: v2.3.0
