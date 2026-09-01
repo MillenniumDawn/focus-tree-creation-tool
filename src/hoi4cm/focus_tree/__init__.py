@@ -23,7 +23,12 @@ from .export_plan import (
     make_main_export_plan,
     render_export_plan,
 )
-from .loc import LOC_LANGUAGE_NAMES, LocTarget, build_loc_yml
+from .loc import (
+    LOC_LANGUAGE_NAMES,
+    LocTarget,
+    build_loc_yml,
+    hydrate_focus_localization,
+)
 from .operations import (
     build_focus_name_lookup,
     group_focuses_by_tree,
@@ -59,6 +64,7 @@ __all__ = [
     "render_focus_block",
     "render_focus_body",
     "build_loc_yml",
+    "hydrate_focus_localization",
     "LOC_LANGUAGE_NAMES",
     "LocTarget",
     "EmptyDrawioGraphError",

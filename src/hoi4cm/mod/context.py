@@ -1,9 +1,9 @@
 """The ``ModContext`` class — mod asset discovery and image loading.
 
 When a mod is loaded, the context walks the mod's directory tree once,
-indexes GFX sprites, idea/decision/event IDs, dynamic modifiers, country
-tags, and MD money-system file paths. The App and every wizard read from
-this single instance (``MOD``).
+indexes GFX sprites, idea/decision/event IDs, character IDs, dynamic
+modifiers, country tags, and MD money-system file paths. The App and every
+wizard read from this single instance (``MOD``).
 
 The scanner is pure-Python: no tkinter. The image loader uses Pillow when
 available; without it ``get_image`` returns ``None`` and the rest of the
@@ -129,6 +129,7 @@ class ModContext:
         self.decision_ids = []  # all decision IDs
         self.decision_cats = []  # all decision category IDs
         self.dyn_mod_ids = []  # common/dynamic_modifiers/*
+        self.character_ids = []  # all character IDs
         self.country_tags = []  # TAG list
         self.variables = set()  # known variable names from set_variable/add_to_variable
         self.loaded = False
@@ -401,6 +402,23 @@ class ModContext:
         return out
 
     @staticmethod
+    def _extract_characters(src):
+        characters = ModContext._parse_text(src).get("characters", {})
+        if isinstance(characters, dict):
+            blocks = (characters,)
+        elif isinstance(characters, list):
+            blocks = characters
+        else:
+            blocks = ()
+        return [
+            character_id
+            for block in blocks
+            if isinstance(block, dict)
+            for character_id in block
+            if isinstance(character_id, str) and not character_id.startswith("_")
+        ]
+
+    @staticmethod
     def _extract_decision_ids(src):
         return [
             m.group(1)
@@ -457,6 +475,21 @@ class ModContext:
             for idea_id in results[p]:
                 seen[idea_id] = None
         self.idea_ids = list(seen)
+
+    def _scan_characters(self):
+        root = self.root
+        if not root:
+            return
+        d = os.path.join(root, "common", "characters")
+        if not os.path.isdir(d):
+            return
+        paths = self._txt_paths(d)
+        results = self._scan_files_cached("characters", paths, self._extract_characters)
+        seen = dict.fromkeys(self.character_ids)
+        for p in paths:
+            for character_id in results[p]:
+                seen[character_id] = None
+        self.character_ids = list(seen)
 
     def _scan_decisions(self):
         # Gather all candidate files per domain first; a single cache call per
@@ -619,6 +652,7 @@ class ModContext:
         self.decision_ids.clear()
         self.decision_cats.clear()
         self.dyn_mod_ids.clear()
+        self.character_ids.clear()
         self.country_tags.clear()
         self.variables.clear()
         self.loaded = False
@@ -640,6 +674,7 @@ class ModContext:
             ("Focus IDs", self._scan_national_focus),
             ("Events", self._scan_events),
             ("Ideas/Spirits", self._scan_ideas),
+            ("Characters", self._scan_characters),
             ("Decisions", self._scan_decisions),
             ("Dynamic Modifiers", self._scan_dyn_mods),
             ("Country Tags", self._scan_tags),

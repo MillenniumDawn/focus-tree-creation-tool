@@ -56,6 +56,7 @@ def _values(focus=None, **overrides):
         ai_will_do_raw=getattr(focus, "ai_will_do_raw", "").strip(),
         x=focus.x,
         y=focus.y,
+        loc_name=getattr(focus, "loc_name", ""),
         desc=focus.desc,
         search_filters=focus.search_filters,
         available_cond=focus.available_cond,
@@ -122,6 +123,7 @@ def test_matching_form_is_noop():
         ("ai_will_do_raw", "base = 9"),
         ("x", 3),
         ("y", 4),
+        ("loc_name", "Localized title"),
         ("desc", "changed"),
         ("search_filters", "FOCUS_FILTER_INDUSTRY"),
         ("available_cond", "always = yes"),
@@ -158,10 +160,11 @@ def test_apply_name_change_returns_true_and_writes_fields():
 
 def test_apply_non_name_change_returns_false():
     focus = _focus()
-    values = _values(focus, desc="edited", cost=12)
+    values = _values(focus, desc="edited", loc_name="Localized title", cost=12)
 
     assert apply_sidebar_values(focus, values) is False
     assert focus.desc == "edited"
+    assert focus.loc_name == "Localized title"
     assert focus.cost == 12
     assert focus.name == "keep"
 

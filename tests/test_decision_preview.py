@@ -1,14 +1,11 @@
-"""Decision wizard preview error handling.
+"""Decision code-tab and export error coverage.
 
-Covers the same fix class as ``test_dyn_mod_preview.py`` and
-``test_national_spirit_preview.py``: build first, log generator failures via
-``add_error``/``get_logger``, narrow widget errors to ``tk.TclError``. These
-tests guard the regression and prove preview text survives a builder
-exception; the headless generator cases live in
-``test_wizard_generators_decision.py``.
+The code tab is refreshed through its real controls, then a failed export
+proves the existing code remains intact while the handled error is logged.
+The decision canvas preview does not use the file generator. Headless
+behavior lives in ``test_wizard_generators_decision.py``.
 """
 
-import pathlib
 import tkinter as tk
 
 import hoi4cm.core.logger as logmod
@@ -37,68 +34,31 @@ def _find_text(root, bg=None):
     return found[0] if found else None
 
 
-def _find_any_text(root):
-    # Prefer code preview bg, then generic preview bg, then any Text.
-    for bg in ("#080b10", "#0d1117"):
-        w = _find_text(root, bg)
-        if w is not None:
-            return w
-    return _find_text(root, None)
+def _find_code_text(root):
+    return _find_text(root, "#080b10")
 
 
-def _trigger_via_stringvar(root, preview=None):
-    triggered = False
-    for w in root.winfo_children():
-        stack = [w]
-        while stack:
-            cur = stack.pop()
-            if isinstance(cur, tk.Entry):
-                try:
-                    var_name = cur.cget("textvariable")
-                except tk.TclError:
-                    var_name = ""
-                if var_name:
-                    try:
-                        cur.tk.call("set", var_name, "TRIGGER_VAL")
-                        triggered = True
-                        break
-                    except tk.TclError:
-                        pass
-            stack.extend(list(cur.winfo_children()))
-        if triggered:
-            break
-    if not triggered:
-        for w in root.winfo_children():
-            stack = [w]
-            while stack:
-                cur = stack.pop()
-                if isinstance(cur, tk.Text) and cur is not preview:
-                    try:
-                        cur.event_generate("<KeyRelease>")
-                    except tk.TclError:
-                        pass
-                stack.extend(list(cur.winfo_children()))
-    return triggered
+def _button_by_text(root, needle):
+    stack = [root]
+    while stack:
+        cur = stack.pop()
+        if isinstance(cur, tk.Button) and needle in cur.cget("text"):
+            return cur
+        stack.extend(cur.winfo_children())
+    return None
 
 
 def _click_button_by_text(root, needle):
-    for w in root.winfo_children():
-        stack = [w]
-        while stack:
-            cur = stack.pop()
-            if isinstance(cur, tk.Button):
-                try:
-                    txt = cur.cget("text")
-                except tk.TclError:
-                    txt = ""
-                if needle in txt:
-                    try:
-                        cur.invoke()
-                        return True
-                    except tk.TclError:
-                        pass
-            stack.extend(list(cur.winfo_children()))
-    return False
+    button = _button_by_text(root, needle)
+    if button is None:
+        return False
+    button.invoke()
+    return True
+
+
+def _flush_after(root):
+    root.after(120, root.quit)
+    root.mainloop()
 
 
 def _ensure_dnd_available():
@@ -110,17 +70,14 @@ def _ensure_dnd_available():
 
 
 def _ensure_decision_has_text(root):
-    # Decision wizard starts empty (no categories) so no Text exists.
-    # Click "+ New Category" and "+ New Decision" to materialize editor.
-    if _find_any_text(root) is not None:
-        return
+    """Create a decision so the code preview has something to render."""
     _ensure_dnd_available()
-    _click_button_by_text(root, "New Category")
-    root.update_idletasks()
-    root.update()
-    _click_button_by_text(root, "New Decision")
-    root.update_idletasks()
-    root.update()
+    if _button_by_text(root, "New Category") is not None:
+        _click_button_by_text(root, "New Category")
+        root.update_idletasks()
+    if _button_by_text(root, "New Decision") is not None:
+        _click_button_by_text(root, "New Decision")
+        root.update_idletasks()
 
 
 def _cleanup_toplevels(root):
@@ -137,15 +94,8 @@ def _cleanup_toplevels(root):
     root.update_idletasks()
 
 
-def test_decision_wizard_source_contains_expected_error_handling():
-    src = pathlib.Path("src/hoi4cm/wizards/decision.py").read_text(encoding="utf-8")
-    assert "report_error" in src
-    assert "get_logger" in src
-    assert "tk.TclError" in src
-
-
-def test_decision_wizard_preview_preserves_text_and_logs_on_builder_failure(
-    tk_root, monkeypatch
+def test_decision_export_failure_preserves_code_tab_and_logs(
+    tk_root, tmp_path, monkeypatch
 ):
     try:
         tk_root.grab_release()
@@ -154,92 +104,42 @@ def test_decision_wizard_preview_preserves_text_and_logs_on_builder_failure(
     orig_cb = logmod._error_callback
     logmod.clear_errors()
     logmod.set_error_callback(None)
+    monkeypatch.setattr("tkinter.messagebox.showerror", lambda *a, **k: None)
     _ensure_dnd_available()
     try:
         open_decision_wizard(tk_root)
-        # Allow debounced preview/code build to finish.
-        tk_root.update_idletasks()
-        tk_root.update()
         _ensure_decision_has_text(tk_root)
-        preview = _find_any_text(tk_root)
-        assert preview is not None, "decision wizard Text not found"
-        preview.configure(state="normal")
+        assert _click_button_by_text(tk_root, "Code")
+        _flush_after(tk_root)
+        preview = _find_code_text(tk_root)
+        assert preview is not None, "decision code preview not found"
         old_text = preview.get("1.0", "end")
-        preview.configure(state="disabled")
+        assert old_text.strip()
 
-        def boom(*_a, **_kw):
+        # Refresh through the actual tab control before forcing the generator
+        # to fail. This proves the text came from the production preview path.
+        assert _click_button_by_text(tk_root, "Refresh")
+        _flush_after(tk_root)
+        preview = _find_code_text(tk_root)
+        assert preview is not None
+        assert preview.get("1.0", "end") == old_text
+
+        def boom(*_args, **_kwargs):
             raise ValueError("boom from decision generator")
 
-        # Patch a generator used by the code tab; preview itself is canvas-based
-        # so this exercises the code path without requiring exact build name.
         monkeypatch.setattr(gen_mod, "generate_decisions_file", boom)
-        monkeypatch.setattr(gen_mod, "generate_decision_block", boom)
-
-        _trigger_via_stringvar(tk_root, preview)
-        tk_root.update_idletasks()
-        tk_root.update()
-
-        # Text should still exist and not have been blanked to empty.
-        new_preview = _find_any_text(tk_root)
-        assert new_preview is not None
-        new_preview.configure(state="normal")
-        new_text = new_preview.get("1.0", "end")
-        new_preview.configure(state="disabled")
-        # If wizard preserved text, it matches; if it rebuilt to empty on
-        # failure, we still ensure window survived and no traceback escaped.
-        assert new_text == old_text or new_text.strip() == "" or len(new_text) > 0
-        # Window must still exist (no unhandled Tk callback).
-        assert any(isinstance(w, tk.Toplevel) for w in tk_root.winfo_children())
-
-        # If the wizard logs builder failures, the error log should contain them.
-        # Not a hard fail if it doesn't yet — smoke ensures no crash.
-        entries = logmod.get_error_entries()
-        if entries:
-            has_boom = any("boom from decision generator" in msg for _, msg in entries)
-            has_decision = any("Decision" in msg for _, msg in entries)
-            assert has_boom or has_decision
-    finally:
-        logmod.clear_errors()
-        logmod.set_error_callback(orig_cb)
-        _cleanup_toplevels(tk_root)
-
-
-def test_decision_wizard_tclerror_does_not_log(tk_root, monkeypatch):
-    try:
-        tk_root.grab_release()
-    except tk.TclError:
-        pass
-    _ensure_dnd_available()
-    orig_cb = logmod._error_callback
-    logmod.clear_errors()
-    logmod.set_error_callback(None)
-    try:
-        open_decision_wizard(tk_root)
-        tk_root.update_idletasks()
-        tk_root.update()
-        _ensure_decision_has_text(tk_root)
-        preview = _find_any_text(tk_root)
-        assert preview is not None
-
-        original_delete = preview.delete
-
-        def boom_delete(*_a, **_kw):
-            raise tk.TclError("simulated TclError")
-
-        preview.delete = boom_delete
+        export_path = str(tmp_path / "decision-preview.txt")
         monkeypatch.setattr(
-            gen_mod, "generate_decisions_file", lambda *a, **k: "dummy preview text"
+            "tkinter.filedialog.asksaveasfilename", lambda **_kwargs: export_path
         )
-
-        _trigger_via_stringvar(tk_root, preview)
+        assert _click_button_by_text(tk_root, "Export .txt")
         tk_root.update_idletasks()
-        tk_root.update()
 
+        assert preview.winfo_exists()
+        assert preview.get("1.0", "end") == old_text
         entries = logmod.get_error_entries()
-        # Widget TclError must not pollute the error log.
-        assert not any("Decision preview failed" in msg for _, msg in entries)
-        assert not any("boom from decision generator" in msg for _, msg in entries)
-        preview.delete = original_delete
+        assert entries
+        assert any("boom from decision generator" in msg for _, msg in entries)
     finally:
         logmod.clear_errors()
         logmod.set_error_callback(orig_cb)

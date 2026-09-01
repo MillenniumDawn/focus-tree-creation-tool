@@ -754,7 +754,7 @@
   "tutorial.step.validate.title": "Validate before exporting",
   "tutorial.step.validate.body": "Run Validate Tree after major edits. Review broken prerequisites, missing effects, and invalid GFX references, then correct every reported problem before writing files into a mod.",
   "tutorial.step.mod.title": "Connect the target mod",
-  "tutorial.step.mod.body": "Load Mod points the app at your mod root so it can find focus icons, localisation, and valid install folders. Settings adjusts those paths, and Set Edit Targets chooses existing files used by wizard-generated content.",
+  "tutorial.step.mod.body": "Load Mod points the app at your mod root so it can find focus icons, localisation, and valid install folders.",
   "tutorial.step.export.title": "Export the finished tree",
   "tutorial.step.export.body": "Export .txt lets you choose a standalone output file. Export to Mod writes to the loaded mod's national_focus folder. Save the editable project JSON as well, so you can reopen the visual workspace later."
 }

@@ -61,6 +61,7 @@ from hoi4cm.core import (
     execute_export_plans,
     get_error_entries,
     group_focuses_by_tree,
+    hydrate_focus_localization,
     install_excepthook,
     make_extra_export_plan,
     make_main_export_plan,
@@ -114,8 +115,8 @@ from hoi4cm.ui import (
     TEXT_DIM,
     YELLOW,
     ApplicationLifecycle,
-    TutorialController,
     Tooltip,
+    TutorialController,
     _safe_after,
     make_progress,
     progress_modal,
@@ -590,9 +591,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         self._shared_focuses = self.workspace.main_tree.metadata.shared_focuses
         self._joint_focuses = self.workspace.main_tree.metadata.joint_focuses
         # Extra loaded trees (shared/joint trees loaded alongside the main tree)
-        self._extra_trees = (
-            []
-        )  # list of dicts: {type, file_path, tree_id, cfp_x, cfp_y, shared_focuses, joint_focuses, country_tag, country_raw, tree_extras, had_wrapper, focus_ids}
+        self._extra_trees = []  # list of dicts: {type, file_path, tree_id, cfp_x, cfp_y, shared_focuses, joint_focuses, country_tag, country_raw, tree_extras, had_wrapper, focus_ids}
         self._tree_badge_table = None  # rebuilt by _get_tree_badge on change
         toolbar = tk.Frame(self, bg=BG_DARK)
         toolbar.pack(fill="x")
@@ -1557,6 +1556,10 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         self._fv_ai_raw.insert("1.0", "    base = 1")
         self._fv_ai = None
 
+        self._fv_loc_name = self._sb_entry(
+            tr("focus.field.localized_name", "Localized Name (localisation):"),
+            "",
+        )
         self._fv_desc = self._sb_text(
             tr("focus.field.description", "Description (localisation):")
         )
@@ -2353,6 +2356,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             ai_will_do_raw=raw_ai,
             x=x,
             y=y,
+            loc_name=self._fv_loc_name.get().strip(),
             desc=self._fv_desc.get("1.0", "end").strip(),
             search_filters=self._fv_search.get().strip() or "FOCUS_FILTER_POLITICAL",
             available_cond=self._fv_avail.get("1.0", "end").strip(),
@@ -2456,6 +2460,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         self._fv_x.set(str(f.x))
         self._fv_y.set(str(f.y))
         self._fv_cost.set(str(f.cost))
+        self._fv_loc_name.set(getattr(f, "loc_name", "") or "")
         self._fv_ai_raw.delete("1.0", "end")
         raw = getattr(f, "ai_will_do_raw", "").strip()
         if raw:
@@ -2515,9 +2520,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
                 self.zoom = _saved_zoom
                 self.offset[0] = _saved_offset[0]
                 self.offset[1] = _saved_offset[1]
-                self._draw_lines()
-                for foc in self.focuses.values():
-                    self._draw_focus(foc)
+                self._redraw_now()
 
             self.cv.after(30, _restore_vp)
             return True
@@ -3400,104 +3403,43 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
 
         frm = tk.Frame(win, bg=BG_DARK)
         frm.pack(fill="both", expand=True, padx=10, pady=4)
-        sb = tk.Scrollbar(frm, orient="vertical")
-        lb = tk.Listbox(
-            frm,
-            bg=BG_PANEL,
-            fg=TEXT,
-            selectbackground=BLUE,
-            selectforeground=BG_DARK,
-            font=("Courier", 9),
-            relief="flat",
-            highlightthickness=0,
-            selectmode=tk.EXTENDED,
-            yscrollcommand=sb.set,
-            activestyle="dotbox",
-        )
-        sb.config(command=lb.yview)
-        sb.pack(side="right", fill="y")
-        lb.pack(side="left", fill="both", expand=True)
 
-        # Populate sorted by name
         sorted_cands = sorted(candidates, key=lambda f: f.name.lower())
-        _id_map = {}  # listbox index → focus id
+        items = []
+        for f in sorted_cands:
+            t_idx = getattr(f, "tree_idx", 0)
+            tree_badge = ""
+            if t_idx > 0:
+                _bt, _ = self._get_tree_badge(t_idx)
+                tree_badge = f" [{_bt}]"
+            items.append(FocusListItem(f.id, f"  {f.name}{tree_badge}"))
 
-        def _populate(filter_text=""):
-            lb.delete(0, "end")
-            _id_map.clear()
-            ft = filter_text.lower().strip()
-            for f in sorted_cands:
-                if ft and ft not in f.name.lower():
-                    continue
-                t_idx = getattr(f, "tree_idx", 0)
-                tree_badge = ""
-                if t_idx > 0:
-                    _bt, _ = self._get_tree_badge(t_idx)
-                    tree_badge = f" [{_bt}]"
-                lb.insert("end", f"  {f.name}{tree_badge}")
-                _id_map[lb.size() - 1] = f.id
+        placeholder = tr("focus.prereq.filter_placeholder", "Filter focuses...")
 
-        _populate()
+        def _update_counter(*_):
+            n = len(focus_list.selected_keys)
+            _counter_var.set(
+                tr("common.selected_count", "{count} selected", count=n)
+            )
+
+        focus_list = VirtualFocusList(
+            frm,
+            on_select=lambda _key: _update_counter(),
+            on_activate=lambda _key: _confirm_or(),
+            multi_select=True,
+            background=BG_PANEL,
+        )
+        focus_list.pack(fill="both", expand=True)
+        focus_list.invalidate_structure(items, placeholder=placeholder)
 
         def _on_filter(*_):
             q = sv.get()
-            if q == tr("focus.prereq.filter_placeholder", "Filter focuses..."):
+            if q == placeholder:
                 q = ""
-            _populate(q)
-            _counter_var.set(tr("common.selected_count", "{count} selected", count=0))
+            focus_list.invalidate_structure(items, query=q, placeholder=placeholder)
+            _update_counter()
 
         sv.trace_add("write", _on_filter)
-
-        def _update_counter(*_):
-            n = len(lb.curselection())
-            _counter_var.set(tr("common.selected_count", "{count} selected", count=n))
-
-        lb.bind("<ButtonRelease-1>", _update_counter)
-        lb.bind("<KeyRelease>", _update_counter)
-
-        # Tooltip on hover showing full ID
-        _tip_win = [None]
-
-        def _show_tip(e):
-            idx = lb.nearest(e.y)
-            if idx < 0 or idx not in _id_map:
-                return
-            f = next((f for f in self.focuses.values() if f.id == _id_map[idx]), None)
-            if not f:
-                return
-            if _tip_win[0]:
-                try:
-                    _tip_win[0].destroy()
-                except Exception:
-                    pass
-            t = tk.Toplevel(win)
-            t.wm_overrideredirect(True)
-            t.geometry(f"+{e.x_root + 12}+{e.y_root - 8}")
-            tk.Label(
-                t,
-                text=f.name,
-                bg="#1e3a5f",
-                fg=TEXT,
-                font=("Courier", 9),
-                padx=6,
-                pady=3,
-                relief="flat",
-                bd=1,
-                highlightbackground=BLUE,
-                highlightthickness=1,
-            ).pack()
-            _tip_win[0] = t
-
-        def _hide_tip(e):
-            if _tip_win[0]:
-                try:
-                    _tip_win[0].destroy()
-                except Exception:
-                    pass
-                _tip_win[0] = None
-
-        lb.bind("<Motion>", _show_tip)
-        lb.bind("<Leave>", _hide_tip)
 
         # AND/OR explanation
         expl = tk.Frame(
@@ -3528,8 +3470,8 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         btn_row.pack(fill="x", padx=10, pady=8)
 
         def _confirm_or():
-            sel = lb.curselection()
-            if not sel:
+            group = list(focus_list.selected_keys)
+            if not group:
                 messagebox.showwarning(
                     tr("dialog.no_selection.title", "No Selection"),
                     tr(
@@ -3537,9 +3479,6 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
                     ),
                     parent=win,
                 )
-                return
-            group = [_id_map[i] for i in sel if i in _id_map]
-            if not group:
                 return
             self._push_undo("add prerequisite OR group", touched_ids=(child.id,))
             self.focuses.link_prerequisite(child.id, group, mode="or")
@@ -3548,8 +3487,8 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             win.destroy()
 
         def _confirm_and():
-            sel = lb.curselection()
-            if not sel:
+            fids = list(focus_list.selected_keys)
+            if not fids:
                 messagebox.showwarning(
                     tr("dialog.no_selection.title", "No Selection"),
                     tr(
@@ -3558,9 +3497,6 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
                     parent=win,
                 )
                 return
-            fids = [_id_map[i] for i in sel if i in _id_map]
-            if not fids:
-                return
             self._push_undo("add prerequisite AND group", touched_ids=(child.id,))
             self.focuses.link_prerequisite(child.id, fids, mode="and")
             self._refresh_prereqs()
@@ -3568,14 +3504,15 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             win.destroy()
 
         def _ctrl_a(e):
-            lb.select_set(0, "end")
+            focus_list.select_all()
             _update_counter()
             return "break"
 
-        lb.bind("<Control-a>", _ctrl_a)
-        lb.bind("<Control-A>", _ctrl_a)
-        lb.bind("<Double-Button-1>", lambda e: _confirm_or())
-        lb.bind("<Return>", lambda e: _confirm_or())
+        win.bind("<Control-a>", _ctrl_a)
+        win.bind("<Control-A>", _ctrl_a)
+        focus_list.canvas.bind("<Control-a>", _ctrl_a)
+        focus_list.canvas.bind("<Control-A>", _ctrl_a)
+        win.bind("<Return>", lambda e: _confirm_or())
         win.bind("<Escape>", lambda e: win.destroy())
 
         tk.Button(
@@ -4340,12 +4277,13 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         # Auto-set the edit target so Export writes back to this file in place
         MOD.edit_focus_file = path
         # If mod is loaded, also try to auto-detect the matching localisation file
+        detected_loc_path = ""
         if MOD.loaded and MOD.root:
-            _loc_path = detect_loc_file(
+            detected_loc_path = detect_loc_file(
                 MOD.root, raw, language=MOD.loc_language
             )
-            if _loc_path:
-                MOD.edit_loc_file = _loc_path
+            if detected_loc_path:
+                MOD.edit_loc_file = detected_loc_path
 
         import_generation = getattr(self, "_import_generation", 0) + 1
         self._import_generation = import_generation
@@ -4368,6 +4306,8 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             # focus_tree/export.py, which does use _raw_gx/_raw_gy, so offsets
             # stay safe there.
             new_focuses = build_focuses(parsed, 0)
+            if detected_loc_path:
+                hydrate_focus_localization(read_file(detected_loc_path), new_focuses)
             t2 = time.perf_counter()
             log.debug(
                 "import main tree %s: parse %.1fms build %.1fms (%d focuses)",
@@ -4490,16 +4430,8 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             self._tree_badge_table = table
         return table[tree_idx - 1]
 
-    def _install_extra_tree(self, raw, path, tree_type):
-        """Parse raw focus-tree text, register the tree, and build its focuses.
-
-        Shared core behind both the shared/joint loaders. Returns
-        (focus_count, tree_id). Raises EmptyFocusTreeError when the file holds
-        no focus data."""
-        t0 = time.perf_counter()
-        parsed = parse_focus_tree(raw, path)
-        t1 = time.perf_counter()
-        tree_idx = len(self._extra_trees) + 1
+    def _install_extra_tree(self, parsed, new_focuses, path, tree_type):
+        """Register a parsed extra tree and adopt its focuses. Tk-thread only."""
         tree_info = {
             "type": tree_type,
             "file_path": path,
@@ -4521,16 +4453,6 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         elif tree_type == "joint" and parsed.tree_id not in self._joint_focuses:
             self._joint_focuses.append(parsed.tree_id)
         self._refresh_tree_meta_panel()
-        # Snapshot existing focuses BEFORE inserting the new ones so cross-tree
-        # position/prereq resolution sees only already-loaded trees.
-        t2 = time.perf_counter()
-        new_focuses = build_focuses(
-            parsed,
-            tree_idx,
-            country_tag=getattr(self, "_tree_country_tag", ""),
-            existing_focuses=list(self.focuses.values()),
-        )
-        t3 = time.perf_counter()
         self.focuses.extend(new_focuses)
         for f in new_focuses:
             tree_info["focus_ids"].add(f.id)
@@ -4538,13 +4460,6 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         self._redraw()
         self._invalidate_focus_list_structure()
         self._fit_all()
-        log.debug(
-            "install tree %s: parse %.1fms build %.1fms (%d focuses)",
-            path,
-            (t1 - t0) * 1000,
-            (t3 - t2) * 1000,
-            len(new_focuses),
-        )
         return len(new_focuses), parsed.tree_id
 
     def _load_extra_tree(self, tree_type):
@@ -4590,22 +4505,60 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
                 title=tr("dialog.load_error.title", "Load Error"),
             )
             return
-        try:
-            count, tree_id = self._install_extra_tree(raw, path, tree_type)
-        except EmptyFocusTreeError as e:
-            messagebox.showwarning(tr("dialog.load_tree.title", "Load Tree"), str(e))
-            return
-        messagebox.showinfo(
-            tr("dialog.loaded.title", "Loaded"),
-            tr(
-                "dialog.extra_tree_loaded.body",
-                "Loaded {count} focuses from {type} tree:\n{file}\n\nTree ID: {tree}",
-                count=count,
-                type=tree_type,
-                file=os.path.basename(path),
-                tree=tree_id,
-            ),
+        tree_idx = len(self._extra_trees) + 1
+        existing_focuses = list(self.focuses.values())
+        country_tag = getattr(self, "_tree_country_tag", "")
+        modal = progress_modal(
+            self, tr("dialog.load_tree.title", "Load Tree"), determinate=False
         )
+
+        def work():
+            t0 = time.perf_counter()
+            parsed = parse_focus_tree(raw, path)
+            t1 = time.perf_counter()
+            new_focuses = build_focuses(
+                parsed,
+                tree_idx,
+                country_tag=country_tag,
+                existing_focuses=existing_focuses,
+            )
+            t2 = time.perf_counter()
+            log.debug(
+                "install tree %s: parse %.1fms build %.1fms (%d focuses)",
+                path,
+                (t1 - t0) * 1000,
+                (t2 - t1) * 1000,
+                len(new_focuses),
+            )
+            return parsed, new_focuses
+
+        def on_done(result):
+            modal.close()
+            parsed, new_focuses = result
+            count, tree_id = self._install_extra_tree(
+                parsed, new_focuses, path, tree_type
+            )
+            messagebox.showinfo(
+                tr("dialog.loaded.title", "Loaded"),
+                tr(
+                    "dialog.extra_tree_loaded.body",
+                    "Loaded {count} focuses from {type} tree:\n"
+                    "{file}\n\nTree ID: {tree}",
+                    count=count,
+                    type=tree_type,
+                    file=os.path.basename(path),
+                    tree=tree_id,
+                ),
+            )
+
+        def on_error(exc):
+            modal.close()
+            if isinstance(exc, EmptyFocusTreeError):
+                messagebox.showwarning(
+                    tr("dialog.load_tree.title", "Load Tree"), str(exc)
+                )
+
+        run_bg(self, work, on_done, on_error=on_error, scope="document")
 
     def _unload_extra_tree(self, tree_idx):
         """Remove all focuses belonging to an extra tree from the canvas."""
@@ -5117,9 +5070,9 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
                     add_error(f"Write failed: {result.plan.focus_path}: {result.error}")
                 continue
             if result.plan.extra_tree_idx is not None:
-                self._extra_trees[result.plan.extra_tree_idx - 1][
-                    "file_path"
-                ] = result.plan.focus_path
+                self._extra_trees[result.plan.extra_tree_idx - 1]["file_path"] = (
+                    result.plan.focus_path
+                )
             if MOD.loaded and MOD.root:
                 for path in result.written_paths:
                     MOD.note_file_written(path)

@@ -46,6 +46,7 @@ def test_legacy_two_field_project_loads_without_changing_focus_data():
 
     assert workspace.main_tree.metadata.tree_id == "legacy_tree"
     assert list(restored.focuses) == [91, 92]
+    assert restored.focuses[91].loc_name == ""
     assert restored.focuses[91].unknown_focus_field == {"kept": True}
     assert restored.focuses.names["duplicate"] == (91, 92)
 
@@ -82,6 +83,7 @@ def test_v2_roundtrip_preserves_workspace_and_tree_metadata():
     main = Focus(1, 2)
     main.id = 12345678901234567890
     main.name = "same_name"
+    main.loc_name = "Same Name"
     extra = Focus(8, 9)
     extra.id = 7
     extra.name = "same_name"
@@ -132,6 +134,7 @@ def test_v2_roundtrip_preserves_workspace_and_tree_metadata():
     assert restored.workspace_extras == {"future_workspace_field": {"enabled": True}}
     assert restored.extras == {"future_root_field": [1, 2, 3]}
     assert list(restored.focuses) == [main.id, extra.id]
+    assert restored.focuses[main.id].loc_name == "Same Name"
     assert restored.focuses.names["same_name"] == (main.id, extra.id)
 
 

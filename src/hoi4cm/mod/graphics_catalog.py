@@ -479,6 +479,17 @@ class GraphicsCatalog:
             generation=self.generation,
         )
 
+    def directory_paths(self) -> tuple[str, ...]:
+        paths: list[str] = []
+        for record in self._directories.values():
+            if not record.exists:
+                continue
+            try:
+                paths.append(record.path.resolve(self._source_roots))
+            except KeyError:
+                continue
+        return tuple(paths)
+
     def query(
         self, *, under: str | None = None, search: str = ""
     ) -> tuple[AssetRef, ...]:

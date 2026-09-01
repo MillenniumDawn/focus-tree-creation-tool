@@ -26,6 +26,7 @@
       "icon": "\u2694",
       "mutex": [],
       "name": "OFS_anchor",
+      "loc_name": "",
       "offsets": [],
       "prereqs": [],
       "relative_position_id": null,
@@ -63,6 +64,7 @@
       "icon": "\u2694",
       "mutex": [],
       "name": "OFS_shifted",
+      "loc_name": "",
       "offsets": [
         {
           "trigger": "original_tag = OFS\n\t\t\t",
