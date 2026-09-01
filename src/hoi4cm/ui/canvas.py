@@ -843,14 +843,15 @@ class CanvasMixin:
                 image_broker.release(("canvas", f.id))
             return
 
+        display_name = (getattr(f, "loc_name", "") or "").strip() or f.name
         if z >= 1.2:
-            label_text = f.name
+            label_text = display_name
         elif z >= 0.8:
-            label_text = f.name[:13] + ("..." if len(f.name) > 13 else "")
+            label_text = display_name[:13] + ("..." if len(display_name) > 13 else "")
         elif z >= 0.5:
-            label_text = f.name[:8] + ("..." if len(f.name) > 8 else "")
+            label_text = display_name[:8] + ("..." if len(display_name) > 8 else "")
         elif z >= 0.3:
-            label_text = f.name[:5] + ("..." if len(f.name) > 5 else "")
+            label_text = display_name[:5] + ("..." if len(display_name) > 5 else "")
         else:
             label_text = ""
 

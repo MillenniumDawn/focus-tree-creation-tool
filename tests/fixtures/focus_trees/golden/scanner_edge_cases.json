@@ -12,6 +12,7 @@
   "focuses": {
     "TST_braces_in_string": {
       "name": "TST_braces_in_string",
+      "loc_name": "",
       "icon": "⚔",
       "gfx": "gfx\\interface\\goals\\tst\\",
       "x": 0,
@@ -49,6 +50,7 @@
     },
     "TST_comment_between_keys": {
       "name": "TST_comment_between_keys",
+      "loc_name": "",
       "icon": "⚔",
       "gfx": "GFX_goal_generic_political_pressure",
       "x": 1,
@@ -90,6 +92,7 @@
     },
     "TST_hash_heavy": {
       "name": "TST_hash_heavy",
+      "loc_name": "",
       "icon": "⚔",
       "gfx": "GFX_goal_generic_political_pressure",
       "x": 2,

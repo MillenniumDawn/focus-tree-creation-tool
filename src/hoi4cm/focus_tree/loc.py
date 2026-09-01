@@ -74,22 +74,37 @@ class LocTarget:
         return f"{stem}_{_LOC_SPECS[self.language].filename_suffix}.yml"
 
 
+def hydrate_focus_localization(text, focuses):
+    """Apply matching title and description keys from localization *text*."""
+    values = {}
+    for match in _KEY_RE.finditer(text or ""):
+        try:
+            values[match.group("key")] = json.loads(f'"{match.group("value")}"')
+        except json.JSONDecodeError, TypeError:
+            continue
+
+    for focus in focuses:
+        if focus.name in values:
+            focus.loc_name = values[focus.name]
+        desc_key = f"{focus.name}_desc"
+        if desc_key in values:
+            focus.desc = values[desc_key]
+
+
 def build_loc_yml(existing_text, focuses, country_tag, *, language="english"):
     """Return ``(new_text, changed_count)`` for the focus-tree loc .yml.
 
     ``existing_text`` is the current file contents, or ``None`` if the file
     doesn't exist yet (distinct from an existing-but-empty file, which still
     gets appended to rather than re-headered). ``focuses`` contributes a
-    title-cased name key and a ``_desc`` key per focus (falling back to a
-    generated sentence when the focus has no ``desc``). ``country_tag`` names
-    the section header.
+    localized or title-cased name key and a ``_desc`` key per focus (falling
+    back to a generated sentence when the focus has no ``desc``). ``country_tag``
+    names the section header.
 
-    A missing key is appended. An existing ``_desc`` key is rewritten in
-    place when the focus has a non-empty ``desc`` that differs from the
-    value already on that line — a blank ``desc`` never overwrites a hand
-    edit. Title keys (the bare focus name) are never rewritten. Returns
-    ``(None, 0)`` when nothing needs to change — the caller should skip the
-    write.
+    A missing key is appended. Existing title and ``_desc`` keys are rewritten
+    in place when their non-empty focus values differ from the value already
+    on that line. Blank values never overwrite a hand edit. Returns ``(None,
+    0)`` when nothing needs to change — the caller should skip the write.
     """
     existing_values = {}
     if existing_text is not None:
@@ -99,10 +114,15 @@ def build_loc_yml(existing_text, focuses, country_tag, *, language="english"):
     to_add = {}
     to_update = {}
     for f in focuses:
-        title = f.name.replace("_", " ").title()
+        loc_name = (getattr(f, "loc_name", "") or "").strip()
+        title = loc_name or f.name.replace("_", " ").title()
         desc = f.desc if f.desc else f"Complete the {title} national focus."
         if f.name not in existing_values:
             to_add[f.name] = title
+        elif loc_name:
+            escaped = json.dumps(loc_name, ensure_ascii=False)[1:-1]
+            if existing_values[f.name] != escaped:
+                to_update[f.name] = loc_name
 
         desc_key = f"{f.name}_desc"
         if desc_key not in existing_values:

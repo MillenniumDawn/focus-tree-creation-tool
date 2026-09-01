@@ -61,6 +61,7 @@ from hoi4cm.core import (
     execute_export_plans,
     get_error_entries,
     group_focuses_by_tree,
+    hydrate_focus_localization,
     install_excepthook,
     make_extra_export_plan,
     make_main_export_plan,
@@ -590,9 +591,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         self._shared_focuses = self.workspace.main_tree.metadata.shared_focuses
         self._joint_focuses = self.workspace.main_tree.metadata.joint_focuses
         # Extra loaded trees (shared/joint trees loaded alongside the main tree)
-        self._extra_trees = (
-            []
-        )  # list of dicts: {type, file_path, tree_id, cfp_x, cfp_y, shared_focuses, joint_focuses, country_tag, country_raw, tree_extras, had_wrapper, focus_ids}
+        self._extra_trees = []  # list of dicts: {type, file_path, tree_id, cfp_x, cfp_y, shared_focuses, joint_focuses, country_tag, country_raw, tree_extras, had_wrapper, focus_ids}
         self._tree_badge_table = None  # rebuilt by _get_tree_badge on change
         toolbar = tk.Frame(self, bg=BG_DARK)
         toolbar.pack(fill="x")
@@ -1557,6 +1556,10 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         self._fv_ai_raw.insert("1.0", "    base = 1")
         self._fv_ai = None
 
+        self._fv_loc_name = self._sb_entry(
+            tr("focus.field.localized_name", "Localized Name (localisation):"),
+            "",
+        )
         self._fv_desc = self._sb_text(
             tr("focus.field.description", "Description (localisation):")
         )
@@ -2353,6 +2356,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             ai_will_do_raw=raw_ai,
             x=x,
             y=y,
+            loc_name=self._fv_loc_name.get().strip(),
             desc=self._fv_desc.get("1.0", "end").strip(),
             search_filters=self._fv_search.get().strip() or "FOCUS_FILTER_POLITICAL",
             available_cond=self._fv_avail.get("1.0", "end").strip(),
@@ -2456,6 +2460,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         self._fv_x.set(str(f.x))
         self._fv_y.set(str(f.y))
         self._fv_cost.set(str(f.cost))
+        self._fv_loc_name.set(getattr(f, "loc_name", "") or "")
         self._fv_ai_raw.delete("1.0", "end")
         raw = getattr(f, "ai_will_do_raw", "").strip()
         if raw:
@@ -4272,12 +4277,13 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         # Auto-set the edit target so Export writes back to this file in place
         MOD.edit_focus_file = path
         # If mod is loaded, also try to auto-detect the matching localisation file
+        detected_loc_path = ""
         if MOD.loaded and MOD.root:
-            _loc_path = detect_loc_file(
+            detected_loc_path = detect_loc_file(
                 MOD.root, raw, language=MOD.loc_language
             )
-            if _loc_path:
-                MOD.edit_loc_file = _loc_path
+            if detected_loc_path:
+                MOD.edit_loc_file = detected_loc_path
 
         import_generation = getattr(self, "_import_generation", 0) + 1
         self._import_generation = import_generation
@@ -4300,6 +4306,8 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             # focus_tree/export.py, which does use _raw_gx/_raw_gy, so offsets
             # stay safe there.
             new_focuses = build_focuses(parsed, 0)
+            if detected_loc_path:
+                hydrate_focus_localization(read_file(detected_loc_path), new_focuses)
             t2 = time.perf_counter()
             log.debug(
                 "import main tree %s: parse %.1fms build %.1fms (%d focuses)",
@@ -5062,9 +5070,9 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
                     add_error(f"Write failed: {result.plan.focus_path}: {result.error}")
                 continue
             if result.plan.extra_tree_idx is not None:
-                self._extra_trees[result.plan.extra_tree_idx - 1][
-                    "file_path"
-                ] = result.plan.focus_path
+                self._extra_trees[result.plan.extra_tree_idx - 1]["file_path"] = (
+                    result.plan.focus_path
+                )
             if MOD.loaded and MOD.root:
                 for path in result.written_paths:
                     MOD.note_file_written(path)
