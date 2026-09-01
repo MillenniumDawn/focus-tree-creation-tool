@@ -108,11 +108,13 @@ class _FocusRow:
     def __init__(
         self,
         master: tk.Canvas,
-        on_select: Callable[[Hashable], None],
+        on_select: Callable[..., None],
+        on_activate: Callable[[Hashable], None] | None = None,
     ) -> None:
         self.key: Hashable | None = None
         self.selected = False
         self._on_select = on_select
+        self._on_activate = on_activate
         self.frame = tk.Frame(master, bg=BG_PANEL, cursor="hand2")
         self.bar = tk.Frame(self.frame, bg=BG_PANEL, width=3)
         self.bar.pack(side="left", fill="y")
@@ -139,6 +141,8 @@ class _FocusRow:
             widget.bind("<Button-1>", self._click)
             widget.bind("<Enter>", self._enter)
             widget.bind("<Leave>", self._leave)
+            if on_activate is not None:
+                widget.bind("<Double-Button-1>", self._double)
 
     def show(self, item: FocusListItem, *, selected: bool) -> None:
         self.key = item.key
@@ -171,9 +175,13 @@ class _FocusRow:
         self.dot.configure(bg=color)
         self.label.configure(bg=color)
 
-    def _click(self, _event) -> None:
+    def _click(self, event) -> None:
         if self.key is not None:
-            self._on_select(self.key)
+            self._on_select(self.key, event)
+
+    def _double(self, _event) -> None:
+        if self.key is not None and self._on_activate is not None:
+            self._on_activate(self.key)
 
     def _enter(self, _event) -> None:
         if not self.selected:
@@ -341,12 +349,17 @@ class VirtualFocusList(_PooledList[_FocusRow]):
         master,
         *,
         on_select: Callable[[Hashable], None],
+        on_activate: Callable[[Hashable], None] | None = None,
+        multi_select: bool = False,
         row_height: int = 27,
         overscan_rows: int = 2,
         background: str = BG_PANEL,
     ) -> None:
         self._on_select = on_select
+        self._on_activate = on_activate
+        self._multi_select = multi_select
         self._selected_key: Hashable | None = None
+        self._selected_keys: set[Hashable] = set()
         self._materialized: dict[Hashable, _FocusRow] = {}
         self._structure_version = 0
         super().__init__(
@@ -364,6 +377,15 @@ class VirtualFocusList(_PooledList[_FocusRow]):
     def structure_version(self) -> int:
         return self._structure_version
 
+    @property
+    def selected_keys(self) -> tuple[Hashable, ...]:
+        if self._multi_select:
+            chosen = self._selected_keys
+            return tuple(item.key for item in self._items if item.key in chosen)
+        if self._selected_key is None:
+            return ()
+        return (self._selected_key,)
+
     def invalidate_structure(
         self,
         items: Sequence[FocusListItem],
@@ -373,10 +395,23 @@ class VirtualFocusList(_PooledList[_FocusRow]):
         selected_key: Hashable | None = None,
     ) -> None:
         self._selected_key = selected_key
+        if self._multi_select:
+            self._selected_keys = set() if selected_key is None else {selected_key}
         self._structure_version += 1
         self.set_items(filter_focus_items(items, query, placeholder=placeholder))
 
     def update_selection(self, selected_key: Hashable | None) -> int:
+        if self._multi_select:
+            old = set(self._selected_keys)
+            self._selected_keys = set() if selected_key is None else {selected_key}
+            self._selected_key = selected_key
+            touched = 0
+            for key in old | self._selected_keys:
+                row = self._materialized.get(key)
+                if row is not None:
+                    row.apply_selection(key in self._selected_keys)
+                    touched += 1
+            return touched
         old_key = self._selected_key
         if old_key == selected_key:
             return 0
@@ -389,15 +424,38 @@ class VirtualFocusList(_PooledList[_FocusRow]):
                 touched += 1
         return touched
 
+    def select_all(self) -> None:
+        if not self._multi_select:
+            return
+        self._selected_keys = {item.key for item in self._items}
+        for row in self._materialized.values():
+            row.apply_selection(True)
+
     def refresh(self) -> None:
         self._materialized.clear()
         super().refresh()
 
+    def _row_clicked(self, key: Hashable, event=None) -> None:
+        if self._multi_select:
+            state = getattr(event, "state", 0) if event is not None else 0
+            if state & 0x0004:
+                self._selected_keys.symmetric_difference_update((key,))
+            else:
+                self._selected_keys = {key}
+            for row_key, row in self._materialized.items():
+                row.apply_selection(row_key in self._selected_keys)
+        self._on_select(key)
+
     def _make_row(self) -> _FocusRow:
-        return _FocusRow(self.canvas, self._on_select)
+        return _FocusRow(self.canvas, self._row_clicked, on_activate=self._on_activate)
 
     def _render(self, row: _FocusRow, item, index: int) -> None:
-        row.show(item, selected=item.key == self._selected_key)
+        selected = (
+            item.key in self._selected_keys
+            if self._multi_select
+            else item.key == self._selected_key
+        )
+        row.show(item, selected=selected)
         self._materialized[item.key] = row
 
     def _unrender(self, row: _FocusRow) -> None:

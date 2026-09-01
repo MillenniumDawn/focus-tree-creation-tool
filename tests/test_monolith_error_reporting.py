@@ -6,6 +6,8 @@ the real reporter: the dialog call is the only stub, the error buffer and
 touching any widget state, so a bare shell stands in for the App.
 """
 
+from types import SimpleNamespace
+
 import pytest
 
 import hoi4_content_maker as m
@@ -92,3 +94,27 @@ def test_apply_focus_code_reports_a_parse_failure(shown):
     assert "Check Error Log for details" in message
     entry = logmod.get_error_entries()[0][1]
     assert "Traceback" in entry
+
+
+def test_apply_focus_code_restore_uses_redraw_now(monkeypatch):
+    monkeypatch.setattr(m, "apply_focus_code", lambda *_a, **_k: None)
+    draws = []
+    redraw_now = []
+    focus = Focus()
+    extra = Focus(2, 2)
+    shell = SimpleNamespace(
+        focuses=FocusDocument([focus, extra]),
+        selected=focus,
+        zoom=1.25,
+        offset=[10, 20],
+        _invalidate_focus_list_structure=lambda: None,
+        _populate=lambda _f: None,
+        _redraw=lambda *_a, **_k: None,
+        _redraw_now=lambda *_a, **_k: redraw_now.append((shell.zoom, shell.offset[:])),
+        _draw_focus=lambda foc: draws.append(foc.id),
+        cv=SimpleNamespace(after=lambda _ms, fn: fn()),
+    )
+
+    assert m.App._apply_focus_code(shell, focus, "id = x") is True
+    assert redraw_now == [(1.25, [10, 20])]
+    assert draws == []
