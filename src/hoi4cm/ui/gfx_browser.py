@@ -49,28 +49,29 @@ def _catalog_image_paths(catalog, *, under=None, search=""):
     return tuple(catalog.path_for(asset) for asset in assets)
 
 
-def _catalog_folder_groups(candidates, image_paths):
+def _catalog_folder_groups(candidates, directory_paths):
     groups = []
     seen = set()
-    normalized_images = tuple(
-        (path, os.path.normcase(os.path.abspath(path))) for path in image_paths
+    normalized_dirs = tuple(
+        (path, os.path.normcase(os.path.abspath(path))) for path in directory_paths
     )
     for label, folder, prefix in candidates:
         normalized_folder = os.path.normcase(os.path.abspath(folder))
         matching = [
             path
-            for path, normalized in normalized_images
+            for path, normalized in normalized_dirs
             if _path_is_under(normalized, normalized_folder)
         ]
         if not matching or normalized_folder in seen:
             continue
         seen.add(normalized_folder)
         groups.append((label, folder, prefix, True))
-        children = {
-            Path(os.path.relpath(path, folder)).parts[0]
-            for path in matching
-            if len(Path(os.path.relpath(path, folder)).parts) > 1
-        }
+        children = set()
+        for path in matching:
+            rel = Path(os.path.relpath(path, folder))
+            if not rel.parts or rel.parts == (".",) or rel.parts[0] == "..":
+                continue
+            children.add(rel.parts[0])
         for child in sorted(children):
             child_path = os.path.join(folder, child)
             normalized_child = os.path.normcase(os.path.abspath(child_path))
@@ -171,8 +172,9 @@ def open_universal_gfx_browser(
             resolved_candidates.append(
                 (os.path.basename(os.path.normpath(cdir)) + " (custom)", cdir, "GFX_")
             )
-        all_paths = _catalog_image_paths(catalog)
-        folder_groups = _catalog_folder_groups(resolved_candidates, all_paths)
+        folder_groups = _catalog_folder_groups(
+            resolved_candidates, catalog.directory_paths()
+        )
         folder_groups = _uncatalogued_custom_groups(
             folder_groups, getattr(mod, "custom_gfx_dirs", [])
         )

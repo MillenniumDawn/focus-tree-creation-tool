@@ -23,6 +23,7 @@ class Focus:
         Focus._next += 1
         self.id = Focus._next
         self.name = f"focus_{self.id}"
+        self.loc_name = ""
         self.icon = "⚔"
         self.gfx = "GFX_goal_generic_political_pressure"
         self.x = x
@@ -95,6 +96,7 @@ class Focus:
             ("bypass_effect", ""),
             ("allow_branch", ""),
             ("text", ""),
+            ("loc_name", ""),
             ("offsets", []),
             ("ai_will_do_raw", ""),
             ("tree_idx", 0),

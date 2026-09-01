@@ -26,6 +26,7 @@
       "icon": "\u2694",
       "mutex": [],
       "name": "BAR_alpha",
+      "loc_name": "",
       "offsets": [],
       "prereqs": [],
       "relative_position_id": null,
@@ -63,6 +64,7 @@
       "icon": "\u2694",
       "mutex": [],
       "name": "BAR_beta",
+      "loc_name": "",
       "offsets": [],
       "prereqs": [
         [

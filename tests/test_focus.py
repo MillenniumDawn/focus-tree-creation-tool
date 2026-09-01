@@ -20,6 +20,7 @@ def test_new_focus_has_defaults():
     assert f.x == 2
     assert f.y == 3
     assert f.name == "focus_1"
+    assert f.loc_name == ""
     assert f.gfx == "GFX_goal_generic_political_pressure"
     assert f.effects == []
     assert f.prereqs == []
@@ -36,6 +37,7 @@ def test_counter_increments():
 def test_to_dict_roundtrips():
     f = Focus(1, 2)
     f.name = "my_focus"
+    f.loc_name = "My Focus"
     f.gfx = "GFX_goal_test"
     f.effects = [{"type": "add_political_power", "fields": {"amount": "100"}}]
     d = f.to_dict()
@@ -59,6 +61,7 @@ def test_from_dict_leaves_grid_coords_alone_by_default():
 
 def test_from_dict_applies_defaults_for_missing_attrs():
     f = Focus.from_dict({"id": 1, "x": 0, "y": 0})
+    assert f.loc_name == ""
     assert f.gfx == "GFX_goal_generic_political_pressure"
     assert f.search_filters == "FOCUS_FILTER_POLITICAL"
     assert f.offsets == []

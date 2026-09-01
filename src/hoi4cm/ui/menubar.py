@@ -348,6 +348,16 @@ def build_menubar(app, toolbar, tutorial_command=None) -> MenuController:
             None,
             tr("menu.section.import_export", "Import / Export"),
             (
+                tr("menu.load_mod", "Load Mod"),
+                app._load_mod,
+                "",
+                tr(
+                    "menu.load_mod.tip",
+                    "Point to your mod root folder to browse GFX and enable direct export.",
+                ),
+                "load_mod",
+            ),
+            (
                 tr("menu.export_txt", "Export .txt"),
                 app._export,
                 "Ctrl+E",
@@ -546,16 +556,6 @@ def build_menubar(app, toolbar, tutorial_command=None) -> MenuController:
                     "Check for broken prerequisites, missing effects, and bad GFX references.",
                 ),
                 "validate_tree",
-            ),
-            (
-                tr("menu.load_mod", "Load Mod"),
-                app._load_mod,
-                "",
-                tr(
-                    "menu.load_mod.tip",
-                    "Point to your mod root folder to browse GFX and enable direct export.",
-                ),
-                "load_mod",
             ),
             (
                 tr("menu.set_edit_targets", "Set Edit Targets"),

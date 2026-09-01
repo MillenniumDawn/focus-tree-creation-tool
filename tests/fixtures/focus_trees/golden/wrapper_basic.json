@@ -26,6 +26,7 @@
       "icon": "\u2694",
       "mutex": [],
       "name": "TST_child_a",
+      "loc_name": "",
       "offsets": [],
       "prereqs": [
         [
@@ -67,6 +68,7 @@
       "icon": "\u2694",
       "mutex": [],
       "name": "TST_child_b",
+      "loc_name": "",
       "offsets": [],
       "prereqs": [],
       "relative_position_id": "TST_child_a",
@@ -106,6 +108,7 @@
         "TST_child_b"
       ],
       "name": "TST_needs_either",
+      "loc_name": "",
       "offsets": [],
       "prereqs": [
         [
@@ -151,6 +154,7 @@
       "icon": "\u2694",
       "mutex": [],
       "name": "TST_root",
+      "loc_name": "",
       "offsets": [],
       "prereqs": [],
       "relative_position_id": null,

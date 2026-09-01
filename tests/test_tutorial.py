@@ -67,6 +67,8 @@ def _find_widgets(parent: tk.Misc, widget_type: type[tk.Widget]) -> list[tk.Widg
 def test_tutorial_has_complete_beginner_workflow():
     assert len(tutorial_mod.TUTORIAL_STEPS) == 8
     assert tutorial_mod.TUTORIAL_STEPS[4].menu_key == "tools"
+    assert tutorial_mod.TUTORIAL_STEPS[6].menu_key == "file"
+    assert tutorial_mod.TUTORIAL_STEPS[6].menu_item_keys == ("load_mod",)
     assert tutorial_mod.TUTORIAL_STEPS[-1].menu_key == "file"
     assert tutorial_mod.TUTORIAL_STEPS[-1].menu_item_keys == (
         "export_txt",
@@ -139,7 +141,7 @@ def test_tutorial_walks_real_menu_previews_and_persists_checkbox(tk_root, monkey
     tk_root.update()
     assert menu.preview_calls[-3:] == [
         ("tools", ("validate_tree",)),
-        ("tools", ("load_mod", "set_edit_targets", "settings")),
+        ("file", ("load_mod",)),
         ("file", ("export_txt", "export_mod")),
     ]
 
@@ -149,6 +151,7 @@ def test_tutorial_walks_real_menu_previews_and_persists_checkbox(tk_root, monkey
     assert windows
     checkbuttons = _find_widgets(windows[0], tk.Checkbutton)
     assert len(checkbuttons) == 1
+    assert isinstance(checkbuttons[0], tk.Checkbutton)
     checkbuttons[0].invoke()
     controller.next_step()
 

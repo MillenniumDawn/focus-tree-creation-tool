@@ -843,14 +843,15 @@ class CanvasMixin:
                 image_broker.release(("canvas", f.id))
             return
 
+        display_name = (getattr(f, "loc_name", "") or "").strip() or f.name
         if z >= 1.2:
-            label_text = f.name
+            label_text = display_name
         elif z >= 0.8:
-            label_text = f.name[:13] + ("..." if len(f.name) > 13 else "")
+            label_text = display_name[:13] + ("..." if len(display_name) > 13 else "")
         elif z >= 0.5:
-            label_text = f.name[:8] + ("..." if len(f.name) > 8 else "")
+            label_text = display_name[:8] + ("..." if len(display_name) > 8 else "")
         elif z >= 0.3:
-            label_text = f.name[:5] + ("..." if len(f.name) > 5 else "")
+            label_text = display_name[:5] + ("..." if len(display_name) > 5 else "")
         else:
             label_text = ""
 
@@ -1215,7 +1216,7 @@ class CanvasMixin:
         if any("focus" in self.cv.gettags(i) for i in hits):
             return
         gx, gy = self.c2w(e.x, e.y)
-        if any(f.x == gx and f.y == gy for f in self.focuses.values()):
+        if not self.focuses.position_free(gx, gy):
             return
         self._new_focus_at(gx, gy)
 
@@ -1260,9 +1261,13 @@ class CanvasMixin:
             "moved": False,
             "undo_pushed": False,
             "last_snap": (f.x, f.y),
-            # Other focuses don't move during a drag, so snapshot their grid
+            # Other focuses don't move during a drag, so snapshot occupied
             # cells once for O(1) collision checks per motion event.
-            "occupied": {(o.x, o.y) for o in self.focuses.values() if o.id != fid},
+            "occupied": {
+                cell
+                for cell, ids in self.focuses.occupied_positions.items()
+                if any(occupant != fid for occupant in ids)
+            },
         }
         self._select(f)
 
