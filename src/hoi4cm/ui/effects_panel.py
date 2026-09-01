@@ -9,6 +9,7 @@ imports the same shared list — always sees the current Millennium Dawn set.
 
 import json
 import tkinter as tk
+from typing import TYPE_CHECKING
 
 from hoi4cm.core import EFFECT_CATS, EFFECT_DEFS, tr
 from hoi4cm.mod import MOD
@@ -27,6 +28,12 @@ from hoi4cm.ui import (
     TEXT,
     TEXT_DIM,
 )
+
+
+def _augment_character_suggestions(suggestions, fname, *, loaded, character_ids):
+    if not loaded or fname not in ("character", "advisor"):
+        return suggestions
+    return sorted(set(suggestions).union(character_ids))
 
 
 def _effects_signature(focus, effects):
@@ -53,6 +60,10 @@ def _effects_signature(focus, effects):
 
 class EffectsMixin:
     """Effects tab, effect browser and parameter-form for :class:`App`."""
+
+    if TYPE_CHECKING:
+
+        def _get_mod_suggestions(self, etype: str, fname: str) -> list[str]: ...
 
     def _build_sidebar_effects(self, p, _make_scroll_panel):
         # ── TAB 2: Effects ─────────────────────────────────────────────
@@ -512,6 +523,14 @@ class EffectsMixin:
         for i, eff in enumerate(self.selected.effects):
             self._draw_eff_card(i, eff)
 
+    def _get_effect_suggestions(self, etype, fname):
+        return _augment_character_suggestions(
+            self._get_mod_suggestions(etype, fname),
+            fname,
+            loaded=MOD.loaded,
+            character_ids=MOD.character_ids,
+        )
+
     def _draw_eff_card(self, i, eff):
         etype = eff.get("type", "")
         defn = EFFECT_DEFS.get(etype, {})
@@ -699,7 +718,7 @@ class EffectsMixin:
                     )
                 else:
                     var = tk.StringVar(value=saved)
-                    suggestions = self._get_mod_suggestions(etype, fname)
+                    suggestions = self._get_effect_suggestions(etype, fname)
                     ent = tk.Entry(
                         ff,
                         textvariable=var,
@@ -723,7 +742,7 @@ class EffectsMixin:
                         self._attach_autocomplete(
                             ent,
                             var,
-                            lambda et=etype, fn=fname: self._get_mod_suggestions(
+                            lambda et=etype, fn=fname: self._get_effect_suggestions(
                                 et, fn
                             ),
                         )
