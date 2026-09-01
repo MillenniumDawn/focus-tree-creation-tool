@@ -8,6 +8,7 @@ from dataclasses import dataclass
 
 from hoi4cm.core.logger import get_logger
 from hoi4cm.core.paths import read_file
+from hoi4cm.mod import append_sprite_types
 from hoi4cm.mod.workspace_files import WriteEntry
 from hoi4cm.models import Focus
 
@@ -34,6 +35,8 @@ class ExportPlan:
     loc_path: str | None = None
     loc_language: str = "english"
     extra_tree_idx: int | None = None
+    gfx_path: str | None = None
+    gfx_entries: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -60,6 +63,8 @@ def make_main_export_plan(
     focus_lookup: Mapping[int, Focus],
     focus_name_lookup: Mapping[str, Focus],
     loc_language: str = "english",
+    gfx_path: str | None = None,
+    gfx_entries: Iterable[tuple[str, str]] = (),
 ) -> ExportPlan:
     """Create a main-tree plan after the UI has resolved its destinations."""
     return ExportPlan(
@@ -72,6 +77,8 @@ def make_main_export_plan(
         focus_lookup=focus_lookup,
         focus_name_lookup=focus_name_lookup,
         loc_language=loc_language,
+        gfx_path=gfx_path,
+        gfx_entries=tuple(gfx_entries),
     )
 
 
@@ -84,6 +91,8 @@ def make_extra_export_plan(
     focus_lookup: Mapping[int, Focus],
     focus_name_lookup: Mapping[str, Focus],
     extra_tree_idx: int,
+    gfx_path: str | None = None,
+    gfx_entries: Iterable[tuple[str, str]] = (),
 ) -> ExportPlan:
     """Create a shared/joint-tree plan after the UI has resolved its destination."""
     return ExportPlan(
@@ -95,6 +104,8 @@ def make_extra_export_plan(
         focus_lookup=focus_lookup,
         focus_name_lookup=focus_name_lookup,
         extra_tree_idx=extra_tree_idx,
+        gfx_path=gfx_path,
+        gfx_entries=tuple(gfx_entries),
     )
 
 
@@ -126,15 +137,22 @@ def render_export_plan(
         writes = [(plan.focus_path, out_text, "utf-8")]
         if new_loc_text is not None and plan.loc_path is not None:
             writes.append((plan.loc_path, new_loc_text, "utf-8-sig"))
-        return tuple(writes), added_count
+    else:
+        out_text = export_focus_tree(
+            plan.focuses,
+            plan.tree_info,
+            focus_lookup=plan.focus_lookup,
+            focus_name_lookup=plan.focus_name_lookup,
+        )
+        writes = [(plan.focus_path, out_text, "utf-8")]
+        added_count = 0
 
-    out_text = export_focus_tree(
-        plan.focuses,
-        plan.tree_info,
-        focus_lookup=plan.focus_lookup,
-        focus_name_lookup=plan.focus_name_lookup,
-    )
-    return ((plan.focus_path, out_text, "utf-8"),), 0
+    if plan.gfx_path is not None and plan.gfx_entries:
+        existing_gfx = read_text(plan.gfx_path) if is_file(plan.gfx_path) else None
+        new_gfx, gfx_added = append_sprite_types(existing_gfx, plan.gfx_entries)
+        if gfx_added:
+            writes.append((plan.gfx_path, new_gfx, "utf-8"))
+    return tuple(writes), added_count
 
 
 def execute_export_plans(

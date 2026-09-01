@@ -22,7 +22,7 @@ from hoi4cm.core import (
 )
 from hoi4cm.core.image import PIL_OK, PILImage, PILImageTk
 from hoi4cm.core.paths import read_file
-from hoi4cm.mod import MOD, find_loc_files
+from hoi4cm.mod import MOD, append_sprite_types, find_loc_files
 from hoi4cm.script.syntax import match_brace, parse_script, serialize_block
 from hoi4cm.ui import (
     BG_CARD,
@@ -38,7 +38,10 @@ from hoi4cm.ui import (
     _safe_after_idle,
     report_error,
 )
-from hoi4cm.wizards._generators import build_dyn_mod_output
+from hoi4cm.wizards._generators import (
+    _parse_dyn_mod_line,
+    build_dyn_mod_output,
+)
 from hoi4cm.wizards._graphics import browser_folders, collect_image_pairs
 from hoi4cm.wizards._image_loader import TkImageLoader
 from hoi4cm.wizards._shared import (
@@ -215,7 +218,9 @@ def open_dyn_mod_wizard(app):
     ).pack(side="left", fill="x", expand=True, ipady=4)
 
     def _open_dynmod_gfx_browser():
-        ideas_root = os.path.join(MOD.root, MOD.path_ideas_gfx) if MOD.loaded else None
+        mod_root = getattr(MOD, "root", "") or ""
+        ideas_path = getattr(MOD, "path_ideas_gfx", "") or ""
+        ideas_root = os.path.join(mod_root, ideas_path) if MOD.loaded else None
         catalog = (
             MOD.graphics_catalog if ideas_root and os.path.isdir(ideas_root) else None
         )
@@ -483,7 +488,7 @@ def open_dyn_mod_wizard(app):
 
         def _decode_image2(item):
             i, path = item
-            if not PIL_OK:
+            if not PIL_OK or PILImage is None:
                 return None
             paths_try = [path] + [
                 os.path.splitext(path)[0] + ext
@@ -505,6 +510,11 @@ def open_dyn_mod_wizard(app):
                 except OSError, ValueError, RuntimeError, AttributeError:
                     pass
             return None
+
+        def _realize_image2(pil):
+            if PILImageTk is None:
+                raise RuntimeError("Pillow Tk support is unavailable")
+            return PILImageTk.PhotoImage(pil)
 
         def _apply_image2(item, img):
             i, path = item
@@ -531,12 +541,12 @@ def open_dyn_mod_wizard(app):
                 for i in (visible + ahead)
                 if _st2["pairs"][i][1] not in _st2["img_cache"]
             ]
-            if to_load:
+            if to_load and PILImageTk is not None:
                 snap = list(_st2["pairs"])
                 image_loader.submit_many(
                     ((i, snap[i][1]) for i in to_load if i < len(snap)),
                     _decode_image2,
-                    realizer=lambda pil: PILImageTk.PhotoImage(pil),
+                    realizer=_realize_image2,
                     apply=_apply_image2,
                 )
 
@@ -744,7 +754,7 @@ def open_dyn_mod_wizard(app):
         anchor="w",
     ).pack(side="left")
     _dm_edit_mode = [False]
-    _dm_raw_override = [None]
+    _dm_raw_override: list[str | None] = [None]
 
     _dm_edit_btn = tk.Button(
         dm_prev_hdr,
@@ -995,7 +1005,7 @@ def open_dyn_mod_wizard(app):
 
     # Real builder + line parser live in _generators.py (headless-testable).
     def _parse_mod_line(ln):
-        return _parse_mod_line_pure(ln)
+        return _parse_dyn_mod_line(ln)
 
     def _build_output():
         state = collect_dyn_mod_state(
@@ -1258,34 +1268,17 @@ def open_dyn_mod_wizard(app):
 
         # ════════════════════════════════════════════════════════
         # FILE 4 — interface/ideas.gfx (if icon set)
-        # Strategy: if file exists, check if spriteType already there;
-        #           if not, append it before the last closing }.
         # ════════════════════════════════════════════════════════
         if icon_gfx:
             icon_name = icon_gfx.replace("GFX_idea_", "").replace("GFX_", "")
-            sprite_block = (
-                f"\tspriteType = {{\n"
-                f'\t\tname = "{icon_gfx}"\n'
-                f'\t\ttexturefile = "gfx/interface/ideas/{icon_name}.dds"\n'
-                f"\t}}"
-            )
             gfx_rel = os.path.join("interface", "ideas.gfx")
             gfx_existing = read_existing(gfx_rel)
-            if gfx_existing is None:
-                gfx_final = f"spriteTypes = {{\n\n{sprite_block}\n\n}}\n"
-                gfx_action = "created"
-            elif icon_gfx in gfx_existing:
-                gfx_final = gfx_existing
-                gfx_action = "skipped (icon already defined)"
-            else:
-                # Insert before last closing }
-                last = gfx_existing.rfind("}")
-                if last >= 0:
-                    gfx_final = gfx_existing[:last] + f"\n{sprite_block}\n\n}}\n"
-                else:
-                    gfx_final = gfx_existing.rstrip() + f"\n{sprite_block}\n"
-                gfx_action = "appended sprite"
-            if gfx_action != "skipped (icon already defined)":
+            gfx_final, added_count = append_sprite_types(
+                gfx_existing,
+                [(icon_gfx, f"gfx/interface/ideas/{icon_name}.dds")],
+            )
+            if added_count:
+                gfx_action = "created" if gfx_existing is None else "appended sprite"
                 if write(gfx_rel, gfx_final):
                     results.append(
                         (
@@ -1295,7 +1288,7 @@ def open_dyn_mod_wizard(app):
                         )
                     )
             else:
-                results.append((gfx_rel, gfx_action, ""))
+                results.append((gfx_rel, "skipped (icon already defined)", ""))
 
         # ── Summary ───────────────────────────────────────────
         if errors:

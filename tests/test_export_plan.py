@@ -7,6 +7,7 @@ from hoi4cm.focus_tree.export_plan import (
     make_extra_export_plan,
     make_main_export_plan,
 )
+from hoi4cm.mod.workspace_files import WorkspaceFiles
 from hoi4cm.models import Focus
 
 
@@ -25,7 +26,7 @@ def _focus(name, tree_idx=0):
     return focus
 
 
-def _main_plan(tmp_path, *, loc_language="english"):
+def _main_plan(tmp_path, *, loc_language="english", gfx_path=None, gfx_entries=()):
     focus = _focus("TST_root")
     return make_main_export_plan(
         label="Main: TST_focus_tree",
@@ -45,6 +46,8 @@ def _main_plan(tmp_path, *, loc_language="english"):
         focus_lookup={focus.id: focus},
         focus_name_lookup={focus.name: focus},
         loc_language=loc_language,
+        gfx_path=gfx_path,
+        gfx_entries=gfx_entries,
     )
 
 
@@ -86,6 +89,58 @@ def test_main_plan_writes_tree_and_localisation_as_one_group(tmp_path):
     ]
     assert "TST_root" in calls[0][0][1]
     assert "TST_root" in calls[0][1][1]
+
+
+def test_main_plan_writes_focus_gfx_declarations(tmp_path):
+    gfx_path = tmp_path / "interface" / "TST_focus.gfx"
+    plan = _main_plan(
+        tmp_path,
+        gfx_path=str(gfx_path),
+        gfx_entries=(("GFX_focus_custom", "gfx/interface/goals/custom.dds"),),
+    )
+
+    results = execute_export_plans([plan], WorkspaceFiles().write_texts)
+
+    assert results[0].ok
+    assert results[0].written_paths[-1] == str(gfx_path)
+    assert 'name = "GFX_focus_custom"' in gfx_path.read_text()
+
+
+def test_main_plan_does_not_duplicate_existing_focus_gfx_declarations(tmp_path):
+    gfx_path = tmp_path / "interface" / "TST_focus.gfx"
+    gfx_path.parent.mkdir()
+    existing = (
+        "spriteTypes = {\n"
+        '\tspriteType = { name = "GFX_focus_custom" '
+        'texturefile = "gfx/interface/goals/custom.dds" }\n'
+        "}\n"
+    )
+    gfx_path.write_text(existing)
+    plan = _main_plan(
+        tmp_path,
+        gfx_path=str(gfx_path),
+        gfx_entries=(("GFX_focus_custom", "gfx/interface/goals/custom.dds"),),
+    )
+
+    results = execute_export_plans([plan], WorkspaceFiles().write_texts)
+
+    assert results[0].ok
+    assert str(gfx_path) not in results[0].written_paths
+    assert gfx_path.read_text() == existing
+
+
+def test_main_plan_with_unresolved_focus_icon_has_no_gfx_write(tmp_path):
+    gfx_path = tmp_path / "interface" / "TST_focus.gfx"
+    plan = _main_plan(
+        tmp_path,
+        gfx_path=str(gfx_path),
+        gfx_entries=(),
+    )
+
+    results = execute_export_plans([plan], WorkspaceFiles().write_texts)
+
+    assert results[0].ok
+    assert not gfx_path.exists()
 
 
 def test_main_plan_snapshots_non_english_localisation_header(tmp_path):
