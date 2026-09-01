@@ -120,7 +120,7 @@ class ModContext:
     """Holds all discovered mod assets: sprites, events, ideas, decisions, etc."""
 
     def __init__(self):
-        self.root = None  # mod root path
+        self.root: str | None = None  # mod root path
         self.sprites = {}  # gfx_name -> abs_path  (all spriteTypes)
         self.sprite_imgs = LRUCache(_SPRITE_IMG_CACHE_SIZE)  # gfx_name -> PhotoImage
         self.focus_ids = []  # all focus IDs across national_focus/
@@ -136,7 +136,8 @@ class ModContext:
         self.use_cache = True  # SQLite per-file scan cache (disable in tests)
         self._cache = None  # active ScanCache during a scan(), else None
         self.sidebar_refresh_skip = True  # skip rebuild when sidebar data unchanged
-        self.is_md = False  # True when Millennium Dawn is detected
+        self.is_md = False  # effective Millennium Dawn mode
+        self.md_mode_override: bool | None = None  # None = auto-detect
         self.mod_name = ""  # basename of mod root
         self._status = ""
         self._img_errors = []  # list of error strings for debugging
@@ -199,7 +200,7 @@ class ModContext:
         ("country_tag_names", "country_tag_names", True),
         ("loc_token_style", "loc_token_style", True),
         ("loc_language", "loc_language", True),
-        ("is_md_override", "is_md", False),
+        ("md_mode_override", "md_mode_override", True),
         ("sidebar_refresh_skip", "sidebar_refresh_skip", True),
     )
 
@@ -209,6 +210,8 @@ class ModContext:
         for key, attr, allow_falsy in self._PERSISTED_ATTRS:
             if key in cfg and (allow_falsy or cfg[key]):
                 setattr(self, attr, cfg[key])
+        if isinstance(self.md_mode_override, bool):
+            self.is_md = self.md_mode_override
         from hoi4cm.focus_tree.loc import LocTarget
 
         self.loc_language = LocTarget(self.loc_language).language
@@ -326,8 +329,11 @@ class ModContext:
     def _scan_gfx_unified(self):
         self.decision_sprites.clear()
         self.idea_sprites.clear()
+        root = self.root
+        if not root:
+            return
         maps = self.graphics_catalog.refresh(
-            self.root,
+            root,
             GraphicsScanConfig(
                 path_goals=self.path_goals,
                 path_ideas_gfx=self.path_ideas_gfx,
@@ -440,7 +446,10 @@ class ModContext:
 
         Both used to walk this directory separately, reading every file twice.
         """
-        d = os.path.join(self.root, "common", "national_focus")
+        root = self.root
+        if not root:
+            return
+        d = os.path.join(root, "common", "national_focus")
         if not os.path.isdir(d):
             return
         paths = self._txt_paths(d)
@@ -454,7 +463,10 @@ class ModContext:
         self.focus_ids = list(focus_seen)
 
     def _scan_events(self):
-        d = os.path.join(self.root, "events")
+        root = self.root
+        if not root:
+            return
+        d = os.path.join(root, "events")
         if not os.path.isdir(d):
             return
         paths = self._txt_paths(d)
@@ -465,7 +477,10 @@ class ModContext:
                 self.event_ids[os.path.basename(p)[:-4]] = ids
 
     def _scan_ideas(self):
-        d = os.path.join(self.root, "common", "ideas")
+        root = self.root
+        if not root:
+            return
+        d = os.path.join(root, "common", "ideas")
         if not os.path.isdir(d):
             return
         paths = self._txt_paths(d)
@@ -492,12 +507,15 @@ class ModContext:
         self.character_ids = list(seen)
 
     def _scan_decisions(self):
+        root = self.root
+        if not root:
+            return
         # Gather all candidate files per domain first; a single cache call per
         # domain keeps prune() from dropping the other directory's rows.
         dec_paths = []
         cat_paths = []
         for sub in ("decisions", "common/decisions"):
-            d = os.path.join(self.root, sub.replace("/", os.sep))
+            d = os.path.join(root, sub.replace("/", os.sep))
             if not os.path.isdir(d):
                 continue
             dec_paths.extend(self._txt_paths(d))
@@ -522,7 +540,10 @@ class ModContext:
         self.decision_cats = list(cats_seen)
 
     def _scan_dyn_mods(self):
-        d = os.path.join(self.root, "common", "dynamic_modifiers")
+        root = self.root
+        if not root:
+            return
+        d = os.path.join(root, "common", "dynamic_modifiers")
         if not os.path.isdir(d):
             return
         paths = self._txt_paths(d)
@@ -534,7 +555,10 @@ class ModContext:
         self.dyn_mod_ids = list(seen)
 
     def _scan_tags(self):
-        d = os.path.join(self.root, "common", "country_tags")
+        root = self.root
+        if not root:
+            return
+        d = os.path.join(root, "common", "country_tags")
         if not os.path.isdir(d):
             return
         paths = self._txt_paths(d)
@@ -547,7 +571,10 @@ class ModContext:
 
     def _scan_md_money_files(self):
         """Auto-discover the three MD additional income system files."""
-        if not self.root:
+        if not self.root or not self.is_md:
+            self.md_money_system_file = ""
+            self.md_money_scripted_loc_file = ""
+            self.md_money_yml_file = ""
             return
         r = self.root
         p = os.path.join(r, "common", "scripted_effects", "00_money_system.txt")
@@ -610,7 +637,7 @@ class ModContext:
             self._img_errors.append("FILE NOT FOUND: " + path)
             return None
 
-        if not _PIL_OK:
+        if not _PIL_OK or _PILImage is None or _PILImageTk is None:
             self.sprite_imgs[key] = None
             self._img_errors.append("Pillow not available")
             return None
@@ -655,19 +682,31 @@ class ModContext:
         self.character_ids.clear()
         self.country_tags.clear()
         self.variables.clear()
+        self.md_money_system_file = ""
+        self.md_money_scripted_loc_file = ""
+        self.md_money_yml_file = ""
         self.loaded = False
 
         name_lower = self.mod_name.lower()
-        self.is_md = (
+        detected = (
             "millennium" in name_lower
             or "md" == name_lower
             or "millennium_dawn" in name_lower
         )
-        if not self.is_md:
+        if not detected:
             desc_path = os.path.join(root, "descriptor.mod")
             if os.path.exists(desc_path):
                 desc_txt = self._read(desc_path).lower()
-                self.is_md = "millennium" in desc_txt
+                detected = "millennium" in desc_txt
+        if not detected:
+            detected = os.path.isfile(
+                os.path.join(root, "common", "scripted_effects", "00_money_system.txt")
+            )
+        self.is_md = (
+            self.md_mode_override
+            if isinstance(self.md_mode_override, bool)
+            else detected
+        )
 
         steps = [
             ("GFX (sprites/ideas/decisions)", self._scan_gfx_unified),
@@ -678,8 +717,9 @@ class ModContext:
             ("Decisions", self._scan_decisions),
             ("Dynamic Modifiers", self._scan_dyn_mods),
             ("Country Tags", self._scan_tags),
-            ("MD Money System", self._scan_md_money_files),
         ]
+        if self.is_md:
+            steps.append(("MD Money System", self._scan_md_money_files))
         self._cache = ScanCache(root) if self.use_cache else None
         try:
             for i, (label, fn) in enumerate(steps):

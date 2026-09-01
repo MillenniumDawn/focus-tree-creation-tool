@@ -316,7 +316,7 @@ def open_settings(app):
         MOD.loc_language = loc_lang_var.get()
         loc_lang_name.config(text=LOC_LANGUAGE_NAMES.get(MOD.loc_language, ""))
         MOD.save_config()
-        if MOD.root:
+        if MOD.root and MOD.is_md:
             MOD._scan_md_money_files()
 
     loc_lang_combo.bind("<<ComboboxSelected>>", _apply_loc_lang)
@@ -354,7 +354,7 @@ def open_settings(app):
     _lbl(
         tr(
             "settings.detection_checks",
-            "  Detection checks: folder name, descriptor.mod content.",
+            "  Detection checks: folder name, descriptor.mod content, and 00_money_system.txt.",
         )
     )
     _lbl(tr("settings.override_manually", "  You can also override manually:"))
@@ -363,7 +363,9 @@ def open_settings(app):
     ovr_row.pack(fill="x", padx=10, pady=6)
 
     def _force(is_md):
+        MOD.md_mode_override = is_md
         MOD.is_md = is_md
+        MOD.save_config()
         app._apply_md_visibility()
         lbl_status.config(
             text=tr(

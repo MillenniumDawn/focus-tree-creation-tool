@@ -742,6 +742,10 @@ class ModLoadingMixin:
             errs.append("No mod loaded — load your mod first via File → Load Mod.")
             return saved, errs
 
+        if not MOD.is_md:
+            errs.append("MD mode is disabled; enable it in Settings first.")
+            return saved, errs
+
         # Re-scan money files in case they weren't found on initial scan
         MOD._scan_md_money_files()
 

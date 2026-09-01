@@ -29,7 +29,9 @@
   parsed trees (`batch_load_trees`, `make_cancel_handle`).
 - **`mod/`**: `ModContext` (the `MOD` singleton): walks a mod's directory
   tree once and indexes sprites, focus/event/idea/decision/dyn-mod IDs,
-  country tags, and MD money-system paths. `scan_cache.py` is the SQLite
+  country tags, and MD money-system paths. MD mode is detected from the
+  mod identity or money-system file, unless `md_mode_override` is configured.
+  `scan_cache.py` is the SQLite
   per-file cache backing warm reloads. `workspace_files.py` is the single
   writer every mod-file save goes through (see "Writing mod files" below).
 - **`wizards/`**: the five `open_*_wizard(app)` entry points (decision,
@@ -72,7 +74,8 @@ The selected HOI4 localisation language is persisted as `loc_language` on
 `ModContext`. UI code snapshots that string into export plans and pure wizard
 generators; worker code does not read mutable global settings. Existing edit
 targets remain explicit overrides, while automatic discovery recursively
-filters `localisation/` for the configured language.
+filters `localisation/` for the configured language. Focus exports default to
+`<TAG>_focus_l_<lang>.yml`.
 
 Parsing and export are pure and tested without a display. Everything from
 `App.focuses` onward touches Tk and is exercised manually (see

@@ -24,6 +24,7 @@ def isolate_mod(tmp_path, monkeypatch):
     snapshot = copy.deepcopy(MOD.__dict__)
     MOD.loaded = True
     MOD.root = str(tmp_path)
+    MOD.is_md = True
     MOD.loc_language = "english"
     yield
     MOD.__dict__.clear()
