@@ -165,7 +165,7 @@ def test_image_no_auto_install_without_env_does_not_call_install(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_paths_read_file_mixed_encoding_returns_empty(monkeypatch, tmp_path):
+def test_paths_read_file_mixed_encoding_returns_none(monkeypatch, tmp_path):
     p = tmp_path / "mixed.txt"
     p.write_bytes(b"\xff\xfe\xfd")
 
@@ -176,10 +176,10 @@ def test_paths_read_file_mixed_encoding_returns_empty(monkeypatch, tmp_path):
     # getsize should not short-circuit; return small size
     monkeypatch.setattr(os.path, "getsize", lambda _: 3)
 
-    assert paths.read_file(str(p)) == ""
+    assert paths.read_file(str(p)) is None
 
 
-def test_paths_read_file_value_error_returns_empty(monkeypatch, tmp_path):
+def test_paths_read_file_value_error_returns_none(monkeypatch, tmp_path):
     p = tmp_path / "bad.txt"
     p.write_text("hello", encoding="utf-8")
 
@@ -189,10 +189,10 @@ def test_paths_read_file_value_error_returns_empty(monkeypatch, tmp_path):
     monkeypatch.setattr(builtins, "open", fake_open)
     monkeypatch.setattr(os.path, "getsize", lambda _: 5)
 
-    assert paths.read_file(str(p)) == ""
+    assert paths.read_file(str(p)) is None
 
 
-def test_paths_read_file_unicode_decode_error_returns_empty(monkeypatch, tmp_path):
+def test_paths_read_file_unicode_decode_error_returns_none(monkeypatch, tmp_path):
     p = tmp_path / "ud.txt"
     p.write_text("hello", encoding="utf-8")
 
@@ -202,14 +202,14 @@ def test_paths_read_file_unicode_decode_error_returns_empty(monkeypatch, tmp_pat
     monkeypatch.setattr(builtins, "open", fake_open)
     monkeypatch.setattr(os.path, "getsize", lambda _: 5)
 
-    assert paths.read_file(str(p)) == ""
+    assert paths.read_file(str(p)) is None
 
 
-def test_paths_read_file_streaming_oversize_returns_empty(tmp_path):
+def test_paths_read_file_streaming_oversize_returns_none(tmp_path):
     p = tmp_path / "stream.txt"
     p.write_text("x" * 20, encoding="utf-8")
     # max_bytes=10 but file is 20 bytes; read(max_bytes+1) will be 11 -> oversize
-    assert paths.read_file(str(p), max_bytes=10) == ""
+    assert paths.read_file(str(p), max_bytes=10) is None
 
 
 def test_paths_read_file_getsize_oserror_still_reads(tmp_path, monkeypatch):
@@ -224,10 +224,10 @@ def test_paths_read_file_getsize_oserror_still_reads(tmp_path, monkeypatch):
     assert paths.read_file(str(p)) == "hello"
 
 
-def test_paths_read_file_oversize_via_getsize_returns_empty(tmp_path):
+def test_paths_read_file_oversize_via_getsize_returns_none(tmp_path):
     p = tmp_path / "big.txt"
     p.write_text("x" * 100, encoding="utf-8")
-    assert paths.read_file(str(p), max_bytes=10) == ""
+    assert paths.read_file(str(p), max_bytes=10) is None
 
 
 def test_paths_read_file_latin1_fallback(tmp_path, monkeypatch):
@@ -251,7 +251,7 @@ def test_paths_read_file_latin1_fallback(tmp_path, monkeypatch):
 def test_paths_read_file_max_bytes_none_reads_large(tmp_path):
     p = tmp_path / "large.txt"
     p.write_text("y" * 5000, encoding="utf-8")
-    assert paths.read_file(str(p), max_bytes=None) == "y" * 5000  # type: ignore[arg-type]
+    assert paths.read_file(str(p), max_bytes=None) == "y" * 5000
 
 
 def test_paths_read_file_missing_returns_empty(tmp_path):

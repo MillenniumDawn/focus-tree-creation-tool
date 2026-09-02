@@ -25,8 +25,10 @@ def test_read_file_missing_returns_empty(tmp_path):
 def test_read_file_falls_back_to_latin1(tmp_path):
     p = tmp_path / "c.txt"
     p.write_bytes("café".encode("latin-1"))  # 0xe9 is not valid UTF-8
-    assert paths.read_file(str(p)) == "café"
-    assert "�" not in paths.read_file(str(p))
+    content = paths.read_file(str(p))
+    assert content == "café"
+    assert content is not None
+    assert "�" not in content
 
 
 def test_default_mod_dir_linux(monkeypatch):
@@ -55,7 +57,13 @@ def test_default_mod_dir_windows(monkeypatch):
 def test_read_file_respects_size_cap(tmp_path):
     p = tmp_path / "big.txt"
     p.write_text("x" * 5000, encoding="utf-8")
-    assert paths.read_file(str(p), max_bytes=1000) == ""
+    assert paths.read_file(str(p), max_bytes=1000) is None
+
+
+def test_read_file_keeps_successful_empty_read_distinct(tmp_path):
+    p = tmp_path / "empty.txt"
+    p.write_text("", encoding="utf-8")
+    assert paths.read_file(str(p)) == ""
 
 
 def test_read_file_reads_within_cap(tmp_path):

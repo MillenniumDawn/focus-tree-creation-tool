@@ -6,6 +6,7 @@ from hoi4cm.focus_tree.export_plan import (
     execute_export_plans,
     make_extra_export_plan,
     make_main_export_plan,
+    render_export_plan,
 )
 from hoi4cm.mod.workspace_files import WorkspaceFiles
 from hoi4cm.models import Focus
@@ -159,6 +160,19 @@ def test_main_plan_exports_german_localisation_header(tmp_path):
     execute_export_plans([plan], lambda entries: calls.append(tuple(entries)))
 
     assert calls[0][1][1].startswith("l_german:\n")
+
+
+def test_unreadable_existing_localisation_is_not_replaced(tmp_path):
+    plan = _main_plan(tmp_path)
+
+    writes, added_count = render_export_plan(
+        plan,
+        read_text=lambda _path: None,
+        is_file=lambda _path: True,
+    )
+
+    assert added_count == 0
+    assert [path for path, _text, _encoding in writes] == [plan.focus_path]
 
 
 def test_batch_continues_after_one_plan_fails(tmp_path):
