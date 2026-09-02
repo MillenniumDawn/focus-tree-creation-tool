@@ -2,13 +2,17 @@
 
 import pytest
 
+from hoi4cm.core import read_file
+from hoi4cm.script.syntax import find_blocks
 from hoi4cm.wizards._generators import (
     _strip_val,
+    capture_decision_extras,
     generate_decision_block,
     generate_decision_categories_file,
     generate_decision_loc_yml,
     generate_decision_scripted_loc,
     generate_decisions_file,
+    render_decision_extras,
 )
 
 
@@ -92,6 +96,46 @@ def _dec(**overrides):
     )
     base.update(overrides)
     return base
+
+
+def test_decision_unmodelled_assignments_survive_import_and_save(tmp_path):
+    source_path = tmp_path / "decisions.txt"
+    source_path.write_text(
+        """
+TAG_cat = {
+\tTAG_decision = {
+\t\tallowed = { always = yes }
+\t\twar_with_on_complete = TAG_enemy
+\t\tcustom_engine_key = {
+\t\t\tcheck_variable = { var = example value = 1 }
+\t\t\t# Keep this comment too.
+\t\t}
+\t\tcustom_engine_scalar = "value # not a comment"
+\t}
+}
+""",
+        encoding="utf-8",
+    )
+    raw = read_file(str(source_path))
+    assert raw is not None
+    cat_inner = find_blocks(raw)[0][1]
+    inner = find_blocks(cat_inner)[0][1]
+    extras = capture_decision_extras(inner)
+
+    assert len(extras) == 2
+    assert "custom_engine_key = {" in extras[0]
+    assert 'custom_engine_scalar = "value # not a comment"' in extras[1]
+    assert render_decision_extras(extras)[0].startswith("\t\tcustom_engine_key")
+
+    out = generate_decisions_file(
+        [_cat()], [_dec(_extras=extras, war_complete_tag="TAG_enemy")]
+    )
+
+    assert "custom_engine_key = {" in out
+    assert "check_variable = { var = example value = 1 }" in out
+    assert "# Keep this comment too." in out
+    assert 'custom_engine_scalar = "value # not a comment"' in out
+    assert "war_with_on_complete = TAG_enemy" in out
 
 
 def test_decision_block_minimum_open_and_close():
