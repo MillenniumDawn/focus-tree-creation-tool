@@ -92,6 +92,19 @@ def test_main_plan_writes_tree_and_localisation_as_one_group(tmp_path):
     assert "TST_root" in calls[0][1][1]
 
 
+def test_main_plan_rejects_focus_text_with_double_quote(tmp_path):
+    plan = _main_plan(tmp_path)
+    plan.focuses[0].text = 'a"b'
+    calls = []
+
+    results = execute_export_plans([plan], lambda entries: calls.append(tuple(entries)))
+
+    assert len(results) == 1
+    assert isinstance(results[0].error, ValueError)
+    assert 'a"b' in str(results[0].error)
+    assert calls == []
+
+
 def test_main_plan_writes_focus_gfx_declarations(tmp_path):
     gfx_path = tmp_path / "interface" / "TST_focus.gfx"
     plan = _main_plan(
