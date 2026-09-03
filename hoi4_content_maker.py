@@ -80,6 +80,7 @@ from hoi4cm.editor import (  # noqa: E402
     clear_workspace_autosave,
     read_project,
     sibling_autosave_path,
+    validate_project_file_path,
     workspace_autosave_path,
     write_project,
 )
@@ -5305,8 +5306,14 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         except Exception:
             pass
         default_filename = f"05_{country_tag}.txt"
-        if MOD.edit_focus_file and os.path.isfile(MOD.edit_focus_file):
-            path = MOD.edit_focus_file
+        mod_root = MOD.root if MOD.root and os.path.isdir(MOD.root) else None
+        focus_path = (
+            validate_project_file_path(MOD.edit_focus_file, mod_root)
+            if mod_root
+            else ""
+        )
+        if focus_path and os.path.isfile(focus_path):
+            path = focus_path
         else:
             path = filedialog.asksaveasfilename(
                 defaultextension=".txt",
@@ -5319,13 +5326,15 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             )
         if not path:
             return None
-        if MOD.edit_loc_file and os.path.isfile(MOD.edit_loc_file):
-            loc_path = MOD.edit_loc_file
+        loc_path_from_project = (
+            validate_project_file_path(MOD.edit_loc_file, mod_root) if mod_root else ""
+        )
+        if loc_path_from_project and os.path.isfile(loc_path_from_project):
+            loc_path = loc_path_from_project
         else:
             loc_target = MOD.loc_target
             loc_filename = loc_target.filename(f"{country_tag}_focus")
             saved_dir = os.path.dirname(os.path.abspath(path))
-            mod_root = MOD.root if MOD.root and os.path.isdir(MOD.root) else None
             if mod_root is None:
                 candidate = saved_dir
                 for _ in range(5):
@@ -5395,8 +5404,12 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
                     tr("dialog.no_focuses_in_tree", "No focuses in this tree."),
                 )
             return None
-        if os.path.isfile(info["file_path"]):
-            path = info["file_path"]
+        mod_root = MOD.root if MOD.root and os.path.isdir(MOD.root) else None
+        focus_path = (
+            validate_project_file_path(info["file_path"], mod_root) if mod_root else ""
+        )
+        if focus_path and os.path.isfile(focus_path):
+            path = focus_path
         else:
             path = filedialog.asksaveasfilename(
                 defaultextension=".txt",
@@ -5516,8 +5529,15 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         self._tree_had_wrapper = workspace.main_tree.had_wrapper
         # Legacy projects decode with an empty file_path; keep the user's
         # existing export target rather than wiping it.
-        if workspace.main_tree.file_path:
-            MOD.edit_focus_file = workspace.main_tree.file_path
+        mod_root = getattr(MOD, "root", "") or ""
+        mod_root = mod_root if os.path.isdir(mod_root) else None
+        focus_path = (
+            validate_project_file_path(workspace.main_tree.file_path, mod_root)
+            if mod_root
+            else ""
+        )
+        if focus_path:
+            MOD.edit_focus_file = focus_path
         self._cfp_x = meta.cfp_x
         self._cfp_y = meta.cfp_y
         self._cfp_x_var.set("" if meta.cfp_x is None else str(meta.cfp_x))
@@ -5659,6 +5679,18 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         self._hide_form()
         self._redraw()
         self._invalidate_focus_list_structure()
+        rejected_paths = getattr(workspace, "_rejected_file_paths", ())
+        if rejected_paths:
+            messagebox.showwarning(
+                tr("dialog.load_project_paths_ignored.title", "Project Load"),
+                tr(
+                    "dialog.load_project_paths_ignored.body",
+                    "Stored export paths were ignored because they are unsafe:\n\n"
+                    "{paths}",
+                    paths="\n".join(f"  {path}" for path in rejected_paths),
+                ),
+                parent=self,
+            )
 
     # ── EXPORT ──────────────────────────────────────────────────
 

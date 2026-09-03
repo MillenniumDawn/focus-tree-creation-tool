@@ -1,5 +1,6 @@
 """Tests for the monolith's Tk shells around the export-plan pipeline."""
 
+from collections.abc import Callable
 from types import SimpleNamespace
 from typing import Any
 
@@ -60,6 +61,8 @@ def mod_files(tmp_path, monkeypatch):
 
 
 class _App:
+    _make_extra_export_plan: Callable[..., Any]
+    _make_main_export_plan: Callable[..., Any]
     _run_export_plans: Any = None
 
     def _begin_document_generation(self):
@@ -144,6 +147,79 @@ def test_export_writes_both_tracked_files(dialogs, mod_files):
     assert "TST_root" in mod_files.loc.read_text(encoding="utf-8-sig")
     assert len(dialogs.info) == 1
     assert dialogs.error == []
+
+
+def test_export_reprompts_for_targets_outside_loaded_mod(
+    dialogs, mod_files, monkeypatch
+):
+    outside_focus = mod_files.root.parent / "outside.txt"
+    outside_loc = mod_files.root.parent / "outside.yml"
+    outside_focus.write_text("user file\n", encoding="utf-8")
+    outside_loc.write_text("user file\n", encoding="utf-8")
+    chosen_focus = mod_files.root / "common" / "national_focus" / "new.txt"
+    prompts = []
+    monkeypatch.setattr(m.MOD, "edit_focus_file", str(outside_focus))
+    monkeypatch.setattr(m.MOD, "edit_loc_file", str(outside_loc))
+    monkeypatch.setattr(
+        m.filedialog,
+        "asksaveasfilename",
+        lambda **kwargs: prompts.append(kwargs) or str(chosen_focus),
+    )
+
+    app = _App([_focus("TST_root")])
+    _bind_export_shells(app)
+    plan = app._make_main_export_plan(
+        list(app.focuses.values()),
+        dict(app.focuses),
+        {"TST_root": next(iter(app.focuses.values()))},
+        show_dialog=False,
+    )
+
+    assert plan is not None
+    assert plan.focus_path == str(chosen_focus)
+    assert plan.loc_path == str(
+        mod_files.root / "localisation" / "english" / "TST_focus_l_english.yml"
+    )
+    assert len(prompts) == 1
+
+
+def test_extra_export_reprompts_without_a_mod_root(dialogs, mod_files, monkeypatch):
+    focus = _focus("TST_shared")
+    focus.tree_idx = 1
+    app = _App([focus])
+    app._extra_trees = [
+        {
+            "type": "shared",
+            "file_path": str(mod_files.focus),
+            "tree_id": "TST_shared_focuses",
+            "country_tag": "TST",
+            "country_raw": "",
+            "cfp_x": None,
+            "cfp_y": None,
+            "had_wrapper": False,
+        }
+    ]
+    chosen = mod_files.root / "new_shared.txt"
+    prompts = []
+    monkeypatch.setattr(m.MOD, "root", None)
+    monkeypatch.setattr(
+        m.filedialog,
+        "asksaveasfilename",
+        lambda **kwargs: prompts.append(kwargs) or str(chosen),
+    )
+
+    _bind_export_shells(app)
+    plan = app._make_extra_export_plan(
+        1,
+        [focus],
+        dict(app.focuses),
+        {focus.name: focus},
+        show_dialog=False,
+    )
+
+    assert plan is not None
+    assert plan.focus_path == str(chosen)
+    assert len(prompts) == 1
 
 
 def test_default_localisation_filename_is_generic(mod_files, monkeypatch):
@@ -326,6 +402,7 @@ def test_failed_extra_tree_export_keeps_the_source_file(dialogs, tmp_path, monke
         }
     ]
     monkeypatch.setattr(m.MOD, "loaded", False)
+    monkeypatch.setattr(m.MOD, "root", str(tmp_path))
     _fail_replace(monkeypatch)
 
     _export_extra_tree(app, 1)

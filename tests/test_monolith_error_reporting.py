@@ -7,12 +7,14 @@ touching any widget state, so a bare shell stands in for the App.
 """
 
 from types import SimpleNamespace
+from typing import cast
 
 import pytest
 
 import hoi4_content_maker as m
 import hoi4cm.core.logger as logmod
 import hoi4cm.ui.error_report as error_report
+from hoi4cm.editor import decode_project
 from hoi4cm.models import Focus, FocusDocument
 
 
@@ -51,6 +53,54 @@ def test_load_reports_a_corrupt_project(shown, monkeypatch):
     assert len(entries) == 1
     assert "invalid JSON" in entries[0][1]
     assert "Traceback" in entries[0][1]
+
+
+def test_load_warns_when_stored_export_paths_are_dropped(shown, monkeypatch):
+    monkeypatch.setattr(m.filedialog, "askopenfilename", lambda **_kw: "project.json")
+    workspace = decode_project(
+        {
+            "format": "hoi4cm-project",
+            "version": 2,
+            "workspace": {
+                "main_tree": {"file_path": "/outside/main.txt"},
+                "extra_trees": [{"file_path": "../outside/shared.txt"}],
+            },
+        }
+    )
+    monkeypatch.setattr(m, "read_project", lambda _path: workspace)
+    monkeypatch.setattr(m, "clear_workspace_autosave", lambda: None)
+    warnings = []
+    monkeypatch.setattr(
+        m.messagebox,
+        "showwarning",
+        lambda *args, **kwargs: warnings.append((args, kwargs)),
+    )
+    shell = type(
+        "Shell",
+        (),
+        {
+            "cv": type("Canvas", (), {"delete": lambda self, *_args: None})(),
+            "selected": None,
+            "_lines": set(),
+            "_grid_item": None,
+            "_grid_key": None,
+            "_grid_img": None,
+            "_install_workspace": lambda self, _workspace: None,
+            "_mark_clean": lambda self: None,
+            "_detect_and_apply_tag": lambda self: None,
+            "_refresh_tree_meta_panel": lambda self: None,
+            "_refresh_loaded_trees_panel": lambda self: None,
+            "_hide_form": lambda self: None,
+            "_redraw": lambda self: None,
+            "_invalidate_focus_list_structure": lambda self: None,
+        },
+    )()
+
+    m.App._load(cast(m.App, shell))
+
+    assert len(warnings) == 1
+    assert "Stored export paths were ignored" in warnings[0][0][1]
+    assert "/outside/main.txt" in warnings[0][0][1]
 
 
 def test_load_cancel_shows_nothing(shown, monkeypatch):
