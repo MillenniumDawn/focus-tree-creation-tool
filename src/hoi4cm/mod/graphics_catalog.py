@@ -425,20 +425,19 @@ class GraphicsCatalog:
         self._flush_cache()
 
     def _flush_cache(self) -> None:
-        if not self._cache_dirty:
-            return
-        self._cache_dirty = False
-        if not self._root:
+        if not self._cache_dirty or not self._root:
             return
         snapshot = self._snapshot_for_store()
         if not snapshot.cacheable:
             return
-        WorkspaceCache(scan_cache.database_path(self._root)).store_graphics(
+        stored = WorkspaceCache(scan_cache.database_path(self._root)).store_graphics(
             snapshot.to_data(),
             schema_version=_CACHE_VERSION,
             root_identity=self._root_identity,
             config_fingerprint=self._config_fingerprint,
         )
+        if stored:
+            self._cache_dirty = False
 
     def _snapshot_for_store(self) -> GraphicsSnapshot:
         goals_root = self._goals_root

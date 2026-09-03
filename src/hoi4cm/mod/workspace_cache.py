@@ -57,7 +57,7 @@ class WorkspaceCache:
         schema_version: int,
         root_identity: str,
         config_fingerprint: str,
-    ) -> None:
+    ) -> bool:
         try:
             encoded = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
             with self._connection() as connection:
@@ -74,6 +74,8 @@ class WorkspaceCache:
                 )
         except (OSError, TypeError, ValueError, sqlite3.Error) as error:
             _log.debug("graphics cache write failed: %s", error)
+            return False
+        return True
 
     @contextlib.contextmanager
     def _connection(self) -> Iterator[sqlite3.Connection]:
