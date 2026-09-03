@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import json
+import ntpath
+import os
 from collections.abc import Mapping
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
+from hoi4cm.core.safe_path import safe_join
 from hoi4cm.mod.workspace_files import WorkspaceFiles
 from hoi4cm.models import (
     EditorWorkspace,
@@ -54,6 +57,7 @@ def encode_project(workspace: EditorWorkspace) -> dict[str, Any]:
 
 
 def decode_project(data: Mapping[str, Any]) -> EditorWorkspace:
+    rejected_paths: list[str] = []
     format_name = data.get("format")
     if format_name is not None:
         if format_name != PROJECT_FORMAT:
@@ -62,12 +66,15 @@ def decode_project(data: Mapping[str, Any]) -> EditorWorkspace:
             raise ValueError(f"unsupported project version: {data.get('version')!r}")
         if not isinstance(data.get("workspace"), Mapping):
             raise ValueError("project workspace must be an object")
-        return _decode_v2(data)
-    if data.get("version") == PROJECT_VERSION and isinstance(
+        workspace = _decode_v2(data, rejected_paths)
+    elif data.get("version") == PROJECT_VERSION and isinstance(
         data.get("workspace"), Mapping
     ):
-        return _decode_v2(data)
-    return _decode_legacy(data)
+        workspace = _decode_v2(data, rejected_paths)
+    else:
+        workspace = _decode_legacy(data)
+    workspace.__dict__["_rejected_file_paths"] = tuple(rejected_paths)
+    return workspace
 
 
 def write_project(path: str | Path, workspace: EditorWorkspace) -> None:
@@ -103,7 +110,7 @@ def _encode_tree(tree: TreeDocument) -> dict[str, Any]:
     return data
 
 
-def _decode_v2(data: Mapping[str, Any]) -> EditorWorkspace:
+def _decode_v2(data: Mapping[str, Any], rejected_paths: list[str]) -> EditorWorkspace:
     raw_workspace = data["workspace"]
     raw_canvas = raw_workspace.get("canvas", {})
     if not isinstance(raw_canvas, Mapping):
@@ -114,9 +121,11 @@ def _decode_v2(data: Mapping[str, Any]) -> EditorWorkspace:
         focuses=FocusDocument(
             Focus.from_dict(focus) for focus in raw_workspace.get("focuses", [])
         ),
-        main_tree=_decode_tree(raw_workspace.get("main_tree", {}), "main"),
+        main_tree=_decode_tree(
+            raw_workspace.get("main_tree", {}), "main", rejected_paths
+        ),
         extra_trees=[
-            _decode_tree(tree, tree.get("tree_type", "shared"))
+            _decode_tree(tree, tree.get("tree_type", "shared"), rejected_paths)
             for tree in raw_workspace.get("extra_trees", [])
         ],
         canvas_min=canvas_min,
@@ -158,7 +167,9 @@ def _decode_legacy(data: Mapping[str, Any]) -> EditorWorkspace:
     )
 
 
-def _decode_tree(data: Mapping[str, Any], default_type: str) -> TreeDocument:
+def _decode_tree(
+    data: Mapping[str, Any], default_type: str, rejected_paths: list[str]
+) -> TreeDocument:
     metadata_data = data.get("metadata", {})
     if not isinstance(metadata_data, Mapping):
         metadata_data = {}
@@ -167,10 +178,16 @@ def _decode_tree(data: Mapping[str, Any], default_type: str) -> TreeDocument:
         **{key: value for key, value in metadata_data.items() if key in metadata_fields}
     )
     known = {"metadata", "tree_type", "file_path", "had_wrapper", "focus_ids"}
+    raw_file_path = data.get("file_path", "")
+    file_path = validate_project_file_path(raw_file_path)
+    if raw_file_path and not file_path:
+        path_text = str(raw_file_path)
+        if path_text not in rejected_paths:
+            rejected_paths.append(path_text)
     return TreeDocument(
         metadata=metadata,
         tree_type=data.get("tree_type", default_type),
-        file_path=data.get("file_path", ""),
+        file_path=file_path,
         had_wrapper=bool(data.get("had_wrapper", True)),
         focus_ids=set(data.get("focus_ids", [])),
         metadata_extras={
@@ -180,6 +197,29 @@ def _decode_tree(data: Mapping[str, Any], default_type: str) -> TreeDocument:
         },
         extras={key: value for key, value in data.items() if key not in known},
     )
+
+
+def validate_project_file_path(
+    path: object, base: str | os.PathLike[str] | None = None
+) -> str:
+    if isinstance(path, os.PathLike):
+        path = os.fspath(path)
+    if not isinstance(path, str) or not path:
+        return ""
+    normalized = path.replace("\\", "/")
+    if ".." in normalized.split("/"):
+        return ""
+    if ntpath.splitdrive(path)[0] and not os.path.isabs(path):
+        return ""
+    if os.path.isabs(path) or ntpath.isabs(path) or normalized.startswith("/"):
+        if base is None or not os.path.isabs(path):
+            return ""
+    if base is None:
+        return path
+    try:
+        return safe_join(base, normalized)
+    except OSError, TypeError, ValueError:
+        return ""
 
 
 def _pair(value: object, default: tuple[int, int]) -> tuple[int, int]:
@@ -192,6 +232,7 @@ __all__ = [
     "PROJECT_FORMAT",
     "PROJECT_VERSION",
     "decode_project",
+    "validate_project_file_path",
     "encode_project",
     "read_project",
     "write_project",

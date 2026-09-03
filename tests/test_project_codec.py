@@ -4,6 +4,7 @@ from hoi4cm.editor.project_codec import (
     decode_project,
     encode_project,
     read_project,
+    validate_project_file_path,
     write_project,
 )
 from hoi4cm.models import (
@@ -77,6 +78,49 @@ def test_legacy_decode_yields_empty_file_path():
     workspace = decode_project({"tree_name": "legacy_tree", "focuses": []})
 
     assert workspace.main_tree.file_path == ""
+
+
+def test_v2_decode_drops_absolute_file_paths(tmp_path):
+    project = {
+        "format": "hoi4cm-project",
+        "version": 2,
+        "workspace": {
+            "main_tree": {"file_path": str(tmp_path / "main.txt")},
+            "extra_trees": [{"file_path": str(tmp_path / "shared.txt")}],
+        },
+    }
+
+    workspace = decode_project(project)
+
+    assert workspace.main_tree.file_path == ""
+    assert workspace.extra_trees[0].file_path == ""
+
+
+def test_v2_decode_drops_parent_file_paths():
+    project = {
+        "format": "hoi4cm-project",
+        "version": 2,
+        "workspace": {
+            "main_tree": {"file_path": "C:\\outside.txt"},
+            "extra_trees": [{"file_path": "..\\outside.txt"}],
+        },
+    }
+
+    workspace = decode_project(project)
+
+    assert workspace.main_tree.file_path == ""
+    assert workspace.extra_trees[0].file_path == ""
+
+
+def test_validate_project_file_path_requires_containment(tmp_path):
+    base = tmp_path / "mod"
+    base.mkdir()
+
+    assert validate_project_file_path(str(tmp_path / "outside.txt"), base) == ""
+    relative = "common/national_focus/shared.txt"
+    expected = base / relative
+    assert validate_project_file_path(relative, base) == str(expected)
+    assert validate_project_file_path(str(expected), base) == str(expected)
 
 
 def test_v2_roundtrip_preserves_workspace_and_tree_metadata():
