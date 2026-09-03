@@ -202,7 +202,7 @@ def show_splash(callback, apply_dpi_scaling=None):
         if f >= 110:
             t = (f - 110) / 10
             # Darken by overlaying black rectangle
-            if not hasattr(state, "overlay"):
+            if "overlay" not in state:
                 state["overlay"] = cv.create_rectangle(
                     0, 0, W, H, fill="#000000", outline="", stipple="gray50"
                 )
