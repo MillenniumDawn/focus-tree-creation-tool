@@ -15,7 +15,7 @@ def cache(tmp_path):
 
 
 def test_store_load_roundtrip(cache):
-    cache.store_graphics(
+    assert cache.store_graphics(
         {"a": 1, "b": ["x", "y"]},
         schema_version=1,
         root_identity="root-1",
@@ -106,7 +106,7 @@ def test_unreadable_database_degrades_to_none(tmp_path, monkeypatch):
 
 def test_store_non_jsonable_degrades_without_raising(tmp_path, monkeypatch):
     cache = WorkspaceCache(tmp_path / "state" / "cache.db")
-    cache.store_graphics(
+    assert not cache.store_graphics(
         {"bad": object()},
         schema_version=1,
         root_identity="root-1",

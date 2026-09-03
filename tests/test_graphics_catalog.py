@@ -7,6 +7,7 @@ import pytest
 from hoi4cm.core.paths import read_file
 from hoi4cm.mod import scan_cache
 from hoi4cm.mod.graphics_catalog import FileStamp, GraphicsCatalog, GraphicsScanConfig
+from hoi4cm.mod.workspace_cache import WorkspaceCache
 
 
 @pytest.fixture(autouse=True)
@@ -560,6 +561,39 @@ def test_snapshot_store_is_deferred_until_flush(graphics_tree):
     fresh.refresh(str(graphics_tree), _config(), read_text=read_file)
     assert fresh.last_metrics.cache_status == "hit"
     assert fresh.resolve("GFX_focus_deferred") is not None
+
+
+def test_failed_snapshot_store_keeps_catalog_dirty_until_retry(
+    graphics_tree, monkeypatch
+):
+    catalog = GraphicsCatalog()
+    catalog.refresh(str(graphics_tree), _config(), read_text=read_file)
+    added = graphics_tree / "gfx" / "interface" / "goals" / "retry.dds"
+    added.write_bytes(b"retry")
+    catalog.note_written(str(added), read_text=read_file)
+
+    original_store = WorkspaceCache.store_graphics
+    attempts = 0
+
+    def store_once_then_succeed(cache, data, **kwargs):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            return False
+        return original_store(cache, data, **kwargs)
+
+    monkeypatch.setattr(WorkspaceCache, "store_graphics", store_once_then_succeed)
+
+    catalog.flush_cache()
+    assert catalog._cache_dirty
+    catalog.flush_cache()
+    assert not catalog._cache_dirty
+
+    fresh = GraphicsCatalog()
+    fresh.refresh(str(graphics_tree), _config(), read_text=read_file)
+    assert attempts == 2
+    assert fresh.last_metrics.cache_status == "hit"
+    assert fresh.resolve("GFX_focus_retry") is not None
 
 
 def test_refresh_flushes_pending_writes(graphics_tree):
