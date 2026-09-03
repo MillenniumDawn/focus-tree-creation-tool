@@ -26,12 +26,16 @@ def _defer_cyclic_image(tk_root: tk.Misc, finalized_on: list[int]) -> None:
     del image, cycle
 
 
-def test_defer_tk_finalizer_until_fixture_teardown(tk_root):
+def test_deferred_tk_image_finalizes_on_main_collect(tk_root):
     finalized_on: list[int] = []
+    main_thread_id = threading.main_thread().ident
+    assert main_thread_id is not None
     gc.disable()
     try:
         _defer_cyclic_image(tk_root, finalized_on)
         assert finalized_on == []
+        gc.collect()
+        assert finalized_on == [main_thread_id]
     finally:
         gc.enable()
 
@@ -43,6 +47,7 @@ def test_worker_does_not_finalize_deferred_tk_image(tk_root):
     gc.disable()
     try:
         _defer_cyclic_image(tk_root, finalized_on)
+        assert finalized_on == []
         gc.collect()
         assert finalized_on == [main_thread_id]
 
@@ -53,7 +58,7 @@ def test_worker_does_not_finalize_deferred_tk_image(tk_root):
         finally:
             executor.shutdown()
 
-        assert worker_id != main_thread_id
         assert finalized_on == [main_thread_id]
+        assert worker_id != main_thread_id
     finally:
         gc.enable()
