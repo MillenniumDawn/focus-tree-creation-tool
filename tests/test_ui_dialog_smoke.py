@@ -13,6 +13,7 @@ from __future__ import annotations
 import copy
 import os
 import tkinter as tk
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -479,6 +480,38 @@ def test_show_splash_constructs(tk_root, monkeypatch):
         except Exception:
             pass
     tk_root.update()
+
+
+def test_show_splash_creates_one_fade_overlay(tk_root, monkeypatch):
+    """The fade uses one overlay rectangle throughout the animation."""
+    import hoi4cm.ui.splash as splash_mod
+
+    overlay_rectangles: list[object] = []
+    original_create_rectangle = tk.Canvas.create_rectangle
+
+    def _create_rectangle(canvas: tk.Canvas, *args: Any, **kwargs: Any) -> Any:
+        if kwargs.get("fill") == "#000000" and kwargs.get("stipple") == "gray50":
+            overlay_rectangles.append(object())
+        return original_create_rectangle(canvas, *args, **kwargs)
+
+    monkeypatch.setattr(tk.Canvas, "create_rectangle", _create_rectangle)
+
+    class _FakeRoot(tk.Toplevel):  # type: ignore[type-arg]
+        def __init__(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+            super().__init__(tk_root, *args, **kwargs)
+
+        def mainloop(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+            return None
+
+        def after(self, ms, func=None, *args):  # type: ignore[no-untyped-def]  # pylint: disable=keyword-arg-before-vararg
+            if func is not None:
+                func(*args)
+            return "after_id"
+
+    monkeypatch.setattr(splash_mod.tk, "Tk", _FakeRoot)
+    splash_mod.show_splash(lambda: None)
+
+    assert len(overlay_rectangles) == 1
 
 
 def test_show_splash_wrapper_logs_on_failure(monkeypatch):
