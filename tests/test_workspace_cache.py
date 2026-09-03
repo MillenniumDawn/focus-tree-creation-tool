@@ -121,16 +121,25 @@ def test_store_non_jsonable_degrades_without_raising(tmp_path, monkeypatch):
     )
 
 
-def test_store_load_does_not_leak_connection(cache):
-    import gc
-    import warnings
+def test_store_load_does_not_leak_connection(cache, monkeypatch):
+    import sqlite3
 
+    connections: list[sqlite3.Connection] = []
+    original_connect = cache._connect
+
+    def tracking_connect() -> sqlite3.Connection:
+        connection = original_connect()
+        connections.append(connection)
+        return connection
+
+    monkeypatch.setattr(cache, "_connect", tracking_connect)
     cache.store_graphics(
         {"a": 1}, schema_version=1, root_identity="root-1", config_fingerprint="fp"
     )
     cache.load_graphics(
         schema_version=1, root_identity="root-1", config_fingerprint="fp"
     )
-    with warnings.catch_warnings():
-        warnings.simplefilter("error", ResourceWarning)
-        gc.collect()
+    assert connections
+    for connection in connections:
+        with pytest.raises(sqlite3.ProgrammingError):
+            connection.execute("SELECT 1")

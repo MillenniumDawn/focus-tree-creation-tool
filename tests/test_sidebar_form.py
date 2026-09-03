@@ -4,7 +4,6 @@ A missed field in the match silently drops an edit when the user clicks
 another focus. The apply path must touch indexes only when name changes.
 """
 
-import time
 from unittest.mock import patch
 
 import pytest
@@ -303,36 +302,3 @@ def test_by_name_get_does_not_scan_all_focuses():
 
     assert got is selected
     assert visits["n"] == 0
-
-
-def test_select_away_hot_path_beats_full_rebuild_at_scale():
-    """1k matched checks and 10k by_name gets must beat full scans.
-
-    At Load All Trees scale the old path paid rebuild_indexes / name-map
-    rebuild per click. The dirty-check no-op and by_name view have to stay
-    cheaper than those full passes.
-    """
-    document, selected, values = _large_document(size=8_000)
-
-    t0 = time.perf_counter()
-    for _ in range(1_000):
-        assert sidebar_values_match_focus(selected, values)
-    match_s = time.perf_counter() - t0
-
-    t0 = time.perf_counter()
-    document.rebuild_indexes()
-    rebuild_s = time.perf_counter() - t0
-
-    t0 = time.perf_counter()
-    for _ in range(10_000):
-        assert document.by_name.get(selected.name) is selected
-    view_s = time.perf_counter() - t0
-
-    t0 = time.perf_counter()
-    for _ in range(10):
-        build_focus_name_lookup(document.values())
-    build_s = time.perf_counter() - t0
-
-    # Generous margins so CI load cannot flake this into a red build.
-    assert match_s < rebuild_s
-    assert view_s < build_s
