@@ -51,6 +51,22 @@ from hoi4cm.wizards._shared import (
     text_get,
 )
 
+_READ_MISSING = "missing"
+_READ_FAILED = "read-failed"
+_READ_CONTENT = "content"
+
+
+def _read_existing_file(path):
+    if not os.path.exists(path):
+        return _READ_MISSING, None
+    try:
+        content = read_file(path)
+    except OSError, UnicodeDecodeError, ValueError:
+        return _READ_FAILED, None
+    if content is None:
+        return _READ_FAILED, None
+    return _READ_CONTENT, content
+
 
 def collect_dyn_mod_state(svars, text_widgets):
     """Collect dynamic-modifier form state into kwargs for ``build_dyn_mod_output``."""
@@ -1089,7 +1105,7 @@ def open_dyn_mod_wizard(app):
         def full(rel):
             return os.path.join(mod_root, rel)
 
-        def read_existing(rel, encoding="utf-8-sig"):
+        def read_existing_text(rel, encoding="utf-8-sig"):
             p = full(rel)
             if not os.path.exists(p):
                 return None
@@ -1098,6 +1114,11 @@ def open_dyn_mod_wizard(app):
                     return f.read()
             except OSError, UnicodeDecodeError, ValueError:
                 return None
+
+        def record_read_error(rel):
+            message = f"Could not read existing file: {rel}"
+            add_error(message)
+            errors.append(message)
 
         def write(rel, content, encoding="utf-8"):
             p = full(rel)
@@ -1114,7 +1135,7 @@ def open_dyn_mod_wizard(app):
         #           if not, create it fresh.
         # ════════════════════════════════════════════════════════
         dm_rel = os.path.join("common", "dynamic_modifiers", f"{mid}.txt")
-        dm_existing = read_existing(dm_rel)
+        dm_state, dm_existing = _read_existing_file(full(dm_rel))
 
         # Build the new block
         icon_gfx = (
@@ -1141,32 +1162,38 @@ def open_dyn_mod_wizard(app):
         dm_block_lines.append("}")
         dm_new_block = "\n".join(dm_block_lines)
 
-        if dm_existing is None:
-            # Fresh file
-            dm_final = dm_new_block + "\n"
-            action = "created"
+        if dm_state == _READ_FAILED:
+            record_read_error(dm_rel)
         else:
-            # Replace existing block for `mid` if present, else append
-            # Match: mid = { ... } at top level (handles nested braces)
-            def replace_or_append(src, block_id, new_block):
-                # Find "block_id = {" and extract to matching "}"
-                pattern = re.compile(
-                    r"^\s*" + re.escape(block_id) + r"\s*=\s*\{", re.MULTILINE
-                )
-                m = pattern.search(src)
-                if not m:
-                    # Not found — append
+            if dm_state == _READ_MISSING:
+                # Fresh file
+                dm_final = dm_new_block + "\n"
+                action = "created"
+            else:
+                # Replace existing block for `mid` if present, else append
+                # Match: mid = { ... } at top level (handles nested braces)
+                def replace_or_append(src, block_id, new_block):
+                    # Find "block_id = {" and extract to matching "}"
+                    pattern = re.compile(
+                        r"^\s*" + re.escape(block_id) + r"\s*=\s*\{", re.MULTILINE
+                    )
+                    m = pattern.search(src)
+                    if not m:
+                        # Not found — append
+                        return src.rstrip() + "\n\n" + new_block + "\n", "appended"
+                    i = match_brace(src, m.end() - 1)
+                    if i < len(src):
+                        replaced = src[: m.start()] + new_block + src[i + 1 :]
+                        return replaced, "updated"
                     return src.rstrip() + "\n\n" + new_block + "\n", "appended"
-                i = match_brace(src, m.end() - 1)
-                if i < len(src):
-                    replaced = src[: m.start()] + new_block + src[i + 1 :]
-                    return replaced, "updated"
-                return src.rstrip() + "\n\n" + new_block + "\n", "appended"
 
-            dm_final, action = replace_or_append(dm_existing, mid, dm_new_block)
+                dm_existing = dm_existing or ""
+                dm_final, action = replace_or_append(dm_existing, mid, dm_new_block)
 
-        if write(dm_rel, dm_final):
-            results.append((dm_rel, action, f"{len(mod_entries)} variable modifiers"))
+            if write(dm_rel, dm_final):
+                results.append(
+                    (dm_rel, action, f"{len(mod_entries)} variable modifiers")
+                )
 
         # ════════════════════════════════════════════════════════
         # FILE 2 — configured localisation language
@@ -1204,7 +1231,7 @@ def open_dyn_mod_wizard(app):
                 loc_target.dirname(),
                 loc_target.filename(mid),
             )
-        loc_existing = read_existing(loc_rel, "utf-8-sig")
+        loc_existing = read_existing_text(loc_rel, "utf-8-sig")
 
         new_loc_lines = []
 
@@ -1274,7 +1301,7 @@ def open_dyn_mod_wizard(app):
         if icon_gfx:
             icon_name = icon_gfx.replace("GFX_idea_", "").replace("GFX_", "")
             gfx_rel = os.path.join("interface", "ideas.gfx")
-            gfx_existing = read_existing(gfx_rel)
+            gfx_existing = read_existing_text(gfx_rel)
             gfx_final, added_count = append_sprite_types(
                 gfx_existing,
                 [(icon_gfx, f"gfx/interface/ideas/{icon_name}.dds")],
@@ -1410,6 +1437,13 @@ def open_dyn_mod_wizard(app):
             modifier_id, fp = mods[sel[0]]
             try:
                 src = read_file(fp)
+                if src is None:
+                    report_error(
+                        f"Could not read modifier '{modifier_id}'",
+                        parent=dlg,
+                        title="Read Error",
+                    )
+                    return
                 parsed = parse_script(src)
                 blk = parsed.get(modifier_id, {})
                 if not isinstance(blk, dict):
@@ -1462,6 +1496,8 @@ def open_dyn_mod_wizard(app):
             for loc_path in find_loc_files(MOD.root, language=MOD.loc_language):
                 try:
                     loc_src = read_file(loc_path)
+                    if loc_src is None:
+                        continue
                     for m in re.finditer(
                         r'^\s+(\S+?)(?::\d+)?\s+"(.*)"', loc_src, re.MULTILINE
                     ):
