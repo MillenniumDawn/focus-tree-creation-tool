@@ -1034,9 +1034,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
     def _validation_sprites(self):
         if MOD.loaded and getattr(MOD, "sprites", None):
             try:
-                # return mapping view directly; validate_document only does `in` checks
-                # caller must not mutate
-                return MOD.sprites
+                return dict(MOD.sprites)
             except Exception:
                 return None
         return None
