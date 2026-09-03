@@ -1236,29 +1236,24 @@ def open_dyn_mod_wizard(app):
             if tooltip:
                 add_loc(tooltip, modifier.replace("_", " ").title())
 
-        if new_loc_lines:
-            if loc_state == _READ_FAILED:
-                record_read_error(loc_rel)
+        if loc_state == _READ_FAILED:
+            record_read_error(loc_rel)
+        elif new_loc_lines:
+            if loc_state == _READ_MISSING:
+                loc_final = loc_target.header() + "\n" + "\n".join(new_loc_lines) + "\n"
+                loc_action = "created"
             else:
-                if loc_state == _READ_MISSING:
-                    loc_final = (
-                        loc_target.header() + "\n" + "\n".join(new_loc_lines) + "\n"
-                    )
-                    loc_action = "created"
-                else:
-                    loc_existing = loc_existing or ""
-                    loc_final = (
-                        loc_existing.rstrip()
-                        + "\n\n"
-                        + f" # {mid} — added by Focus Maker\n"
-                        + "\n".join(new_loc_lines)
-                        + "\n"
-                    )
-                    loc_action = f"appended {len(new_loc_lines)} new keys"
-                if write(loc_rel, loc_final, "utf-8-sig"):
-                    results.append(
-                        (loc_rel, loc_action, f"{len(new_loc_lines)} loc keys")
-                    )
+                loc_existing = loc_existing or ""
+                loc_final = (
+                    loc_existing.rstrip()
+                    + "\n\n"
+                    + f" # {mid} — added by Focus Maker\n"
+                    + "\n".join(new_loc_lines)
+                    + "\n"
+                )
+                loc_action = f"appended {len(new_loc_lines)} new keys"
+            if write(loc_rel, loc_final, "utf-8-sig"):
+                results.append((loc_rel, loc_action, f"{len(new_loc_lines)} loc keys"))
         else:
             results.append((loc_rel, "skipped", "all keys already exist"))
 

@@ -157,6 +157,41 @@ def test_save_skips_unreadable_loc(
     assert dm_target.exists()
 
 
+def test_save_reports_unreadable_loc_when_keys_already_exist(
+    tmp_path, monkeypatch, tk_root, isolated_error_buffer
+):
+    loc_rel = _loc_rel()
+    target = tmp_path / loc_rel
+    target.parent.mkdir(parents=True)
+    original = b"l_english:\n existing loc bytes\n"
+    target.write_bytes(original)
+    _unread_paths(monkeypatch, target)
+
+    other = (
+        tmp_path
+        / "localisation"
+        / dm_mod.MOD.loc_target.dirname()
+        / "existing_keys_l_english.yml"
+    )
+    other.write_text(
+        "l_english:\n"
+        ' TAG_my_dynamic_modifier: "Name"\n'
+        ' TAG_my_dynamic_modifier_desc: "Desc"\n'
+        ' modifies_dynamic_modifier_tt: "Modifies $MODIFIER$"\n'
+        ' stability_factor_tt: "Stability Factor"\n'
+        ' industrial_capacity_factory_tt: "Industrial Capacity Factory"\n'
+        ' political_power_gain_tt: "Political Power Gain"\n',
+        encoding="utf-8-sig",
+    )
+
+    _, info_messages = _open_and_save(tk_root, tmp_path, monkeypatch)
+
+    assert target.read_bytes() == original
+    _assert_read_error(loc_rel)
+    summary = "\n".join(str(arg) for call in info_messages for arg in call)
+    assert loc_rel not in summary
+
+
 def test_save_skips_unreadable_ideas_gfx(
     tmp_path, monkeypatch, tk_root, isolated_error_buffer
 ):
