@@ -1,3 +1,4 @@
+from types import SimpleNamespace
 from typing import cast
 
 import hoi4_content_maker as m
@@ -42,3 +43,40 @@ def test_validation_sprites_snapshot_survives_clear(monkeypatch):
     live.clear()
     issues = validate_document({1: _focus(1, "GFX_foo")}, sprites=snapshot)
     assert not any(it.code == "gfx_missing" for it in issues)
+
+
+def test_run_validation_snapshots_sprites_before_worker(monkeypatch):
+    live = {"GFX_foo": "/x"}
+    monkeypatch.setattr(m.MOD, "loaded", True)
+    monkeypatch.setattr(m.MOD, "sprites", live)
+
+    captured: list[object] = []
+
+    def fake_validate(_focuses, sprites=None, **_kwargs):
+        captured.append(sprites)
+        return []
+
+    monkeypatch.setattr(m, "validate_document", fake_validate)
+
+    def fake_run_bg(_widget, work, _on_done, **_kwargs):
+        live.clear()
+        work()
+
+    monkeypatch.setattr(m, "run_bg", fake_run_bg)
+
+    host = SimpleNamespace(
+        focuses={1: _focus(1, "GFX_foo")},
+        _validation_job=object(),
+        _lifecycle=SimpleNamespace(begin=lambda scope: None),
+        _validation_loc_keys=lambda: None,
+        _apply_validation_result=lambda _issues: None,
+    )
+    host._validation_sprites = m.App._validation_sprites.__get__(host)
+    host._run_validation = m.App._run_validation.__get__(host)
+
+    host._run_validation()
+
+    sprites = captured[0]
+    assert sprites == {"GFX_foo": "/x"}
+    assert sprites is not live
+    assert live == {}
