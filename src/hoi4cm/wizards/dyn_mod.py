@@ -1105,16 +1105,6 @@ def open_dyn_mod_wizard(app):
         def full(rel):
             return os.path.join(mod_root, rel)
 
-        def read_existing_text(rel, encoding="utf-8-sig"):
-            p = full(rel)
-            if not os.path.exists(p):
-                return None
-            try:
-                with open(p, encoding=encoding, errors="replace") as f:
-                    return f.read()
-            except OSError, UnicodeDecodeError, ValueError:
-                return None
-
         def record_read_error(rel):
             message = f"Could not read existing file: {rel}"
             add_error(message)
@@ -1231,7 +1221,7 @@ def open_dyn_mod_wizard(app):
                 loc_target.dirname(),
                 loc_target.filename(mid),
             )
-        loc_existing = read_existing_text(loc_rel, "utf-8-sig")
+        loc_state, loc_existing = _read_existing_file(full(loc_rel))
 
         new_loc_lines = []
 
@@ -1247,21 +1237,28 @@ def open_dyn_mod_wizard(app):
                 add_loc(tooltip, modifier.replace("_", " ").title())
 
         if new_loc_lines:
-            if loc_existing is None:
-                loc_final = loc_target.header() + "\n" + "\n".join(new_loc_lines) + "\n"
-                loc_action = "created"
+            if loc_state == _READ_FAILED:
+                record_read_error(loc_rel)
             else:
-                # Append after last non-empty line, preserving file
-                loc_final = (
-                    loc_existing.rstrip()
-                    + "\n\n"
-                    + f" # {mid} — added by Focus Maker\n"
-                    + "\n".join(new_loc_lines)
-                    + "\n"
-                )
-                loc_action = f"appended {len(new_loc_lines)} new keys"
-            if write(loc_rel, loc_final, "utf-8-sig"):
-                results.append((loc_rel, loc_action, f"{len(new_loc_lines)} loc keys"))
+                if loc_state == _READ_MISSING:
+                    loc_final = (
+                        loc_target.header() + "\n" + "\n".join(new_loc_lines) + "\n"
+                    )
+                    loc_action = "created"
+                else:
+                    loc_existing = loc_existing or ""
+                    loc_final = (
+                        loc_existing.rstrip()
+                        + "\n\n"
+                        + f" # {mid} — added by Focus Maker\n"
+                        + "\n".join(new_loc_lines)
+                        + "\n"
+                    )
+                    loc_action = f"appended {len(new_loc_lines)} new keys"
+                if write(loc_rel, loc_final, "utf-8-sig"):
+                    results.append(
+                        (loc_rel, loc_action, f"{len(new_loc_lines)} loc keys")
+                    )
         else:
             results.append((loc_rel, "skipped", "all keys already exist"))
 
@@ -1301,23 +1298,28 @@ def open_dyn_mod_wizard(app):
         if icon_gfx:
             icon_name = icon_gfx.replace("GFX_idea_", "").replace("GFX_", "")
             gfx_rel = os.path.join("interface", "ideas.gfx")
-            gfx_existing = read_existing_text(gfx_rel)
-            gfx_final, added_count = append_sprite_types(
-                gfx_existing,
-                [(icon_gfx, f"gfx/interface/ideas/{icon_name}.dds")],
-            )
-            if added_count:
-                gfx_action = "created" if gfx_existing is None else "appended sprite"
-                if write(gfx_rel, gfx_final):
-                    results.append(
-                        (
-                            gfx_rel,
-                            gfx_action,
-                            f"icon: {icon_gfx} → gfx/interface/ideas/{icon_name}.dds",
-                        )
-                    )
+            gfx_state, gfx_existing = _read_existing_file(full(gfx_rel))
+            if gfx_state == _READ_FAILED:
+                record_read_error(gfx_rel)
             else:
-                results.append((gfx_rel, "skipped (icon already defined)", ""))
+                gfx_final, added_count = append_sprite_types(
+                    gfx_existing,
+                    [(icon_gfx, f"gfx/interface/ideas/{icon_name}.dds")],
+                )
+                if added_count:
+                    gfx_action = (
+                        "created" if gfx_existing is None else "appended sprite"
+                    )
+                    if write(gfx_rel, gfx_final):
+                        results.append(
+                            (
+                                gfx_rel,
+                                gfx_action,
+                                f"icon: {icon_gfx} → gfx/interface/ideas/{icon_name}.dds",
+                            )
+                        )
+                else:
+                    results.append((gfx_rel, "skipped (icon already defined)", ""))
 
         # ── Summary ───────────────────────────────────────────
         if errors:
