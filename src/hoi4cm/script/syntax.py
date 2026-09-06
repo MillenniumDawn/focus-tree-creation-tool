@@ -202,11 +202,15 @@ def extract_named_block(source: str, name: str) -> str | None:
 def emit_scalar(value: str) -> str:
     """Wrap a string in double quotes if it contains bare-token-breaking chars.
 
-    Paradox script bare tokens cannot contain whitespace, ``{``, ``}``, ``=``,
-    ``"``, or ``#``. Values containing any of these characters are quoted so
-    that they survive a parse -> export -> parse round-trip intact.
+    Paradox script bare tokens cannot contain whitespace, ``{``, ``}``, ``=`` or
+    ``#``. Values containing any of these characters are quoted so that they
+    survive a parse -> export -> parse round-trip intact. Values containing a
+    double quote raise ``ValueError`` because Clausewitz has no string escape
+    mechanism, so emitting one would corrupt the script.
     """
-    if any(c in value for c in ' \t\n\r{}="#') or '"' in value:
+    if '"' in value:
+        raise ValueError(f"Cannot emit scalar containing a double quote: {value!r}")
+    if any(c in value for c in " \t\n\r{}=#"):
         return f'"{value}"'
     return value
 
