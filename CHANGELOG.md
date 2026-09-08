@@ -8,6 +8,10 @@ the version by hand. See `AGENTS.md`.
 
 ## Unreleased
 
+---
+
+## [0.4.2] — 2026-09-08
+
 ### Automated pre-release and release publishing
 
 **[ENHANCEMENT] Two publishing channels, neither run from a developer's machine**
