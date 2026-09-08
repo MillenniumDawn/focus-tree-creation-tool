@@ -8,6 +8,16 @@ the version by hand. See `AGENTS.md`.
 
 ## Unreleased
 
+### Pre-release publishing
+
+**[BUGFIX] The pre-release job can find the repository again**
+
+- `pre-release.yml`'s `publish` job downloads the built binaries and never checks the
+  repository out, so `gh release create` had no Git remote to infer the target
+  repository from and failed with `fatal: not a git repository` before it reached the
+  API. It now passes `GH_REPO`, so every push to `main` publishes its prerelease
+  instead of leaving a failed run on the commit.
+
 ---
 
 ## [0.4.2] — 2026-09-08
