@@ -1,0 +1,124 @@
+name: Release PR
+
+# Keeps a release pull request open against main. Every push to main
+# regenerates release/version-bump from origin/main: the changelog's
+# `## Unreleased` section becomes a dated version heading and every version
+# source in the repo moves to match. Merging that pull request is what cuts a
+# release — tag-release.yml takes it from there.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      release_type:
+        description: "Which part of the version to bump"
+        type: choice
+        options: [patch, minor, major]
+        default: patch
+
+permissions:
+  contents: read
+
+# Never cancel: two runs racing would fight over the same branch.
+concurrency:
+  group: release-pull-request
+  cancel-in-progress: false
+
+jobs:
+  release-pr:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+      BRANCH: release/version-bump
+      BUMP: ${{ inputs.release_type || 'patch' }}
+      # `secrets` is not usable in a job-level `if`, so the guard rides on an
+      # env value the steps below can read.
+      HAS_APP: ${{ secrets.RELEASE_PR_APP_ID != '' }}
+    steps:
+      # A pull request opened with GITHUB_TOKEN triggers no workflow, so CI
+      # would never run against it. An App installation token does trigger
+      # workflows, and unlike a PAT it leaves no person as the author of the
+      # release pull request. continue-on-error keeps a missing or misconfigured
+      # App from breaking main: every consumer below falls back to
+      # github.token, which still opens the pull request.
+      - name: Mint a GitHub App token
+        id: app-token
+        if: ${{ env.HAS_APP == 'true' }}
+        continue-on-error: true
+        # v3.2.0
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        with:
+          app-id: ${{ secrets.RELEASE_PR_APP_ID }}
+          private-key: ${{ secrets.RELEASE_PR_APP_PRIVATE_KEY }}
+
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 0
+          # Credentials are kept on purpose: this job pushes the release branch.
+          token: ${{ steps.app-token.outputs.token || github.token }}
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        # v5.6.0
+        with:
+          python-version: "3.14"
+
+      # The branch is regenerated from origin/main on every push rather than
+      # merged forward, so the edit is always the same mechanical rewrite and
+      # nothing can conflict. Hand edits pushed to it are discarded; fixes
+      # belong in main's `## Unreleased`.
+      - name: Prepare the release commit
+        id: prepare
+        run: |
+          git checkout -B "$BRANCH" origin/main
+          python scripts/release_pr.py --bump "$BUMP" >> "$GITHUB_OUTPUT"
+
+      - name: Push the release branch
+        if: ${{ steps.prepare.outputs.release == 'true' }}
+        env:
+          VERSION: ${{ steps.prepare.outputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email \
+            "41898282+github-actions[bot]@users.noreply.github.com"
+          git add CHANGELOG.md pyproject.toml src/hoi4cm/__init__.py \
+            build/version_info.txt README.md
+          git commit -m "Release $VERSION"
+          git push --force origin "$BRANCH"
+
+      - name: Open or update the release pull request
+        if: ${{ steps.prepare.outputs.release == 'true' }}
+        env:
+          VERSION: ${{ steps.prepare.outputs.version }}
+          REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
+        run: |
+          title="Release $VERSION"
+          body_file="$RUNNER_TEMP/release-pr-body.md"
+          {
+            echo "Promotes the changelog's \`## Unreleased\` section to"
+            echo "\`## [$VERSION]\` and moves every version source in the repo"
+            echo "to the same version."
+            echo
+            echo "Merging this pull request cuts the release:"
+            echo "\`tag-release.yml\` pushes \`v$VERSION\`, which runs the full"
+            echo "CI gate and publishes the three binaries to Releases."
+            echo
+            echo "This branch is regenerated from \`main\` on every push, so"
+            echo "edits made here are discarded. Correct the release notes in"
+            echo "\`main\`'s \`## Unreleased\` section instead."
+            echo
+            echo "Bump: \`$BUMP\`. Re-run \`release-pr.yml\` with a different"
+            echo "\`release_type\` to change it."
+          } > "$body_file"
+          number=$(gh pr list --repo "$REPO" --head "$BRANCH" --state open \
+            --json number --jq '.[0].number // empty')
+          if [ -n "$number" ]; then
+            gh pr edit "$number" --repo "$REPO" \
+              --title "$title" --body-file "$body_file"
+          else
+            gh pr create --repo "$REPO" --base main --head "$BRANCH" \
+              --title "$title" --body-file "$body_file"
+          fi

@@ -1,0 +1,81 @@
+name: Tag release
+
+# Cuts the release once the release pull request lands. Fires on every push to
+# main and does nothing unless pyproject.toml's version matches the top
+# changelog heading and no tag for it exists yet — which is only true of the
+# commit that merged release-pr.yml's branch.
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tag-release
+  cancel-in-progress: false
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      HAS_APP: ${{ secrets.RELEASE_PR_APP_ID != '' }}
+    steps:
+      # The tag is pushed with the App token on purpose. A tag pushed with
+      # GITHUB_TOKEN starts no workflow, so ci.yml's v* release job would never
+      # run and the release would never publish. continue-on-error keeps a
+      # missing App from breaking main; the fallback still pushes the tag, it
+      # just won't trigger the release, which is then a one-click re-run.
+      - name: Mint a GitHub App token
+        id: app-token
+        if: ${{ env.HAS_APP == 'true' }}
+        continue-on-error: true
+        # v3.2.0
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        with:
+          app-id: ${{ secrets.RELEASE_PR_APP_ID }}
+          private-key: ${{ secrets.RELEASE_PR_APP_PRIVATE_KEY }}
+
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          # Full history so the existing tags are present to check against.
+          # Credentials are kept on purpose: this job pushes the release tag.
+          fetch-depth: 0
+          token: ${{ steps.app-token.outputs.token || github.token }}
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        # v5.6.0
+        with:
+          python-version: "3.14"
+
+      - name: Check whether this push cut a release
+        id: check
+        run: |
+          version=$(python scripts/versioning.py project-version \
+            | sed -n 's/^version=//p')
+          top=$(grep -m1 -oE '^## \[[0-9]+\.[0-9]+\.[0-9]+\]' CHANGELOG.md \
+            | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
+          echo "project=$version changelog=$top"
+          if [ "$version" != "$top" ]; then
+            echo "Project and changelog disagree; not a release commit."
+            echo "release=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if git rev-parse -q --verify "refs/tags/v$version" >/dev/null; then
+            echo "Tag v$version already exists; nothing to cut."
+            echo "release=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "release=true" >> "$GITHUB_OUTPUT"
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+
+      - name: Push the release tag
+        if: ${{ steps.check.outputs.release == 'true' }}
+        env:
+          TAG: ${{ steps.check.outputs.tag }}
+        run: |
+          git tag "$TAG"
+          git push origin "$TAG"

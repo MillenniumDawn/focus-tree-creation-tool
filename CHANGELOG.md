@@ -1,5 +1,42 @@
 # HOI4 Content Maker — Changelog
 
+Add entries for unreleased work under `## Unreleased`. The release pull request
+promotes that section to a dated version heading — don't add version headings or bump
+the version by hand. See `AGENTS.md`.
+
+---
+
+## Unreleased
+
+### Automated pre-release and release publishing
+
+**[ENHANCEMENT] Two publishing channels, neither run from a developer's machine**
+
+- Every push to `main` now publishes a GitHub prerelease with the Windows, macOS and
+  Linux binaries and a `SHA256SUMS.txt` (`.github/workflows/pre-release.yml`), so a fix
+  is installable without waiting for the next tag. It has its own concurrency group
+  with `cancel-in-progress: true` — a superseded pre-release build is worth cancelling,
+  unlike a release.
+- Versions follow VS Code's channel convention: stable takes the even minors and
+  pre-release the odd minor directly above, with the Actions run number as the patch,
+  so stable `0.4.1` gives pre-releases `0.5.<run>`. Only the Git tag carries the
+  `-pre.<attempt>` suffix. A pre-release build fails loudly rather than publishing into
+  the stable line if the project ever sits on an odd minor.
+- Releases are now cut by merging a pull request instead of pushing a tag by hand.
+  `release-pr.yml` regenerates `release/version-bump` from `origin/main` on every push,
+  where `scripts/release_pr.py` promotes the changelog's `## Unreleased` section to a
+  dated version heading and moves every version source to match. Merging it makes
+  `tag-release.yml` push `v<version>`, which runs the full CI gate and publishes.
+  A minor release skips the odd pre-release line, so `0.4.x` goes to `0.6.0`.
+- `pyproject.toml` is now the single source of truth for the version, seeded to the
+  last shipped tag (`0.4.1`). It had drifted to `0.1.0` while `src/hoi4cm/__init__.py`
+  said `0.1.0`, `build/version_info.txt` said `2.0.0.0` and the README badge said
+  `2.0` — four values, none of them the shipped one. All four are written together
+  now, and a test asserts they agree, so the Windows `.exe` finally reports a truthful
+  version.
+- `ci.yml`'s release job skips any tag carrying `-pre.` and rejects a tag on an odd
+  minor, so a pre-release can never go out as a full release.
+
 ---
 
 ## Application Modernization — Python Floor Raised to 3.14

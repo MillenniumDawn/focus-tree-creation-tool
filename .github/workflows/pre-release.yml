@@ -1,0 +1,139 @@
+name: Pre-release
+
+# Every push to main becomes a GitHub prerelease carrying the three binaries.
+# The version is the odd minor above the current stable one, with the Actions
+# run number as the patch; see prerelease_identity in scripts/versioning.py.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Least privilege: read by default. Only `publish` gets write, and it uses the
+# automatic GITHUB_TOKEN — a tag created with it starts no workflow, which is
+# what keeps a pre-release out of ci.yml's v* release path.
+permissions:
+  contents: read
+
+# Unlike a release, a superseded pre-release build is worth cancelling: only
+# the newest commit on main needs publishing.
+concurrency:
+  group: pre-release
+  cancel-in-progress: true
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.identity.outputs.version }}
+      tag: ${{ steps.identity.outputs.tag }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        # v5.6.0
+        with:
+          python-version: "3.14"
+      # Fails the run when the project sits on an odd minor, rather than
+      # publishing a pre-release into the stable line.
+      - name: Resolve the pre-release identity
+        id: identity
+        run: python scripts/versioning.py prerelease-identity >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: version
+    strategy:
+      # One platform breaking shouldn't hide whether the other two are fine.
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            artifact_name: HOI4ContentMaker.exe
+          - os: macos-latest
+            artifact_name: HOI4ContentMaker-mac
+          - os: ubuntu-latest
+            artifact_name: HOI4ContentMaker-linux
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        # v5.6.0
+        with:
+          python-version: "3.14"
+
+      - name: Install tkinter (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y python3-tk
+
+      - name: Install build dependencies
+        run: pip install --require-hashes -r build/requirements.txt
+
+      - name: Build executable
+        run: python build/build.py
+
+      - name: Make executable (Linux/macOS)
+        if: runner.os != 'Windows'
+        run: chmod +x "${{ matrix.artifact_name }}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        # v4.6.2
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: ${{ matrix.artifact_name }}
+
+  publish:
+    needs: [version, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        # v4.3.0
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Checksum the binaries
+        working-directory: artifacts
+        run: >
+          sha256sum HOI4ContentMaker.exe HOI4ContentMaker-mac
+          HOI4ContentMaker-linux > SHA256SUMS.txt
+
+      - name: Publish the GitHub prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.version.outputs.tag }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          gh release create "$TAG" \
+            artifacts/HOI4ContentMaker.exe \
+            artifacts/HOI4ContentMaker-mac \
+            artifacts/HOI4ContentMaker-linux \
+            artifacts/SHA256SUMS.txt \
+            --target "$GITHUB_SHA" \
+            --title "Pre-release $VERSION" \
+            --prerelease \
+            --notes-file - <<EOF
+          Automated pre-release build from commit \`$GITHUB_SHA\`.
+
+          ### Downloads
+          | Platform | File |
+          |----------|------|
+          | Windows | \`HOI4ContentMaker.exe\` |
+          | macOS | \`HOI4ContentMaker-mac\` |
+          | Linux | \`HOI4ContentMaker-linux\` |
+
+          Pre-releases take the odd minor above the current stable version, so
+          \`$VERSION\` is a build of what will become the next stable release.
+          They are test builds and may break — use a tagged release if you want
+          something stable.
+
+          \`SHA256SUMS.txt\` has the SHA-256 of each binary; verify the same way
+          as a full release.
+          EOF
