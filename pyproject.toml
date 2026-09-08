@@ -4,7 +4,10 @@ build-backend = "hatchling.build"
 
 [project]
 name = "hoi4cm"
-version = "0.1.0"
+# Moved by scripts/release_pr.py when the release pull request is prepared, and
+# the source of truth every other version source is written from. Do not bump
+# by hand — add bullets under CHANGELOG.md's `## Unreleased` instead.
+version = "0.4.1"
 description = "Content Maker for Hearts of Iron 4 — Millennium Dawn Team"
 requires-python = ">=3.14"
 # Runs on the stdlib + tkinter alone. Third-party deps are optional extras below.
@@ -29,7 +32,7 @@ packages = ["src/hoi4cm"]
 # The repo root is on the path so tests can import the monolith; CI runs bare
 # `pytest`, which (unlike `python -m pytest`) does not add the cwd itself.
 [tool.pytest.ini_options]
-pythonpath = ["src", "."]
+pythonpath = ["src", ".", "scripts"]
 testpaths = ["tests"]
 
 # `pytest --cov` measures the whole package. CI runs it twice: once over
@@ -68,8 +71,8 @@ select = ["E", "F", "W", "I", "UP", "B"]
 # puts src/ on the search path so tests can import hoi4cm.
 [tool.mypy]
 python_version = "3.14"
-mypy_path = ["src"]
-files = ["src/hoi4cm", "tests"]
+mypy_path = ["src", "scripts"]
+files = ["src/hoi4cm", "tests", "scripts"]
 native_parser = true
 # The monolith and build scripts stay out until refactored. The native
 # parser (above) handles PEP 758's unparenthesized `except A, B:` on 3.14,

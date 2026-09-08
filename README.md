@@ -5,7 +5,7 @@
 ![Python](https://img.shields.io/badge/Python-3.14%2B-blue?logo=python)
 ![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
 [![License: CC BY-ND 4.0](https://img.shields.io/badge/License-CC_BY--ND_4.0-blue)](LICENSE)
-![Version](https://img.shields.io/badge/Version-2.0-gold)
+![Version](https://img.shields.io/badge/Version-0.4.1-gold)
 
 ---
 
@@ -84,6 +84,17 @@ Just download and run — no Python installation required.
 > are attached to the [Releases](../../releases) page along with a `SHA256SUMS.txt` you
 > can check them against.
 
+### Pre-release builds
+
+Every push to `main` is published as a GitHub prerelease
+(`.github/workflows/pre-release.yml`) carrying the same three binaries and a
+`SHA256SUMS.txt`. Pick one from the [Releases](../../releases) page if you want a fix
+before the next tagged release — they are marked *Pre-release* there.
+
+Pre-releases take the odd minor above the current stable version, so `0.5.x` is the
+pre-release line for stable `0.4.x` and the patch number is the CI run. They are test
+builds and may break; use a tagged release if you want something stable.
+
 ### Option 2: Run from source
 
 ```bash
@@ -116,7 +127,11 @@ code except the build scripts.
 
 CI runs the same checks on every pull request, then builds the three executables
 (`.github/workflows/ci.yml`). A `v*` tag runs that whole gate and publishes the binaries
-to Releases, so a release can't skip the tests.
+to Releases, so a release can't skip the tests. Every push to `main` additionally
+publishes a prerelease of the same binaries.
+
+Releases are cut by merging the release pull request that `release-pr.yml` keeps open,
+not by bumping the version by hand — see `AGENTS.md`.
 
 ---
 

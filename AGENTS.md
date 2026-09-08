@@ -23,7 +23,7 @@ pytest tests/test_config.py::test_cfg_save_merges_existing_keys   # single test
 ruff check .                    # lint
 black --check .                 # formatting
 mypy                            # type check (src/hoi4cm + tests)
-pylint src/hoi4cm tests         # lint (light gate on top of ruff/black)
+pylint src/hoi4cm tests scripts # lint (light gate on top of ruff/black)
 pre-commit run --all-files      # run all hooks once
 pre-commit install              # run hooks on every commit
 
@@ -36,13 +36,14 @@ CI runs ruff, black, mypy, pylint and pytest, all on 3.14 (the project's floor).
 
 - **`hoi4_content_maker.py`** — the launch point and (still) most of the app: `App(tk.Tk)`, its Tk-shell methods and one-line delegates into extracted modules, and the deferred sidebar form. Entry point at the bottom calls `show_splash(_launch)`.
 - **`src/hoi4cm/`** — the extracted package, organized by domain: `core/` (logger, config, paths, undo, i18n, concurrency, safe file/xml helpers), `models/` (`Focus`, `FocusDocument`, `EditorWorkspace`), `focus_tree/` (parse/build/export, codec, operations, drawio, loc), `ui/` (canvas, splash, menubar, toolbar, settings dialog, gfx browser, image pipeline), `wizards/` (the five authoring wizards + shared helpers), `mod/` (mod context, GFX catalog, scan/workspace caches), `script/` (effects + syntax), `editor/` (project save/load), `data/` (effect/modifier tables). New modules land in the owning subpackage, not a catch-all.
+- **`scripts/`** — release tooling the workflows call: `versioning.py` (version arithmetic for both channels, and the table of every file that states the version) and `release_pr.py` (promotes `## Unreleased`). Linted and type-checked like packaged code, and tested under `tests/`. Not shipped in the executable — `build/` is the PyInstaller side.
 - **`docs/dev/`**: developer docs, architecture, migration status, performance, testing, wizards. Start at `docs/dev/README.md`. They carry a maintenance rule: any PR that changes architecture, hot paths, or migration status updates the matching doc in the same PR.
 
 The monolith inserts `src/` onto `sys.path` at startup and imports canonical names straight from the `hoi4cm.core` facade (`from hoi4cm.core import (...)`), which re-exports the public names of every subpackage (data, focus_tree, models, ui, ...). There's no underscore-aliasing layer left. When you extract a new module, add the public name to the owning subpackage's `__all__`, and to `core/__init__.py`'s import list and `__all__` if the monolith or a wizard needs it via the facade. Details in `docs/dev/architecture.md`.
 
 ## Conventions
 
-- **Lint scope:** Ruff (`E,F,W,I,UP,B`) and Black (line-length 88) cover all Python except `build/`; mypy and pylint cover `src/hoi4cm/` and `tests/` only. Packaged code must pass all four; the monolith must pass Ruff and Black. Config lives in `pyproject.toml` (`[tool.ruff]`, `[tool.black]`, `[tool.mypy]`, `[tool.pylint]`); `.pre-commit-config.yaml` wires them into pre-commit. Pylint's `disable` list is deliberate: it drops checks Ruff/Black already cover and false positives on Tk/dataclass/mixin patterns, so it stays a light gate.
+- **Lint scope:** Ruff (`E,F,W,I,UP,B`) and Black (line-length 88) cover all Python except `build/`; mypy and pylint cover `src/hoi4cm/`, `tests/` and `scripts/` only. Packaged code must pass all four; the monolith must pass Ruff and Black. Config lives in `pyproject.toml` (`[tool.ruff]`, `[tool.black]`, `[tool.mypy]`, `[tool.pylint]`); `.pre-commit-config.yaml` wires them into pre-commit. Pylint's `disable` list is deliberate: it drops checks Ruff/Black already cover and false positives on Tk/dataclass/mixin patterns, so it stays a light gate.
 - **Logging, not print.** `get_logger("name")` for a `HOI4CM.<name>` child. User-facing errors go through `add_error()` so they reach the in-app error log.
 - **Tolerant file reads.** Mod files have mixed encodings — read them via `read_file`, never bare `open(...).read()`.
 - **Preserve user data on round-trips.** Parse→export of an existing file must not drop fields. Test round-trips when touching the parser or exporters.
@@ -51,4 +52,14 @@ The monolith inserts `src/` onto `sys.path` at startup and imports canonical nam
 
 ## Releases
 
-`ci.yml` is the only workflow. Every push and PR runs lint, test, then the Win/macOS/Linux build matrix. Pushing a tag matching `v*` runs that same gate and adds the `release` job, which publishes a Release with the three binaries and a `SHA256SUMS.txt` attached; the version is the tag name (`github.ref_name`). Executables are never committed. Build deps are hash-pinned in `build/requirements.txt`, regenerated with `uv pip compile --generate-hashes --universal --extra build pyproject.toml -o build/requirements.txt`.
+**Never bump the version and never add a version heading to `CHANGELOG.md` by hand.** On a branch, add your bullets under `## Unreleased`; the release pull request does the rest. `pyproject.toml`'s `version` is the single source of truth, and `scripts/release_pr.py` writes it, `src/hoi4cm/__init__.py`, `build/version_info.txt` and the README badge together — a test asserts all four agree, so moving one alone fails CI.
+
+Publishing runs on two channels, neither of them from a developer's machine.
+
+**Pre-release.** Every push to `main` publishes a GitHub prerelease with the three binaries and a `SHA256SUMS.txt` (`.github/workflows/pre-release.yml`). Stable takes the even minors and pre-release the odd minor directly above, with the Actions run number as the patch: with stable at `0.4.1`, pre-releases are `0.5.<run>` (`prerelease_identity` in `scripts/versioning.py`). Only the Git tag carries the `-pre.<attempt>` suffix.
+
+**Release.** `.github/workflows/release-pr.yml` regenerates `release/version-bump` from `origin/main` on every push, where `scripts/release_pr.py` promotes `## Unreleased` to `## [x.y.z] — <date>` and moves the version sources. That branch is force-pushed, so edits made on it are discarded — fix release notes in `main`'s `## Unreleased`. Merging it makes `.github/workflows/tag-release.yml` push `v<x.y.z>`, which triggers `ci.yml`'s `release` job for the build and publish. Releases stay on even minors, so a minor bump goes `0.4.x` → `0.6.0`; `ci.yml` rejects a tag on the odd pre-release line and skips any `-pre.` tag. Run `release-pr.yml` by hand with `release_type` to make it a minor or major.
+
+Both the release PR and the release tag are pushed with a GitHub App token (`melon-release-bot`, secrets `RELEASE_PR_APP_ID` / `RELEASE_PR_APP_PRIVATE_KEY`), because a pull request or tag created with `GITHUB_TOKEN` triggers no workflow. Each mint step is guarded and `continue-on-error`, falling back to `github.token` — the PR still opens and the tag still pushes, they just won't trigger CI on themselves.
+
+`ci.yml` still runs lint, test, then the Win/macOS/Linux build matrix on every push and PR. Executables are never committed. Build deps are hash-pinned in `build/requirements.txt`, regenerated with `uv pip compile --generate-hashes --universal --extra build pyproject.toml -o build/requirements.txt`.
