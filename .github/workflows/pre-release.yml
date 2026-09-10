@@ -108,6 +108,10 @@ jobs:
       - name: Publish the GitHub prerelease
         env:
           GH_TOKEN: ${{ github.token }}
+          # This job checks nothing out — it only needs the built artifacts — so
+          # gh has no Git remote to infer the repository from. Without GH_REPO it
+          # dies on `fatal: not a git repository` before reaching the API.
+          GH_REPO: ${{ github.repository }}
           TAG: ${{ needs.version.outputs.tag }}
           VERSION: ${{ needs.version.outputs.version }}
         run: |
