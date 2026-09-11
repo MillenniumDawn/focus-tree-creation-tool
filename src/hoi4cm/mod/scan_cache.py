@@ -181,10 +181,14 @@ class ScanCache:
         if not self._conn:
             return
         try:
-            self._conn.commit()
-            self._conn.close()
-        except sqlite3.Error, OSError:
-            pass
+            try:
+                self._conn.commit()
+            except (sqlite3.Error, OSError) as exc:
+                _log.warning("scan cache commit failed: %s", exc)
+            try:
+                self._conn.close()
+            except sqlite3.Error, OSError:
+                pass
         finally:
             self._conn = None
 
