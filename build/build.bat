@@ -27,10 +27,10 @@ if errorlevel 1 (
 
 :: ── Check PyInstaller ─────────────────────────────────────────
 echo  Checking PyInstaller...
-%PYTHON% -c "import PyInstaller; print('PyInstaller OK')" 2>nul
+%PYTHON% -c "from importlib.metadata import version; assert tuple(int(p) for p in version('pyinstaller').split('.')[:3]) >= (6, 22, 2)" 2>nul
 if errorlevel 1 (
     echo  [INFO] Installing PyInstaller...
-    %PYTHON% -m pip install pyinstaller
+    %PYTHON% -m pip install "pyinstaller>=6.22.2"
     if errorlevel 1 (
         echo  [ERROR] Failed to install PyInstaller.
         pause

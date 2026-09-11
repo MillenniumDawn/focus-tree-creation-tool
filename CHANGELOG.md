@@ -18,6 +18,12 @@ the version by hand. See `AGENTS.md`.
   API. It now passes `GH_REPO`, so every push to `main` publishes its prerelease
   instead of leaving a failed run on the commit.
 
+### Windows executable startup
+
+- Fix Windows executable startup with Tcl/Tk 9 embedded libraries by requiring
+  PyInstaller 6.22.2 or newer. Release builds now launch the frozen executable
+  with `--smoke-test` to catch Tcl/Tk startup failures before publishing.
+
 ---
 
 ## [0.4.2] — 2026-09-08
