@@ -1,3 +1,5 @@
+import pytest
+
 from hoi4cm.script.syntax import emit_scalar
 
 
@@ -31,8 +33,9 @@ def test_emit_scalar_quotes_on_braces_equals_hash():
     assert emit_scalar("hello#world") == '"hello#world"'
 
 
-def test_emit_scalar_quotes_on_embedded_quote():
-    assert emit_scalar('hello"world') == '"hello"world"'
+def test_emit_scalar_rejects_embedded_quote():
+    with pytest.raises(ValueError, match=r'hello"world'):
+        emit_scalar('hello"world')
 
 
 def test_emit_scalar_icon_path_with_space():
