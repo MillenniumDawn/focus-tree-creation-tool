@@ -24,7 +24,7 @@ dev = [
   "pylint>=4.0.7",
   "pre-commit>=3.5",
 ] # tests + linting
-build = ["pyinstaller>=6.0", "Pillow>=9.0"] # compile standalone executables
+build = ["pyinstaller>=6.22.2", "Pillow>=9.0"] # Tcl/Tk 9 embedded-data support
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/hoi4cm"]

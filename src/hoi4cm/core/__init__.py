@@ -47,7 +47,7 @@ from hoi4cm.script import (
     dict_to_raw,
     normalize_effect_fields,
 )
-from hoi4cm.ui import show_splash
+from hoi4cm.ui import check_tk_startup, show_splash
 
 from .config import CONFIG_PATH, cfg_load, cfg_save
 from .i18n import (
@@ -74,6 +74,7 @@ from .safe_xml import bounded_inflate, safe_fromstring
 from .undo import UndoStack
 
 __all__ = [
+    "check_tk_startup",
     "CONFIG_PATH",
     "BuildContext",
     "EFFECT_CATS",
