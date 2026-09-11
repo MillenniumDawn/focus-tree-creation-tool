@@ -7,7 +7,7 @@ name = "hoi4cm"
 # Moved by scripts/release_pr.py when the release pull request is prepared, and
 # the source of truth every other version source is written from. Do not bump
 # by hand — add bullets under CHANGELOG.md's `## Unreleased` instead.
-version = "0.4.2"
+version = "0.4.3"
 description = "Content Maker for Hearts of Iron 4 — Millennium Dawn Team"
 requires-python = ">=3.14"
 # Runs on the stdlib + tkinter alone. Third-party deps are optional extras below.

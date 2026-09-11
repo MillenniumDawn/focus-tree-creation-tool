@@ -5,8 +5,8 @@
 #
 VSVersionInfo(
   ffi=FixedFileInfo(
-    filevers=(0, 4, 2, 0),
-    prodvers=(0, 4, 2, 0),
+    filevers=(0, 4, 3, 0),
+    prodvers=(0, 4, 3, 0),
     mask=0x3f,
     flags=0x0,
     OS=0x40004,
@@ -22,12 +22,12 @@ VSVersionInfo(
           [
             StringStruct(u'CompanyName',      u'Blazer'),
             StringStruct(u'FileDescription',  u'HOI4 Content Maker — Mod Tooling for Hearts of Iron IV'),
-            StringStruct(u'FileVersion',      u'0.4.2.0'),
+            StringStruct(u'FileVersion',      u'0.4.3.0'),
             StringStruct(u'InternalName',     u'HOI4ContentMaker'),
             StringStruct(u'LegalCopyright',   u'Copyright (c) 2025 Blazer. All Rights Reserved.'),
             StringStruct(u'OriginalFilename', u'HOI4ContentMaker.exe'),
             StringStruct(u'ProductName',      u'HOI4 Content Maker'),
-            StringStruct(u'ProductVersion',   u'0.4.2.0'),
+            StringStruct(u'ProductVersion',   u'0.4.3.0'),
           ]
         )
       ]

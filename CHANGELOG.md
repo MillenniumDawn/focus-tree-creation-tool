@@ -8,6 +8,10 @@ the version by hand. See `AGENTS.md`.
 
 ## Unreleased
 
+---
+
+## [0.4.3] — 2026-09-11
+
 ### Pre-release publishing
 
 **[BUGFIX] The pre-release job can find the repository again**
