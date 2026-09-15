@@ -1,9 +1,14 @@
 """Tests for hoi4cm.focus_tree.parse — text -> structured data, no field loss."""
 
+import threading
+
 import pytest
 
+import hoi4cm.focus_tree.parse as parse_module
 from hoi4cm.focus_tree.parse import (
     EmptyFocusTreeError,
+    FocusTreeParseBudgetExceeded,
+    FocusTreeParseCancelled,
     parse_focus_tree,
 )
 
@@ -71,6 +76,20 @@ joint_focus = {
 \t}
 \tcompletion_reward = {
 \t\tadd_political_power = 50
+\t}
+}
+"""
+
+COUNTRY_BUDGET_TREE = """\
+focus_tree = {
+\tid = bounded_country
+\tcountry = {
+\t\tfactor = 0
+\t}
+\tfocus = {
+\t\tid = TST_country_focus
+\t\tx = 0
+\t\ty = 0
 \t}
 }
 """
@@ -289,6 +308,371 @@ def test_parse_no_wrapper_fallback():
     assert [f["id"] for f in p.focuses_data] == ["JNT_one"]
     assert "joint_trigger" in p.raw_rewards[("JNT_one", "_joint_extra")]
     assert "is_ai = no" in p.raw_rewards[("JNT_one", "_joint_extra")]
+
+
+def test_malformed_nested_focus_fallback_recovers_each_focus():
+    source = """\
+focus_tree = {
+	id = broken_tree
+	focus = {
+		id = broken_first
+	}
+	focus = {
+		id = broken_second
+		focus = {
+			id = broken_nested
+		}
+}
+"""
+
+    parsed = parse_focus_tree(source, "/tmp/broken.txt")
+
+    assert [focus["id"] for focus in parsed.focuses_data] == [
+        "broken_first",
+        "broken_second",
+        "broken_nested",
+    ]
+
+
+def test_nested_focus_rescans_are_bounded(monkeypatch):
+    depth = 8000
+    source = "focus = {\n" * depth + "id = too_deep\n" + "}\n" * depth
+    real_match_brace = parse_module.match_brace
+    scan_costs = []
+
+    def count_scan(source_text, start):
+        end = real_match_brace(source_text, start)
+        scan_costs.append(end - start)
+        return end
+
+    monkeypatch.setattr(parse_module, "match_brace", count_scan)
+
+    with pytest.raises(FocusTreeParseBudgetExceeded, match="parse budget exhausted"):
+        parse_focus_tree(source, "/tmp/too_deep.txt")
+
+    assert scan_costs == []
+
+
+@pytest.mark.parametrize(
+    ("limit", "attempts", "expected_calls", "expected_results"),
+    [
+        (3, 2, 2, [True, True]),  # below the scan limit
+        (2, 2, 2, [True, True]),  # exactly the scan limit
+        (2, 3, 2, [True, True, False]),  # one attempt beyond the limit
+    ],
+)
+def test_raw_rescan_budget_scan_limit_boundaries(
+    monkeypatch, limit, attempts, expected_calls, expected_results
+):
+    calls = 0
+
+    def match(source, start):
+        nonlocal calls
+        calls += 1
+        return start + 1
+
+    monkeypatch.setattr(parse_module, "MAX_RAW_BLOCK_RESCANS", limit)
+    monkeypatch.setattr(parse_module, "MAX_RAW_BLOCK_RESCAN_CHARS", 100)
+    monkeypatch.setattr(parse_module, "match_brace", match)
+    budget = parse_module._RawRescanBudget()
+
+    results = [budget.match("x", 0) is not None for _ in range(attempts)]
+
+    assert calls == expected_calls
+    assert results == expected_results
+    assert budget.exhausted is (not all(expected_results))
+
+
+@pytest.mark.parametrize(
+    ("limit", "cost", "attempts", "expected_calls", "expected_results"),
+    [
+        (5, 3, 1, 1, [True]),  # below the character limit
+        (4, 2, 2, 2, [True, True]),  # exactly the character limit
+        (5, 3, 2, 2, [True, False]),  # cumulative cost exceeds the limit
+    ],
+)
+def test_raw_rescan_budget_char_limit_boundaries(
+    monkeypatch, limit, cost, attempts, expected_calls, expected_results
+):
+    calls = 0
+
+    def match(source, start):
+        nonlocal calls
+        calls += 1
+        return start + cost
+
+    monkeypatch.setattr(parse_module, "MAX_RAW_BLOCK_RESCANS", 100)
+    monkeypatch.setattr(parse_module, "MAX_RAW_BLOCK_RESCAN_CHARS", limit)
+    monkeypatch.setattr(parse_module, "match_brace", match)
+    budget = parse_module._RawRescanBudget()
+
+    results = [budget.match("x", 0) is not None for _ in range(attempts)]
+
+    assert calls == expected_calls
+    assert results == expected_results
+    assert budget.exhausted is (not all(expected_results))
+
+
+def test_raw_rescan_budget_rejects_oversized_single_scan(monkeypatch):
+    calls = 0
+
+    def match(source, start):
+        nonlocal calls
+        calls += 1
+        return start + 6
+
+    monkeypatch.setattr(parse_module, "MAX_RAW_BLOCK_RESCANS", 100)
+    monkeypatch.setattr(parse_module, "MAX_RAW_BLOCK_RESCAN_CHARS", 5)
+    monkeypatch.setattr(parse_module, "match_brace", match)
+    budget = parse_module._RawRescanBudget()
+
+    assert budget.match("x", 0) is None
+    assert budget.scans == 1
+    assert budget.chars == 6
+    assert budget.exhausted
+    assert calls == 1
+
+
+def test_raw_rescan_budget_bounds_oversized_scan_input(monkeypatch):
+    source = "prefix{" + "x" * 100
+    start = source.index("{")
+    seen = []
+
+    def match(source_text, open_index, end_index=None):
+        seen.append((source_text, open_index, end_index))
+        return end_index if end_index is not None else len(source_text)
+
+    monkeypatch.setattr(parse_module, "MAX_RAW_BLOCK_RESCANS", 100)
+    monkeypatch.setattr(parse_module, "MAX_RAW_BLOCK_RESCAN_CHARS", 5)
+    monkeypatch.setattr(parse_module, "match_brace", match)
+    budget = parse_module._RawRescanBudget()
+
+    assert budget.match(source, start) is None
+    assert len(seen) == 1
+    received_source, open_index, end_index = seen[0]
+    assert received_source is source
+    assert open_index == start
+    assert end_index == start + 6
+    assert end_index - open_index == 6
+
+
+def test_raw_rescan_budget_preserves_absolute_end_index(monkeypatch):
+    source = "prefix{}"
+    start = source.index("{")
+    monkeypatch.setattr(parse_module, "MAX_RAW_BLOCK_RESCANS", 1)
+    monkeypatch.setattr(parse_module, "MAX_RAW_BLOCK_RESCAN_CHARS", 1)
+
+    budget = parse_module._RawRescanBudget()
+
+    assert budget.match(source, start) == source.index("}")
+
+
+def _country_budget_costs():
+    txt = parse_module.strip_comments(COUNTRY_BUDGET_TREE)
+    focus_start = parse_module.focus_block_starts(txt)[0]
+    country_start = txt.index("{", txt.index("country ="))
+    real_match_brace = parse_module.match_brace
+    return (
+        real_match_brace(txt, focus_start) - focus_start,
+        real_match_brace(txt, country_start) - country_start,
+    )
+
+
+def test_parse_country_raw_consumes_shared_scan_budget(monkeypatch):
+    scans = []
+    real_match_brace = parse_module.match_brace
+
+    def count_scan(source, start, end_index=None):
+        end = real_match_brace(source, start, end_index)
+        scans.append((start, end - start))
+        return end
+
+    monkeypatch.setattr(parse_module, "MAX_RAW_BLOCK_RESCANS", 1)
+    monkeypatch.setattr(parse_module, "match_brace", count_scan)
+
+    with pytest.raises(FocusTreeParseBudgetExceeded, match="parse budget exhausted"):
+        parse_focus_tree(COUNTRY_BUDGET_TREE, "/tmp/country-budget.txt")
+
+    assert len(scans) == 1
+
+
+def test_parse_country_raw_exact_shared_scan_budget_succeeds(monkeypatch):
+    scans = []
+    real_match_brace = parse_module.match_brace
+
+    def count_scan(source, start, end_index=None):
+        end = real_match_brace(source, start, end_index)
+        scans.append((start, end - start))
+        return end
+
+    monkeypatch.setattr(parse_module, "MAX_RAW_BLOCK_RESCANS", 2)
+    monkeypatch.setattr(parse_module, "match_brace", count_scan)
+
+    parsed = parse_focus_tree(COUNTRY_BUDGET_TREE, "/tmp/country-budget.txt")
+
+    assert parsed.country_raw.strip() == "factor = 0"
+    assert len(scans) == 2
+
+
+def test_parse_country_raw_exact_shared_char_budget_succeeds(monkeypatch):
+    focus_cost, country_cost = _country_budget_costs()
+    scans = []
+    real_match_brace = parse_module.match_brace
+
+    def count_scan(source, start, end_index=None):
+        end = real_match_brace(source, start, end_index)
+        scans.append((start, end - start))
+        return end
+
+    monkeypatch.setattr(parse_module, "MAX_RAW_BLOCK_RESCANS", 100)
+    monkeypatch.setattr(
+        parse_module, "MAX_RAW_BLOCK_RESCAN_CHARS", focus_cost + country_cost
+    )
+    monkeypatch.setattr(parse_module, "match_brace", count_scan)
+
+    parsed = parse_focus_tree(COUNTRY_BUDGET_TREE, "/tmp/country-budget.txt")
+
+    assert parsed.country_raw.strip() == "factor = 0"
+    assert sum(cost for _start, cost in scans) == focus_cost + country_cost
+
+
+def test_parse_country_raw_char_budget_overflow_is_rejected(monkeypatch):
+    focus_cost, country_cost = _country_budget_costs()
+    scans = []
+    real_match_brace = parse_module.match_brace
+
+    def count_scan(source, start, end_index=None):
+        end = real_match_brace(source, start, end_index)
+        scans.append((start, end - start))
+        return end
+
+    monkeypatch.setattr(parse_module, "MAX_RAW_BLOCK_RESCANS", 100)
+    monkeypatch.setattr(
+        parse_module,
+        "MAX_RAW_BLOCK_RESCAN_CHARS",
+        focus_cost + country_cost - 1,
+    )
+    monkeypatch.setattr(parse_module, "match_brace", count_scan)
+
+    with pytest.raises(FocusTreeParseBudgetExceeded, match="parse budget exhausted"):
+        parse_focus_tree(COUNTRY_BUDGET_TREE, "/tmp/country-budget.txt")
+
+    assert len(scans) == 2
+
+
+def test_parse_rejects_when_rescan_scan_budget_is_exhausted(monkeypatch):
+    source = """\
+focus_tree = {
+	id = broken_tree
+	focus = {
+		id = broken_first
+	}
+	focus = {
+		id = broken_second
+		focus = {
+			id = broken_nested
+		}
+}
+"""
+    real_match_brace = parse_module.match_brace
+    scans = 0
+
+    def count_scan(source_text, start):
+        nonlocal scans
+        scans += 1
+        return real_match_brace(source_text, start)
+
+    monkeypatch.setattr(parse_module, "MAX_RAW_BLOCK_RESCANS", 3)
+    monkeypatch.setattr(parse_module, "match_brace", count_scan)
+
+    with pytest.raises(FocusTreeParseBudgetExceeded, match="parse budget exhausted"):
+        parse_focus_tree(source, "/tmp/budget.txt")
+
+    assert scans == 3
+
+
+def test_parse_rejects_when_raw_reward_budget_is_exhausted(
+    monkeypatch,
+):
+    source = """\
+focus_tree = {
+\tid = bounded_tree
+\tfocus = {
+\t\tid = bounded_focus
+\t\tcompletion_reward = {
+\t\t\tadd_political_power = 1
+\t\t}
+\t\toffset = {
+\t\t\tx = 1
+\t\t\ty = 2
+\t\t\ttrigger = {
+\t\t\t\thas_war = no
+\t\t\t}
+\t\t}
+\t}
+}
+"""
+    real_match_brace = parse_module.match_brace
+    scans = 0
+
+    def count_scan(source_text, start):
+        nonlocal scans
+        scans += 1
+        return real_match_brace(source_text, start)
+
+    monkeypatch.setattr(parse_module, "MAX_RAW_BLOCK_RESCANS", 1)
+    monkeypatch.setattr(parse_module, "match_brace", count_scan)
+
+    with pytest.raises(FocusTreeParseBudgetExceeded, match="parse budget exhausted"):
+        parse_focus_tree(source, "/tmp/budget-nested.txt")
+
+    assert scans == 1
+
+
+def test_parse_cancellation_callback_stops_raw_reward_scan():
+    checks = 0
+
+    def cancelled():
+        nonlocal checks
+        checks += 1
+        return checks >= 4
+
+    with pytest.raises(FocusTreeParseCancelled):
+        parse_focus_tree(WRAPPED, "/tmp/cancelled.txt", cancelled=cancelled)
+
+
+def test_parse_cancellation_event_stops_per_block_fallback(monkeypatch):
+    source = """\
+focus_tree = {
+	id = broken_tree
+	focus = {
+		id = broken_first
+	}
+	focus = {
+		id = broken_second
+		focus = {
+			id = broken_nested
+		}
+}
+"""
+    cancelled = threading.Event()
+    real_match_brace = parse_module.match_brace
+    scans = 0
+
+    def cancel_on_fallback(source_text, start):
+        nonlocal scans
+        scans += 1
+        end = real_match_brace(source_text, start)
+        if scans == 4:
+            cancelled.set()
+        return end
+
+    monkeypatch.setattr(parse_module, "match_brace", cancel_on_fallback)
+
+    with pytest.raises(FocusTreeParseCancelled):
+        parse_focus_tree(source, "/tmp/cancelled-fallback.txt", cancelled=cancelled)
+
+    assert scans == 4
 
 
 @pytest.mark.parametrize(
