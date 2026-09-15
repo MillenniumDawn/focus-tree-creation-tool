@@ -4,12 +4,13 @@ import logging
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from typing import Any, cast
 
 import pytest
 
 from hoi4cm.core.logger import get_logger
 from hoi4cm.mod.graphics_catalog import AssetRef, FileStamp
-from hoi4cm.ui.image_broker import ImageBroker, ImageTransform
+from hoi4cm.ui.image_broker import ImageBroker, ImageTransform, decode_image
 
 
 class _RecordHandler(logging.Handler):
@@ -32,6 +33,20 @@ def _drain_when_ready(broker: ImageBroker) -> None:
         time.sleep(0.001)
     broker.drain()
     assert not broker.pending
+
+
+def test_decode_image_falls_back_from_invalid_dds_to_png(tmp_path) -> None:
+    image = pytest.importorskip("PIL.Image")
+    dds = tmp_path / "icon.dds"
+    png = tmp_path / "icon.png"
+    dds.write_bytes(b"not a DDS image")
+    image.new("RGB", (8, 4), "#123456").save(png)
+
+    decoded = decode_image(str(dds), ImageTransform(size=(5, 3), mode="RGBA"))
+
+    decoded_image = cast(Any, decoded)
+    assert decoded_image.mode == "RGBA"
+    assert decoded_image.size == (5, 3)
 
 
 def test_inflight_requests_are_deduplicated_by_stamp_and_transform() -> None:
