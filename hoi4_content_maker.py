@@ -1034,9 +1034,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
     def _validation_sprites(self):
         if MOD.loaded and getattr(MOD, "sprites", None):
             try:
-                # return mapping view directly; validate_document only does `in` checks
-                # caller must not mutate
-                return MOD.sprites
+                return dict(MOD.sprites)
             except Exception:
                 return None
         return None
@@ -6445,6 +6443,11 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
 
 # ─────────────────────────── ENTRY POINT ────────────────────────
 if __name__ == "__main__":
+    if "--smoke-test" in sys.argv:
+        from hoi4cm.core import check_tk_startup
+
+        check_tk_startup()
+        sys.exit(0)
 
     def _launch():
         log.info("_launch: creating App...")
