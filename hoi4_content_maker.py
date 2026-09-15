@@ -4318,6 +4318,8 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             )
 
     def _import_txt(self):
+        if not self._confirm_discard(action="importing"):
+            return
         # If mod is loaded, open directly in common/national_focus
         init_dir = None
         if MOD.loaded and MOD.root:
@@ -4401,6 +4403,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
 
             # clear existing
             # Clear canvas; _items refs are gone since we cv.delete('all')
+            self._push_undo("import tree")
             self.cv.delete("all")
             self.focuses.clear()
             self._reset_canvas_bounds()
