@@ -162,7 +162,11 @@ def main():
 
     # Ensure dependencies
     print("[STEP 1/4] Checking dependencies...")
-    ensure_package("pyinstaller", "PyInstaller")
+    # Honor the minimum version even when an older PyInstaller is installed.
+    from importlib.metadata import version
+    ensure_package("pyinstaller>=6.22.2", "PyInstaller")
+    if tuple(int(part) for part in version("pyinstaller").split(".")[:3]) < (6, 22, 2):
+        run([sys.executable, "-m", "pip", "install", "pyinstaller>=6.22.2"])
     ensure_package("Pillow", "PIL")
     print()
 

@@ -225,6 +225,7 @@ def export_main_tree(
                 effect_renderer=effect_renderer,
                 coordinate_policy="canvas",
                 completion_reward_policy="main",
+                include_joint_extra=True,
             )
         )
 
