@@ -705,6 +705,8 @@ def open_settings(app):
     def _delete_profile(pname):
         if pname == "vanilla":
             return
+        if not messagebox.askyesno("Delete", f"Delete profile '{pname}'?", parent=win):
+            return
         MOD.event_dim_profiles.pop(pname, None)
         if MOD.event_dim_active_profile == pname:
             MOD.event_dim_active_profile = "vanilla"

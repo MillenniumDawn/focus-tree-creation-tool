@@ -340,6 +340,44 @@ def test_fixture_country_raw_present_verbatim_on_first_export():
     assert "original_tag=TST" in text  # no space around '=', preserved verbatim
 
 
+def test_main_tree_joint_trigger_survives_round_trip():
+    src = "\n".join(
+        [
+            "focus_tree = {",
+            "\tid = TST_main_tree",
+            "\tcountry = { factor = 0 modifier = { original_tag = TST } }",
+            "\tcontinuous_focus_position = { x = 20 y = 300 }",
+            "\tfocus = {",
+            "\t\tid = TST_joint_trigger",
+            "\t\tx = 0",
+            "\t\ty = 0",
+            "\t\tcost = 10",
+            "\t\tjoint_trigger = {",
+            "\t\t\thas_government = democratic",
+            "\t\t\tOR = {",
+            "\t\t\t\thas_war = yes",
+            "\t\t\t\thas_stability = 50",
+            "\t\t\t}",
+            "\t\t}",
+            "\t\tcompletion_reward = {",
+            "\t\t\tadd_political_power = 5",
+            "\t\t}",
+            "\t}",
+            "}",
+        ]
+    )
+
+    f1, t1 = _load_and_export_main(src)
+    f2, t2 = _load_and_export_main(t1)
+
+    assert "joint_trigger = {" in t1
+    assert "has_government = democratic" in t1
+    assert "has_war = yes" in t1
+    assert "has_stability = 50" in t1
+    assert f1[0]._joint_extra == f2[0]._joint_extra
+    assert t1 == t2
+
+
 def test_main_tree_roundtrip_preserves_unknown_focus_keys_and_is_idempotent():
     src = "\n".join(
         [

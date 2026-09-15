@@ -7,7 +7,7 @@ name = "hoi4cm"
 # Moved by scripts/release_pr.py when the release pull request is prepared, and
 # the source of truth every other version source is written from. Do not bump
 # by hand — add bullets under CHANGELOG.md's `## Unreleased` instead.
-version = "0.4.2"
+version = "0.4.3"
 description = "Content Maker for Hearts of Iron 4 — Millennium Dawn Team"
 requires-python = ">=3.14"
 # Runs on the stdlib + tkinter alone. Third-party deps are optional extras below.
@@ -24,7 +24,7 @@ dev = [
   "pylint>=4.0.7",
   "pre-commit>=3.5",
 ] # tests + linting
-build = ["pyinstaller>=6.0", "Pillow>=9.0"] # compile standalone executables
+build = ["pyinstaller>=6.22.2", "Pillow>=9.0"] # Tcl/Tk 9 embedded-data support
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/hoi4cm"]

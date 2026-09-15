@@ -1,5 +1,12 @@
 # Testing
 
+Both CI and pre-release builds run the frozen executable with `--smoke-test`
+before uploading it (60-second timeout; Xvfb on Linux). This creates and
+destroys a hidden Tk root and a ttk widget without launching the editor.
+It catches packaging failures that source tests cannot see, including the
+Tcl/Tk 9 embedded-library incompatibility in PyInstaller 6.21. The check
+lives in `src/hoi4cm/ui/startup_check.py`.
+
 Run `pytest --collect-only -q` to list the tests under `tests/`.
 `pyproject.toml`'s `[tool.pytest.ini_options]` puts `src/` on `pythonpath`
 and scopes `testpaths` to `tests/`, so `pytest` from the repo root just

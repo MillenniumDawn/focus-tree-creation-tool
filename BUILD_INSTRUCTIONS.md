@@ -18,6 +18,18 @@ pip install ".[build]"
 
 This installs PyInstaller and Pillow (declared in `pyproject.toml`). You only need to do this once.
 
+PyInstaller 6.22.2 or newer is required for Python distributions that embed
+Tcl/Tk 9 scripts in DLLs. Older versions can produce an executable that fails
+with `Tcl data directory ... _tcl_data not found`. Rebuild with the updated
+dependencies; installing Python on the end user's machine does not repair
+an already-built executable.
+
+Run `HOI4ContentMaker.exe --smoke-test` after building on Windows (or the
+corresponding binary on macOS/Linux). This initializes Tcl, Tk and ttk, then
+exits without opening the editor. Linux needs a display, such as
+`xvfb-run -a ./HOI4ContentMaker-linux --smoke-test`. Both publishing pipelines
+run this check before uploading artifacts.
+
 On **Linux**, you also need tkinter (not bundled with pip):
 ```bash
 sudo apt-get install python3-tk    # Debian/Ubuntu
