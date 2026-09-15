@@ -1,5 +1,8 @@
+from pathlib import Path
+
 import pytest
 
+from hoi4cm.core import read_file
 from hoi4cm.editor.project_codec import (
     decode_project,
     encode_project,
@@ -7,6 +10,9 @@ from hoi4cm.editor.project_codec import (
     validate_project_file_path,
     write_project,
 )
+from hoi4cm.focus_tree.build import build_focuses
+from hoi4cm.focus_tree.export import export_main_tree
+from hoi4cm.focus_tree.parse import parse_focus_tree
 from hoi4cm.models import (
     EditorWorkspace,
     Focus,
@@ -48,7 +54,7 @@ def test_legacy_two_field_project_loads_without_changing_focus_data():
     assert workspace.main_tree.metadata.tree_id == "legacy_tree"
     assert list(restored.focuses) == [91, 92]
     assert restored.focuses[91].loc_name == ""
-    assert restored.focuses[91].unknown_focus_field == {"kept": True}
+    assert restored.focuses[91].to_dict()["unknown_focus_field"] == {"kept": True}
     assert restored.focuses.names["duplicate"] == (91, 92)
 
 
@@ -194,6 +200,92 @@ def test_v2_roundtrip_preserves_grid_coords_that_are_multiples_of_96():
     restored = decode_project(encode_project(workspace))
 
     assert (restored.focuses[focus.id].x, restored.focuses[focus.id].y) == (96, 192)
+
+
+def test_imported_focus_export_survives_project_save_load(tmp_path):
+    fixture = (
+        Path(__file__).parent / "fixtures" / "focus_trees" / "project_roundtrip.txt"
+    )
+    source = read_file(str(fixture))
+    assert source is not None
+
+    parsed = parse_focus_tree(source, str(fixture))
+    focuses = build_focuses(parsed, tree_idx=0)
+    workspace = EditorWorkspace(
+        focuses=FocusDocument(focuses),
+        main_tree=TreeDocument(
+            metadata=TreeMetadata(
+                tree_id=parsed.tree_id,
+                country_tag=parsed.country_tag,
+                country_raw=parsed.country_raw,
+                cfp_x=parsed.cfp_x,
+                cfp_y=parsed.cfp_y,
+                shared_focuses=parsed.shared_refs,
+                joint_focuses=parsed.joint_refs,
+            ),
+            had_wrapper=parsed.had_wrapper,
+        ),
+    )
+
+    def export(workspace):
+        return export_main_tree(
+            list(workspace.focuses.values()),
+            {
+                "tree_id": workspace.main_tree.metadata.tree_id,
+                "country_tag": workspace.main_tree.metadata.country_tag,
+                "country_raw": workspace.main_tree.metadata.country_raw,
+                "cfp_x": workspace.main_tree.metadata.cfp_x,
+                "cfp_y": workspace.main_tree.metadata.cfp_y,
+                "shared_focuses": workspace.main_tree.metadata.shared_focuses,
+                "joint_focuses": workspace.main_tree.metadata.joint_focuses,
+                "tree_extras": workspace.main_tree.extras,
+            },
+            focus_lookup=dict(workspace.focuses.items()),
+        )
+
+    direct_export = export(workspace)
+    write_project(tmp_path / "project.json", workspace)
+    restored = read_project(tmp_path / "project.json")
+    assert export(restored) == direct_export
+
+    imported = next(focus for focus in focuses if focus.name == "TST_project_child")
+    reloaded = restored.focuses.find_by_name("TST_project_child")
+    assert reloaded is not None
+    for attr in (
+        "_raw_gx",
+        "_raw_gy",
+        "_rel_dx",
+        "_rel_dy",
+        "_joint_extra",
+        "_script_extras",
+    ):
+        assert getattr(reloaded, attr) == getattr(imported, attr)
+
+
+def test_corrupt_project_format_and_workspace_are_rejected():
+    with pytest.raises(ValueError, match="unsupported project format"):
+        decode_project({"format": "not-hoi4cm", "version": 2, "workspace": {}})
+
+    with pytest.raises(ValueError, match="project workspace must be an object"):
+        decode_project({"format": "hoi4cm-project", "version": 2, "workspace": []})
+
+
+def test_malformed_canvas_and_metadata_use_defaults():
+    project = {
+        "format": "hoi4cm-project",
+        "version": 2,
+        "workspace": {
+            "canvas": "not an object",
+            "main_tree": {"metadata": "not an object"},
+        },
+    }
+
+    restored = decode_project(project)
+
+    assert restored.canvas_min == (0, 0)
+    assert restored.canvas_max == (9, 9)
+    assert restored.canvas_extras == {}
+    assert restored.main_tree.metadata == TreeMetadata()
 
 
 def test_future_project_version_is_rejected_without_legacy_fallback():
