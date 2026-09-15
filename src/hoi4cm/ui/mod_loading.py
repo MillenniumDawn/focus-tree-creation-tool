@@ -14,7 +14,9 @@ from typing import Any, cast
 
 from hoi4cm.core import default_hoi4_mod_dir, tr
 from hoi4cm.mod import MOD, find_loc_files, notifying_workspace_files
-from hoi4cm.ui import (
+from hoi4cm.ui.error_report import report_error
+from hoi4cm.ui.tasks import make_progress, run_bg
+from hoi4cm.ui.theme import (
     BG_CARD,
     BG_DARK,
     BLUE,
@@ -25,8 +27,6 @@ from hoi4cm.ui import (
     TEXT,
     TEXT_DIM,
 )
-from hoi4cm.ui.error_report import report_error
-from hoi4cm.ui.tasks import make_progress, run_bg
 from hoi4cm.wizards import _shared as _wiz_shared
 
 # Alias used by the moved methods (matches the monolith's alias).
@@ -896,7 +896,7 @@ class ModLoadingMixin:
                     yml_text = fp.read()
             if summary_token in yml_text:
                 saved.append(
-                    f"{yml_name} — " f"'{summary_token}' already present (skipped)"
+                    f"{yml_name} — '{summary_token}' already present (skipped)"
                 )
             else:
                 # Find ADDITIONAL_INCOME_REVENUES_TOOLTIP and append token

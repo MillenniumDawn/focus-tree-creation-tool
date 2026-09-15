@@ -73,7 +73,6 @@ from hoi4cm.core import (  # noqa: E402
     safe_join,
     sanitize_component,
     set_error_callback,
-    show_splash,
     tr,
 )
 from hoi4cm.editor import (  # noqa: E402
@@ -132,6 +131,7 @@ from hoi4cm.ui import (  # noqa: E402
     report_error,
     report_write_failure,
     run_bg,
+    show_splash,
 )
 from hoi4cm.ui.canvas import CanvasMixin  # noqa: E402
 from hoi4cm.ui.checklist import (  # noqa: E402
@@ -6446,7 +6446,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
 # ─────────────────────────── ENTRY POINT ────────────────────────
 if __name__ == "__main__":
     if "--smoke-test" in sys.argv:
-        from hoi4cm.core import check_tk_startup
+        from hoi4cm.ui.startup_check import check_tk_startup
 
         check_tk_startup()
         sys.exit(0)

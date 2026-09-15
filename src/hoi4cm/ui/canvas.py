@@ -12,7 +12,12 @@ from typing import Any
 
 from hoi4cm.focus_tree.validate import Severity
 from hoi4cm.mod import MOD
-from hoi4cm.ui import (
+from hoi4cm.ui.canvas_renderer import FocusCanvasBundle
+from hoi4cm.ui.canvas_scheduler import DirtyRedrawState, RedrawChannel
+from hoi4cm.ui.image_broker import ImageBroker
+from hoi4cm.ui.scene_index import DEBUG_VALIDATE, SceneIndex
+from hoi4cm.ui.tasks import get_executor
+from hoi4cm.ui.theme import (
     BG_CARD,
     BLUE,
     BORDER_G,
@@ -29,11 +34,6 @@ from hoi4cm.ui import (
     XGRID,
     YGRID,
 )
-from hoi4cm.ui.canvas_renderer import FocusCanvasBundle
-from hoi4cm.ui.canvas_scheduler import DirtyRedrawState, RedrawChannel
-from hoi4cm.ui.image_broker import ImageBroker
-from hoi4cm.ui.scene_index import DEBUG_VALIDATE, SceneIndex
-from hoi4cm.ui.tasks import get_executor
 from hoi4cm.ui.viewport import edge_visible, focus_visible, visible_world_rect
 
 # Margin (canvas pixels, scaled by zoom) added around the viewport before
