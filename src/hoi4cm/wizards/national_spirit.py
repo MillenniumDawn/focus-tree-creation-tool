@@ -20,13 +20,15 @@ from hoi4cm.core import (
     add_error,
     append_scripted_loc,
     autosave_path,
+    convert_newlines,
     get_logger,
     modifiers_in_cat,
+    newline_style,
+    read_file_with_encoding,
     sanitize_component,
     tr,
 )
 from hoi4cm.core.image import PIL_OK, PILImage, PILImageTk
-from hoi4cm.core.paths import read_file
 from hoi4cm.mod import MOD, find_loc_files
 from hoi4cm.script.syntax import match_brace, parse_script, serialize_block
 from hoi4cm.ui import (
@@ -1597,10 +1599,15 @@ def open_national_spirit_wizard(app):
 
         # ── SAFE APPEND to ideas file ─────────────────────────────────────
         try:
+            selected_ideas = bool(MOD.edit_ideas_file)
             file_exists = os.path.isfile(ideas_path)
+            if selected_ideas and not file_exists:
+                raise OSError("selected ideas file no longer exists")
+            ideas_encoding = "utf-8"
             if file_exists:
-                with open(ideas_path, encoding="utf-8-sig", errors="replace") as f:
-                    existing = f.read()
+                existing, ideas_encoding = read_file_with_encoding(ideas_path)
+                if existing is None or ideas_encoding is None:
+                    raise OSError("ideas file could not be read")
                 # Check if spirit ID already defined
                 if re.search(r"\b" + re.escape(sid) + r"\s*=\s*\{", existing):
                     warnings.append(
@@ -1636,22 +1643,27 @@ def open_national_spirit_wizard(app):
                             close_pos = match_brace(existing, si2)
                             if close_pos >= len(existing):
                                 close_pos = si2
+                            inserted = convert_newlines(
+                                "\n\n" + spirit_block + "\n\t",
+                                newline_style(existing),
+                            )
                             new_existing = (
-                                existing[:close_pos].rstrip()
-                                + "\n\n"
-                                + spirit_block
-                                + "\n\t"
-                                + existing[close_pos:]
+                                existing[:close_pos] + inserted + existing[close_pos:]
                             )
                         else:
                             # Slot section not found — append full block at end
-                            new_existing = (
-                                existing.rstrip() + "\n\n" + ideas_block + "\n"
+                            inserted = convert_newlines(
+                                "\n\n" + ideas_block + "\n",
+                                newline_style(existing),
                             )
+                            new_existing = existing + inserted
                     else:
-                        new_existing = existing.rstrip() + "\n\n" + ideas_block + "\n"
+                        inserted = convert_newlines(
+                            "\n\n" + ideas_block + "\n", newline_style(existing)
+                        )
+                        new_existing = existing + inserted
 
-                    wf.write_text(ideas_path, new_existing, encoding="utf-8")
+                    wf.write_text(ideas_path, new_existing, encoding=ideas_encoding)
                     rel = os.path.relpath(ideas_path, mod_root)
                     saved.append(rel + "  (spirit appended into existing file)")
             else:
@@ -1664,7 +1676,8 @@ def open_national_spirit_wizard(app):
             errs.append("Ideas: " + str(exc))
 
         # ── SAFE APPEND to localisation ───────────────────────────────────
-        if MOD.edit_loc_file and os.path.isfile(MOD.edit_loc_file):
+        selected_loc = bool(MOD.edit_loc_file)
+        if selected_loc:
             loc_path = MOD.edit_loc_file
         else:
             loc_target = MOD.loc_target
@@ -1678,26 +1691,32 @@ def open_national_spirit_wizard(app):
         try:
             new_entries = {sid: loc_n, f"{sid}_desc": loc_d}
             existing_keys = set()
-            if os.path.isfile(loc_path):
-                with open(loc_path, encoding="utf-8-sig", errors="replace") as f:
-                    for line in f:
-                        m = re.match(r'\s+(\S+?)(?::\d+)?\s*[=:]?\s*"', line)
-                        if m:
-                            existing_keys.add(m.group(1))
+            loc_encoding = "utf-8-sig"
+            loc_exists = os.path.isfile(loc_path)
+            if selected_loc and not loc_exists:
+                raise OSError("selected localisation file no longer exists")
+            if loc_exists:
+                loc_text, loc_encoding = read_file_with_encoding(loc_path)
+                if loc_text is None or loc_encoding is None:
+                    raise OSError("localisation file could not be read")
+                for line in loc_text.splitlines():
+                    m = re.match(r'\s+(\S+?)(?::\d+)?\s*[=:]?\s*"', line)
+                    if m:
+                        existing_keys.add(m.group(1))
 
             to_add = {k: v for k, v in new_entries.items() if k not in existing_keys}
             if to_add:
-                if not os.path.isfile(loc_path):
+                if not loc_exists:
                     wf.write_text(
                         loc_path,
                         MOD.loc_target.header() + "\n",
-                        encoding="utf-8-sig",
+                        encoding=loc_encoding,
                     )
                 loc_body = "".join(
                     f" {k}: {json.dumps(v, ensure_ascii=False)}\n"
                     for k, v in to_add.items()
                 )
-                wf.append_text(loc_path, loc_body, encoding="utf-8-sig")
+                wf.append_text(loc_path, loc_body, encoding=loc_encoding)
                 rel = os.path.relpath(loc_path, mod_root)
                 saved.append(rel + f"  (+{len(to_add)} keys)")
             else:
@@ -1721,7 +1740,12 @@ def open_national_spirit_wizard(app):
                         }
                     )
             append_scripted_loc(
-                MOD.edit_scripted_loc_file, sloc_blocks, saved, errs, mod_root
+                MOD.edit_scripted_loc_file,
+                sloc_blocks,
+                saved,
+                errs,
+                mod_root,
+                require_existing=True,
             )
 
         msg = ""
@@ -1757,7 +1781,7 @@ def open_national_spirit_wizard(app):
         spirits = []  # list of (spirit_id, slot, file_path)
         for fp in sorted(_glob.glob(os.path.join(ideas_dir, "*.txt"))):
             try:
-                src = read_file(fp)
+                src, encoding = read_file_with_encoding(fp)
                 if not src:
                     continue
                 parsed = parse_script(src)
@@ -1894,7 +1918,9 @@ def open_national_spirit_wizard(app):
                 return
             spirit_id, slot_key, fp = _filtered[sel[0]]
             try:
-                src = read_file(fp)
+                src, encoding = read_file_with_encoding(fp)
+                if src is None or encoding is None:
+                    raise OSError("ideas file could not be read")
                 parsed = parse_script(src)
                 ideas = parsed.get("ideas", {})
                 slot_data = ideas.get(slot_key, {})
@@ -1950,7 +1976,9 @@ def open_national_spirit_wizard(app):
             loc_name = loc_desc = ""
             for loc_path in find_loc_files(MOD.root, language=MOD.loc_language):
                 try:
-                    loc_src = read_file(loc_path)
+                    loc_src, encoding = read_file_with_encoding(loc_path)
+                    if loc_src is None:
+                        continue
                     for m in re.finditer(
                         r'^\s+(\S+?)(?::\d+)?\s+"(.*)"', loc_src, re.MULTILINE
                     ):

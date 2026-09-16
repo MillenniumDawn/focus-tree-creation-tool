@@ -7,6 +7,7 @@ from collections.abc import Callable, Iterable
 from pathlib import Path
 
 from hoi4cm.core.logger import get_logger
+from hoi4cm.core.paths import convert_newlines
 
 _log = get_logger("workspace_files")
 
@@ -39,6 +40,21 @@ def _read_bytes(target: Path) -> bytes | None:
         return None
 
 
+def _existing_newline(target: Path) -> str:
+    """Return the first line-ending style in an existing file."""
+    pending_cr = False
+    with target.open("rb") as stream:
+        while chunk := stream.read(8192):
+            for byte in chunk:
+                if pending_cr:
+                    return "\r\n" if byte == 10 else "\r"
+                if byte == 13:
+                    pending_cr = True
+                elif byte == 10:
+                    return "\n"
+    return "\r" if pending_cr else "\n"
+
+
 def _stage(target: Path, text: str, encoding: str) -> Path:
     """Write ``text`` to a sibling temp file, fully flushed to disk.
 
@@ -56,7 +72,12 @@ def _stage(target: Path, text: str, encoding: str) -> Path:
     try:
         if target_mode is not None:
             os.chmod(temporary_path, target_mode)
-        with os.fdopen(descriptor, "w", encoding=encoding) as temporary:
+        with os.fdopen(
+            descriptor,
+            "w",
+            encoding=encoding,
+            newline="" if target_mode is not None else None,
+        ) as temporary:
             descriptor = -1
             temporary.write(text)
             temporary.flush()
@@ -126,7 +147,12 @@ class WorkspaceFiles:
     def append_text(self, path: str | Path, text: str, *, encoding: str) -> None:
         target = Path(path)
         target.parent.mkdir(parents=True, exist_ok=True)
-        with target.open("a", encoding=encoding) as stream:
+        exists = target.exists()
+        if exists:
+            text = convert_newlines(text, _existing_newline(target))
+        with target.open(
+            "a", encoding=encoding, newline="" if exists else None
+        ) as stream:
             stream.write(text)
         self._notify(target)
 

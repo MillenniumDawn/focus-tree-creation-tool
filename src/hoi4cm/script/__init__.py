@@ -3,6 +3,7 @@
 import os
 import re
 
+from hoi4cm.core.paths import read_file_with_encoding
 from hoi4cm.mod.workspace_files import WorkspaceFiles
 
 from .effects import render_effect
@@ -149,7 +150,9 @@ def normalize_effect_fields(etype, raw, effect_defs):
     return {"raw": val}
 
 
-def append_scripted_loc(sloc_path, blocks, saved, errs, mod_root=None):
+def append_scripted_loc(
+    sloc_path, blocks, saved, errs, mod_root=None, *, require_existing=False
+):
     """Append defined_text blocks to a scripted_localisation .txt file.
 
     blocks: list of dicts with keys:
@@ -162,9 +165,14 @@ def append_scripted_loc(sloc_path, blocks, saved, errs, mod_root=None):
 
     try:
         existing = ""
-        if os.path.isfile(sloc_path):
-            with open(sloc_path, encoding="utf-8", errors="replace") as f:
-                existing = f.read()
+        encoding = "utf-8"
+        file_exists = os.path.isfile(sloc_path)
+        if require_existing and not file_exists:
+            raise OSError("selected scripted localisation file no longer exists")
+        if file_exists:
+            existing, encoding = read_file_with_encoding(sloc_path)
+            if existing is None or encoding is None:
+                raise OSError("scripted localisation file could not be read")
         new_blocks = []
         for blk in blocks:
             name = blk.get("name", "")
@@ -194,7 +202,7 @@ def append_scripted_loc(sloc_path, blocks, saved, errs, mod_root=None):
             WorkspaceFiles().append_text(
                 sloc_path,
                 sep + "\n\n".join(new_blocks) + "\n",
-                encoding="utf-8",
+                encoding=encoding,
             )
             rel = os.path.relpath(sloc_path, mod_root) if mod_root else sloc_path
             saved.append(rel + f"  (+{len(new_blocks)} scripted_loc blocks)")

@@ -11,10 +11,7 @@ import os
 import tkinter as tk
 from tkinter import messagebox
 
-from hoi4cm.core import (
-    sanitize_component,
-    tr,
-)
+from hoi4cm.core import read_file_with_encoding, sanitize_component, tr
 from hoi4cm.mod import MOD
 from hoi4cm.ui import (
     BG_CARD,
@@ -550,9 +547,10 @@ def open_additional_income_wizard(app):
         # ── Also write localisation for tooltip ──────────────────────
         if tooltip_text and tooltip_key:
             loc_target = MOD.loc_target
+            selected_loc = bool(MOD.edit_loc_file)
             loc_path = (
                 MOD.edit_loc_file
-                if MOD.edit_loc_file and os.path.isfile(MOD.edit_loc_file)
+                if selected_loc
                 else os.path.join(
                     MOD.root,
                     "localisation",
@@ -562,12 +560,18 @@ def open_additional_income_wizard(app):
             )
             try:
                 existing_keys = set()
-                if os.path.isfile(loc_path):
-                    with open(loc_path, encoding="utf-8-sig", errors="replace") as fp:
-                        for line in fp:
-                            m = _LOC_KEY_RE.match(line)
-                            if m:
-                                existing_keys.add(m.group(1))
+                loc_encoding = "utf-8-sig"
+                loc_exists = os.path.isfile(loc_path)
+                if selected_loc and not loc_exists:
+                    raise OSError("selected localisation file no longer exists")
+                if loc_exists:
+                    loc_text, loc_encoding = read_file_with_encoding(loc_path)
+                    if loc_text is None or loc_encoding is None:
+                        raise OSError("localisation file could not be read")
+                    for line in loc_text.splitlines():
+                        m = _LOC_KEY_RE.match(line)
+                        if m:
+                            existing_keys.add(m.group(1))
                 os.makedirs(os.path.dirname(loc_path), exist_ok=True)
                 wf = notifying_workspace_files(MOD, MOD.root)
                 to_write = {}
@@ -575,9 +579,9 @@ def open_additional_income_wizard(app):
                     to_write[tooltip_key] = (
                         f"$$[?{variable_name}|+3] from §Y${idea_id}$§!\\n"
                     )
-                if not os.path.isfile(loc_path):
+                if not loc_exists:
                     wf.write_text(
-                        loc_path, loc_target.header() + "\n", encoding="utf-8-sig"
+                        loc_path, loc_target.header() + "\n", encoding=loc_encoding
                     )
                 if to_write:
                     wf.append_text(
@@ -586,7 +590,7 @@ def open_additional_income_wizard(app):
                             f" {k}: {json.dumps(v, ensure_ascii=False)}\n"
                             for k, v in to_write.items()
                         ),
-                        encoding="utf-8-sig",
+                        encoding=loc_encoding,
                     )
                     output_lines.append(
                         f"✅ {os.path.relpath(loc_path, MOD.root)}  — wrote tooltip localisation"

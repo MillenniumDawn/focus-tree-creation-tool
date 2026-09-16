@@ -66,7 +66,7 @@ def test_read_existing_file_distinguishes_missing_content_and_failure(
         "existing = {}\n",
     )
 
-    monkeypatch.setattr(dm_mod, "read_file", lambda _path: None)
+    monkeypatch.setattr(dm_mod, "read_file_with_encoding", lambda _path: (None, None))
     assert dm_mod._read_existing_file(existing) == (dm_mod._READ_FAILED, None)
 
 
@@ -77,7 +77,7 @@ def test_save_skips_unreadable_dynamic_modifier(
     target.parent.mkdir(parents=True)
     original = b"\xff\xfeexisting modifier bytes\n"
     target.write_bytes(original)
-    monkeypatch.setattr(dm_mod, "read_file", lambda _path: None)
+    monkeypatch.setattr(dm_mod, "read_file_with_encoding", lambda _path: (None, None))
 
     _, info_messages = _open_and_save(tk_root, tmp_path, monkeypatch)
 

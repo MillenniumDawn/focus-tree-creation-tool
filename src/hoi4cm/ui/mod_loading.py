@@ -12,7 +12,13 @@ import tkinter as tk
 from tkinter import filedialog, messagebox
 from typing import Any, cast
 
-from hoi4cm.core import default_hoi4_mod_dir, tr
+from hoi4cm.core import (
+    convert_newlines,
+    default_hoi4_mod_dir,
+    newline_style,
+    read_file_with_encoding,
+    tr,
+)
 from hoi4cm.mod import MOD, find_loc_files, notifying_workspace_files
 from hoi4cm.ui import (
     BG_CARD,
@@ -654,11 +660,10 @@ class ModLoadingMixin:
             MOD.edit_events_ns = ""
             if MOD.edit_events_file and os.path.isfile(MOD.edit_events_file):
                 try:
-                    with open(
-                        MOD.edit_events_file, encoding="utf-8", errors="replace"
-                    ) as f:
-                        raw = f.read(4096)
-                    m = re.search(r"add_namespace\s*=\s*(\S+)", raw)
+                    raw, encoding = read_file_with_encoding(MOD.edit_events_file)
+                    if raw is None or encoding is None:
+                        raise OSError("events file could not be read")
+                    m = re.search(r"add_namespace\s*=\s*(\S+)", raw[:4096])
                     MOD.edit_events_ns = (
                         m.group(1).strip()
                         if m
@@ -762,8 +767,9 @@ class ModLoadingMixin:
             )
         if os.path.isfile(money_sys):
             try:
-                with open(money_sys, encoding="utf-8-sig", errors="replace") as fp:
-                    sys_text = fp.read()
+                sys_text, sys_encoding = read_file_with_encoding(money_sys)
+                if sys_text is None or sys_encoding is None:
+                    raise OSError("money system file could not be read")
                 # Check if already present
                 if (
                     f"has_idea = {idea_id}" in sys_text
@@ -818,8 +824,11 @@ class ModLoadingMixin:
                                     break
                             i += 1
                         # Insert before closing brace (no extra tab before it)
-                        sys_text = sys_text[:i] + inject_block + "\n" + sys_text[i:]
-                        wf.write_text(money_sys, sys_text, encoding="utf-8")
+                        inserted = convert_newlines(
+                            inject_block + "\n", newline_style(sys_text)
+                        )
+                        sys_text = sys_text[:i] + inserted + sys_text[i:]
+                        wf.write_text(money_sys, sys_text, encoding=sys_encoding)
                         rel = os.path.relpath(money_sys, MOD.root)
                         saved.append(
                             f"✅ {rel}  — injected '{idea_id}' into "
@@ -841,8 +850,9 @@ class ModLoadingMixin:
             )
 
         # ── Step 2: money_scripted_localization.txt ───────────────────
+        selected_sloc = bool(MOD.md_money_scripted_loc_file)
         sloc = MOD.md_money_scripted_loc_file
-        if not sloc:
+        if not selected_sloc:
             sloc_dir = os.path.join(MOD.root, "common", "scripted_localisation")
             try:
                 os.makedirs(sloc_dir, exist_ok=True)
@@ -851,9 +861,14 @@ class ModLoadingMixin:
             sloc = os.path.join(sloc_dir, "money_scripted_localization.txt")
         try:
             existing_sloc = ""
-            if os.path.isfile(sloc):
-                with open(sloc, encoding="utf-8-sig", errors="replace") as fp:
-                    existing_sloc = fp.read()
+            sloc_encoding = "utf-8"
+            sloc_exists = os.path.isfile(sloc)
+            if selected_sloc and not sloc_exists:
+                raise OSError("selected scripted localisation file no longer exists")
+            if sloc_exists:
+                existing_sloc, sloc_encoding = read_file_with_encoding(sloc)
+                if existing_sloc is None or sloc_encoding is None:
+                    raise OSError("scripted localisation file could not be read")
             summary_name = f"additional_income_summary_{idea_id}"
             if summary_name in existing_sloc:
                 saved.append(
@@ -870,7 +885,7 @@ class ModLoadingMixin:
                     f"\t}}\n"
                     f"}}\n"
                 )
-                wf.append_text(sloc, defined_text, encoding="utf-8")
+                wf.append_text(sloc, defined_text, encoding=sloc_encoding)
                 rel = os.path.relpath(sloc, MOD.root)
                 saved.append(f"✅ {rel}  — appended '{summary_name}'")
         except (OSError, ValueError, RuntimeError, UnicodeDecodeError) as exc:
@@ -879,8 +894,9 @@ class ModLoadingMixin:
         # ── Step 3: configured-language MD_money localisation ────────
         loc_target = MOD.loc_target
         yml_name = loc_target.filename("MD_money")
+        selected_yml = bool(MOD.md_money_yml_file)
         yml = MOD.md_money_yml_file
-        if not yml:
+        if not selected_yml:
             yml_dir = os.path.join(MOD.root, "localisation", loc_target.dirname())
             try:
                 os.makedirs(yml_dir, exist_ok=True)
@@ -891,12 +907,17 @@ class ModLoadingMixin:
             summary_token = f"[additional_income_summary_{idea_id}]"
             tooltip_loc_key = "ADDITIONAL_INCOME_REVENUES_TOOLTIP"
             yml_text = ""
-            if os.path.isfile(yml):
-                with open(yml, encoding="utf-8-sig", errors="replace") as fp:
-                    yml_text = fp.read()
+            yml_encoding = "utf-8-sig"
+            yml_exists = os.path.isfile(yml)
+            if selected_yml and not yml_exists:
+                raise OSError("selected localisation file no longer exists")
+            if yml_exists:
+                yml_text, yml_encoding = read_file_with_encoding(yml)
+                if yml_text is None or yml_encoding is None:
+                    raise OSError("localisation file could not be read")
             if summary_token in yml_text:
                 saved.append(
-                    f"{yml_name} — " f"'{summary_token}' already present (skipped)"
+                    f"{yml_name} — '{summary_token}' already present (skipped)"
                 )
             else:
                 # Find ADDITIONAL_INCOME_REVENUES_TOOLTIP and append token
@@ -913,7 +934,7 @@ class ModLoadingMixin:
                         + f"\\n{summary_token}"
                         + yml_text[m2.start(3) :]
                     )
-                    wf.write_text(yml, new_yml, encoding="utf-8-sig")
+                    wf.write_text(yml, new_yml, encoding=yml_encoding)
                     rel = os.path.relpath(yml, MOD.root)
                     saved.append(
                         f"✅ {rel}  — appended '{summary_token}' to {tooltip_loc_key}"
@@ -923,7 +944,7 @@ class ModLoadingMixin:
                     entry = f' {tooltip_loc_key}: "{summary_token}\\n"\n'
                     if not yml_text:
                         entry = loc_target.header() + "\n" + entry
-                    wf.append_text(yml, entry, encoding="utf-8-sig")
+                    wf.append_text(yml, entry, encoding=yml_encoding)
                     rel = os.path.relpath(yml, MOD.root)
                     saved.append(
                         f"✅ {rel}  — appended new '{tooltip_loc_key}' entry "

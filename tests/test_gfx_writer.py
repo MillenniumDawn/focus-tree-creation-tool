@@ -71,6 +71,18 @@ def test_append_sprite_types_preserves_existing_wrapper_and_declarations():
     assert text.count('name = "GFX_focus_existing"') == 1
 
 
+def test_append_sprite_types_uses_existing_crlf_style():
+    existing = "spriteTypes = {\r\n}\r\n"
+
+    text, added = append_sprite_types(
+        existing, [("GFX_focus_new", "gfx/interface/goals/new.dds")]
+    )
+
+    assert added == 1
+    assert text.startswith(existing[: existing.index("}")])
+    assert "\n" not in text.replace("\r\n", "")
+
+
 def test_append_sprite_types_preserves_unwrapped_content():
     existing = "# User content\n"
 

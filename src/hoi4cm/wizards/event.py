@@ -15,6 +15,7 @@ from tkinter import filedialog, messagebox
 from hoi4cm.core import (
     append_scripted_loc,
     autosave_path,
+    read_file_with_encoding,
     sanitize_component,
     tr,
 )
@@ -1140,7 +1141,8 @@ def open_event_wizard(app):
         warnings = []
 
         # ── Determine mod root and target files ───────────────────────────
-        if MOD.edit_events_file:
+        selected_event = bool(MOD.edit_events_file)
+        if selected_event:
             ev_file = MOD.edit_events_file
             mod_root = MOD.root or os.path.dirname(os.path.dirname(ev_file))
         else:
@@ -1152,7 +1154,8 @@ def open_event_wizard(app):
                 return
             ev_file = os.path.join(mod_root, "events", f"{ns}.txt")
 
-        if MOD.edit_loc_file and os.path.isfile(MOD.edit_loc_file):
+        selected_loc = bool(MOD.edit_loc_file)
+        if selected_loc:
             loc_file = MOD.edit_loc_file
         else:
             loc_target = MOD.loc_target
@@ -1170,9 +1173,13 @@ def open_event_wizard(app):
         try:
             existing_ids = set()
             file_exists = os.path.isfile(ev_file)
+            if selected_event and not file_exists:
+                raise OSError("selected events file no longer exists")
+            event_encoding = "utf-8"
             if file_exists:
-                with open(ev_file, encoding="utf-8", errors="replace") as f:
-                    raw = f.read()
+                raw, event_encoding = read_file_with_encoding(ev_file)
+                if raw is None or event_encoding is None:
+                    raise OSError("events file could not be read")
                 # Collect every id = X already in the file
                 for m in re.finditer(r"\bid\s*=\s*(\S+)", raw):
                     existing_ids.add(m.group(1).strip())
@@ -1199,9 +1206,9 @@ def open_event_wizard(app):
 
                 ev_content = "\n".join(lines) + "\n"
                 if file_exists:
-                    wf.append_text(ev_file, ev_content, encoding="utf-8")
+                    wf.append_text(ev_file, ev_content, encoding=event_encoding)
                 else:
-                    wf.write_text(ev_file, ev_content, encoding="utf-8")
+                    wf.write_text(ev_file, ev_content, encoding=event_encoding)
                 rel = os.path.relpath(ev_file, mod_root)
                 saved.append(
                     f"{rel}  (+{len(to_append)} event{'s' if len(to_append) != 1 else ''})"
@@ -1225,14 +1232,20 @@ def open_event_wizard(app):
 
             existing_yml_keys = set()
             yml_exists = os.path.isfile(loc_file)
+            if selected_loc and not yml_exists:
+                raise OSError("selected localisation file no longer exists")
+            yml_encoding = "utf-8-sig"
+            existing_yml_text = ""
             # Regex accepts both the modern `key: "value"` form and the legacy `key:0 "value"` form
             _YML_KEY = re.compile(r'^\s+(\S+?)(?::\d+)?\s*[=:]?\s*"')
             if yml_exists:
-                with open(loc_file, encoding="utf-8-sig", errors="replace") as f:
-                    for line in f:
-                        m = _YML_KEY.match(line)
-                        if m:
-                            existing_yml_keys.add(m.group(1))
+                existing_yml_text, yml_encoding = read_file_with_encoding(loc_file)
+                if existing_yml_text is None or yml_encoding is None:
+                    raise OSError("localisation file could not be read")
+                for line in existing_yml_text.splitlines():
+                    m = _YML_KEY.match(line)
+                    if m:
+                        existing_yml_keys.add(m.group(1))
 
             to_add = []
             for ln in yml_new_lines:
@@ -1245,20 +1258,16 @@ def open_event_wizard(app):
 
             if to_add:
                 if not yml_exists:
-                    wf.write_text(loc_file, loc_header + "\n", encoding="utf-8-sig")
+                    wf.write_text(loc_file, loc_header + "\n", encoding=yml_encoding)
                 # Only add the section header if it's not already there
-                needs_hdr = True
-                try:
-                    with open(loc_file, encoding="utf-8-sig", errors="replace") as _rf:
-                        if f"##########Events - {ns}##########" in _rf.read():
-                            needs_hdr = False
-                except OSError, UnicodeDecodeError, ValueError:
-                    pass
+                needs_hdr = (
+                    f"##########Events - {ns}##########" not in existing_yml_text
+                )
                 loc_body = ""
                 if needs_hdr:
                     loc_body += f"\n ##########Events - {ns}##########\n"
                 loc_body += "\n".join(to_add) + "\n"
-                wf.append_text(loc_file, loc_body, encoding="utf-8-sig")
+                wf.append_text(loc_file, loc_body, encoding=yml_encoding)
                 rel = os.path.relpath(loc_file, mod_root)
                 saved.append(f"{rel}  (+{len(to_add)} keys)")
             else:
@@ -1273,7 +1282,12 @@ def open_event_wizard(app):
                 ev.eid for ev in events
             )
             append_scripted_loc(
-                MOD.edit_scripted_loc_file, sloc_blocks, saved, errs, mod_root
+                MOD.edit_scripted_loc_file,
+                sloc_blocks,
+                saved,
+                errs,
+                mod_root,
+                require_existing=True,
             )
 
         # ── Report ────────────────────────────────────────────────────────
@@ -1371,8 +1385,9 @@ def open_event_wizard(app):
             # Check for duplicate event IDs
             existing_ids = {ev.eid for ev in events}
             try:
-                with open(fp, encoding="utf-8-sig", errors="replace") as f:
-                    raw = f.read()
+                raw, encoding = read_file_with_encoding(fp)
+                if raw is None or encoding is None:
+                    raise OSError("event file could not be read")
                 dupes = [
                     m.group(1)
                     for m in _re2.finditer(r"\bids?\s*=\s*([^\s{}#\n]+)", raw)
@@ -1429,8 +1444,9 @@ def open_event_wizard(app):
         if not path:
             return
         try:
-            with open(path, encoding="utf-8", errors="replace") as f:
-                raw = f.read()
+            raw, encoding = read_file_with_encoding(path)
+            if raw is None or encoding is None:
+                raise OSError("event file could not be read")
         except (OSError, UnicodeDecodeError, ValueError) as exc:
             report_error(str(exc), exc, parent=win, title="Import Error")
             return
