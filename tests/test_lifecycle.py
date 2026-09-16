@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import threading
-import time
 from collections.abc import Callable
 from concurrent.futures import Executor, Future
 from typing import cast
@@ -95,21 +94,23 @@ def test_daemon_executor_close_does_not_wait_for_running_work() -> None:
     executor = DaemonThreadPoolExecutor(1, thread_name_prefix="test-daemon")
     started = threading.Event()
     release = threading.Event()
+    events: list[str] = []
 
     def work() -> None:
+        events.append("started")
         started.set()
         release.wait(timeout=2)
+        events.append("finished")
 
     future = executor.submit(work)
     assert started.wait(timeout=1)
 
-    before = time.monotonic()
     executor.shutdown(wait=False, cancel_futures=True)
-    elapsed = time.monotonic() - before
+    events.append("shutdown")
     release.set()
     future.result(timeout=1)
 
-    assert elapsed < 0.1
+    assert events == ["started", "shutdown", "finished"]
     assert all(thread.daemon for thread in executor._threads)
 
 
