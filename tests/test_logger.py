@@ -91,12 +91,26 @@ def test_add_error_fires_callback_with_count(log_state):
     assert seen == [1, 2]
 
 
-def test_callback_exception_does_not_break_add_error(log_state):
+@pytest.mark.parametrize(
+    "error_type", (RuntimeError, AttributeError, ValueError, TypeError, OSError)
+)
+def test_unrelated_callback_error_is_reraised(log_state, error_type):
     def boom(_count):
-        raise RuntimeError("callback failed")
+        raise error_type("callback failed")
 
     logmod.set_error_callback(boom)
-    # Must not raise, and the entry must still be recorded.
+    with pytest.raises(error_type, match="callback failed"):
+        logmod.add_error("still recorded")
+    assert logmod.get_error_entries()[0][1] == "still recorded"
+
+
+def test_genuine_tk_callback_error_does_not_break_add_error(log_state):
+    import _tkinter
+
+    def boom(_count):
+        raise _tkinter.TclError("widget destroyed")
+
+    logmod.set_error_callback(boom)
     assert logmod.add_error("still recorded") == 1
     assert logmod.get_error_entries()[0][1] == "still recorded"
 

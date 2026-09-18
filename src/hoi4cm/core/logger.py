@@ -13,7 +13,6 @@ import datetime
 import logging
 import os
 import sys
-import tkinter as tk
 from logging.handlers import RotatingFileHandler
 
 _LOG_NAME = "HOI4CM"
@@ -84,8 +83,12 @@ def add_error(msg):
     if _error_callback is not None:
         try:
             _error_callback(count)
-        except tk.TclError, RuntimeError, AttributeError, ValueError, TypeError:
-            pass
+        except Exception as exc:
+            if not any(
+                cls.__name__ == "TclError" and cls.__module__ == "_tkinter"
+                for cls in type(exc).__mro__
+            ):
+                raise
     return count
 
 
