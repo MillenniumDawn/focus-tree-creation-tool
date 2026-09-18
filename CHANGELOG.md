@@ -8,6 +8,12 @@ the version by hand. See `AGENTS.md`.
 
 ## Unreleased
 
+### Packaged Windows builds
+
+**[BUGFIX] Standard builds no longer open a console window**
+
+- Bundle locale files and all five lazy wizard modules in both PyInstaller specs.
+
 ---
 
 ## [0.4.3] — 2026-09-11
