@@ -35,16 +35,26 @@ _FOCUS_SEMANTIC_METADATA = (
     "_joint_extra",
     "_script_extras",
 )
+_MISSING = object()
 
 
 def _snapshot_focus(focus):
     """Return serializable focus state needed to restore an undo entry."""
     snapshot = copy.deepcopy(focus.to_dict())
     for attr in _FOCUS_SEMANTIC_METADATA:
-        try:
-            snapshot[attr] = copy.deepcopy(getattr(focus, attr))
-        except AttributeError:
-            continue
+        value = getattr(focus, attr, _MISSING)
+        if value is not _MISSING:
+            snapshot[attr] = copy.deepcopy(value)
+    return snapshot
+
+
+def _snapshot_focus_for_encoding(focus):
+    """Return focus state for immediate JSON serialization."""
+    snapshot = focus.to_dict()
+    for attr in _FOCUS_SEMANTIC_METADATA:
+        value = getattr(focus, attr, _MISSING)
+        if value is not _MISSING:
+            snapshot[attr] = value
     return snapshot
 
 
@@ -62,9 +72,9 @@ def _decode_full(payload: bytes) -> dict[int, dict] | None:
 def _encode_full(focuses) -> bytes:
     """Compress every focus in ``focuses`` into a full-snapshot blob."""
     return zlib.compress(
-        json.dumps({str(fid): _snapshot_focus(f) for fid, f in focuses.items()}).encode(
-            "utf-8"
-        )
+        json.dumps(
+            {str(fid): _snapshot_focus_for_encoding(f) for fid, f in focuses.items()}
+        ).encode("utf-8")
     )
 
 

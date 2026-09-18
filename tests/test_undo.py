@@ -146,13 +146,17 @@ def test_undo_then_redo_roundtrip_restores_state_and_changed_set():
     focuses[1].cost = 99
     pre_state = focuses[1].to_dict()
 
-    label, changed, removed = stack.undo(focuses, Focus.from_dict)
+    result = stack.undo(focuses, Focus.from_dict)
+    assert result is not None
+    label, changed, removed = result
     assert label == "edit cost"
     assert changed == {1}
     assert removed == set()
     assert focuses[1].cost == 10
 
-    label2, changed2, removed2 = stack.redo(focuses, Focus.from_dict)
+    result = stack.redo(focuses, Focus.from_dict)
+    assert result is not None
+    label2, changed2, removed2 = result
     assert label2 == "edit cost"
     assert changed2 == {1}
     assert removed2 == set()
@@ -191,12 +195,16 @@ def test_redo_restores_created_focuses():
     focuses[2] = new
     new_dict = new.to_dict()
 
-    label, changed, removed = stack.undo(focuses, Focus.from_dict)
+    result = stack.undo(focuses, Focus.from_dict)
+    assert result is not None
+    label, changed, removed = result
     assert label == "add focus"
     assert removed == {2}
     assert 2 not in focuses
 
-    label2, changed2, removed2 = stack.redo(focuses, Focus.from_dict)
+    result = stack.redo(focuses, Focus.from_dict)
+    assert result is not None
+    label2, changed2, removed2 = result
     assert label2 == "add focus"
     # The original push was sparse, so redo mirrors that: only focus 2 was
     # ever touched, so it's the only one that needs a redraw.
@@ -222,6 +230,7 @@ def test_redo_eviction_caps_at_maxlen():
     undone_labels = []
     for _ in range(4):
         result = stack.undo(focuses, Focus.from_dict)
+        assert result is not None
         undone_labels.append(result[0])
     assert len(stack) == 0
 
@@ -304,6 +313,7 @@ def test_redo_sparse_matches_full_snapshot_reference():
             r2 = full_stack.redo(full_focuses, Focus.from_dict)
             assert (r1 is None) == (r2 is None)
             if r1 is not None:
+                assert r2 is not None
                 assert r1[0] == r2[0]
                 # Round-trip: undo should restore the pre-redo state. This
                 # catches a redo that forgot to push back onto the undo
@@ -362,7 +372,9 @@ def test_creation_only_undo_removes_new_focus():
     stack.push("add focus", focuses, touched_ids=())
     focuses[2] = _mk_focus(2, "focus_2")
 
-    label, changed, removed = stack.undo(focuses, Focus.from_dict)
+    result = stack.undo(focuses, Focus.from_dict)
+    assert result is not None
+    label, changed, removed = result
 
     assert label == "add focus"
     assert changed == set()
@@ -399,7 +411,9 @@ def test_undo_of_sparse_entry_does_not_full_encode(monkeypatch):
     stack.push("edit", focuses, touched_ids=(0,))
     focuses[0].cost = 999
 
-    label, changed, removed = stack.undo(focuses, Focus.from_dict)
+    result = stack.undo(focuses, Focus.from_dict)
+    assert result is not None
+    label, changed, removed = result
 
     assert calls == []
     assert label == "edit"
@@ -408,7 +422,9 @@ def test_undo_of_sparse_entry_does_not_full_encode(monkeypatch):
     assert focuses[0].cost == 10
     assert stack._redo[-1][1] == "sparse"
 
-    label2, changed2, removed2 = stack.redo(focuses, Focus.from_dict)
+    result = stack.redo(focuses, Focus.from_dict)
+    assert result is not None
+    label2, changed2, removed2 = result
 
     assert calls == []
     assert label2 == "edit"
@@ -506,7 +522,9 @@ def test_single_edit_undo_restores_fields():
     f.desc = "new"
     f.name = "renamed"
 
-    label, changed, removed = stack.undo(focuses, Focus.from_dict)
+    result = stack.undo(focuses, Focus.from_dict)
+    assert result is not None
+    label, changed, removed = result
 
     assert label == "edit focus"
     assert changed == {1}
@@ -609,7 +627,9 @@ def test_multi_delete_undo_restores_focuses_and_links():
     assert focuses[2].prereqs == []
     assert focuses[3].mutex == []
 
-    label, changed, removed = stack.undo(focuses, Focus.from_dict)
+    result = stack.undo(focuses, Focus.from_dict)
+    assert result is not None
+    label, changed, removed = result
 
     assert label == "delete focus"
     assert changed == {1, 2, 3}
@@ -631,7 +651,9 @@ def test_rename_set_undo_restores_names_only():
     focuses[1].name = "new_a"
     focuses[2].name = "new_b"
 
-    label, changed, removed = stack.undo(focuses, Focus.from_dict)
+    result = stack.undo(focuses, Focus.from_dict)
+    assert result is not None
+    label, changed, removed = result
 
     assert label == "bulk_rename"
     assert changed == {1, 2}
@@ -651,7 +673,9 @@ def test_full_snapshot_roundtrip_unicode_and_big_text():
     focuses.clear()
     focuses[100] = _mk_focus(100, "imported")
 
-    label, changed, removed = stack.undo(focuses, Focus.from_dict)
+    result = stack.undo(focuses, Focus.from_dict)
+    assert result is not None
+    label, changed, removed = result
 
     assert label == "draw.io import"
     assert removed == {100}
@@ -660,6 +684,61 @@ def test_full_snapshot_roundtrip_unicode_and_big_text():
     assert focuses[1].ai_will_do_raw == big_raw
     assert focuses[1].desc == "ünïcödé désc"
     assert focuses[2].name == "f2"
+
+
+def test_full_encoding_serializes_nested_data_without_deepcopy(monkeypatch):
+    focus = _mk_focus(1, "nested")
+    focus.effects = [{"type": "custom", "fields": {"values": [1, {"ok": True}]}}]
+    focus._raw_gx = 6
+    focus._raw_gy = 7
+    focus._rel_dx = 2
+    focus._rel_dy = 3
+    focus._joint_extra = "joint_trigger = { always = yes }"
+    focus._script_extras = {"nested": [{"value": "kept"}]}
+
+    def fail_deepcopy(_value):
+        raise AssertionError("full encoding must not deepcopy")
+
+    monkeypatch.setattr(undo_module.copy, "deepcopy", fail_deepcopy)
+
+    snapshot = _decode_full(undo_module._encode_full({focus.id: focus}))
+
+    assert snapshot is not None
+    assert snapshot[1]["effects"] == focus.effects
+    assert (
+        snapshot[1]["_raw_gx"],
+        snapshot[1]["_raw_gy"],
+        snapshot[1]["_rel_dx"],
+        snapshot[1]["_rel_dy"],
+        snapshot[1]["_joint_extra"],
+    ) == (6, 7, 2, 3, "joint_trigger = { always = yes }")
+    assert snapshot[1]["_script_extras"] == {"nested": [{"value": "kept"}]}
+
+
+def test_full_encoding_omits_missing_metadata():
+    focus = _mk_focus(1, "fresh")
+    snapshot = _decode_full(undo_module._encode_full({focus.id: focus}))
+
+    assert snapshot is not None
+    assert all(attr not in snapshot[1] for attr in undo_module._FOCUS_SEMANTIC_METADATA)
+
+
+def test_sparse_snapshot_retains_deepcopy_isolation():
+    focus = _mk_focus(1, "nested")
+    focus.effects = [{"type": "custom", "fields": {"values": [1]}}]
+    nested_values = [{"value": "before"}]
+    script_extras: dict[str, object] = {"nested": nested_values}
+    focus._script_extras = script_extras
+    focuses = {focus.id: focus}
+    stack = UndoStack()
+    stack.push("edit nested data", focuses, touched_ids=(focus.id,))
+
+    focus.effects[0]["fields"]["values"].append(2)
+    nested_values[0]["value"] = "after"
+    stack.undo(focuses, Focus.from_dict)
+
+    assert focuses[1].effects == [{"type": "custom", "fields": {"values": [1]}}]
+    assert focuses[1]._script_extras == {"nested": [{"value": "before"}]}
 
 
 def test_eviction_caps_at_60():
@@ -673,6 +752,7 @@ def test_eviction_caps_at_60():
     labels = []
     while len(stack):
         result = stack.undo(focuses, Focus.from_dict)
+        assert result is not None
         labels.append(result[0])
 
     assert len(labels) == 60
@@ -764,6 +844,7 @@ def test_property_sparse_matches_full_snapshot_reference():
             r2 = stack_full.undo(focuses_full, Focus.from_dict)
             assert (r1 is None) == (r2 is None)
             if r1 is not None:
+                assert r2 is not None
                 assert r1[0] == r2[0]
 
         assert_in_sync()
