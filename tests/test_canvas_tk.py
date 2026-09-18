@@ -7,6 +7,7 @@ headless dev box.
 
 import tkinter as tk
 from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 
@@ -32,6 +33,9 @@ def tk_root(tk_root):
 
 class _FakeApp(CanvasMixin):
     """Bare host exposing just the attributes _draw_focus/_draw_lines touch."""
+
+    _cfp_x: Any
+    _cfp_y: Any
 
     CANVAS_MIN_SIZE = 10
     CANVAS_EXPAND_STEP = 5
@@ -138,6 +142,100 @@ def test_draw_key_updates_changed_icon(tk_root):
     assert cv.itemcget(icon_item, "text") == "X"
 
 
+def test_focus_probe_recovers_after_canvas_is_cleared(tk_root):
+    cv = tk.Canvas(tk_root, width=200, height=200)
+    app = _FakeApp(cv)
+    f = Focus(x=5, y=5)
+
+    app._draw_focus(f, FAR_RECT)
+    cv.delete("all")
+    app._draw_focus(f, FAR_RECT)
+
+    assert f.id in app._focus_bundles
+    assert cv.find_withtag(f"F{f.id}")
+
+
+def test_rendered_frame_uses_one_canvas_probe(tk_root, monkeypatch):
+    cv = tk.Canvas(tk_root, width=200, height=200)
+    app = _FakeApp(cv)
+    app.focuses = FocusDocument(_linked_chain(3))
+    for name in (
+        "_draw_canvas_bounds",
+        "_draw_coord_labels",
+        "_draw_cfp_markers",
+        "_draw_canvas_legend",
+        "_update_focus_list_selection",
+        "_draw_minimap",
+    ):
+        monkeypatch.setattr(app, name, lambda: None, raising=False)
+
+    app._render_frame(RedrawChannel.VIEW)
+
+    labels = cv.find_withtag("focus_lbl")
+    lines = cv.find_withtag("line")
+    display_order = cv.find_all()
+    assert labels and lines
+    assert max(display_order.index(label) for label in labels) < min(
+        display_order.index(line) for line in lines
+    )
+
+    probes = []
+    original_type = cv.type
+    monkeypatch.setattr(
+        cv,
+        "type",
+        lambda item: probes.append(item) or original_type(item),
+    )
+
+    app._render_frame(RedrawChannel.VIEW)
+
+    assert probes == [app._canvas_probe]
+    assert len(app._focus_bundles) == 3
+    assert cv.find_withtag("grid")
+    assert cv.find_withtag("line")
+    assert all(cv.find_withtag(f"F{focus_id}") for focus_id in app.focuses)
+
+
+def test_interrupted_frame_retries_pending_label_stacking(tk_root, monkeypatch):
+    cv = tk.Canvas(tk_root, width=200, height=200)
+    app = _FakeApp(cv)
+    app.focuses = FocusDocument(_linked_chain(3))
+    for name in (
+        "_draw_canvas_bounds",
+        "_draw_coord_labels",
+        "_draw_cfp_markers",
+        "_draw_canvas_legend",
+        "_update_focus_list_selection",
+        "_draw_minimap",
+    ):
+        monkeypatch.setattr(app, name, lambda: None, raising=False)
+
+    original_draw_focus = app._draw_focus
+    interrupted = True
+
+    def draw_focus_once(focus, vis_rect=None):
+        nonlocal interrupted
+        original_draw_focus(focus, vis_rect)
+        if interrupted:
+            interrupted = False
+            raise RuntimeError("simulated interrupted frame")
+
+    monkeypatch.setattr(app, "_draw_focus", draw_focus_once)
+    with pytest.raises(RuntimeError, match="simulated"):
+        app._render_frame(RedrawChannel.VIEW)
+
+    assert app._focus_line_stack_dirty
+    app._render_frame(RedrawChannel.VIEW)
+
+    assert not app._focus_line_stack_dirty
+    labels = cv.find_withtag("focus_lbl")
+    lines = cv.find_withtag("line")
+    display_order = cv.find_all()
+    assert max(display_order.index(label) for label in labels) < min(
+        display_order.index(line) for line in lines
+    )
+
+
 def test_draw_focus_uses_localized_label_with_name_fallback(tk_root):
     cv = tk.Canvas(tk_root, width=200, height=200)
     app = _FakeApp(cv)
@@ -167,7 +265,8 @@ def test_retained_focus_bundles_are_bounded_by_visible_set(tk_root):
     for focus in focuses:
         app._draw_focus(focus, (185, -1, 205, 5))
     assert len(app._focus_bundles) <= 2
-    assert len(cv.find_withtag("focus")) <= 28
+    focus_items = set(cv.find_withtag("focus")) - set(cv.find_withtag("canvas_probe"))
+    assert len(focus_items) <= 28
 
 
 def test_low_zoom_uses_three_item_focus_lod(tk_root):
@@ -478,7 +577,7 @@ def test_unload_extra_tree_deletes_pooled_connection_items(tk_root):
     app._draw_lines((-1.0, -1.0, 100.0, 1.0))
     assert len(cv.find_withtag("line")) == 22
 
-    app_module.App._unload_extra_tree(app, 1)
+    app_module.App._unload_extra_tree(cast(app_module.App, app), 1)
 
     assert not app.focuses
     assert not cv.find_withtag("line")
@@ -500,6 +599,130 @@ def test_narrow_frame_hides_the_lines_the_wide_frame_left_behind(tk_root):
         cv.itemcget(item, "state") == "hidden"
         for item in app._lines[app._lines_used : wide_used]
     )
+
+
+def test_unchanged_line_frame_skips_tk_updates(tk_root, monkeypatch):
+    cv = tk.Canvas(tk_root, width=200, height=200)
+    app = _FakeApp(cv)
+    app.focuses = FocusDocument(_linked_chain(3))
+    rect = (-1.0, -1.0, 100.0, 1.0)
+    app._draw_lines(rect)
+
+    calls = {name: 0 for name in ("coords", "itemconfig", "tag_lower")}
+    for name in calls:
+        original = getattr(cv, name)
+        monkeypatch.setattr(
+            cv,
+            name,
+            lambda *args, _original=original, _name=name, **kwargs: (
+                calls.__setitem__(_name, calls[_name] + 1) or _original(*args, **kwargs)
+            ),
+        )
+
+    app._draw_lines(rect)
+
+    assert calls == {"coords": 0, "itemconfig": 0, "tag_lower": 0}
+
+
+def test_line_frame_redraws_after_scene_or_view_changes(tk_root, monkeypatch):
+    cv = tk.Canvas(tk_root, width=200, height=200)
+    app = _FakeApp(cv)
+    focuses = _linked_chain(3)
+    app.focuses = FocusDocument(focuses)
+    rect = (-1.0, -1.0, 100.0, 1.0)
+    app._draw_lines(rect)
+
+    coords = []
+    original_coords = cv.coords
+    monkeypatch.setattr(
+        cv,
+        "coords",
+        lambda *args, **kwargs: coords.append(args) or original_coords(*args, **kwargs),
+    )
+
+    app.focuses.move(focuses[1].id, 4, 0)
+    app._draw_lines(rect)
+    after_scene_change = len(coords)
+    app.offset[0] += 1
+    app._draw_lines(rect)
+    after_offset_change = len(coords)
+    app.zoom = 1.25
+    app._draw_lines(rect)
+    after_zoom_change = len(coords)
+    app._draw_lines((-1.0, -1.0, 50.0, 1.0))
+
+    assert after_scene_change > 0
+    assert after_offset_change > after_scene_change
+    assert after_zoom_change > after_offset_change
+    assert len(coords) > after_zoom_change
+
+
+def test_line_frame_recovers_from_tk_mutation_failure(tk_root, monkeypatch):
+    cv = tk.Canvas(tk_root, width=200, height=200)
+    app = _FakeApp(cv)
+    app.focuses = FocusDocument(_linked_chain(3))
+    rect = (-1.0, -1.0, 100.0, 1.0)
+    app._draw_lines(rect)
+    previous_key = app._lines_key
+    attempts = 0
+    original_coords = cv.coords
+
+    def fail_once(*args, **kwargs):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise tk.TclError("simulated canvas mutation failure")
+        return original_coords(*args, **kwargs)
+
+    monkeypatch.setattr(cv, "coords", fail_once)
+    app.offset[0] += 1
+
+    with pytest.raises(tk.TclError, match="simulated"):
+        app._draw_lines(rect)
+    assert app._lines_key == previous_key
+
+    app._draw_lines(rect)
+
+    assert attempts >= 2
+    assert app._lines_key != previous_key
+
+
+def test_line_edges_can_be_removed_and_restored(tk_root):
+    cv = tk.Canvas(tk_root, width=200, height=200)
+    app = _FakeApp(cv)
+    focuses = _linked_chain(3)
+    app.focuses = FocusDocument(focuses)
+    rect = (-1.0, -1.0, 100.0, 1.0)
+
+    app._draw_lines(rect)
+    assert app._lines_used == 4
+
+    app.focuses.unlink_prerequisite_group(focuses[1].id, 0)
+    app.focuses.unlink_prerequisite_group(focuses[2].id, 0)
+    app._draw_lines(rect)
+    assert app._lines_used == 0
+    assert all(cv.itemcget(item, "state") == "hidden" for item in app._lines)
+
+    app.focuses.link_prerequisite(focuses[1].id, [focuses[0].id])
+    app.focuses.link_prerequisite(focuses[2].id, [focuses[1].id])
+    app._draw_lines(rect)
+    assert app._lines_used == 4
+    assert all(
+        cv.itemcget(item, "state") != "hidden" for item in app._lines[: app._lines_used]
+    )
+
+
+def test_line_pool_recovers_after_canvas_clear(tk_root):
+    cv = tk.Canvas(tk_root, width=200, height=200)
+    app = _FakeApp(cv)
+    app.focuses = FocusDocument(_linked_chain(3))
+    rect = (-1.0, -1.0, 100.0, 1.0)
+
+    app._draw_lines(rect)
+    cv.delete("all")
+    app._draw_lines(rect)
+
+    assert cv.find_withtag("line")
 
 
 def test_surplus_lines_are_hidden_once_not_once_per_frame(tk_root, monkeypatch):

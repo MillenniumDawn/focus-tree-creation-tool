@@ -128,10 +128,18 @@ def parse_script(source: str) -> dict[str, object]:
     return result
 
 
-def match_brace(source: str, open_index: int) -> int:
-    """Return a matching close-brace index, or ``len(source)`` if missing."""
+def match_brace(source: str, open_index: int, end_index: int | None = None) -> int:
+    """Return a matching close-brace index, or the scan end if missing.
+
+    ``end_index`` is an exclusive bound for the scan when provided. Without
+    it, the scan end is ``len(source)``.
+    """
     depth = 0
-    for match in _BRACE_RE.finditer(source, open_index):
+    if end_index is None:
+        matches = _BRACE_RE.finditer(source, open_index)
+    else:
+        matches = _BRACE_RE.finditer(source, open_index, end_index)
+    for match in matches:
         char = match.group()
         if char == "{":
             depth += 1
@@ -139,7 +147,7 @@ def match_brace(source: str, open_index: int) -> int:
             depth -= 1
             if depth == 0:
                 return match.start()
-    return len(source)
+    return len(source) if end_index is None else end_index
 
 
 def extract_block(source: str, open_index: int = 0) -> tuple[str, int]:
@@ -202,11 +210,15 @@ def extract_named_block(source: str, name: str) -> str | None:
 def emit_scalar(value: str) -> str:
     """Wrap a string in double quotes if it contains bare-token-breaking chars.
 
-    Paradox script bare tokens cannot contain whitespace, ``{``, ``}``, ``=``,
-    ``"``, or ``#``. Values containing any of these characters are quoted so
-    that they survive a parse -> export -> parse round-trip intact.
+    Paradox script bare tokens cannot contain whitespace, ``{``, ``}``, ``=`` or
+    ``#``. Values containing any of these characters are quoted so that they
+    survive a parse -> export -> parse round-trip intact. Values containing a
+    double quote raise ``ValueError`` because Clausewitz has no string escape
+    mechanism, so emitting one would corrupt the script.
     """
-    if any(c in value for c in ' \t\n\r{}="#') or '"' in value:
+    if '"' in value:
+        raise ValueError(f"Cannot emit scalar containing a double quote: {value!r}")
+    if any(c in value for c in " \t\n\r{}=#"):
         return f'"{value}"'
     return value
 

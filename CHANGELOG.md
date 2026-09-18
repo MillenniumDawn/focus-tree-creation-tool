@@ -8,6 +8,21 @@ the version by hand. See `AGENTS.md`.
 
 ## Unreleased
 
+- Canvas redraws skip per-focus item probes and unchanged line updates: tests measure 14
+  probes per visible full bundle reduced to one sentinel probe per frame; unchanged
+  frames make zero `coords`, `itemconfig`, or `tag_lower` calls.
+
+### Focus-tree parser
+
+- Bound malformed nested-block rescans and let batch imports cancel a
+  file without returning partial model data.
+
+### Packaged Windows builds
+
+**[BUGFIX] Standard builds no longer open a console window**
+
+- Bundle locale files and all five lazy wizard modules in both PyInstaller specs.
+
 ---
 
 ## [0.4.3] — 2026-09-11

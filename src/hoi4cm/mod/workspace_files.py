@@ -46,6 +46,15 @@ def _stage(target: Path, text: str, encoding: str) -> Path:
     directory, a bad encoding, a full disk — fails here, before the target
     itself is touched.
     """
+    return _stage_bytes(target, text.encode(encoding))
+
+
+def _stage_bytes(target: Path, content: bytes) -> Path:
+    """Write ``content`` to a sibling temp file, fully flushed to disk.
+
+    Everything that can reasonably fail — a missing parent, an unwritable
+    directory, a full disk — fails here, before the target itself is touched.
+    """
     target.parent.mkdir(parents=True, exist_ok=True)
     target_mode: int | None
     try:
@@ -56,9 +65,9 @@ def _stage(target: Path, text: str, encoding: str) -> Path:
     try:
         if target_mode is not None:
             os.chmod(temporary_path, target_mode)
-        with os.fdopen(descriptor, "w", encoding=encoding) as temporary:
+        with os.fdopen(descriptor, "wb") as temporary:
             descriptor = -1
-            temporary.write(text)
+            temporary.write(content)
             temporary.flush()
             os.fsync(temporary.fileno())
     except BaseException:
@@ -124,10 +133,14 @@ class WorkspaceFiles:
             self._notify(target)
 
     def append_text(self, path: str | Path, text: str, *, encoding: str) -> None:
+        """Append ``text`` to ``path`` atomically (temp file + ``os.replace``)."""
         target = Path(path)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        with target.open("a", encoding=encoding) as stream:
-            stream.write(text)
+        original = _read_bytes(target) or b""
+        temporary = _stage_bytes(target, original + text.encode(encoding))
+        try:
+            os.replace(temporary, target)
+        finally:
+            _unlink(temporary)
         self._notify(target)
 
     def _notify(self, path: Path) -> None:
