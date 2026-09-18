@@ -11,7 +11,7 @@ from hoi4cm.core.logger import get_logger
 from hoi4cm.core.paths import read_file
 
 from .build import BuildContext, build_focuses
-from .parse import parse_focus_tree
+from .parse import FocusTreeParseCancelled, parse_focus_tree
 
 _log = get_logger("batch_load")
 
@@ -53,7 +53,10 @@ def batch_load_trees(
         try:
             raw = read_file(path)
             t0 = time.perf_counter()
-            parsed = parse_focus_tree(raw, path)
+            parsed = parse_focus_tree(raw, path, cancelled=cancelled)
+            if cancelled is not None and cancelled.is_set():
+                stopped_early = True
+                break
             t1 = time.perf_counter()
             new_focuses = build_focuses(
                 parsed,
@@ -61,6 +64,9 @@ def batch_load_trees(
                 country_tag=country_tag,
                 context=build_context,
             )
+            if cancelled is not None and cancelled.is_set():
+                stopped_early = True
+                break
             tree_idx += 1
             t2 = time.perf_counter()
             _log.debug(
@@ -80,6 +86,9 @@ def batch_load_trees(
                     "new_focuses": new_focuses,
                 }
             )
+        except FocusTreeParseCancelled:
+            stopped_early = True
+            break
         except Exception as exc:  # noqa: BLE001
             results.append({"path": path, "type": ttype, "ok": False, "error": exc})
     return results, stopped_early

@@ -33,7 +33,13 @@ from .operations import (
     build_focus_name_lookup,
     group_focuses_by_tree,
 )
-from .parse import EmptyFocusTreeError, ParsedFocusTree, parse_focus_tree
+from .parse import (
+    EmptyFocusTreeError,
+    FocusTreeParseBudgetExceeded,
+    FocusTreeParseCancelled,
+    ParsedFocusTree,
+    parse_focus_tree,
+)
 from .validate import (
     Issue,
     Severity,
@@ -48,6 +54,8 @@ __all__ = [
     "parse_focus_tree",
     "ParsedFocusTree",
     "EmptyFocusTreeError",
+    "FocusTreeParseBudgetExceeded",
+    "FocusTreeParseCancelled",
     "BuildContext",
     "apply_focus_code",
     "build_focuses",

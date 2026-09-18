@@ -1,0 +1,37 @@
+focus_tree = {
+	id = TST_project_tree
+	country = {
+		factor = 0
+		modifier = {
+			add = 20
+			original_tag = TST
+		}
+	}
+	continuous_focus_position = { x = 20 y = 300 }
+	focus = {
+		id = TST_project_root
+		icon = GFX_goal_generic_demand_territory
+		x = 4
+		y = -2
+		cost = 5
+		completion_reward = {
+			add_political_power = 50
+		}
+	}
+	focus = {
+		id = TST_project_child
+		icon = GFX_goal_generic_political_pressure
+		x = 1
+		y = 3
+		relative_position_id = TST_project_root
+		custom_script_data = {
+			nested = yes
+		}
+		joint_trigger = {
+			has_dlc = "No Step Back"
+		}
+		completion_reward = {
+			add_stability = 0.05
+		}
+	}
+}
