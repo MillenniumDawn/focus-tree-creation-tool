@@ -4,10 +4,26 @@ import sqlite3
 
 import pytest
 
-from hoi4cm.core.paths import read_file
+from hoi4cm.core.paths import read_file as _read_file
+from hoi4cm.mod import graphics_catalog as graphics_catalog_module
 from hoi4cm.mod import scan_cache
-from hoi4cm.mod.graphics_catalog import FileStamp, GraphicsCatalog, GraphicsScanConfig
+from hoi4cm.mod.graphics_catalog import (
+    DirectoryRecord,
+    FileStamp,
+    GfxFileRecord,
+    GraphicsCatalog,
+    GraphicsScanConfig,
+    GraphicsSnapshot,
+    ImageRecord,
+    PathReference,
+)
 from hoi4cm.mod.workspace_cache import WorkspaceCache
+
+
+def read_file(path: str) -> str:
+    content = _read_file(path)
+    assert content is not None
+    return content
 
 
 @pytest.fixture(autouse=True)
@@ -62,6 +78,87 @@ def test_warm_catalog_load_restats_without_walking_or_reparsing(graphics_tree):
     assert second.last_metrics.image_stats == 3
     assert second.last_metrics.gfx_reads == 0
     assert warm_maps == cold_maps
+
+
+@pytest.mark.parametrize(
+    ("stale_kind", "expected_metrics", "expected_calls"),
+    [
+        ("directory", (1, 0, 0), ("first",)),
+        ("gfx", (2, 1, 0), ("first", "second", "first.gfx")),
+        (
+            "image",
+            (2, 2, 1),
+            ("first", "second", "first.gfx", "second.gfx", "first.png"),
+        ),
+    ],
+)
+def test_snapshot_validation_stops_at_first_stale_stamp(
+    tmp_path, monkeypatch, stale_kind, expected_metrics, expected_calls
+):
+    first_directory = tmp_path / "first"
+    second_directory = tmp_path / "second"
+    first_directory.mkdir()
+    second_directory.mkdir()
+    first_gfx = tmp_path / "first.gfx"
+    second_gfx = tmp_path / "second.gfx"
+    first_gfx.write_text("")
+    second_gfx.write_text("")
+    first_image = tmp_path / "first.png"
+    second_image = tmp_path / "second.png"
+    first_image.write_bytes(b"first")
+    second_image.write_bytes(b"second")
+
+    def stamp(path):
+        stat = os.stat(path)
+        return FileStamp(stat.st_mtime_ns, stat.st_ctime_ns, stat.st_size)
+
+    stale_stamp = FileStamp(-1, -1, -1)
+    directory_records = (
+        DirectoryRecord(
+            PathReference("mod", "first"),
+            True,
+            stale_stamp if stale_kind == "directory" else stamp(first_directory),
+        ),
+        DirectoryRecord(PathReference("mod", "second"), True, stamp(second_directory)),
+    )
+    gfx_records = (
+        GfxFileRecord(
+            PathReference("mod", "first.gfx"),
+            stale_stamp if stale_kind == "gfx" else stamp(first_gfx),
+            (),
+        ),
+        GfxFileRecord(PathReference("mod", "second.gfx"), stamp(second_gfx), ()),
+    )
+    image_records = (
+        ImageRecord(
+            PathReference("mod", "first.png"),
+            stale_stamp if stale_kind == "image" else stamp(first_image),
+        ),
+        ImageRecord(PathReference("mod", "second.png"), stamp(second_image)),
+    )
+    snapshot = GraphicsSnapshot(
+        directories=directory_records,
+        images=image_records,
+        gfx_files=gfx_records,
+        goal_images=(),
+        idea_images=(),
+    )
+
+    calls = []
+    real_stat = os.stat
+
+    def tracked_stat(path):
+        calls.append(path)
+        return real_stat(path)
+
+    monkeypatch.setattr(graphics_catalog_module.os, "stat", tracked_stat)
+    catalog = GraphicsCatalog()
+
+    assert not catalog._snapshot_is_current(snapshot, {"mod": str(tmp_path)})
+    assert catalog.last_metrics.directory_stats == expected_metrics[0]
+    assert catalog.last_metrics.gfx_file_stats == expected_metrics[1]
+    assert catalog.last_metrics.image_stats == expected_metrics[2]
+    assert calls == [str(tmp_path / path) for path in expected_calls]
 
 
 def test_event_pictures_dir_outside_gfx_is_catalogued(graphics_tree):

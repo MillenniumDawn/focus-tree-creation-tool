@@ -109,6 +109,17 @@ def test_nested_braces_inside_strings_do_not_shift_brace_matching():
     assert extract_named_block(source, "deeper") == ' x = "}}}" '
 
 
+def test_match_brace_honors_exclusive_end_bound():
+    source = "{ nested = { value = yes } }"
+    nested_open = source.index("{", 1)
+    nested_close = source.index("}", nested_open)
+    outer_close = source.rindex("}")
+
+    assert match_brace(source, nested_open, nested_close + 1) == nested_close
+    assert match_brace(source, 0, nested_close + 1) == nested_close + 1
+    assert match_brace(source, 0) == outer_close
+
+
 def test_match_and_extract_block_ignore_braces_in_strings_and_comments():
     source = '{ text = "}" # }\n nested = { value = "{" } } trailing'
 

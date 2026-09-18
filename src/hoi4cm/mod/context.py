@@ -15,12 +15,10 @@ import os
 import re
 import time
 from collections.abc import Callable
+from typing import Any
 
 from hoi4cm.core.concurrency import DaemonThreadPoolExecutor
 from hoi4cm.core.config import cfg_load, cfg_save
-from hoi4cm.core.image import PIL_OK as _PIL_OK
-from hoi4cm.core.image import PILImage as _PILImage
-from hoi4cm.core.image import PILImageTk as _PILImageTk
 from hoi4cm.core.logger import get_logger
 from hoi4cm.core.lru import LRUCache
 from hoi4cm.core.paths import read_file
@@ -34,6 +32,20 @@ _log = get_logger("mod")
 # cache). Each drawn focus pins its image through the canvas image broker, so
 # evicting a cold entry here never blanks something on screen.
 _SPRITE_IMG_CACHE_SIZE = 512
+_PillowState = tuple[bool, Any, Any]
+_PIL_STATE: _PillowState | None = None
+
+
+def _get_pillow_state() -> _PillowState:
+    """Return Pillow's import state, publishing all three values together."""
+    global _PIL_STATE
+    state = _PIL_STATE
+    if state is None:
+        from hoi4cm.core.image import PIL_OK, PILImage, PILImageTk
+
+        state = (PIL_OK, PILImage, PILImageTk)
+        _PIL_STATE = state
+    return state
 
 
 # Pre-compiled regexes used by the ID scanners (compiled once, not per file).
@@ -731,7 +743,8 @@ class ModContext:
             self._img_errors.append("FILE NOT FOUND: " + path)
             return None
 
-        if not _PIL_OK or _PILImage is None or _PILImageTk is None:
+        pil_ok, pil_image, pil_image_tk = _get_pillow_state()
+        if not pil_ok or pil_image is None or pil_image_tk is None:
             self.sprite_imgs[key] = None
             self._img_errors.append("Pillow not available")
             return None
@@ -744,13 +757,13 @@ class ModContext:
                 if os.path.exists(alt):
                     try_paths.append(alt)
 
-        resample = getattr(_PILImage, "LANCZOS", getattr(_PILImage, "ANTIALIAS", 1))
+        resample = getattr(pil_image, "LANCZOS", getattr(pil_image, "ANTIALIAS", 1))
         last_err = ""
         for try_path in try_paths:
             try:
-                img = _PILImage.open(try_path).convert("RGBA")
+                img = pil_image.open(try_path).convert("RGBA")
                 img = img.resize(size, resample)
-                photo = _PILImageTk.PhotoImage(img)
+                photo = pil_image_tk.PhotoImage(img)
                 self.sprite_imgs[key] = photo
                 return photo
             except (OSError, ValueError, RuntimeError, AttributeError) as exc:

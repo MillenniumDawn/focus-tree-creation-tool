@@ -6,10 +6,13 @@ subdirectories the scanner walks, then verifies the corresponding
 side-effect-free.
 """
 
+import builtins
 import os
 import sqlite3
 import textwrap
 import threading
+import types
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
@@ -25,6 +28,7 @@ def isolate_scan_cache(tmp_path_factory, monkeypatch):
         scan_cache_mod, "STATE_DIR", str(tmp_path_factory.mktemp("hoi4cm_state"))
     )
     monkeypatch.setattr(MOD, "md_mode_override", None)
+    monkeypatch.setattr(ctx_mod, "_PIL_STATE", None)
 
 
 @pytest.fixture
@@ -343,13 +347,127 @@ def test_summary_includes_counts(mod_tree):
     assert "3 tags" in s
 
 
+class _FakeDecodedImage:
+    def convert(self, _mode):
+        return self
+
+    def resize(self, _size, _resample):
+        return self
+
+
+class _FakePillowImage:
+    LANCZOS = object()
+
+    def __init__(self):
+        self.opened = []
+
+    def open(self, path):
+        self.opened.append(path)
+        return _FakeDecodedImage()
+
+
+class _FakePillowImageTk:
+    def __init__(self):
+        self.photo_threads = []
+
+    def PhotoImage(self, image):
+        self.photo_threads.append((threading.get_ident(), image))
+        return object()
+
+
+def _install_fake_pillow_import(monkeypatch, barrier=None):
+    pillow_image = _FakePillowImage()
+    pillow_image_tk = _FakePillowImageTk()
+    core_image = types.SimpleNamespace(
+        PIL_OK=True, PILImage=pillow_image, PILImageTk=pillow_image_tk
+    )
+    real_import = builtins.__import__
+    import_calls = []
+
+    def fake_import(name, *args, **kwargs):
+        if name == "hoi4cm.core.image":
+            import_calls.append(threading.get_ident())
+            if barrier is not None:
+                barrier.wait(timeout=5)
+            return core_image
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+    return pillow_image, pillow_image_tk, import_calls, core_image
+
+
 def test_get_image_returns_none_when_pillow_unavailable(monkeypatch, mod_tree):
     """With Pillow disabled, get_image must return None, not crash."""
-    monkeypatch.setattr(ctx_mod, "_PIL_OK", False)
-    monkeypatch.setattr(ctx_mod, "_PILImage", None)
-    monkeypatch.setattr(ctx_mod, "_PILImageTk", None)
+    monkeypatch.setattr(ctx_mod, "_PIL_STATE", (False, None, None))
     MOD.scan(str(mod_tree))
     assert MOD.get_image("GFX_focus_USA_first_focus") is None
+
+
+def test_get_image_lazily_initializes_pillow_and_reuses_cache(monkeypatch, mod_tree):
+    (
+        pillow_image,
+        pillow_image_tk,
+        import_calls,
+        core_image,
+    ) = _install_fake_pillow_import(monkeypatch)
+    MOD.scan(str(mod_tree))
+
+    first = MOD.get_image("GFX_focus_USA_first_focus")
+    second = MOD.get_image("GFX_focus_USA_first_focus")
+
+    assert first is not None
+    assert second is first
+    assert import_calls == [threading.get_ident()]
+    assert pillow_image.opened == [
+        str(mod_tree / "gfx" / "interface" / "goals" / "USA_first_focus.dds")
+    ]
+    assert [thread_id for thread_id, _image in pillow_image_tk.photo_threads] == [
+        threading.get_ident()
+    ]
+    state = ctx_mod._get_pillow_state()
+    assert state == (True, pillow_image, pillow_image_tk)
+    assert state is ctx_mod._PIL_STATE
+    assert core_image.PILImage is pillow_image
+
+
+def test_pillow_state_concurrent_initialization_is_atomic(monkeypatch, mod_tree):
+    barrier = threading.Barrier(2)
+    pillow_image, pillow_image_tk, import_calls, _core_image = (
+        _install_fake_pillow_import(monkeypatch, barrier)
+    )
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [executor.submit(ctx_mod._get_pillow_state) for _ in range(2)]
+        results = [future.result() for future in futures]
+
+    expected = (True, pillow_image, pillow_image_tk)
+    assert results == [expected, expected]
+    assert ctx_mod._PIL_STATE == expected
+    assert len(import_calls) == 2
+    assert pillow_image_tk.photo_threads == []
+
+    MOD.scan(str(mod_tree))
+    photo = MOD.get_image("GFX_focus_USA_first_focus")
+    assert photo is not None
+    assert [thread_id for thread_id, _image in pillow_image_tk.photo_threads] == [
+        threading.get_ident()
+    ]
+
+
+def test_get_image_falls_back_from_invalid_dds_to_png(tk_root, tmp_path):
+    image = pytest.importorskip("PIL.Image")
+    dds = tmp_path / "icon.dds"
+    png = tmp_path / "icon.png"
+    dds.write_bytes(b"not a DDS image")
+    image.new("RGB", (12, 8), "#123456").save(png)
+
+    context = ctx_mod.ModContext()
+    context.sprites["GFX_test"] = str(dds)
+    photo = context.get_image("GFX_test", size=(32, 24))
+
+    assert photo is not None
+    assert photo.width() == 32
+    assert photo.height() == 24
 
 
 def test_get_image_returns_none_for_unknown_gfx(mod_tree):

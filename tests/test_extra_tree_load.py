@@ -5,7 +5,11 @@ from typing import Any, cast
 from unittest.mock import Mock
 
 import hoi4_content_maker as m
-from hoi4cm.focus_tree.parse import EmptyFocusTreeError
+import hoi4cm.focus_tree.parse as parse_module
+from hoi4cm.focus_tree.parse import (
+    EmptyFocusTreeError,
+    FocusTreeParseBudgetExceeded,
+)
 from hoi4cm.models import FocusDocument
 
 
@@ -32,7 +36,7 @@ def _patch_run_bg(monkeypatch, calls: list[dict[str, Any]]):
         calls.append(kwargs)
         try:
             on_done(work())
-        except EmptyFocusTreeError as exc:
+        except (EmptyFocusTreeError, FocusTreeParseBudgetExceeded) as exc:
             if on_error is not None:
                 on_error(exc)
             else:
@@ -87,7 +91,7 @@ def test_import_tree_rejects_oversized_file(tmp_path, monkeypatch):
     monkeypatch.setattr(m, "report_error", lambda *args, **_k: errors.append(args))
     monkeypatch.setattr(m.MOD, "loaded", False)
     monkeypatch.setattr(m.MOD, "root", None)
-    app = SimpleNamespace()
+    app = SimpleNamespace(_confirm_discard=Mock(return_value=True))
 
     m.App._import_txt(cast(m.App, app))
 
@@ -108,6 +112,36 @@ def test_load_extra_tree_rejects_oversized_file(tmp_path, monkeypatch):
     m.App._load_extra_tree(cast(m.App, app), "joint")
 
     assert errors
+
+
+def test_load_extra_tree_budget_failure_warns(tmp_path, monkeypatch):
+    tree = tmp_path / "over_budget.txt"
+    tree.write_text(
+        "focus_tree = {\n\tid = over_budget\n\tfocus = { id = TST_focus }\n}\n",
+        encoding="utf-8",
+    )
+    warnings: list[tuple] = []
+    calls: list[dict[str, Any]] = []
+    _patch_run_bg(monkeypatch, calls)
+    monkeypatch.setattr(m.filedialog, "askopenfilename", lambda **_k: str(tree))
+    monkeypatch.setattr(
+        m.messagebox, "showwarning", lambda *args, **_k: warnings.append(args)
+    )
+    monkeypatch.setattr(
+        m,
+        "progress_modal",
+        lambda *_a, **_k: SimpleNamespace(close=lambda: None),
+    )
+    monkeypatch.setattr(m.MOD, "loaded", False)
+    monkeypatch.setattr(m.MOD, "root", None)
+    monkeypatch.setattr(parse_module, "MAX_RAW_BLOCK_RESCANS", 0)
+    app = _shell()
+
+    m.App._load_extra_tree(cast(m.App, app), "shared")
+
+    assert calls and calls[0]["scope"] == "document"
+    assert warnings and "parse budget exhausted" in warnings[0][1]
+    assert not app.focuses
     assert not app._extra_trees
 
 

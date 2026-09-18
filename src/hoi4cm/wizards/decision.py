@@ -99,6 +99,15 @@ def collect_decision_state(evars, dec=None):
     }
 
 
+def decision_save_needs_confirmation(target_path, import_source, target_exists):
+    """Return whether saving would overwrite a file not imported by the wizard."""
+    if not target_exists:
+        return False
+    target = os.path.normcase(os.path.abspath(target_path))
+    source = os.path.normcase(os.path.abspath(import_source)) if import_source else None
+    return target != source
+
+
 def open_decision_wizard(app):
     """HOI4 Decision / Decision Category maker — matches mockup layout."""
     win = tk.Toplevel(app)
@@ -225,6 +234,7 @@ def open_decision_wizard(app):
     dm_decs = []
     sel: dict[str, object] = {"uid": None, "type": None}
     _uid_n = [0]
+    _decision_import_source = None
 
     def _uid():
         _uid_n[0] += 1
@@ -306,6 +316,7 @@ def open_decision_wizard(app):
             priority="1",
             chain="",
             highlight_states="",
+            _extras=[],
         )
 
     # ── helpers ──────────────────────────────────────────────────────────────
@@ -4503,6 +4514,7 @@ def open_decision_wizard(app):
         ).pack(side="right", padx=10)
 
     def _import_txt(_paths=None):
+        nonlocal _decision_import_source
         import os as _os
         import re as _re
 
@@ -4522,6 +4534,7 @@ def open_decision_wizard(app):
         # Auto-set edit target to the first imported .txt so Save overwrites in place
         _first_txt = next((p for p in paths if p.lower().endswith(".txt")), None)
         if _first_txt:
+            _decision_import_source = _first_txt
             MOD.edit_decisions_file = _first_txt
             # Try to auto-detect matching categories file in common/decisions/categories/
             _base = _os.path.basename(_first_txt)
@@ -4652,6 +4665,8 @@ def open_decision_wizard(app):
                         "icon": "icon",
                         "mission_timeout": "days_mission_timeout",
                         "target_array": "target_array",
+                        "war_complete_tag": "war_with_on_complete",
+                        "war_remove_tag": "war_with_on_remove",
                     }
                     for dkey, hkey in sv_map.items():
                         v = _get_value(dec_inner, hkey or dkey)
@@ -4681,6 +4696,10 @@ def open_decision_wizard(app):
                         d["targets_dynamic"] = True
                     if _get_yes_no(dec_inner, "target_non_existing"):
                         d["target_non_existing"] = True
+                    if _get_yes_no(dec_inner, "war_with_target_on_complete"):
+                        d["war_target_complete"] = True
+                    if _get_yes_no(dec_inner, "war_with_target_on_remove"):
+                        d["war_target_remove"] = True
 
                     # ── cost type detection ──
                     if _re.search(r"\bcustom_cost_trigger\b", dec_inner):
@@ -4732,6 +4751,8 @@ def open_decision_wizard(app):
                             d["targets"] = tv
                     if _re.search(r"\bstate_target\b", dec_inner):
                         d["targeted"] = "state"
+                    d["_extras"] = _generators.capture_decision_extras(dec_inner)
+
                     if d["targeted"] != "none":
                         on_mm = _get_value(dec_inner, "on_map_mode")
                         if on_mm:
@@ -4911,6 +4932,15 @@ def open_decision_wizard(app):
             dec_path = os.path.join(
                 mod_root, "common", "decisions", f"{ns}_decisions.txt"
             )
+        if decision_save_needs_confirmation(
+            dec_path, _decision_import_source, os.path.isfile(dec_path)
+        ) and not messagebox.askyesno(
+            "Overwrite Existing Decisions",
+            "This decisions file was not imported by the wizard.\n"
+            "Overwrite its existing contents?",
+            parent=win,
+        ):
+            return
         try:
             dec_encoding = "utf-8"
             existing_dec = ""

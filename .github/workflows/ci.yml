@@ -44,6 +44,8 @@ jobs:
       # Turns "no display" from a silent skip into a failure, so a broken
       # Xvfb can't quietly drop every widget test (tests/conftest.py).
       HOI4CM_REQUIRE_TK: "1"
+      # The test guard fails if CI did not install the lock's exact Pillow pin.
+      HOI4CM_REQUIRE_PINNED_PILLOW: "1"
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
@@ -53,7 +55,20 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install dev dependencies
-        run: pip install ".[dev]"
+        run: |
+          # Reuse the build lock's exact Pillow pin without duplicating it here.
+          pillow_lines="$(grep '^pillow==' build/requirements.txt || true)"
+          pillow_count="$(
+            printf '%s\n' "$pillow_lines" | grep -c '^pillow==' || true
+          )"
+          test "$pillow_count" -eq 1
+          pillow_line="$pillow_lines"
+          printf '%s\n' "$pillow_line" | grep -Eq \
+            '^pillow==[0-9]+\.[0-9]+\.[0-9]+ \\$'
+          pillow_version="${pillow_line#pillow==}"
+          pillow_version="${pillow_version% \\}"
+          test -n "$pillow_version"
+          pip install ".[dev]" "Pillow==$pillow_version"
       - name: Run tests
         # Xvfb gives the Tk widget tests a display; without it they skip.
         run: >

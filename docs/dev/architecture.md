@@ -148,11 +148,12 @@ from hoi4cm.core import (
 
 `core/__init__.py` re-exports from its own submodules (`config.py`,
 `i18n.py`, `logger.py`, `paths.py`, `safe_path.py`, `safe_xml.py`) and also
-re-exports from sibling subpackages (`data`, `focus_tree`, `models`,
-`script`, `ui`) so the monolith has one import line to maintain. When you
-extract a new module, add the public name to the owning subpackage's
-`__all__`, then add it to `core/__init__.py`'s import and `__all__` if the
-monolith (or a wizard) needs it from there.
+re-exports from sibling subpackages (`data`, `focus_tree`, `models`, `script`)
+so the monolith has one import line to maintain. UI helpers remain owned by
+`hoi4cm.ui` and are not re-exported through core, keeping the core facade free
+of Tk imports. When you extract a new module, add the public name to the owning
+subpackage's `__all__`, then add it to `core/__init__.py`'s import and `__all__`
+if the monolith (or a wizard) needs it from there.
 
 The old underscore-aliasing story (`_cfg_load = cfg_load`, etc.) is gone
 from the monolith. One survivor remains, but it moved with its only caller:

@@ -74,7 +74,6 @@ from hoi4cm.core import (  # noqa: E402
     safe_join,
     sanitize_component,
     set_error_callback,
-    show_splash,
     tr,
 )
 from hoi4cm.editor import (  # noqa: E402
@@ -85,6 +84,7 @@ from hoi4cm.editor import (  # noqa: E402
     workspace_autosave_path,
     write_project,
 )
+from hoi4cm.focus_tree import FocusTreeParseBudgetExceeded  # noqa: E402
 from hoi4cm.focus_tree.validate import (  # noqa: E402
     collect_loc_keys_from_text,
     validate_document,
@@ -133,6 +133,7 @@ from hoi4cm.ui import (  # noqa: E402
     report_error,
     report_write_failure,
     run_bg,
+    show_splash,
 )
 from hoi4cm.ui.canvas import CanvasMixin  # noqa: E402
 from hoi4cm.ui.checklist import (  # noqa: E402
@@ -4317,6 +4318,8 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             )
 
     def _import_txt(self):
+        if not self._confirm_discard(action="importing"):
+            return
         # If mod is loaded, open directly in common/national_focus
         init_dir = None
         if MOD.loaded and MOD.root:
@@ -4349,16 +4352,12 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
 
         self._begin_document_generation()
 
-        # Auto-set the edit target so Export writes back to this file in place
-        MOD.edit_focus_file = path
         # If mod is loaded, also try to auto-detect the matching localisation file
         detected_loc_path = ""
         if MOD.loaded and MOD.root:
             detected_loc_path = detect_loc_file(
                 MOD.root, raw, language=MOD.loc_language
             )
-            if detected_loc_path:
-                MOD.edit_loc_file = detected_loc_path
 
         import_generation = getattr(self, "_import_generation", 0) + 1
         self._import_generation = import_generation
@@ -4401,9 +4400,15 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             if import_generation != self._import_generation:
                 return
             parsed, new_focuses = result
+            # Commit import targets only after parse/build succeeded and this
+            # generation is still current.
+            MOD.edit_focus_file = path
+            if detected_loc_path:
+                MOD.edit_loc_file = detected_loc_path
 
             # clear existing
             # Clear canvas; _items refs are gone since we cv.delete('all')
+            self._push_undo("import tree")
             self.cv.delete("all")
             self.focuses.clear()
             self._reset_canvas_bounds()
@@ -4480,7 +4485,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             modal.close()
             if import_generation != self._import_generation:
                 return
-            if isinstance(exc, EmptyFocusTreeError):
+            if isinstance(exc, (EmptyFocusTreeError, FocusTreeParseBudgetExceeded)):
                 messagebox.showwarning(tr("dialog.import.title", "Import"), str(exc))
             # else: unexpected error, already recorded in the in-app error
             # log by run_bg.
@@ -4637,7 +4642,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
 
         def on_error(exc):
             modal.close()
-            if isinstance(exc, EmptyFocusTreeError):
+            if isinstance(exc, (EmptyFocusTreeError, FocusTreeParseBudgetExceeded)):
                 messagebox.showwarning(
                     tr("dialog.load_tree.title", "Load Tree"), str(exc)
                 )
@@ -6450,7 +6455,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
 # ─────────────────────────── ENTRY POINT ────────────────────────
 if __name__ == "__main__":
     if "--smoke-test" in sys.argv:
-        from hoi4cm.core import check_tk_startup
+        from hoi4cm.ui.startup_check import check_tk_startup
 
         check_tk_startup()
         sys.exit(0)

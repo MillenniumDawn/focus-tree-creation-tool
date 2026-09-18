@@ -1112,15 +1112,6 @@ def open_dyn_mod_wizard(app):
         def full(rel):
             return os.path.join(mod_root, rel)
 
-        def read_existing_text(rel):
-            p = full(rel)
-            if not os.path.exists(p):
-                return _READ_MISSING, None, None
-            content, encoding = read_file_with_encoding(p)
-            if content is None or encoding is None:
-                return _READ_FAILED, None, None
-            return _READ_CONTENT, content, encoding
-
         def record_read_error(rel):
             message = f"Could not read existing file: {rel}"
             add_error(message)
@@ -1249,7 +1240,9 @@ def open_dyn_mod_wizard(app):
                 loc_target.dirname(),
                 loc_target.filename(mid),
             )
-        loc_state, loc_existing, loc_encoding = read_existing_text(loc_rel)
+        loc_state, loc_existing, loc_encoding = _read_existing_file_with_encoding(
+            full(loc_rel)
+        )
         loc_read_failed = loc_state == _READ_FAILED
         if selected_loc and loc_state == _READ_MISSING:
             loc_read_failed = True
@@ -1333,7 +1326,9 @@ def open_dyn_mod_wizard(app):
         if icon_gfx:
             icon_name = icon_gfx.replace("GFX_idea_", "").replace("GFX_", "")
             gfx_rel = os.path.join("interface", "ideas.gfx")
-            gfx_state, gfx_existing, gfx_encoding = read_existing_text(gfx_rel)
+            gfx_state, gfx_existing, gfx_encoding = _read_existing_file_with_encoding(
+                full(gfx_rel)
+            )
             if gfx_state == _READ_FAILED:
                 record_read_error(gfx_rel)
             else:

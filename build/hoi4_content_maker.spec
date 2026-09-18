@@ -7,10 +7,14 @@ a = Analysis(
     ['..\\hoi4_content_maker.py'],
     pathex=['..', '..\\src'],
     binaries=[],
-    datas=[],
+    datas=[('..\\locales', 'locales')],
     hiddenimports=[
         'hoi4cm', 'hoi4cm.core', 'hoi4cm.core.logger',
         'hoi4cm.core.config', 'hoi4cm.core.paths', 'logging.handlers',
+        # The wizard entry points are resolved lazily at runtime.
+        'hoi4cm.wizards.national_spirit', 'hoi4cm.wizards.decision',
+        'hoi4cm.wizards.dyn_mod', 'hoi4cm.wizards.additional_income',
+        'hoi4cm.wizards.event',
         'tkinter', 'tkinter.ttk', 'tkinter.messagebox',
         'tkinter.filedialog', 'tkinter.font', 'tkinter.scrolledtext',
         'PIL', 'PIL.Image', 'PIL.ImageTk',

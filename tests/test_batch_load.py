@@ -75,7 +75,7 @@ def test_batch_load_worker_stops_before_any_file_when_already_cancelled(tmp_path
     assert seen == []
 
 
-def test_batch_load_worker_finishes_current_file_then_stops(tmp_path):
+def test_batch_load_worker_drops_current_file_when_cancelled_during_parse(tmp_path):
     first = _write_tree(tmp_path / "a.txt", "a")
     second = _write_tree(tmp_path / "b.txt", "b")
     flag = threading.Event()
@@ -95,7 +95,5 @@ def test_batch_load_worker_finishes_current_file_then_stops(tmp_path):
     )
 
     assert stopped is True
-    assert len(results) == 1
-    assert results[0]["ok"] is True
-    assert results[0]["path"] == first
+    assert results == []
     assert seen == ["a.txt"]

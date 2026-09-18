@@ -62,6 +62,15 @@ def _stage(target: Path, text: str, encoding: str) -> Path:
     directory, a bad encoding, a full disk — fails here, before the target
     itself is touched.
     """
+    return _stage_bytes(target, text.encode(encoding))
+
+
+def _stage_bytes(target: Path, content: bytes) -> Path:
+    """Write ``content`` to a sibling temp file, fully flushed to disk.
+
+    Everything that can reasonably fail — a missing parent, an unwritable
+    directory, a full disk — fails here, before the target itself is touched.
+    """
     target.parent.mkdir(parents=True, exist_ok=True)
     target_mode: int | None
     try:
@@ -72,14 +81,9 @@ def _stage(target: Path, text: str, encoding: str) -> Path:
     try:
         if target_mode is not None:
             os.chmod(temporary_path, target_mode)
-        with os.fdopen(
-            descriptor,
-            "w",
-            encoding=encoding,
-            newline="" if target_mode is not None else None,
-        ) as temporary:
+        with os.fdopen(descriptor, "wb") as temporary:
             descriptor = -1
-            temporary.write(text)
+            temporary.write(content)
             temporary.flush()
             os.fsync(temporary.fileno())
     except BaseException:
@@ -145,15 +149,20 @@ class WorkspaceFiles:
             self._notify(target)
 
     def append_text(self, path: str | Path, text: str, *, encoding: str) -> None:
+        """Append ``text`` to ``path`` atomically (temp file + ``os.replace``)."""
         target = Path(path)
         target.parent.mkdir(parents=True, exist_ok=True)
-        exists = target.exists()
-        if exists:
+        original = _read_bytes(target) or b""
+        if original:
             text = convert_newlines(text, _existing_newline(target))
-        with target.open(
-            "a", encoding=encoding, newline="" if exists else None
-        ) as stream:
-            stream.write(text)
+        payload_encoding = (
+            "utf-8" if (original and encoding == "utf-8-sig") else encoding
+        )
+        temporary = _stage_bytes(target, original + text.encode(payload_encoding))
+        try:
+            os.replace(temporary, target)
+        finally:
+            _unlink(temporary)
         self._notify(target)
 
     def _notify(self, path: Path) -> None:

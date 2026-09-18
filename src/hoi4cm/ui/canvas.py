@@ -12,7 +12,12 @@ from typing import Any
 
 from hoi4cm.focus_tree.validate import Severity
 from hoi4cm.mod import MOD
-from hoi4cm.ui import (
+from hoi4cm.ui.canvas_renderer import FocusCanvasBundle
+from hoi4cm.ui.canvas_scheduler import DirtyRedrawState, RedrawChannel
+from hoi4cm.ui.image_broker import ImageBroker
+from hoi4cm.ui.scene_index import DEBUG_VALIDATE, SceneIndex
+from hoi4cm.ui.tasks import get_executor
+from hoi4cm.ui.theme import (
     BG_CARD,
     BLUE,
     BORDER_G,
@@ -29,11 +34,6 @@ from hoi4cm.ui import (
     XGRID,
     YGRID,
 )
-from hoi4cm.ui.canvas_renderer import FocusCanvasBundle
-from hoi4cm.ui.canvas_scheduler import DirtyRedrawState, RedrawChannel
-from hoi4cm.ui.image_broker import ImageBroker
-from hoi4cm.ui.scene_index import DEBUG_VALIDATE, SceneIndex
-from hoi4cm.ui.tasks import get_executor
 from hoi4cm.ui.viewport import edge_visible, focus_visible, visible_world_rect
 
 # Margin (canvas pixels, scaled by zoom) added around the viewport before
@@ -73,6 +73,10 @@ class CanvasMixin:
     _redraw_state: Any  # type: ignore[no-redef]
     _scene_index: Any  # type: ignore[no-redef]
     _focus_bundles: Any  # type: ignore[no-redef]
+    _canvas_probe: Any  # type: ignore[no-redef]
+    _rendering_frame: Any  # type: ignore[no-redef]
+    _focus_line_stack_dirty: Any  # type: ignore[no-redef]
+    _lines_key: Any  # type: ignore[no-redef]
     _redraw_job: Any  # type: ignore[no-redef]
     _lines_job: Any  # type: ignore[no-redef]
     _push_undo: Any  # type: ignore[no-redef]
@@ -304,6 +308,37 @@ class CanvasMixin:
             self._scene_index = SceneIndex()
         if not hasattr(self, "_focus_bundles"):
             self._focus_bundles = {}
+        if not hasattr(self, "_focus_line_stack_dirty"):
+            self._focus_line_stack_dirty = False
+        if not hasattr(self, "_canvas_probe"):
+            self._canvas_probe = self.cv.create_line(
+                0, 0, 0, 0, state="hidden", tags=("focus", "canvas_probe")
+            )
+
+    def _canvas_item_exists(self, item):
+        try:
+            return bool(self.cv.type(item))
+        except tk.TclError:
+            return False
+
+    def _validate_canvas_probe(self):
+        """Recover pooled items after an external canvas deletion."""
+        if self._canvas_item_exists(self._canvas_probe):
+            return
+        self.cv.delete("focus")
+        self.cv.delete("line")
+        self.cv.delete("grid")
+        self._focus_bundles.clear()
+        self._lines.clear()
+        self._lines_used = 0
+        self._lines_key = None
+        self._grid_pool = []
+        self._grid_used = 0
+        self._grid_key = None
+        self._grid_item = None
+        self._canvas_probe = self.cv.create_line(
+            0, 0, 0, 0, state="hidden", tags=("focus", "canvas_probe")
+        )
 
     def _redraw(
         self,
@@ -327,31 +362,43 @@ class CanvasMixin:
         self._render_frame(request.channels)
 
     def _render_frame(self, channels):
-        max(1, self.cv.winfo_width())
-        max(1, self.cv.winfo_height())
-        self._scene_index.ensure(self.focuses, validate=DEBUG_VALIDATE)
-        if channels & RedrawChannel.SCENE:
-            self._grow_canvas_to_focuses()
-        self._draw_grid()
-        self._draw_canvas_bounds()
-        self._draw_coord_labels()
-        vis_rect = self._visible_rect()
-        self._draw_lines(vis_rect)
-        if vis_rect is None:
-            visible_ids = list(self.focuses)
-        else:
-            visible_ids = self._scene_index.query_focus_ids(vis_rect)
-        self._reclaim_focus_bundles(set(visible_ids))
-        for focus_id in visible_ids:
-            focus = self.focuses.get(focus_id)
-            if focus is not None:
-                self._draw_focus(focus, vis_rect)
-        self._draw_cfp_markers()
-        self._draw_canvas_legend()
-        self._update_statusbar()
-        if channels & RedrawChannel.FOCUS_LIST:
-            self._update_focus_list_selection()
-        self._draw_minimap()
+        self._canvas_runtime()
+        self._validate_canvas_probe()
+        self._rendering_frame = True
+        try:
+            max(1, self.cv.winfo_width())
+            max(1, self.cv.winfo_height())
+            self._scene_index.ensure(self.focuses, validate=DEBUG_VALIDATE)
+            if channels & RedrawChannel.SCENE:
+                self._grow_canvas_to_focuses()
+            self._draw_grid()
+            self._draw_canvas_bounds()
+            self._draw_coord_labels()
+            vis_rect = self._visible_rect()
+            self._draw_lines(vis_rect)
+            if vis_rect is None:
+                visible_ids = list(self.focuses)
+            else:
+                visible_ids = self._scene_index.query_focus_ids(vis_rect)
+            self._reclaim_focus_bundles(set(visible_ids))
+            for focus_id in visible_ids:
+                focus = self.focuses.get(focus_id)
+                if focus is not None:
+                    self._draw_focus(focus, vis_rect)
+            if self._focus_line_stack_dirty:
+                if self._lines and any(
+                    bundle.lod == "full" for bundle in self._focus_bundles.values()
+                ):
+                    self.cv.tag_lower("focus_lbl", "line")
+                self._focus_line_stack_dirty = False
+            self._draw_cfp_markers()
+            self._draw_canvas_legend()
+            self._update_statusbar()
+            if channels & RedrawChannel.FOCUS_LIST:
+                self._update_focus_list_selection()
+            self._draw_minimap()
+        finally:
+            self._rendering_frame = False
 
     def _draw_lines_throttled(self):
         """Coalesce rapid line redraws (during a drag) to ~60fps.
@@ -435,7 +482,11 @@ class CanvasMixin:
             self._grid_used = 0
         # A `cv.delete("all")` elsewhere (new/clear document) takes the pooled
         # items with it; the ids left behind name nothing.
-        if self._grid_pool and not self.cv.type(self._grid_pool[0]):
+        if (
+            not getattr(self, "_rendering_frame", False)
+            and self._grid_pool
+            and not self.cv.type(self._grid_pool[0])
+        ):
             self._grid_pool.clear()
             self._grid_used = 0
             self._grid_key = None
@@ -617,10 +668,21 @@ class CanvasMixin:
     def _draw_lines(self, vis_rect=None):
         """Draw edges: solid blue elbow+arrow for prereqs; dashed orange for mutex."""
         self._canvas_runtime()
+        if not getattr(self, "_rendering_frame", False):
+            self._validate_canvas_probe()
         self._scene_index.ensure(self.focuses, validate=False)
         cv = self.cv
         if vis_rect is None:
             vis_rect = self._visible_rect()
+        key = (
+            self.zoom,
+            self.offset[0],
+            self.offset[1],
+            self._scene_index.revision,
+            vis_rect,
+        )
+        if key == getattr(self, "_lines_key", None):
+            return
         half = BOX * self.zoom / 2
         lw = max(1, int(2.0 * self.zoom))  # line width scales with zoom
         asz = max(4, int(10 * self.zoom))  # arrowhead half-width
@@ -704,14 +766,19 @@ class CanvasMixin:
         self._lines_used = need
 
         if self._lines:
+            self._focus_line_stack_dirty = True
             cv.tag_lower("line")
             # Guard: grid may have no items (low zoom / toggled off).
             if cv.find_withtag("grid"):
                 cv.tag_lower("grid")
-            # Labels sit below lines so arrows always draw on top of text
-            # Guard: tag_lower("focus_lbl","line") crashes if "line" tag has no items
-            if cv.find_withtag("focus_lbl"):
+            # Labels sit below lines so arrows always draw on top of text.
+            # During a frame, defer this until after newly created labels exist.
+            if not getattr(self, "_rendering_frame", False) and cv.find_withtag(
+                "focus_lbl"
+            ):
                 cv.tag_lower("focus_lbl", "line")
+                self._focus_line_stack_dirty = False
+        self._lines_key = key
 
     def _delete_focus_bundle(self, focus_id):
         self._canvas_runtime()
@@ -752,6 +819,8 @@ class CanvasMixin:
     def _draw_focus(self, f, vis_rect=None):
         """Create once; skip update if state unchanged for near-zero idle cost."""
         self._canvas_runtime()
+        if not getattr(self, "_rendering_frame", False):
+            self._validate_canvas_probe()
         if vis_rect is None:
             vis_rect = self._visible_rect()
         cx, cy = self.w2c(f.x, f.y)
@@ -761,9 +830,6 @@ class CanvasMixin:
             return
 
         bundle = self._focus_bundles.get(f.id)
-        if bundle is not None and any(not self.cv.type(item) for item in bundle.items):
-            self._focus_bundles.pop(f.id, None)
-            bundle = None
         lod = "compact" if self.zoom < _FOCUS_LOD_ZOOM else "full"
         if bundle is not None and bundle.lod != lod:
             self._delete_focus_bundle(f.id)
@@ -969,6 +1035,7 @@ class CanvasMixin:
             )
             bundle = FocusCanvasBundle(items, lod)
             self._focus_bundles[f.id] = bundle
+            self._focus_line_stack_dirty = True
             self._bind_focus_items(items, fid)
         bundle.draw_key = state_key
 
