@@ -12,6 +12,8 @@ headless callers agree byte-for-byte.
 """
 
 import json
+import re
+import textwrap
 
 from hoi4cm.focus_tree.loc import LocTarget
 
@@ -20,6 +22,172 @@ def _indent_lines(text, n=1):
     """Indent every non-blank line by n tabs."""
     tab = "\t" * n
     return "\n".join(tab + line if line.strip() else line for line in text.splitlines())
+
+
+_DECISION_MODELED_KEYS = frozenset(
+    {
+        "allowed",
+        "icon",
+        "target_root_trigger",
+        "target_trigger",
+        "state_target",
+        "on_map_mode",
+        "targets",
+        "targets_dynamic",
+        "target_non_existing",
+        "target_array",
+        "visible",
+        "available",
+        "highlight_states",
+        "days_mission_timeout",
+        "selectable_mission",
+        "is_good",
+        "is_mission",
+        "activation",
+        "cost",
+        "ai_hint_pp_cost",
+        "custom_cost_trigger",
+        "custom_cost_text",
+        "days_remove",
+        "days_re_enable",
+        "fire_only_once",
+        "fixed_random_seed",
+        "war_with_target_on_complete",
+        "war_with_target_on_remove",
+        "war_with_on_complete",
+        "war_with_on_remove",
+        "war_with_on_timeout",
+        "modifier",
+        "complete_effect",
+        "timeout_effect",
+        "remove_effect",
+        "cancel_trigger",
+        "cancel_effect",
+        "cancel_if_not_visible",
+        "remove_trigger",
+        "ai_will_do",
+        "priority",
+    }
+)
+
+
+def _skip_script_string(source, position):
+    end = source.find('"', position + 1)
+    return len(source) if end == -1 else end + 1
+
+
+def _skip_script_comment(source, position):
+    end = source.find("\n", position)
+    return len(source) if end == -1 else end
+
+
+def _skip_space_and_comments(source, position):
+    while position < len(source):
+        if source[position].isspace():
+            position += 1
+        elif source[position] == "#":
+            position = _skip_script_comment(source, position)
+        else:
+            break
+    return position
+
+
+def _block_value_end(source, position):
+    depth = 0
+    while position < len(source):
+        char = source[position]
+        if char == '"':
+            position = _skip_script_string(source, position)
+        elif char == "#":
+            position = _skip_script_comment(source, position)
+        elif char == "{":
+            depth += 1
+            position += 1
+        elif char == "}":
+            depth -= 1
+            position += 1
+            if depth == 0:
+                return position
+        else:
+            position += 1
+    return len(source)
+
+
+def _assignment_end(source, position):
+    position = _skip_space_and_comments(source, position)
+    if position < len(source) and source[position] == "{":
+        return _block_value_end(source, position)
+    while position < len(source) and source[position] != "\n":
+        if source[position] == '"':
+            position = _skip_script_string(source, position)
+        else:
+            position += 1
+    return position
+
+
+def _top_level_assignments(source):
+    assignments = []
+    position = 0
+    depth = 0
+    identifier = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+    while position < len(source):
+        char = source[position]
+        if char == '"':
+            position = _skip_script_string(source, position)
+            continue
+        if char == "#":
+            position = _skip_script_comment(source, position)
+            continue
+        if char == "{":
+            depth += 1
+            position += 1
+            continue
+        if char == "}":
+            depth = max(depth - 1, 0)
+            position += 1
+            continue
+        if depth == 0 and (char.isalpha() or char == "_"):
+            match = identifier.match(source, position)
+            if match:
+                equals = _skip_space_and_comments(source, match.end())
+                if equals < len(source) and source[equals] == "=":
+                    raw_start = match.start()
+                    while raw_start > 0 and source[raw_start - 1] in " \t":
+                        raw_start -= 1
+                    raw_end = _assignment_end(source, equals + 1)
+                    assignments.append((match.group(), raw_start, raw_end))
+                    position = raw_end
+                    continue
+                position = match.end()
+                continue
+        position += 1
+    return assignments
+
+
+def capture_decision_extras(source, modeled_keys=None):
+    """Capture unmodelled top-level decision assignments as raw text."""
+    modeled = (
+        _DECISION_MODELED_KEYS if modeled_keys is None else frozenset(modeled_keys)
+    )
+    extras = []
+    for name, start, end in _top_level_assignments(source):
+        if name not in modeled:
+            raw = textwrap.dedent(source[start:end]).strip()
+            if raw:
+                extras.append(raw)
+    return extras
+
+
+def render_decision_extras(extras, indent=2):
+    """Indent captured decision assignments for re-emission."""
+    if isinstance(extras, str):
+        extras = [extras]
+    lines = []
+    for extra in extras or []:
+        if not isinstance(extra, str) or not extra.strip():
+            continue
+        lines.extend(_indent_lines(textwrap.dedent(extra).strip(), indent).splitlines())
+    return lines
 
 
 def render_event_txt(ev):
@@ -341,6 +509,7 @@ def generate_decision_block(dec, *, targeted=None, cost_type=None):
     if s(dec.get("priority", "")) not in ("", "1"):
         lines.append(f"{T2}priority = {s(dec['priority'])}")
 
+    lines.extend(render_decision_extras(dec.get("_extras", []), indent=2))
     lines.append(f"{T1}}}")
     return "\n".join(lines)
 
