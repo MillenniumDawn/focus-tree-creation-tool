@@ -128,10 +128,18 @@ def parse_script(source: str) -> dict[str, object]:
     return result
 
 
-def match_brace(source: str, open_index: int) -> int:
-    """Return a matching close-brace index, or ``len(source)`` if missing."""
+def match_brace(source: str, open_index: int, end_index: int | None = None) -> int:
+    """Return a matching close-brace index, or the scan end if missing.
+
+    ``end_index`` is an exclusive bound for the scan when provided. Without
+    it, the scan end is ``len(source)``.
+    """
     depth = 0
-    for match in _BRACE_RE.finditer(source, open_index):
+    if end_index is None:
+        matches = _BRACE_RE.finditer(source, open_index)
+    else:
+        matches = _BRACE_RE.finditer(source, open_index, end_index)
+    for match in matches:
         char = match.group()
         if char == "{":
             depth += 1
@@ -139,7 +147,7 @@ def match_brace(source: str, open_index: int) -> int:
             depth -= 1
             if depth == 0:
                 return match.start()
-    return len(source)
+    return len(source) if end_index is None else end_index
 
 
 def extract_block(source: str, open_index: int = 0) -> tuple[str, int]:

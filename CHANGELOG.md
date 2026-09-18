@@ -8,6 +8,11 @@ the version by hand. See `AGENTS.md`.
 
 ## Unreleased
 
+### Focus-tree parser
+
+- Bound malformed nested-block rescans and let batch imports cancel a
+  file without returning partial model data.
+
 ### Packaged Windows builds
 
 **[BUGFIX] Standard builds no longer open a console window**
