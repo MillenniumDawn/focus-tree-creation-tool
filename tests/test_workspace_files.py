@@ -3,6 +3,7 @@ import stat
 
 import pytest
 
+import hoi4cm.mod.workspace_files as workspace_files_module
 from hoi4cm.mod.workspace_files import WorkspaceFiles
 
 
@@ -195,6 +196,68 @@ def test_write_text_still_takes_the_single_entry_path(tmp_path, monkeypatch):
     WorkspaceFiles().write_text(target, "new", encoding="utf-8")
 
     assert target.read_text() == "new"
+
+
+def test_append_text_preserves_existing_bytes(tmp_path):
+    target = tmp_path / "data.txt"
+    original = bytes((0xFF, 0xFE)) + b"existing" + bytes((13, 10))
+    appended = "second" + chr(10)
+    target.write_bytes(original)
+
+    WorkspaceFiles().append_text(target, appended, encoding="utf-8")
+
+    assert target.read_bytes() == original + appended.encode("utf-8")
+
+
+def test_append_text_creates_missing_file(tmp_path):
+    target = tmp_path / "nested" / "data.txt"
+
+    WorkspaceFiles().append_text(target, "created", encoding="utf-8")
+
+    assert target.read_bytes() == b"created"
+
+
+def test_append_text_staging_failure_keeps_existing_file(tmp_path, monkeypatch):
+    target = tmp_path / "data.txt"
+    original = b"original" + bytes((0,)) + b"bytes"
+    target.write_bytes(original)
+    notifications = []
+    real_fdopen = workspace_files_module.os.fdopen
+
+    class FailingWriter:
+        def __init__(self, stream):
+            self._stream = stream
+
+        def __enter__(self):
+            self._stream.__enter__()
+            return self
+
+        def __exit__(self, *args):
+            return self._stream.__exit__(*args)
+
+        def write(self, content):
+            self._stream.write(content[:1])
+            raise OSError("write failed")
+
+        def flush(self):
+            return self._stream.flush()
+
+        def fileno(self):
+            return self._stream.fileno()
+
+    def failing_fdopen(*args, **kwargs):
+        return FailingWriter(real_fdopen(*args, **kwargs))
+
+    monkeypatch.setattr(workspace_files_module.os, "fdopen", failing_fdopen)
+
+    with pytest.raises(OSError, match="write failed"):
+        WorkspaceFiles(on_written=notifications.append).append_text(
+            target, " appended", encoding="utf-8"
+        )
+
+    assert target.read_bytes() == original
+    assert notifications == []
+    assert list(target.parent.glob("*.tmp")) == []
 
 
 def test_append_text_notifies_after_write(tmp_path):

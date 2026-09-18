@@ -5,6 +5,7 @@ Each test points ``STATE_DIR`` at a tmp dir so nothing touches the real
 """
 
 import os
+import sqlite3
 
 import pytest
 
@@ -168,3 +169,28 @@ def test_get_many_skips_none_contribution(cache):
     cache.commit()
     assert cache.get_many("focus", {"/x/a.txt": (1.0, 1)}) == {}
     assert cache.get("focus", "/x/a.txt", 1.0, 1) is None
+
+
+def test_close_still_closes_when_commit_fails(cache, monkeypatch):
+    inner = cache._conn
+    assert inner is not None
+    logged = []
+
+    class BoomConn:
+        def commit(self):
+            raise sqlite3.Error("disk I/O error")
+
+        def close(self):
+            inner.close()
+
+    def capture(msg, *args, **_kwargs):
+        logged.append(msg % args if args else msg)
+
+    cache._conn = BoomConn()
+    monkeypatch.setattr(sc._log, "warning", capture)
+    cache.close()
+    assert cache._conn is None
+    with pytest.raises(sqlite3.ProgrammingError):
+        inner.execute("SELECT 1")
+    assert logged
+    assert "commit failed" in logged[0]

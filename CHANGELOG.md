@@ -13,6 +13,12 @@ the version by hand. See `AGENTS.md`.
 - Bound malformed nested-block rescans and let batch imports cancel a
   file without returning partial model data.
 
+### Packaged Windows builds
+
+**[BUGFIX] Standard builds no longer open a console window**
+
+- Bundle locale files and all five lazy wizard modules in both PyInstaller specs.
+
 ---
 
 ## [0.4.3] — 2026-09-11
