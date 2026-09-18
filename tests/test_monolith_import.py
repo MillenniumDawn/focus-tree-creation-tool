@@ -38,6 +38,8 @@ def _shell():
         _invalidate_focus_list_structure=Mock(),
         _fit_all=Mock(),
         _import_generation=0,
+        _confirm_discard=Mock(return_value=True),
+        _push_undo=Mock(),
     )
     return app, old_focus
 
