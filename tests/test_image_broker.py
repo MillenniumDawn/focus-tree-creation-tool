@@ -401,10 +401,15 @@ def test_missing_pillow_does_not_submit_or_realize() -> None:
 
 def test_close_drops_inflight_owner_callback_without_waiting() -> None:
     gate = threading.Event()
+    started = threading.Event()
     delivered: list[object] = []
+    events: list[str] = []
 
     def decode(path: str, transform: ImageTransform) -> object:
+        events.append("started")
+        started.set()
         gate.wait(timeout=2)
+        events.append("finished")
         return object()
 
     executor = ThreadPoolExecutor(max_workers=1)
@@ -416,14 +421,14 @@ def test_close_drops_inflight_owner_callback_without_waiting() -> None:
         pillow_available=True,
     )
     broker.request(_asset(), "/tmp/icon.png", owner="window", callback=delivered.append)
+    assert started.wait(timeout=2)
 
-    before = time.monotonic()
     broker.close()
-    elapsed = time.monotonic() - before
+    events.append("closed")
     gate.set()
     executor.shutdown(wait=True)
     broker.drain()
 
-    assert elapsed < 0.1
+    assert events == ["started", "closed", "finished"]
     assert delivered == []
     assert not broker.pending
