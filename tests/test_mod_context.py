@@ -352,6 +352,22 @@ def test_get_image_returns_none_when_pillow_unavailable(monkeypatch, mod_tree):
     assert MOD.get_image("GFX_focus_USA_first_focus") is None
 
 
+def test_get_image_falls_back_from_invalid_dds_to_png(tk_root, tmp_path):
+    image = pytest.importorskip("PIL.Image")
+    dds = tmp_path / "icon.dds"
+    png = tmp_path / "icon.png"
+    dds.write_bytes(b"not a DDS image")
+    image.new("RGB", (12, 8), "#123456").save(png)
+
+    context = ctx_mod.ModContext()
+    context.sprites["GFX_test"] = str(dds)
+    photo = context.get_image("GFX_test", size=(32, 24))
+
+    assert photo is not None
+    assert photo.width() == 32
+    assert photo.height() == 24
+
+
 def test_get_image_returns_none_for_unknown_gfx(mod_tree):
     MOD.scan(str(mod_tree))
     assert MOD.get_image("GFX_does_not_exist") is None

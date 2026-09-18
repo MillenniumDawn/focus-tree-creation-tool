@@ -367,11 +367,12 @@ def test_open_gfx_placement_editor_constructs(tk_root, monkeypatch):
 
 def test_open_gfx_placement_editor_confirm_flow(tk_root, tmp_path, monkeypatch):
     """Confirming the placement editor invokes on_confirm with items."""
+    image = pytest.importorskip("PIL.Image")
     _stub_mod_app(tk_root, monkeypatch)
     from hoi4cm.ui.gfx_browser import open_gfx_placement_editor
 
     img = tmp_path / "icon.png"
-    img.write_bytes(b"\x89PNG\r\n")
+    image.new("RGBA", (12, 8), "#123456").save(img)
     confirmed: list[list[dict]] = []
 
     before: set[tk.Misc] = set(tk_root.winfo_children())
@@ -380,7 +381,7 @@ def test_open_gfx_placement_editor_confirm_flow(tk_root, tmp_path, monkeypatch):
         initial_items=[
             {
                 "gfx_key": "GFX_test",
-                "path": str(img),
+                "abs_path": str(img),
                 "role": "icon",
                 "x": 10,
                 "y": 10,
@@ -403,6 +404,7 @@ def test_open_gfx_placement_editor_confirm_flow(tk_root, tmp_path, monkeypatch):
         assert len(confirmed[0]) == 1
         assert confirmed[0][0]["gfx_key"] == "GFX_test"
         assert confirmed[0][0]["role"] == "icon"
+        assert confirmed[0][0]["img_ref"] is not None
         assert not win.winfo_exists()
     finally:
         _destroy_toplevels(wins, tk_root)
