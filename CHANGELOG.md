@@ -8,6 +8,10 @@ the version by hand. See `AGENTS.md`.
 
 ## Unreleased
 
+- Track per-area performance with a repeatable harness: `python
+  scripts/track_perf.py` times parsing, building, batch load, undo snapshots,
+  graphics catalog scans, scene-index work, and export on deterministic synthetic
+  workloads and writes a comparable JSON report (see docs/dev/performance.md).
 - Canvas redraws skip per-focus item probes and unchanged line updates: tests measure 14
   probes per visible full bundle reduced to one sentinel probe per frame; unchanged
   frames make zero `coords`, `itemconfig`, or `tag_lower` calls.

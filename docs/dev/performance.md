@@ -10,6 +10,66 @@ here should be checked against this scale, not a small test mod: a fix
 that helps a 50-focus tree and does nothing for a 23,524-focus load is not
 the target.
 
+## Profiling harness
+
+One command profiles every hot area on deterministic synthetic workloads and
+writes a comparable JSON report (`src/hoi4cm/perf/tracking.py`, stdlib only,
+no tkinter, no display):
+
+```bash
+python scripts/track_perf.py --preset quick --out /tmp/perf.json
+python scripts/track_perf.py --preset full --areas parse,build --repeats 3
+python scripts/track_perf.py --list-areas
+```
+
+| Area | What it times | Full-preset workload |
+|---|---|---|
+| `parse` | `parse_focus_tree` on one synthetic tree | 776 focuses (the reference largest tree's count) |
+| `build` | `build_focuses` from the already-parsed tree | 776 focuses |
+| `batch_load` | `batch_load_trees` over synthetic files on disk | 20 files x 25 focuses |
+| `undo` | sparse push, small mutate, undo, redo on a focus dict | 2,000 focuses, 2 touched ids |
+| `graphics_scan` | cold `GraphicsCatalog.refresh` (fresh cache dir per repeat) | 2,000 images + 1 `.gfx` |
+| `scene` | `SceneIndex` rebuild, no-op `ensure`, single-focus update | 2,000 focuses, 1,999 chain edges |
+| `export` | `export_main_tree` back to script text | 776 focuses |
+
+Each entry records the workload size, the median/min/max ms over the repeats
+(after one discarded warmup), and call counts where meaningful: the `undo`
+entry breaks out push/mutate/undo/redo medians, `graphics_scan` records the
+catalog metrics (`directory_listings`, `image_stats`, `gfx_reads`), and
+`scene` records the no-op `ensure` and single-focus update medians next to
+the full rebuild. The canvas itself needs Tk, so `scene` is the headless
+geometry work a frame depends on, not real widget calls.
+
+How to read it: rerun the same preset on the same machine and diff the
+`median_ms` values across branches. The synthetic focuses are lighter than
+real mod files (no localisation, few raw blocks), so the absolute numbers are
+baselines for deltas, not predictions of real-mod time; display-bound paths
+(real Tk frames, Load All Trees against the reference mod) still need a
+display session. Heavy timing stays out of the default suite by living in the
+scripts entry point: `tests/test_perf_tracking.py` only pins the report
+schema and workload determinism on a tiny preset (under a second). Example
+(`--preset quick`, Python 3.14.4, Linux):
+
+```json
+{
+  "areas": [
+    {"area": "parse", "workload": {"focuses": 200}, "median_ms": 2.712},
+    {"area": "build", "workload": {"focuses": 200}, "median_ms": 1.024},
+    {"area": "batch_load", "workload": {"focuses_total": 80},
+     "median_ms": 2.815},
+    {"area": "undo", "workload": {"focuses": 500}, "median_ms": 0.159,
+     "extra": {"push_median_ms": 0.06, "undo_median_ms": 0.057}},
+    {"area": "graphics_scan", "workload": {"images": 300},
+     "median_ms": 11.573},
+    {"area": "scene", "workload": {"focuses": 500, "edges": 499},
+     "median_ms": 3.855,
+     "extra": {"ensure_noop_median_ms": 0.004,
+              "update_focus_median_ms": 0.024}},
+    {"area": "export", "workload": {"focuses": 200}, "median_ms": 1.11}
+  ]
+}
+```
+
 ## Hot-path ledger
 
 | Finding | Location | Fix | Status | Measured delta |
