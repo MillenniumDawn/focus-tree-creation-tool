@@ -905,30 +905,27 @@ class GraphicsCatalog:
         snapshot: GraphicsSnapshot,
         source_roots: Mapping[str, str],
     ) -> bool:
-        current = True
         for record in snapshot.directories:
             self.last_metrics.directory_stats += 1
             try:
                 stat = os.stat(record.path.resolve(source_roots))
             except KeyError, OSError:
                 if record.exists:
-                    current = False
+                    return False
                 continue
             if not record.exists or not stat_module.S_ISDIR(stat.st_mode):
-                current = False
-                continue
+                return False
             if _stamp_from_stat(stat) != record.stamp:
-                current = False
+                return False
 
         for gfx_record in snapshot.gfx_files:
             self.last_metrics.gfx_file_stats += 1
             try:
                 stat = os.stat(gfx_record.path.resolve(source_roots))
             except KeyError, OSError:
-                current = False
-                continue
+                return False
             if _stamp_from_stat(stat) != gfx_record.stamp:
-                current = False
+                return False
 
         # Stat the known image paths too. Directory mtimes don't change when a
         # file is overwritten in place, so an image edit that keeps the same
@@ -939,11 +936,10 @@ class GraphicsCatalog:
             try:
                 stat = os.stat(image_record.path.resolve(source_roots))
             except KeyError, OSError:
-                current = False
-                continue
+                return False
             if _stamp_from_stat(stat) != image_record.stamp:
-                current = False
-        return current
+                return False
+        return True
 
     def _scan_snapshot(
         self,
@@ -1049,7 +1045,7 @@ class GraphicsCatalog:
             except OSError:
                 directories.append(DirectoryRecord(path_ref, False, FileStamp(0, 0, 0)))
                 return
-            if not os.path.isdir(directory):
+            if not stat_module.S_ISDIR(stat.st_mode):
                 directories.append(DirectoryRecord(path_ref, False, FileStamp(0, 0, 0)))
                 return
 
