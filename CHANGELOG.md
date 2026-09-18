@@ -8,6 +8,10 @@ the version by hand. See `AGENTS.md`.
 
 ## Unreleased
 
+---
+
+## [0.4.4] — 2026-09-18
+
 - Track per-area performance with a repeatable harness: `python
   scripts/track_perf.py` times parsing, building, batch load, undo snapshots,
   graphics catalog scans, scene-index work, and export on deterministic synthetic
