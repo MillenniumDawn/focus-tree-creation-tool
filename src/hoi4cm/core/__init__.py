@@ -67,7 +67,14 @@ from .logger import (
     log_startup,
     set_error_callback,
 )
-from .paths import autosave_path, default_hoi4_mod_dir, read_file
+from .paths import (
+    autosave_path,
+    convert_newlines,
+    default_hoi4_mod_dir,
+    newline_style,
+    read_file,
+    read_file_with_encoding,
+)
 from .safe_path import safe_join, sanitize_component
 from .safe_xml import bounded_inflate, safe_fromstring
 from .undo import UndoStack
@@ -130,6 +137,9 @@ __all__ = [
     "parse_drawio_graph",
     "parse_focus_tree",
     "read_file",
+    "read_file_with_encoding",
+    "convert_newlines",
+    "newline_style",
     "render_export_plan",
     "render_focus_block",
     "safe_join",

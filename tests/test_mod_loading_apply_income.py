@@ -86,6 +86,53 @@ def test_apply_income_injects_into_money_system_fixed(tmp_path):
     assert "additional_income_rate = var_test" in txt
 
 
+def test_apply_income_preserves_latin1_bytes_around_insertion(tmp_path):
+    root = str(tmp_path)
+    MOD.root = root
+    MOD.loaded = True
+    p = os.path.join(root, "common", "scripted_effects", "00_money_system.txt")
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    prefix = b"header = 1\r\ncalculate_additional_income_rate = {\r\n\t# caf\xe9\r\n"
+    suffix = b"}\r\nfooter = 2\r\n"
+    original = prefix + suffix
+    with open(p, "wb") as fh:
+        fh.write(original)
+    MOD.md_money_system_file = p
+    sloc = os.path.join(
+        root, "common", "scripted_localisation", "money_scripted_localization.txt"
+    )
+    _write(sloc, "")
+    MOD.md_money_scripted_loc_file = sloc
+    yml = os.path.join(root, "localisation", "english", "MD_money_l_english.yml")
+    yml_original = b"l_english:\r\n # caf\xe9\r\n"
+    os.makedirs(os.path.dirname(yml), exist_ok=True)
+    with open(yml, "wb") as fh:
+        fh.write(yml_original)
+    MOD.md_money_yml_file = yml
+
+    saved, errs = _FakeApp()._apply_md_additional_income(
+        "TAG_spirit", "var_test", "0.5", "TAG_spirit_tt"
+    )
+
+    assert not errs
+    with open(p, "rb") as fh:
+        updated = fh.read()
+    assert b"caf\xe9" in updated
+    assert b"\xef\xbf\xbd" not in updated
+    insertion_point = original.index(b"}")
+    assert updated.startswith(original[:insertion_point])
+    assert updated.endswith(original[insertion_point:])
+    inserted = updated[len(original[:insertion_point]) : -len(suffix)]
+    assert b"\n" in inserted
+    assert b"\n" not in inserted.replace(b"\r\n", b"")
+    with open(yml, "rb") as fh:
+        updated_yml = fh.read()
+    assert updated_yml.startswith(yml_original)
+    assert b"caf\xe9" in updated_yml
+    assert b"ADDITIONAL_INCOME_REVENUES_TOOLTIP" in updated_yml
+    assert b"\n" not in updated_yml.replace(b"\r\n", b"")
+
+
 def test_apply_income_gdp_pct_and_population(tmp_path):
     root = str(tmp_path)
     MOD.root = root

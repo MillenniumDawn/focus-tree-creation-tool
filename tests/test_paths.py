@@ -31,6 +31,30 @@ def test_read_file_falls_back_to_latin1(tmp_path):
     assert "�" not in content
 
 
+def test_read_file_preserves_line_endings(tmp_path):
+    p = tmp_path / "crlf.txt"
+    p.write_bytes(b"first\r\nsecond\r\n")
+    assert paths.read_file(str(p)) == "first\r\nsecond\r\n"
+
+
+def test_read_file_with_encoding_returns_text_and_encoding(tmp_path):
+    latin = tmp_path / "latin.txt"
+    latin.write_bytes("caf\xe9".encode("latin-1"))
+    assert paths.read_file_with_encoding(str(latin)) == ("café", "latin-1")
+
+    bom = tmp_path / "bom.txt"
+    bom.write_bytes("hello".encode("utf-8-sig"))
+    assert paths.read_file_with_encoding(str(bom)) == ("hello", "utf-8-sig")
+
+
+def test_read_file_with_encoding_distinguishes_missing_and_empty(tmp_path):
+    assert paths.read_file_with_encoding(str(tmp_path / "missing.txt")) == ("", None)
+
+    empty = tmp_path / "empty.txt"
+    empty.write_bytes(b"")
+    assert paths.read_file_with_encoding(str(empty)) == ("", "utf-8")
+
+
 def test_default_mod_dir_linux(monkeypatch):
     monkeypatch.setattr(sys, "platform", "linux")
     expected = os.path.join(
@@ -58,6 +82,19 @@ def test_read_file_respects_size_cap(tmp_path):
     p = tmp_path / "big.txt"
     p.write_text("x" * 5000, encoding="utf-8")
     assert paths.read_file(str(p), max_bytes=1000) is None
+
+
+def test_read_file_cap_is_in_bytes_without_stat(tmp_path, monkeypatch):
+    p = tmp_path / "multibyte.txt"
+    p.write_text("é" * 6, encoding="utf-8")
+
+    def no_stat(_path):
+        raise OSError
+
+    monkeypatch.setattr(paths.os.path, "getsize", no_stat)
+
+    assert paths.read_file(str(p), max_bytes=10) is None
+    assert paths.read_file_with_encoding(str(p), max_bytes=10) == (None, None)
 
 
 def test_read_file_keeps_successful_empty_read_distinct(tmp_path):

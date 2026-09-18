@@ -7,6 +7,7 @@ from collections.abc import Callable, Iterable
 from pathlib import Path
 
 from hoi4cm.core.logger import get_logger
+from hoi4cm.core.paths import convert_newlines
 
 _log = get_logger("workspace_files")
 
@@ -37,6 +38,21 @@ def _read_bytes(target: Path) -> bytes | None:
         return target.read_bytes()
     except FileNotFoundError:
         return None
+
+
+def _existing_newline(target: Path) -> str:
+    """Return the first line-ending style in an existing file."""
+    pending_cr = False
+    with target.open("rb") as stream:
+        while chunk := stream.read(8192):
+            for byte in chunk:
+                if pending_cr:
+                    return "\r\n" if byte == 10 else "\r"
+                if byte == 13:
+                    pending_cr = True
+                elif byte == 10:
+                    return "\n"
+    return "\r" if pending_cr else "\n"
 
 
 def _stage(target: Path, text: str, encoding: str) -> Path:
@@ -135,8 +151,14 @@ class WorkspaceFiles:
     def append_text(self, path: str | Path, text: str, *, encoding: str) -> None:
         """Append ``text`` to ``path`` atomically (temp file + ``os.replace``)."""
         target = Path(path)
+        target.parent.mkdir(parents=True, exist_ok=True)
         original = _read_bytes(target) or b""
-        temporary = _stage_bytes(target, original + text.encode(encoding))
+        if original:
+            text = convert_newlines(text, _existing_newline(target))
+        payload_encoding = (
+            "utf-8" if (original and encoding == "utf-8-sig") else encoding
+        )
+        temporary = _stage_bytes(target, original + text.encode(payload_encoding))
         try:
             os.replace(temporary, target)
         finally:

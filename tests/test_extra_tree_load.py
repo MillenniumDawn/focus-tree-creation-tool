@@ -82,6 +82,38 @@ def test_load_extra_tree_parses_off_the_tk_thread(tmp_path, monkeypatch):
     app._fit_all.assert_called_once()
 
 
+def test_import_tree_rejects_oversized_file(tmp_path, monkeypatch):
+    tree = tmp_path / "oversized.txt"
+    with tree.open("wb") as stream:
+        stream.truncate(32 * 1024 * 1024 + 1)
+    errors = []
+    monkeypatch.setattr(m.filedialog, "askopenfilename", lambda **_k: str(tree))
+    monkeypatch.setattr(m, "report_error", lambda *args, **_k: errors.append(args))
+    monkeypatch.setattr(m.MOD, "loaded", False)
+    monkeypatch.setattr(m.MOD, "root", None)
+    app = SimpleNamespace(_confirm_discard=Mock(return_value=True))
+
+    m.App._import_txt(cast(m.App, app))
+
+    assert errors
+
+
+def test_load_extra_tree_rejects_oversized_file(tmp_path, monkeypatch):
+    tree = tmp_path / "oversized.txt"
+    with tree.open("wb") as stream:
+        stream.truncate(32 * 1024 * 1024 + 1)
+    errors = []
+    monkeypatch.setattr(m.filedialog, "askopenfilename", lambda **_k: str(tree))
+    monkeypatch.setattr(m, "report_error", lambda *args, **_k: errors.append(args))
+    monkeypatch.setattr(m.MOD, "loaded", False)
+    monkeypatch.setattr(m.MOD, "root", None)
+    app = _shell()
+
+    m.App._load_extra_tree(cast(m.App, app), "joint")
+
+    assert errors
+
+
 def test_load_extra_tree_budget_failure_warns(tmp_path, monkeypatch):
     tree = tmp_path / "over_budget.txt"
     tree.write_text(

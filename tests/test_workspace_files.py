@@ -198,6 +198,15 @@ def test_write_text_still_takes_the_single_entry_path(tmp_path, monkeypatch):
     assert target.read_text() == "new"
 
 
+def test_write_existing_text_preserves_line_endings(tmp_path):
+    target = tmp_path / "data.txt"
+    target.write_bytes(b"first\r\nsecond\r\n")
+
+    WorkspaceFiles().write_text(target, "first\r\nupdated\r\n", encoding="utf-8")
+
+    assert target.read_bytes() == b"first\r\nupdated\r\n"
+
+
 def test_append_text_preserves_existing_bytes(tmp_path):
     target = tmp_path / "data.txt"
     original = bytes((0xFF, 0xFE)) + b"existing" + bytes((13, 10))
@@ -206,7 +215,7 @@ def test_append_text_preserves_existing_bytes(tmp_path):
 
     WorkspaceFiles().append_text(target, appended, encoding="utf-8")
 
-    assert target.read_bytes() == original + appended.encode("utf-8")
+    assert target.read_bytes() == bytes((0xFF, 0xFE)) + b"existing\r\nsecond\r\n"
 
 
 def test_append_text_creates_missing_file(tmp_path):
@@ -271,3 +280,21 @@ def test_append_text_notifies_after_write(tmp_path):
 
     assert target.read_text() == "first second"
     assert notifications == [str(target)]
+
+
+def test_append_existing_text_uses_existing_crlf_style(tmp_path):
+    target = tmp_path / "data.txt"
+    target.write_bytes(b"first\r\n")
+
+    WorkspaceFiles().append_text(target, "second\nthird\n", encoding="utf-8")
+
+    assert target.read_bytes() == b"first\r\nsecond\r\nthird\r\n"
+
+
+def test_append_existing_utf8_sig_does_not_add_another_bom(tmp_path):
+    target = tmp_path / "data.txt"
+    target.write_bytes(b"first\n")
+
+    WorkspaceFiles().append_text(target, "second\n", encoding="utf-8-sig")
+
+    assert target.read_bytes() == b"first\nsecond\n"

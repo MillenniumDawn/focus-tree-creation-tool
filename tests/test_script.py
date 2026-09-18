@@ -128,6 +128,22 @@ def test_append_scripted_loc_preserves_existing_content(tmp_path):
     assert "name = NEW" in text
 
 
+def test_append_scripted_loc_preserves_existing_encoding(tmp_path):
+    sloc = tmp_path / "test_scripted_loc.txt"
+    original = b"# caf\xe9\r\n"
+    sloc.write_bytes(original)
+    saved = []
+    errs = []
+
+    append_scripted_loc(str(sloc), [{"name": "NEW", "texts": []}], saved, errs)
+
+    assert not errs
+    updated = sloc.read_bytes()
+    assert updated.startswith(original)
+    assert b"caf\xe9" in updated
+    assert b"name = NEW\r\n" in updated
+
+
 def test_append_scripted_loc_uses_workspace_files(tmp_path, monkeypatch):
     sloc = tmp_path / "test_scripted_loc.txt"
     sloc.write_text("existing\n", encoding="utf-8")

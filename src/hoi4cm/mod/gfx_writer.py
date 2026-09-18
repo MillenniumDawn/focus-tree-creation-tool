@@ -8,6 +8,7 @@ from collections.abc import Collection, Iterable, Mapping
 from pathlib import Path
 from typing import cast
 
+from hoi4cm.core.paths import convert_newlines, newline_style
 from hoi4cm.script.syntax import match_brace
 
 DEFAULT_FOCUS_ICON = "GFX_goal_generic_political_pressure"
@@ -73,19 +74,21 @@ def append_sprite_types(
     if source is None:
         return f"spriteTypes = {{\n\n{blocks}\n\n}}\n", len(new_entries)
 
+    style = newline_style(source)
+    blocks = convert_newlines(blocks, style)
     wrapper = _next_code_match(_WRAPPER_RE, source)
     if wrapper is not None:
         close = match_brace(source, wrapper.end() - 1)
         if close < len(source):
             prefix = source[:close]
-            separator = "\n" if not prefix.endswith("\n\n") else ""
+            separator = style if not prefix.endswith((style, style + style)) else ""
             return (
-                f"{prefix}{separator}{blocks}\n{source[close:]}",
+                f"{prefix}{separator}{blocks}{style}{source[close:]}",
                 len(new_entries),
             )
 
-    separator = "" if source.endswith(("\n", "\r")) else "\n"
-    return f"{source}{separator}{blocks}\n", len(new_entries)
+    separator = "" if source.endswith(("\n", "\r")) else style
+    return f"{source}{separator}{blocks}{style}", len(new_entries)
 
 
 def resolve_mod_texture_path(

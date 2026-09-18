@@ -69,6 +69,7 @@ from hoi4cm.core import (  # noqa: E402
     parse_drawio_graph,
     parse_focus_tree,
     read_file,
+    read_file_with_encoding,
     render_focus_block,
     safe_join,
     sanitize_component,
@@ -4338,8 +4339,9 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         if not path:
             return
         try:
-            with open(path, encoding="utf-8-sig", errors="replace") as fp:
-                raw = fp.read()
+            raw, encoding = read_file_with_encoding(path)
+            if raw is None or encoding is None:
+                raise OSError("file could not be read or exceeds the 32 MiB limit")
         except Exception as e:
             report_error(
                 tr("dialog.read_file_error", "Could not read file:\n{error}", error=e),
@@ -4379,7 +4381,10 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             # stay safe there.
             new_focuses = build_focuses(parsed, 0)
             if detected_loc_path:
-                hydrate_focus_localization(read_file(detected_loc_path), new_focuses)
+                loc_text, loc_encoding = read_file_with_encoding(detected_loc_path)
+                if loc_text is None or loc_encoding is None:
+                    raise OSError("localisation file could not be read")
+                hydrate_focus_localization(loc_text, new_focuses)
             t2 = time.perf_counter()
             log.debug(
                 "import main tree %s: parse %.1fms build %.1fms (%d focuses)",
@@ -4579,8 +4584,9 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
                 )
                 return
         try:
-            with open(path, encoding="utf-8-sig", errors="replace") as fp:
-                raw = fp.read()
+            raw, encoding = read_file_with_encoding(path)
+            if raw is None or encoding is None:
+                raise OSError("file could not be read or exceeds the 32 MiB limit")
         except Exception as e:
             report_error(
                 tr("dialog.read_file_error", "Could not read file:\n{error}", error=e),
