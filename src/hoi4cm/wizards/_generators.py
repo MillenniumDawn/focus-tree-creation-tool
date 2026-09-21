@@ -70,6 +70,21 @@ _DECISION_MODELED_KEYS = frozenset(
     }
 )
 
+# Keep category keys separate from nested decision assignments.
+_DECISION_CATEGORY_MODELED_KEYS = frozenset(
+    {
+        "allowed",
+        "visible",
+        "icon",
+        "picture",
+        "priority",
+        "visible_when_empty",
+        "scripted_gui",
+        "highlight_states",
+        "on_map_area",
+    }
+)
+
 
 def _skip_script_string(source, position):
     end = source.find('"', position + 1)
@@ -872,6 +887,7 @@ def generate_decision_categories_file(cats, decs):
                 trig_ind = _indent_lines(_strip_val(cat["map_trigger"]), 3)
                 out.append(f"{T2}target_root_trigger = {{\n{trig_ind}\n{T2}}}")
             out.append(f"{T1}}}")
+        out.extend(render_decision_extras(cat.get("_extras", []), indent=1))
         out.append("}\n")
     return "\n".join(out)
 
