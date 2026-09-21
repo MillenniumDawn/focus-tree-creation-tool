@@ -15,6 +15,8 @@ the version by hand. See `AGENTS.md`.
 - Canvas redraws skip per-focus item probes and unchanged line updates: tests measure 14
   probes per visible full bundle reduced to one sentinel probe per frame; unchanged
   frames make zero `coords`, `itemconfig`, or `tag_lower` calls.
+- Skip unreadable or oversize scan files without aborting valid sibling results; failed
+  reads remain retryable.
 
 ### Focus-tree parser
 
