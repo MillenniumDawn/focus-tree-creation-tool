@@ -303,10 +303,20 @@ class ModContext:
         to_read = [p for p in paths if p not in contrib]
 
         def read_and_extract(p):
-            return extract_fn(self._read(p))
+            src = self._read(p)
+            if src is None:
+                # Keep failed reads retryable; don't cache empty contributions.
+                return False, extract_fn("")
+            return True, extract_fn(src)
+
+        successful_reads = []
 
         if len(to_read) == 1:
-            contrib[to_read[0]] = read_and_extract(to_read[0])
+            p = to_read[0]
+            readable, contribution = read_and_extract(p)
+            contrib[p] = contribution
+            if readable:
+                successful_reads.append(p)
         elif to_read:
             workers = min(8, (os.cpu_count() or 4), len(to_read))
             with DaemonThreadPoolExecutor(
@@ -314,12 +324,15 @@ class ModContext:
             ) as ex:
                 futures = [ex.submit(read_and_extract, p) for p in to_read]
                 for p, fut in zip(to_read, futures, strict=True):
-                    contrib[p] = fut.result()
+                    readable, contribution = fut.result()
+                    contrib[p] = contribution
+                    if readable:
+                        successful_reads.append(p)
 
         if self._cache:
             self._cache.put_many(
                 domain,
-                [(p, sigs[p][0], sigs[p][1], contrib[p]) for p in to_read],
+                [(p, sigs[p][0], sigs[p][1], contrib[p]) for p in successful_reads],
             )
             self._cache.prune(domain, paths)
             self._cache.commit()
@@ -806,7 +819,7 @@ class ModContext:
         if not detected:
             desc_path = os.path.join(root, "descriptor.mod")
             if os.path.exists(desc_path):
-                desc_txt = self._read(desc_path).lower()
+                desc_txt = (self._read(desc_path) or "").lower()
                 detected = "millennium" in desc_txt
         if not detected:
             detected = os.path.isfile(

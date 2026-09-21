@@ -159,6 +159,23 @@ def test_scan_loads_event_ids(mod_tree):
     assert MOD.event_ids.get("USA_events") == ["usa_events.1", "usa_events.2"]
 
 
+def test_scan_ignores_unreadable_descriptor(tmp_path, monkeypatch):
+    """An unreadable descriptor must not abort the rest of the scan."""
+    descriptor = tmp_path / "descriptor.mod"
+    descriptor.write_text("name = unreadable_descriptor\n")
+    original_read = MOD._read
+    monkeypatch.setattr(
+        MOD,
+        "_read",
+        lambda path: None if path == str(descriptor) else original_read(path),
+    )
+
+    MOD.scan(str(tmp_path))
+
+    assert MOD.loaded
+    assert not MOD.is_md
+
+
 def test_scan_discovers_md_money_files(tmp_path):
     money = tmp_path / "common" / "scripted_effects" / "00_money_system.txt"
     money.parent.mkdir(parents=True)
@@ -938,3 +955,114 @@ def test_scan_files_cached_extracts_off_the_calling_thread(tmp_path):
 
     assert result == {p: name.upper() for p, name in paths.items()}
     assert seen_threads - {threading.current_thread()}
+
+
+def test_scan_files_cached_single_read_failure_is_retried_not_cached(
+    tmp_path, monkeypatch
+):
+    """A failed single-file read has an empty shape but no cache row."""
+    path = tmp_path / "retry.txt"
+    path.write_text("valid")
+    cache = scan_cache_mod.ScanCache(str(tmp_path))
+    reads = 0
+    original_read = MOD._read
+
+    def flaky_read(candidate):
+        nonlocal reads
+        reads += 1
+        if reads == 1:
+            return None
+        return original_read(candidate)
+
+    monkeypatch.setattr(MOD, "_read", flaky_read)
+    MOD._cache = cache
+    try:
+
+        def extract(text):
+            return [] if not text else [text]
+
+        first = MOD._scan_files_cached("retry", [str(path)], extract)
+        stat = path.stat()
+        assert first == {str(path): []}
+        assert cache.get("retry", str(path), stat.st_mtime, stat.st_size) is None
+
+        second = MOD._scan_files_cached("retry", [str(path)], extract)
+        assert second == {str(path): ["valid"]}
+        assert cache.get("retry", str(path), stat.st_mtime, stat.st_size) == ["valid"]
+        assert reads == 2
+    finally:
+        cache.close()
+        MOD._cache = None
+
+
+def test_scan_files_cached_failed_thread_read_keeps_valid_sibling(
+    tmp_path, monkeypatch
+):
+    """A pool read failure contributes empty data without dropping siblings."""
+    bad = tmp_path / "bad.txt"
+    good = tmp_path / "good.txt"
+    bad.write_text("unreadable")
+    good.write_text("valid")
+    original_read = MOD._read
+    seen_threads = set()
+
+    def read(candidate):
+        if candidate == str(bad):
+            return None
+        return original_read(candidate)
+
+    def extract(text):
+        seen_threads.add(threading.current_thread())
+        return [] if not text else [text]
+
+    monkeypatch.setattr(MOD, "_read", read)
+    result = MOD._scan_files_cached("siblings", [str(bad), str(good)], extract)
+
+    assert result == {str(bad): [], str(good): ["valid"]}
+    assert seen_threads - {threading.current_thread()}
+
+
+def test_scan_skips_unreadable_file_beside_valid_focus_file(tmp_path, monkeypatch):
+    """Unreadable focus files do not abort valid focus and variable scans."""
+    nf = tmp_path / "common" / "national_focus"
+    nf.mkdir(parents=True)
+    bad = nf / "bad.txt"
+    good = nf / "good.txt"
+    bad.write_text("focus = { id = UNREADABLE }")
+    good.write_text(
+        "focus = {\n"
+        "  id = VALID\n"
+        "  completion_reward = { set_variable = { score = 1 } }\n"
+        "}\n"
+    )
+    original_read = MOD._read
+    monkeypatch.setattr(
+        MOD,
+        "_read",
+        lambda path: None if path == str(bad) else original_read(path),
+    )
+    monkeypatch.setattr(MOD, "use_cache", False)
+    MOD.scan(str(tmp_path))
+
+    assert "VALID" in MOD.focus_ids
+    assert "UNREADABLE" not in MOD.focus_ids
+    assert "score" in MOD.variables
+
+
+def test_scan_skips_oversize_file_beside_valid_event_file(tmp_path, monkeypatch):
+    """The read limit skips one event file while preserving its sibling."""
+    events = tmp_path / "events"
+    events.mkdir()
+    (events / "oversize.txt").write_text("x" * 100)
+    (events / "valid.txt").write_text("country_event = { id = valid.1 }\n")
+
+    original_read = ctx_mod.read_file
+
+    def limited_read(path):
+        return original_read(path, max_bytes=64)
+
+    monkeypatch.setattr(ctx_mod, "read_file", limited_read)
+    monkeypatch.setattr(MOD, "use_cache", False)
+    MOD.scan(str(tmp_path))
+
+    assert MOD.event_ids == {"valid": ["valid.1"]}
