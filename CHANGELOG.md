@@ -8,6 +8,8 @@ the version by hand. See `AGENTS.md`.
 
 ## Unreleased
 
+- Isolate pytest's import-time user-home state from the developer's real HOME,
+  preserving X11 authentication when needed.
 - Track per-area performance with a repeatable harness: `python
   scripts/track_perf.py` times parsing, building, batch load, undo snapshots,
   graphics catalog scans, scene-index work, and export on deterministic synthetic

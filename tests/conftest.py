@@ -1,16 +1,73 @@
-"""Shared fixtures.
+"""Shared Tk fixtures with import-time user-home isolation."""
 
-Two things need to be shared: every widget test needs a Tk root, and the
-"no display" skip has to be loud in CI (which runs under Xvfb) instead of
-quietly dropping every widget test from the run. The rest of this module
-keeps those windows off the screen on a machine that has a real desktop.
-"""
-
+import atexit
 import gc
+import logging
 import os
+import sys
+import tempfile
 import types
 
 import pytest
+
+# Isolate import-time app state before pytest collects test modules.
+_HOME_ENV_NAMES = ("HOME", "USERPROFILE", "XAUTHORITY")
+_ORIGINAL_HOME_ENV = {
+    name: os.environ[name] for name in _HOME_ENV_NAMES if name in os.environ
+}
+_ORIGINAL_USER_HOME = os.path.abspath(os.path.expanduser("~"))
+if "XAUTHORITY" not in os.environ:
+    xauthority = os.path.join(_ORIGINAL_USER_HOME, ".Xauthority")
+    if os.path.exists(xauthority):
+        os.environ["XAUTHORITY"] = xauthority
+
+
+def _new_isolated_home() -> tempfile.TemporaryDirectory[str]:
+    return tempfile.TemporaryDirectory(prefix="hoi4cm-pytest-home-")
+
+
+_ISOLATED_HOME_DIR = _new_isolated_home()
+_ISOLATED_HOME_ROOT = _ISOLATED_HOME_DIR.name
+_ISOLATED_HOME: str | None = _ISOLATED_HOME_ROOT
+os.environ["HOME"] = _ISOLATED_HOME_ROOT
+if sys.platform == "win32":
+    os.environ["USERPROFILE"] = _ISOLATED_HOME_ROOT
+
+
+def _cleanup_isolated_home() -> None:
+    """Restore the home environment and release the temporary directory."""
+    global _ISOLATED_HOME
+    home_dir = _ISOLATED_HOME_DIR
+    if _ISOLATED_HOME is None:
+        return
+
+    try:
+        app_logger = logging.getLogger("HOI4CM")
+        for handler in list(app_logger.handlers):
+            if isinstance(handler, logging.FileHandler):
+                app_logger.removeHandler(handler)
+                try:
+                    handler.close()
+                except OSError, ValueError:
+                    pass
+        home_dir.cleanup()
+    finally:
+        for name in _HOME_ENV_NAMES:
+            original = _ORIGINAL_HOME_ENV.get(name)
+            if original is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = original
+        _ISOLATED_HOME = None
+
+
+atexit.register(_cleanup_isolated_home)
+
+
+def pytest_unconfigure(config):
+    """Restore the caller's home after pytest has finished the session."""
+    _cleanup_isolated_home()
+
 
 tk: types.ModuleType | None
 try:
