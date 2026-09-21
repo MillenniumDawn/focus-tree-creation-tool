@@ -10,8 +10,15 @@ lives in `src/hoi4cm/ui/startup_check.py`.
 Run `pytest --collect-only -q` to list the tests under `tests/`.
 `pyproject.toml`'s `[tool.pytest.ini_options]` puts `src/` on `pythonpath`
 and scopes `testpaths` to `tests/`, so `pytest` from the repo root just
-works. `tests/conftest.py` holds exactly one fixture, `tk_root` (see "The
-headless constraint"); everything else lives in the file that uses it.
+works. On import, `tests/conftest.py` replaces HOME with a temporary
+per-run home before test modules are collected, then restores the original
+environment and removes the temporary tree at session end. On Windows it also
+sets USERPROFILE because that is what `expanduser("~")` prefers. DISPLAY and
+explicit XAUTHORITY values are unchanged; when XAUTHORITY is unset, an
+existing original `~/.Xauthority` is exported by absolute path before HOME is
+replaced so X11 authentication still works. The same module provides the
+shared Tk fixtures (see "The headless constraint"); everything else lives in
+the file that uses it.
 
 ## Coverage
 
@@ -46,9 +53,15 @@ substitute for that extraction.
 
 ## Fixture / isolation patterns
 
-Every module with import-time or process-lifetime state needs a fixture
-that resets it, or state leaks between tests. Five patterns cover what's
-here today:
+Every module with import-time or process-lifetime state needs isolation, or
+state leaks between tests. Six patterns cover what's here today:
+
+- **Pytest-startup HOME isolation.** `tests/conftest.py` installs a temporary
+  HOME while the conftest is imported, before collection imports application
+  modules. This keeps import-time logging, config reads, scan-cache paths, and
+  autosave paths out of the real user home for the entire run. A subprocess
+  regression test covers implicit and explicit X11 authentication and proves
+  that sentinel files in the initial HOME are not changed.
 
 - **Module-state snapshot/restore.** `tests/test_logger.py`'s `log_state`
   fixture saves `sys.excepthook`, the excepthook-installed flag, and the
@@ -72,9 +85,10 @@ here today:
   first, plus that structural fields and known content survive. Its
   `reset_counter` fixture saves and restores `Focus._next` around each test
   so ID assignment doesn't depend on test order.
-- **The shared `tk_root` fixture.** `tests/conftest.py` builds a `tk.Tk()`
-  and destroys it after the test, skipping when no display is reachable
-  (see "The headless constraint" below). `tests/test_canvas_tk.py`
+- **The shared Tk fixtures.** `tests/conftest.py` provides the autouse
+  `hide_tk_windows` fixture and builds a `tk.Tk()` in `tk_root`, destroying it
+  after the test and skipping when no display is reachable (see "The headless
+  constraint" below). `tests/test_canvas_tk.py`
   overrides it to `withdraw()` the window, since it drives `CanvasMixin`
   against a bare `tk.Canvas` through a minimal fake host exposing only the
   attributes `_draw_focus` touches (`cv`, `focuses`, `offset`, `zoom`,
