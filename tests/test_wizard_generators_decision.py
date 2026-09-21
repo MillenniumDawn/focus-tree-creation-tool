@@ -5,6 +5,7 @@ import pytest
 from hoi4cm.core import read_file
 from hoi4cm.script.syntax import find_blocks
 from hoi4cm.wizards._generators import (
+    _DECISION_CATEGORY_MODELED_KEYS,
     _strip_val,
     capture_decision_extras,
     generate_decision_block,
@@ -136,6 +137,44 @@ TAG_cat = {
     assert "# Keep this comment too." in out
     assert 'custom_engine_scalar = "value # not a comment"' in out
     assert "war_with_on_complete = TAG_enemy" in out
+
+
+def test_decision_category_extras_use_category_file_shape(tmp_path):
+    decision_path = tmp_path / "TAG_decisions.txt"
+    category_path = tmp_path / "TAG_categories.txt"
+    decision_path.write_text(
+        "TAG_cat = {\n\tTAG_decision = {\n\t\tallowed = { always = yes }\n\t}\n}\n",
+        encoding="utf-8",
+    )
+    category_path.write_text(
+        "TAG_cat = {\n"
+        "\tallowed = { always = yes }\n"
+        "\tcustom_category_key = { category_flag = yes }\n"
+        "\tcustom_category_key = category_value\n"
+        "}\n",
+        encoding="utf-8",
+    )
+
+    decision_raw = read_file(str(decision_path))
+    category_raw = read_file(str(category_path))
+    assert decision_raw is not None
+    assert category_raw is not None
+    decision_inner = find_blocks(decision_raw)[0][1]
+    category_inner = find_blocks(category_raw)[0][1]
+    decision_inner = find_blocks(decision_inner)[0][1]
+    category_extras = capture_decision_extras(
+        category_inner, _DECISION_CATEGORY_MODELED_KEYS
+    )
+
+    # Decision IDs are nested assignments, not category extras.  The actual
+    # categories-file shape retains both unknown assignments, including the
+    # duplicate scalar key.
+    assert capture_decision_extras(decision_inner) == []
+    assert len(category_extras) == 2
+    out = generate_decision_categories_file([_cat(_extras=category_extras)], [])
+    assert out.count("custom_category_key =") == 2
+    assert "category_flag = yes" in out
+    assert "TAG_decision" not in out
 
 
 def test_decision_block_minimum_open_and_close():

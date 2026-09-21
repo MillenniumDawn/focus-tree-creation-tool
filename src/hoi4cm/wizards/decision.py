@@ -235,6 +235,7 @@ def open_decision_wizard(app):
     sel: dict[str, object] = {"uid": None, "type": None}
     _uid_n = [0]
     _decision_import_source = None
+    _category_import_source = None
 
     def _uid():
         _uid_n[0] += 1
@@ -259,6 +260,7 @@ def open_decision_wizard(app):
             map_trigger="",
             scripted_gui="",
             highlight_states="",
+            _extras=[],
         )
 
     def _new_dec(cat_uid: object = ""):
@@ -4514,9 +4516,15 @@ def open_decision_wizard(app):
         ).pack(side="right", padx=10)
 
     def _import_txt(_paths=None):
-        nonlocal _decision_import_source
+        nonlocal _decision_import_source, _category_import_source
         import os as _os
         import re as _re
+
+        def _is_category_path(path):
+            normalized = _os.path.normpath(path)
+            parent = _os.path.basename(_os.path.dirname(normalized)).casefold()
+            filename = _os.path.basename(normalized).casefold()
+            return parent == "categories" or filename.endswith("_categories.txt")
 
         paths = _paths or filedialog.askopenfilenames(
             parent=win,
@@ -4531,17 +4539,22 @@ def open_decision_wizard(app):
         if not paths:
             return
 
-        # Auto-set edit target to the first imported .txt so Save overwrites in place
-        _first_txt = next((p for p in paths if p.lower().endswith(".txt")), None)
-        if _first_txt:
-            _decision_import_source = _first_txt
-            MOD.edit_decisions_file = _first_txt
-            # Try to auto-detect matching categories file in common/decisions/categories/
-            _base = _os.path.basename(_first_txt)
-            _folder = _os.path.dirname(_first_txt)
+        txt_paths = [p for p in paths if p.lower().endswith(".txt")]
+        decision_paths = [p for p in txt_paths if not _is_category_path(p)]
+        category_paths = [p for p in txt_paths if _is_category_path(p)]
+
+        # Auto-detection selects a target but does not count as importing it.
+        _first_decision = next(iter(decision_paths), None)
+        if _first_decision:
+            MOD.edit_decisions_file = _first_decision
+            _base = _os.path.basename(_first_decision)
+            _folder = _os.path.dirname(_first_decision)
             _cat_path = _os.path.join(_folder, "categories", _base)
             if _os.path.isfile(_cat_path):
                 MOD.edit_decisions_cat_file = _cat_path
+        _first_category = next(iter(category_paths), None)
+        if _first_category:
+            MOD.edit_decisions_cat_file = _first_category
 
         def _get_block(text, key):
             """Extract inner content of first occurrence of key = { ... } in text."""
@@ -4573,7 +4586,6 @@ def open_decision_wizard(app):
                     get_logger("decision").debug("loc read failed %s: %s", path, exc)
 
         # Also try to auto-load loc from same folder as first .txt
-        txt_paths = [p for p in paths if p.lower().endswith(".txt")]
         if txt_paths and not any(p.lower().endswith(".yml") for p in paths):
             folder = os.path.dirname(txt_paths[0])
             # walk up to find localisation folder
@@ -4597,7 +4609,9 @@ def open_decision_wizard(app):
                 folder = os.path.dirname(folder)
 
         imported = 0
-        for path in txt_paths:
+        imported_decision_paths = []
+        imported_category_paths = []
+        for path in decision_paths + category_paths:
             try:
                 raw, encoding = read_file_with_encoding(path)
                 if raw is None or encoding is None:
@@ -4605,6 +4619,11 @@ def open_decision_wizard(app):
             except OSError as e:
                 report_error(str(e), e, parent=win, title="Import Error")
                 continue
+
+            if _is_category_path(path):
+                imported_category_paths.append(path)
+            else:
+                imported_decision_paths.append(path)
 
             for cat_name, cat_inner, _ in find_blocks(raw):
                 if cat_name in ("add_namespace", "namespace"):
@@ -4646,6 +4665,23 @@ def open_decision_wizard(app):
                     c["map_name"] = nv or ""
                     zv = _get_value(oma, "zoom")
                     c["map_zoom"] = zv or "850"
+
+                if _is_category_path(path):
+                    c["_extras"] = _generators.capture_decision_extras(
+                        cat_inner, _generators._DECISION_CATEGORY_MODELED_KEYS
+                    )
+                    existing = next(
+                        (item for item in dm_cats if item["cat_id"] == c["cat_id"]),
+                        None,
+                    )
+                    if existing is None:
+                        dm_cats.append(c)
+                    else:
+                        uid = existing["uid"]
+                        existing.update(c)
+                        existing["uid"] = uid
+                    continue
+
                 dm_cats.append(c)
 
                 for dec_name, dec_inner, _ in find_blocks(cat_inner):
@@ -4766,6 +4802,11 @@ def open_decision_wizard(app):
 
                     dm_decs.append(d)
                     imported += 1
+
+        if imported_decision_paths:
+            _decision_import_source = imported_decision_paths[0]
+        if imported_category_paths:
+            _category_import_source = imported_category_paths[0]
 
         _autosave()
         _dm_status.config(text=f"  ✓  Imported {imported} decisions — rebuilding...")
@@ -4932,11 +4973,28 @@ def open_decision_wizard(app):
             dec_path = os.path.join(
                 mod_root, "common", "decisions", f"{ns}_decisions.txt"
             )
+        # Confirm both paired targets before writing either file.
+        selected_cat = bool(MOD.edit_decisions_cat_file)
+        if selected_cat:
+            cat_path = MOD.edit_decisions_cat_file
+        else:
+            cat_path = os.path.join(
+                mod_root, "common", "decisions", "categories", f"{ns}_categories.txt"
+            )
         if decision_save_needs_confirmation(
             dec_path, _decision_import_source, os.path.isfile(dec_path)
         ) and not messagebox.askyesno(
             "Overwrite Existing Decisions",
             "This decisions file was not imported by the wizard.\n"
+            "Overwrite its existing contents?",
+            parent=win,
+        ):
+            return
+        if decision_save_needs_confirmation(
+            cat_path, _category_import_source, os.path.isfile(cat_path)
+        ) and not messagebox.askyesno(
+            "Overwrite Existing Decision Categories",
+            "This decision categories file was not imported by the wizard.\n"
             "Overwrite its existing contents?",
             parent=win,
         ):
@@ -4961,14 +5019,6 @@ def open_decision_wizard(app):
         except OSError as e:
             errs.append(str(e))
             get_logger("decision").error("save decisions failed: %s", e, exc_info=True)
-        # Categories file — use the matching edit target if set, else default
-        selected_cat = bool(MOD.edit_decisions_cat_file)
-        if selected_cat:
-            cat_path = MOD.edit_decisions_cat_file
-        else:
-            cat_path = os.path.join(
-                mod_root, "common", "decisions", "categories", f"{ns}_categories.txt"
-            )
         try:
             cat_encoding = "utf-8"
             existing_cat = ""
