@@ -39,15 +39,15 @@ jobs:
           app-id: ${{ secrets.RELEASE_PR_APP_ID }}
           private-key: ${{ secrets.RELEASE_PR_APP_PRIVATE_KEY }}
 
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           # Full history so the existing tags are present to check against.
           # Credentials are kept on purpose: this job pushes the release tag.
           fetch-depth: 0
           token: ${{ steps.app-token.outputs.token || github.token }}
 
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
-        # v5.6.0
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        # v6.3.0
         with:
           python-version: "3.14"
 
