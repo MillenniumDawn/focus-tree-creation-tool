@@ -188,6 +188,11 @@ def test_v2_roundtrip_preserves_workspace_and_tree_metadata():
     assert restored.focuses.names["same_name"] == (main.id, extra.id)
 
 
+def test_focus_counter_is_reset_after_large_project_id_roundtrip():
+    """A loaded large ID must not leak into the next test's allocator."""
+    assert Focus().id == 1
+
+
 def test_v2_roundtrip_preserves_grid_coords_that_are_multiples_of_96():
     """Grid coords that happen to be multiples of 96 (XGRID) must survive a
     current-format save/load unchanged -- they aren't legacy pixel coords."""
