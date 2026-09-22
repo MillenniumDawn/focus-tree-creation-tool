@@ -80,10 +80,11 @@ class GraphicsSnapshot:
     gfx_files: tuple[GfxFileRecord, ...]
     goal_images: tuple[PathReference, ...]
     idea_images: tuple[PathReference, ...]
+    unreadable_gfx: tuple[PathReference, ...] = ()
 
     @property
     def cacheable(self) -> bool:
-        return all(
+        return not self.unreadable_gfx and all(
             declaration.texture_path.source_id != "absolute"
             for gfx_file in self.gfx_files
             for declaration in gfx_file.declarations
@@ -125,6 +126,7 @@ class GraphicsSnapshot:
             ],
             "goal_images": [_path_to_data(path) for path in self.goal_images],
             "idea_images": [_path_to_data(path) for path in self.idea_images],
+            "unreadable_gfx": [_path_to_data(path) for path in self.unreadable_gfx],
         }
 
     @classmethod
@@ -174,6 +176,10 @@ class GraphicsSnapshot:
             idea_images=tuple(
                 _path_from_data(item)
                 for item in _mapping_values(data.get("idea_images"))
+            ),
+            unreadable_gfx=tuple(
+                _path_from_data(item)
+                for item in _mapping_values(data.get("unreadable_gfx", []))
             ),
         )
 
@@ -287,7 +293,7 @@ class GraphicsCatalog:
         root: str,
         config: GraphicsScanConfig,
         *,
-        read_text: Callable[[str], str],
+        read_text: Callable[[str], str | None],
     ) -> GraphicsMaps:
         self.last_metrics = GraphicsMetrics()
         self._flush_cache()
@@ -339,7 +345,7 @@ class GraphicsCatalog:
         self._gfx_files = {record.path: record for record in snapshot.gfx_files}
 
     def note_written(
-        self, path: str, *, read_text: Callable[[str], str]
+        self, path: str, *, read_text: Callable[[str], str | None]
     ) -> GraphicsMaps | None:
         if not self._root:
             return None
@@ -363,13 +369,16 @@ class GraphicsCatalog:
             )
             self._rebuild_image_query_index()
         elif self._is_interface_file(absolute_path):
+            text = read_text(absolute_path)
+            if text is None:
+                return None
             interface_root = os.path.join(self._root, "interface")
             record = GfxFileRecord(
                 reference,
                 _stamp_from_stat(path_stat),
                 tuple(
                     _parse_declarations(
-                        read_text(absolute_path),
+                        text,
                         top_level=os.path.normcase(os.path.dirname(absolute_path))
                         == os.path.normcase(interface_root),
                         strict_extension=os.path.basename(absolute_path).endswith(
@@ -457,6 +466,11 @@ class GraphicsCatalog:
                 for record in self._images.values()
                 if ideas_root
                 and _is_under(record.path.resolve(self._source_roots), ideas_root)
+            ),
+            unreadable_gfx=tuple(
+                path
+                for path in self._snapshot.unreadable_gfx
+                if path not in self._gfx_files
             ),
         )
 
@@ -905,6 +919,8 @@ class GraphicsCatalog:
         snapshot: GraphicsSnapshot,
         source_roots: Mapping[str, str],
     ) -> bool:
+        if snapshot.unreadable_gfx:
+            return False
         for record in snapshot.directories:
             self.last_metrics.directory_stats += 1
             try:
@@ -946,11 +962,12 @@ class GraphicsCatalog:
         root: str,
         config: GraphicsScanConfig,
         source_roots: Mapping[str, str],
-        read_text: Callable[[str], str],
+        read_text: Callable[[str], str | None],
     ) -> GraphicsSnapshot:
         directories: list[DirectoryRecord] = []
         images: list[ImageRecord] = []
         gfx_files: list[GfxFileRecord] = []
+        unreadable_gfx: list[PathReference] = []
         scanned_roots: list[str] = []
 
         interface_root = os.path.join(root, "interface")
@@ -964,6 +981,7 @@ class GraphicsCatalog:
             directories=directories,
             images=images,
             gfx_files=gfx_files,
+            unreadable_gfx=unreadable_gfx,
         )
         scanned_roots.append(interface_root)
         self._scan_tree(
@@ -975,6 +993,7 @@ class GraphicsCatalog:
             directories=directories,
             images=images,
             gfx_files=gfx_files,
+            unreadable_gfx=unreadable_gfx,
         )
         scanned_roots.append(gfx_root)
 
@@ -1004,6 +1023,7 @@ class GraphicsCatalog:
                 directories=directories,
                 images=images,
                 gfx_files=gfx_files,
+                unreadable_gfx=unreadable_gfx,
             )
             scanned_roots.append(scan_root)
 
@@ -1023,6 +1043,7 @@ class GraphicsCatalog:
             gfx_files=tuple(gfx_files),
             goal_images=goal_images,
             idea_images=idea_images,
+            unreadable_gfx=tuple(unreadable_gfx),
         )
 
     def _scan_tree(
@@ -1032,10 +1053,11 @@ class GraphicsCatalog:
         scan_root: str,
         *,
         read_gfx: bool,
-        read_text: Callable[[str], str],
+        read_text: Callable[[str], str | None],
         directories: list[DirectoryRecord],
         images: list[ImageRecord],
         gfx_files: list[GfxFileRecord],
+        unreadable_gfx: list[PathReference],
     ) -> None:
         def scan(directory: str, *, top_level: bool) -> None:
             path_ref = _reference_for(source_id, source_root, directory)
@@ -1087,9 +1109,15 @@ class GraphicsCatalog:
                 except OSError:
                     continue
                 self.last_metrics.gfx_reads += 1
+                text = read_text(entry.path)
+                if text is None:
+                    unreadable_gfx.append(
+                        _reference_for(source_id, source_root, entry.path)
+                    )
+                    continue
                 declarations = tuple(
                     _parse_declarations(
-                        read_text(entry.path),
+                        text,
                         top_level=top_level,
                         strict_extension=entry.name.endswith(".gfx"),
                     )
