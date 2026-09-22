@@ -28,11 +28,11 @@ a = Analysis(
         'PyQt5', 'PyQt6', 'wx', 'unittest',
         'email', 'http', 'xmlrpc', 'lib2to3',
     ],
-    cipher=block_cipher,
+    cipher=None,
     noarchive=False,
 )
 
-pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
+pyz = PYZ(a.pure, a.zipped_data, cipher=None)
 
 exe = EXE(
     pyz,

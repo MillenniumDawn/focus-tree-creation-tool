@@ -270,7 +270,6 @@ build/
   build.py                  ← cross-platform build script
   requirements.txt          ← hash-pinned build deps (pyinstaller, Pillow)
   build.bat                 ← Windows-only build script (legacy)
-  build_encrypted.bat       ← Windows-only encrypted build (legacy)
   hoi4_content_maker.spec   ← PyInstaller spec (Windows)
   generate_icon.py          ← generates app icons (.ico, .png)
   version_info.txt          ← Windows file properties metadata
