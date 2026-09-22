@@ -300,6 +300,8 @@
   "settings.reload_hint": "  Changes take effect when you reload the mod.",
   "settings.reset_hoi4_default": "Reset to HOI4 Default",
   "settings.save_and_close": "Save & Close",
+  "settings.save_failed.title": "Settings Not Saved",
+  "settings.save_failed.body": "Could not save settings to {path}. Changes will be lost when the app closes.",
   "settings.saved_to": "  Settings saved to:  {path}",
   "settings.session_log": "SESSION LOG",
   "settings.session_log.hint": "  All errors and warnings captured during this session.",

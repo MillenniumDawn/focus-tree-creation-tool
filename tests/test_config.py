@@ -24,7 +24,7 @@ def test_cfg_load_invalid_json_returns_empty(tmp_path, monkeypatch):
 def test_cfg_save_writes_and_roundtrips(tmp_path, monkeypatch):
     p = tmp_path / "cfg.json"
     monkeypatch.setattr(config, "CONFIG_PATH", str(p))
-    config.cfg_save({"a": 1})
+    assert config.cfg_save({"a": 1}) is True
     assert json.loads(p.read_text()) == {"a": 1}
     assert config.cfg_load() == {"a": 1}
 
@@ -45,11 +45,12 @@ def test_cfg_save_overwrites_existing_key(tmp_path, monkeypatch):
     assert config.cfg_load()["a"] == 99
 
 
-def test_cfg_save_failure_is_swallowed(tmp_path, monkeypatch):
-    # Parent dir does not exist → open() raises; cfg_save must log, not crash.
+def test_cfg_save_failure_reports_false_without_raising(tmp_path, monkeypatch):
+    # Parent dir does not exist → open() raises; cfg_save must report failure,
+    # not crash the caller.
     bad = tmp_path / "missing_dir" / "cfg.json"
     monkeypatch.setattr(config, "CONFIG_PATH", str(bad))
-    config.cfg_save({"a": 1})  # should not raise
+    assert config.cfg_save({"a": 1}) is False
     assert config.cfg_load() == {}
 
 
@@ -65,8 +66,18 @@ def test_cfg_save_is_atomic_no_leftover_tmp(tmp_path, monkeypatch):
 def test_cfg_save_failure_leaves_no_tmp(tmp_path, monkeypatch):
     bad = tmp_path / "missing_dir" / "cfg.json"
     monkeypatch.setattr(config, "CONFIG_PATH", str(bad))
-    config.cfg_save({"a": 1})
+    assert config.cfg_save({"a": 1}) is False
     assert not os.path.exists(str(bad) + ".tmp")
+
+
+def test_mod_context_save_config_propagates_failure(monkeypatch):
+    from hoi4cm.mod import context as ctx_mod
+
+    monkeypatch.setattr(ctx_mod, "cfg_load", lambda: {})
+    monkeypatch.setattr(ctx_mod, "cfg_save", lambda data: False)
+    monkeypatch.setattr(ctx_mod.GraphicsCatalog, "flush_cache", lambda self: None)
+
+    assert ctx_mod.ModContext().save_config() is False
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX file modes only")
@@ -95,13 +106,13 @@ def test_sidebar_refresh_skip_roundtrips_through_save_config(monkeypatch):
     from hoi4cm.mod import context as ctx_mod
 
     saved = {}
-    monkeypatch.setattr(ctx_mod, "cfg_save", lambda data: saved.update(data))
+    monkeypatch.setattr(ctx_mod, "cfg_save", lambda data: (saved.update(data), True)[1])
     monkeypatch.setattr(ctx_mod, "cfg_load", lambda: dict(saved))
     monkeypatch.setattr(ctx_mod.GraphicsCatalog, "flush_cache", lambda self: None)
 
     c = ctx_mod.ModContext()
     c.sidebar_refresh_skip = False
-    c.save_config()
+    assert c.save_config() is True
     assert saved["sidebar_refresh_skip"] is False
 
     c2 = ctx_mod.ModContext()
@@ -112,7 +123,7 @@ def test_loc_language_defaults_persists_and_normalizes(monkeypatch):
     from hoi4cm.mod import context as ctx_mod
 
     saved = {}
-    monkeypatch.setattr(ctx_mod, "cfg_save", lambda data: saved.update(data))
+    monkeypatch.setattr(ctx_mod, "cfg_save", lambda data: (saved.update(data), True)[1])
     monkeypatch.setattr(ctx_mod, "cfg_load", lambda: dict(saved))
     monkeypatch.setattr(ctx_mod.GraphicsCatalog, "flush_cache", lambda self: None)
 
@@ -120,7 +131,7 @@ def test_loc_language_defaults_persists_and_normalizes(monkeypatch):
     assert context.loc_language == "english"
 
     context.loc_language = "french"
-    context.save_config()
+    assert context.save_config() is True
     assert saved["loc_language"] == "french"
     assert ctx_mod.ModContext().loc_language == "french"
 

@@ -69,12 +69,13 @@ def _load_i18n(lang=None):
     I18N_LANG = chosen
 
 
-def set_language(lang):
-    """Persist and switch the active language."""
+def set_language(lang) -> bool:
+    """Persist and switch the active language, returning write success."""
     if lang not in I18N_LANGS:
         lang = "en"
-    cfg_save({"language": lang})
+    result = cfg_save({"language": lang})
     _load_i18n(lang)
+    return result
 
 
 def get_language():

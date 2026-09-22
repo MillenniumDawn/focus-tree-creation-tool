@@ -115,9 +115,17 @@ def test_german_language_is_selectable_and_loaded(restore_i18n_state, fake_confi
 
 
 def test_set_language_rejects_unknown(restore_i18n_state, fake_config, monkeypatch):
-    monkeypatch.setattr(i18n_mod, "cfg_save", lambda d: None)
-    i18n_mod.set_language("xx_YY")  # not in I18N_LANGS
+    monkeypatch.setattr(i18n_mod, "cfg_save", lambda d: True)
+    assert i18n_mod.set_language("xx_YY") is True  # not in I18N_LANGS
     assert i18n_mod.I18N_LANG == "en"  # falls back to en
+
+
+def test_set_language_reports_save_failure(
+    restore_i18n_state, fake_config, monkeypatch
+):
+    monkeypatch.setattr(i18n_mod, "cfg_save", lambda d: False)
+    assert i18n_mod.set_language("de") is False
+    assert i18n_mod.I18N_LANG == "de"
 
 
 def test_get_language_tracks_set_language(restore_i18n_state, fake_config):

@@ -157,9 +157,9 @@ def tutorial_is_disabled() -> bool:
     return bool(cfg_load().get(TUTORIAL_DISABLED_KEY, False))
 
 
-def save_tutorial_disabled(disabled: bool) -> None:
+def save_tutorial_disabled(disabled: bool) -> bool:
     """Persist the user's "don't show this again" choice."""
-    cfg_save({TUTORIAL_DISABLED_KEY: bool(disabled)})
+    return cfg_save({TUTORIAL_DISABLED_KEY: bool(disabled)})
 
 
 class HighlightOverlay:

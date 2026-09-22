@@ -24,8 +24,13 @@ def cfg_load():
         return {}
 
 
-def cfg_save(data):
-    """Merge data into existing config and write it atomically."""
+def cfg_save(data) -> bool:
+    """Merge data into existing config and write it atomically.
+
+    Return whether the write completed. Persistence is best-effort so a
+    read-only or otherwise unavailable config location cannot break a UI event
+    callback; callers that can notify the user should check the result.
+    """
     try:
         existing = cfg_load()
         existing.update(data)
@@ -48,3 +53,5 @@ def cfg_save(data):
             raise
     except (OSError, ValueError, TypeError, RuntimeError) as exc:
         _log.debug("save failed: %s", exc, exc_info=True)
+        return False
+    return True

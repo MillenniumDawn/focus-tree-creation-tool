@@ -97,6 +97,11 @@ def test_every_tutorial_key_exists_in_each_locale():
         assert keys <= strings.keys(), f"missing tutorial keys in {path.name}"
 
 
+def test_save_tutorial_disabled_reports_save_failure(monkeypatch):
+    monkeypatch.setattr(tutorial_mod, "cfg_save", lambda values: False)
+    assert tutorial_mod.save_tutorial_disabled(True) is False
+
+
 def test_automatic_start_honours_saved_preference(tk_root, monkeypatch):
     monkeypatch.setattr(
         tutorial_mod,
