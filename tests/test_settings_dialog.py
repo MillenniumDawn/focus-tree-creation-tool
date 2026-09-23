@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import copy
 import tkinter as tk
+from tkinter import ttk
 from unittest.mock import MagicMock
 
 import pytest
 
 import hoi4cm.ui.settings_dialog as settings_dialog
+from hoi4cm.core.i18n import I18N_LANGS
 from hoi4cm.mod import MOD
 from hoi4cm.mod import scan_cache as scan_cache_mod
 
@@ -127,6 +129,35 @@ def _find_profile_delete_button(win: tk.Misc, profile_name: str) -> tk.Button | 
     return None
 
 
+def _find_button(win: tk.Misc, text: str) -> tk.Button | None:
+    stack: list[tk.Misc] = [win]
+    while stack:
+        cur = stack.pop()
+        children = list(cur.winfo_children())  # type: ignore[union-attr]
+        for child in children:
+            if isinstance(child, tk.Button) and child.cget("text") == text:
+                return child
+        stack.extend(children)
+    return None
+
+
+def _find_lang_combobox(win: tk.Misc):
+    stack: list[tk.Misc] = [win]
+    while stack:
+        cur = stack.pop()
+        children = list(cur.winfo_children())  # type: ignore[union-attr]
+        for child in children:
+            if not isinstance(child, ttk.Combobox):
+                continue
+            vals = child["values"]
+            if isinstance(vals, str):
+                vals = tuple(vals.split())
+            if tuple(vals) == tuple(I18N_LANGS):
+                return child
+        stack.extend(children)
+    return None
+
+
 def _open_settings_with_profile(tk_root, monkeypatch):
     _stub_mod_app(tk_root, monkeypatch)
     MOD.country_tag_names = {}
@@ -196,5 +227,57 @@ def test_delete_event_dim_profile_confirm_removes_profile_and_saves(
         assert "vanilla" in MOD.event_dim_profiles
         assert MOD.event_dim_active_profile == "vanilla"
         save_config.assert_called_once_with()
+    finally:
+        _destroy_toplevels(wins, tk_root)
+
+
+def test_config_save_failure_warns_once_per_settings_dialog(
+    tk_root, isolate_mod, monkeypatch
+):
+    warnings: list[tuple] = []
+    wins, save_config = _open_settings_with_profile(tk_root, monkeypatch)
+    win = wins[0]
+    monkeypatch.setattr(
+        settings_dialog.messagebox,
+        "showwarning",
+        lambda *args, **kwargs: warnings.append((args, kwargs)),
+    )
+    save_config.return_value = False
+    try:
+        for text in ("Force MD ON", "Force MD OFF  (Vanilla)"):
+            button = _find_button(win, text)
+            assert button is not None
+            button.invoke()
+            tk_root.update()
+
+        assert len(warnings) == 1
+        assert warnings[0][1].get("parent") is win
+        assert "save settings" in warnings[0][0][1].lower()
+        assert save_config.call_count == 2
+    finally:
+        _destroy_toplevels(wins, tk_root)
+
+
+def test_language_change_failed_save_warns_without_success_dialog(
+    tk_root, isolate_mod, monkeypatch
+):
+    warnings: list[tuple] = []
+    infos: list[tuple] = []
+    wins, _save_config = _open_settings_with_profile(tk_root, monkeypatch)
+    win = wins[0]
+    mb = settings_dialog.messagebox
+    monkeypatch.setattr(mb, "showwarning", lambda *a, **kw: warnings.append((a, kw)))
+    monkeypatch.setattr(mb, "showinfo", lambda *a, **kw: infos.append((a, kw)))
+    monkeypatch.setattr(settings_dialog, "set_language", lambda lang: False)
+    lang_combo = _find_lang_combobox(win)
+    assert lang_combo is not None
+    other = next(lang for lang in I18N_LANGS if lang != lang_combo.get())
+    try:
+        lang_combo.set(other)
+        lang_combo.event_generate("<<ComboboxSelected>>")
+        tk_root.update()
+
+        assert len(warnings) == 1
+        assert infos == []
     finally:
         _destroy_toplevels(wins, tk_root)

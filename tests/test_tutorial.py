@@ -97,6 +97,36 @@ def test_every_tutorial_key_exists_in_each_locale():
         assert keys <= strings.keys(), f"missing tutorial keys in {path.name}"
 
 
+def test_save_tutorial_disabled_reports_save_failure(monkeypatch):
+    monkeypatch.setattr(tutorial_mod, "cfg_save", lambda values: False)
+    assert tutorial_mod.save_tutorial_disabled(True) is False
+
+
+def test_close_warns_when_persisting_preference_fails(tk_root, monkeypatch):
+    warnings: list[tuple] = []
+    monkeypatch.setattr(tutorial_mod, "cfg_load", lambda: {})
+    monkeypatch.setattr(tutorial_mod, "cfg_save", lambda values: False)
+    monkeypatch.setattr(
+        tutorial_mod.messagebox,
+        "showwarning",
+        lambda *args, **kwargs: warnings.append((args, kwargs)),
+    )
+    menu = _install_tutorial_targets(tk_root)
+    controller = tutorial_mod.TutorialController(tk_root, menu)
+
+    assert controller.start(manual=True) is True
+    tk_root.update()
+    window = next(
+        child
+        for child in tk_root.winfo_children()  # type: ignore[union-attr]
+        if isinstance(child, tk.Toplevel)
+    )
+    controller.close()
+
+    assert len(warnings) == 1
+    assert warnings[0][1].get("parent") is window
+
+
 def test_automatic_start_honours_saved_preference(tk_root, monkeypatch):
     monkeypatch.setattr(
         tutorial_mod,
@@ -113,7 +143,9 @@ def test_automatic_start_honours_saved_preference(tk_root, monkeypatch):
 def test_tutorial_walks_real_menu_previews_and_persists_checkbox(tk_root, monkeypatch):
     saved: dict[str, bool] = {}
     monkeypatch.setattr(tutorial_mod, "cfg_load", lambda: dict(saved))
-    monkeypatch.setattr(tutorial_mod, "cfg_save", lambda values: saved.update(values))
+    monkeypatch.setattr(
+        tutorial_mod, "cfg_save", lambda values: (saved.update(values), True)[1]
+    )
     menu = _install_tutorial_targets(tk_root)
     controller = tutorial_mod.TutorialController(tk_root, menu)
 
@@ -163,7 +195,9 @@ def test_tutorial_walks_real_menu_previews_and_persists_checkbox(tk_root, monkey
 def test_manual_start_bypasses_disabled_preference(tk_root, monkeypatch):
     saved = {tutorial_mod.TUTORIAL_DISABLED_KEY: True}
     monkeypatch.setattr(tutorial_mod, "cfg_load", lambda: dict(saved))
-    monkeypatch.setattr(tutorial_mod, "cfg_save", lambda values: saved.update(values))
+    monkeypatch.setattr(
+        tutorial_mod, "cfg_save", lambda values: (saved.update(values), True)[1]
+    )
     menu = _install_tutorial_targets(tk_root)
     controller = tutorial_mod.TutorialController(tk_root, menu)
 

@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import tkinter as tk
 from dataclasses import dataclass
+from tkinter import messagebox
 from typing import Protocol
 
-from hoi4cm.core.config import cfg_load, cfg_save
+from hoi4cm.core.config import CONFIG_PATH, cfg_load, cfg_save
 from hoi4cm.core.i18n import tr
 from hoi4cm.ui.theme import (
     BG_CARD,
@@ -157,9 +158,9 @@ def tutorial_is_disabled() -> bool:
     return bool(cfg_load().get(TUTORIAL_DISABLED_KEY, False))
 
 
-def save_tutorial_disabled(disabled: bool) -> None:
+def save_tutorial_disabled(disabled: bool) -> bool:
     """Persist the user's "don't show this again" choice."""
-    cfg_save({TUTORIAL_DISABLED_KEY: bool(disabled)})
+    return cfg_save({TUTORIAL_DISABLED_KEY: bool(disabled)})
 
 
 class HighlightOverlay:
@@ -283,12 +284,22 @@ class TutorialController:
     def close(self) -> None:
         """Close every tutorial surface and persist the checkbox when active."""
         was_active = self._active
+        window = self._window
         self._active = False
         self._highlight.clear()
         self._menu.close()
-        if was_active and self._disabled_var is not None:
-            save_tutorial_disabled(self._disabled_var.get())
-        window = self._window
+        if was_active and self._disabled_var is not None and window is not None:
+            if not save_tutorial_disabled(self._disabled_var.get()):
+                messagebox.showwarning(
+                    tr("settings.save_failed.title", "Settings Not Saved"),
+                    tr(
+                        "settings.save_failed.body",
+                        "Could not save settings to {path}. Changes will be lost "
+                        "when the app closes.",
+                        path=CONFIG_PATH,
+                    ),
+                    parent=window,
+                )
         self._window = None
         self._active_targets.clear()
         if window is not None:

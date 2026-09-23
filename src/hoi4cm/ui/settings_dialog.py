@@ -118,6 +118,27 @@ def open_settings(app):
     win.resizable(True, True)
     win.grab_set()
 
+    save_warning_shown = False
+
+    def _report_save_result(result):
+        nonlocal save_warning_shown
+        if not result and not save_warning_shown:
+            save_warning_shown = True
+            messagebox.showwarning(
+                tr("settings.save_failed.title", "Settings Not Saved"),
+                tr(
+                    "settings.save_failed.body",
+                    "Could not save settings to {path}. Changes will be lost "
+                    "when the app closes.",
+                    path=CONFIG_PATH,
+                ),
+                parent=win,
+            )
+        return result
+
+    def _save_config():
+        return _report_save_result(MOD.save_config())
+
     tk.Label(
         win,
         text=tr("settings.header", "SETTINGS"),
@@ -197,7 +218,7 @@ def open_settings(app):
 
         def _on_change(*a, _attr=attr, _var=var):
             setattr(MOD, _attr, _var.get())
-            MOD.save_config()
+            _save_config()
 
         var.trace_add("write", _on_change)
 
@@ -268,9 +289,9 @@ def open_settings(app):
     def _apply_lang(*_):
         old = get_language()
         new = lang_var.get()
-        set_language(new)
+        saved = _report_save_result(set_language(new))
         lang_name.config(text=I18N_LANGS.get(new, ""))
-        if old != new:
+        if old != new and saved:
             messagebox.showinfo(
                 tr("settings.language.changed.title", "Language Changed"),
                 tr(
@@ -315,7 +336,7 @@ def open_settings(app):
     def _apply_loc_lang(*_):
         MOD.loc_language = loc_lang_var.get()
         loc_lang_name.config(text=LOC_LANGUAGE_NAMES.get(MOD.loc_language, ""))
-        MOD.save_config()
+        _save_config()
         if MOD.root and MOD.is_md:
             MOD._scan_md_money_files()
 
@@ -365,7 +386,7 @@ def open_settings(app):
     def _force(is_md):
         MOD.md_mode_override = is_md
         MOD.is_md = is_md
-        MOD.save_config()
+        _save_config()
         app._apply_md_visibility()
         lbl_status.config(
             text=tr(
@@ -457,7 +478,7 @@ def open_settings(app):
 
     def _on_mp_change(*a):
         MOD.custom_mod_path = mp_var.get()
-        MOD.save_config()
+        _save_config()
 
     mp_var.trace_add("write", _on_mp_change)
 
@@ -544,7 +565,7 @@ def open_settings(app):
         def _apply(g=pg, i=pi):
             MOD.path_goals = g
             MOD.path_ideas_gfx = i
-            MOD.save_config()
+            _save_config()
             messagebox.showinfo(
                 tr("dialog.preset_applied.title", "Preset Applied"),
                 tr(
@@ -639,7 +660,7 @@ def open_settings(app):
 
     def _on_prof_select(evt=None):
         MOD.event_dim_active_profile = _prof_var.get()
-        MOD.save_config()
+        _save_config()
         _refresh_prof_list()
         _refresh_profiles_box()
 
@@ -711,7 +732,7 @@ def open_settings(app):
         if MOD.event_dim_active_profile == pname:
             MOD.event_dim_active_profile = "vanilla"
             _prof_var.set("vanilla")
-        MOD.save_config()
+        _save_config()
         _refresh_prof_list()
         _refresh_profiles_box()
 
@@ -775,7 +796,7 @@ def open_settings(app):
         MOD.event_dim_profiles[name] = profile
         MOD.event_dim_active_profile = name
         _prof_var.set(name)
-        MOD.save_config()
+        _save_config()
         _refresh_prof_list()
         _refresh_profiles_box()
 
@@ -844,7 +865,7 @@ def open_settings(app):
                 text="X",
                 command=lambda idx=i: [
                     MOD.custom_gfx_dirs.pop(idx),
-                    MOD.save_config(),
+                    _save_config(),
                     _refresh_extra(),
                 ],
                 bg=BG_CARD,
@@ -863,7 +884,7 @@ def open_settings(app):
         )
         if d and d not in MOD.custom_gfx_dirs:
             MOD.custom_gfx_dirs.append(d)
-            MOD.save_config()
+            _save_config()
             _refresh_extra()
 
     tk.Button(
@@ -1096,7 +1117,7 @@ def open_settings(app):
                     MOD.country_tag_names.pop(old_tag, None)
                     if new_name:
                         MOD.country_tag_names[new_tag] = new_name
-                    MOD.save_config()
+                    _save_config()
 
                 te.bind("<FocusOut>", lambda e, f=_save_row: f())
                 ne.bind("<FocusOut>", lambda e, f=_save_row: f())
@@ -1107,7 +1128,7 @@ def open_settings(app):
                     text="✕",
                     command=lambda t=tag: [
                         MOD.country_tag_names.pop(t, None),
-                        MOD.save_config(),
+                        _save_config(),
                         _refresh_tag_table(),
                     ],
                     bg=BG_CARD,
@@ -1175,7 +1196,7 @@ def open_settings(app):
             )
             return
         MOD.country_tag_names[t] = n
-        MOD.save_config()
+        _save_config()
         new_tag_v.set("")
         new_name_v.set("")
         _refresh_tag_table()
@@ -1200,7 +1221,7 @@ def open_settings(app):
             if t not in MOD.country_tag_names:
                 MOD.country_tag_names[t] = n
                 count += 1
-        MOD.save_config()
+        _save_config()
         _refresh_tag_table()
         messagebox.showinfo(
             tr("dialog.vanilla_tags.title", "Vanilla Tags"),
@@ -1229,7 +1250,7 @@ def open_settings(app):
         text=tr("settings.clear_all_tags", "Clear All Tags"),
         command=lambda: [
             MOD.country_tag_names.clear(),
-            MOD.save_config(),
+            _save_config(),
             _refresh_tag_table(),
         ],
         bg="#2d0a0a",
@@ -1273,7 +1294,7 @@ def open_settings(app):
 
     def _on_tok_change(*_):
         MOD.loc_token_style = _tok_var.get()
-        MOD.save_config()
+        _save_config()
 
     for val, label, hint in [
         (
@@ -1372,7 +1393,7 @@ def open_settings(app):
     tk.Button(
         bot_bar,
         text=tr("settings.save_and_close", "Save & Close"),
-        command=lambda: [MOD.save_config(), win.destroy()],
+        command=lambda: [_save_config(), win.destroy()],
         bg="#14532d",
         fg="#4ade80",
         relief="flat",

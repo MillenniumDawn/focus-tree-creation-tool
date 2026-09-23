@@ -300,6 +300,8 @@
   "settings.reload_hint": "  重新加载 Mod 后生效。",
   "settings.reset_hoi4_default": "重置为 HOI4 默认值",
   "settings.save_and_close": "保存并关闭",
+  "settings.save_failed.title": "设置未保存",
+  "settings.save_failed.body": "无法将设置保存到 {path}。应用关闭时更改将丢失。",
   "settings.saved_to": "  设置保存到：{path}",
   "settings.session_log": "会话日志",
   "settings.session_log.hint": "  本次会话捕获的所有错误和警告。",

@@ -235,11 +235,12 @@ class ModContext:
         self._saved_geometry = cfg.get("window_geometry", "")
         self._recent_mods = cfg.get("recent_mods", [])
 
-    def save_config(self, window_geometry: str = ""):
+    def save_config(self, window_geometry: str = "") -> bool:
         """Persist current path/preference settings to disk.
 
         ``window_geometry`` is passed in by the App at shutdown — the
-        context doesn't need to know about the Tk window directly.
+        context doesn't need to know about the Tk window directly. Returns
+        whether the config write completed.
         """
         out = {key: getattr(self, attr) for key, attr, _ in self._PERSISTED_ATTRS}
         out.update(
@@ -249,10 +250,11 @@ class ModContext:
                 "recent_mods": getattr(self, "_recent_mods", []),
             }
         )
-        cfg_save(out)
+        result = cfg_save(out)
         # Pending graphics-snapshot patches (note_file_written / _deleted) are
         # persisted here and at the next mod refresh, not on every write.
         self.graphics_catalog.flush_cache()
+        return result
 
     # ── HOI4 script tokeniser (same as main parser) ─────────────────
     @staticmethod

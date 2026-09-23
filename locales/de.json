@@ -300,6 +300,8 @@
   "settings.reload_hint": "  Änderungen werden beim Neuladen des Mods wirksam.",
   "settings.reset_hoi4_default": "Auf HOI4-Standard zurücksetzen",
   "settings.save_and_close": "Speichern und schließen",
+  "settings.save_failed.title": "Einstellungen nicht gespeichert",
+  "settings.save_failed.body": "Einstellungen konnten nicht unter {path} gespeichert werden. Änderungen gehen beim Schließen der App verloren.",
   "settings.saved_to": "  Einstellungen gespeichert unter:  {path}",
   "settings.session_log": "SITZUNGSPROTOKOLL",
   "settings.session_log.hint": "  Alle Fehler und Warnungen dieser Sitzung.",
