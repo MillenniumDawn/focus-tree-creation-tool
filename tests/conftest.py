@@ -90,6 +90,19 @@ def pytest_configure(config):
 
 
 @pytest.fixture(autouse=True)
+def _reset_focus_counter():
+    """Give every test an isolated, deterministic focus ID sequence."""
+    from hoi4cm.models import Focus
+
+    previous = Focus._next
+    Focus._next = 0
+    try:
+        yield
+    finally:
+        Focus._next = previous
+
+
+@pytest.fixture(autouse=True)
 def hide_tk_windows(request, monkeypatch):
     """Withdraw every Toplevel the test creates.
 

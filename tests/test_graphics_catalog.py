@@ -80,6 +80,101 @@ def test_warm_catalog_load_restats_without_walking_or_reparsing(graphics_tree):
     assert warm_maps == cold_maps
 
 
+def test_unreadable_gfx_preserves_siblings_and_is_retried(graphics_tree):
+    unreadable = graphics_tree / "interface" / "unreadable.gfx"
+    unreadable.write_text(
+        'spriteType = { name = "GFX_focus_unreadable" '
+        'texturefile = "gfx/interface/goals/unreadable.dds" }\n'
+    )
+    failed_reads = set()
+
+    def fail_one(path):
+        if path == str(unreadable):
+            failed_reads.add(path)
+            return None
+        return read_file(path)
+
+    first = GraphicsCatalog()
+    maps = first.refresh(str(graphics_tree), _config(), read_text=fail_one)
+
+    assert maps.sprites["GFX_focus_declared"].endswith("declared.dds")
+    assert "GFX_focus_unreadable" not in maps.sprites
+    assert first._snapshot.unreadable_gfx == (
+        PathReference("mod", "interface/unreadable.gfx"),
+    )
+
+    second = GraphicsCatalog()
+    warm_maps = second.refresh(str(graphics_tree), _config(), read_text=read_file)
+
+    assert second.last_metrics.cache_status == "miss"
+    assert failed_reads == {str(unreadable)}
+    assert warm_maps.sprites["GFX_focus_unreadable"].endswith("unreadable.dds")
+
+
+def test_failed_rescan_does_not_replace_existing_graphics_cache(graphics_tree):
+    config = _config()
+    first = GraphicsCatalog()
+    first.refresh(str(graphics_tree), config, read_text=read_file)
+
+    gfx_file = graphics_tree / "interface" / "assets.gfx"
+    gfx_file.write_text(
+        'spriteType = { name = "GFX_focus_retried" '
+        'texturefile = "gfx/interface/goals/retried.dds" }\n'
+    )
+
+    failed = GraphicsCatalog()
+    failed_maps = failed.refresh(
+        str(graphics_tree), config, read_text=lambda _path: None
+    )
+    assert "GFX_focus_retried" not in failed_maps.sprites
+    assert "GFX_focus_declared" not in failed_maps.sprites
+
+    retried = GraphicsCatalog()
+    retried_maps = retried.refresh(str(graphics_tree), config, read_text=read_file)
+
+    assert retried.last_metrics.cache_status == "miss"
+    assert retried_maps.sprites["GFX_focus_retried"].endswith("retried.dds")
+
+
+def test_note_written_ignores_unreadable_gfx_without_mutating_catalog(graphics_tree):
+    catalog = GraphicsCatalog()
+    catalog.refresh(str(graphics_tree), _config(), read_text=read_file)
+    gfx_file = graphics_tree / "interface" / "assets.gfx"
+    gfx_file.write_text(
+        'spriteType = { name = "GFX_focus_incremental_retry" '
+        'texturefile = "gfx/interface/goals/retried.dds" }\n'
+    )
+    reference = PathReference("mod", "interface/assets.gfx")
+    old_record = catalog._gfx_files[reference]
+    old_refs = dict(catalog._sprite_refs)
+    old_generation = catalog.generation
+
+    assert catalog.note_written(str(gfx_file), read_text=lambda _path: None) is None
+    assert catalog._gfx_files[reference] is old_record
+    assert catalog._sprite_refs == old_refs
+    assert catalog.generation == old_generation
+
+    maps = catalog.note_written(str(gfx_file), read_text=read_file)
+    assert maps is not None
+    assert maps.sprites["GFX_focus_incremental_retry"].endswith("retried.dds")
+    assert maps.removed_sprites == ("GFX_focus_declared",)
+
+
+def test_successful_incremental_retry_can_be_cached_after_failed_scan(graphics_tree):
+    catalog = GraphicsCatalog()
+    catalog.refresh(str(graphics_tree), _config(), read_text=lambda _path: None)
+    gfx_file = graphics_tree / "interface" / "assets.gfx"
+
+    assert catalog.note_written(str(gfx_file), read_text=read_file) is not None
+    catalog.flush_cache()
+
+    fresh = GraphicsCatalog()
+    maps = fresh.refresh(str(graphics_tree), _config(), read_text=read_file)
+
+    assert fresh.last_metrics.cache_status == "hit"
+    assert maps.sprites["GFX_focus_declared"].endswith("declared.dds")
+
+
 @pytest.mark.parametrize(
     ("stale_kind", "expected_metrics", "expected_calls"),
     [
