@@ -19,6 +19,7 @@ from hoi4cm.core import (
     read_file_with_encoding,
     tr,
 )
+from hoi4cm.core.config import CONFIG_PATH
 from hoi4cm.mod import MOD, find_loc_files, notifying_workspace_files
 from hoi4cm.ui.error_report import report_error
 from hoi4cm.ui.tasks import make_progress, run_bg
@@ -49,6 +50,22 @@ class ModLoadingMixin:
     def __getattr__(self, name: str) -> Any:  # type: ignore[no-redef]
         raise AttributeError(name)
 
+    def _warn_config_write_failed(self) -> None:
+        """Show a one-time-per-session warning when a config write fails."""
+        if getattr(self, "_config_write_warned", False):
+            return
+        self._config_write_warned = True
+        messagebox.showwarning(
+            tr("settings.save_failed.title", "Settings Not Saved"),
+            tr(
+                "settings.save_failed.body",
+                "Could not save settings to {path}. Changes will be lost "
+                "when the app closes.",
+                path=CONFIG_PATH,
+            ),
+            parent=cast(Any, self),
+        )
+
     def _load_mod_path(self, root):
         """Load a mod directly from a known path (used by Recent Mods menu)."""
         if not root or not os.path.isdir(root):
@@ -64,7 +81,8 @@ class ModLoadingMixin:
             # Remove stale entry
             if hasattr(MOD, "_recent_mods") and root in MOD._recent_mods:
                 MOD._recent_mods.remove(root)
-                MOD.save_config()
+                if not MOD.save_config():
+                    self._warn_config_write_failed()
             return
         # Reuse _load_mod flow by temporarily monkeypatching the dialog
         orig = __import__("tkinter.filedialog", fromlist=["askdirectory"]).askdirectory
@@ -108,7 +126,8 @@ class ModLoadingMixin:
             MOD._recent_mods.remove(root)
         MOD._recent_mods.insert(0, root)
         MOD._recent_mods = MOD._recent_mods[:8]  # keep 8 most recent
-        MOD.save_config()
+        if not MOD.save_config():
+            self._warn_config_write_failed()
 
         # Progress window
         pw = tk.Toplevel(cast(Any, self))  # type: ignore[arg-type]

@@ -122,7 +122,7 @@ def open_settings(app):
 
     def _report_save_result(result):
         nonlocal save_warning_shown
-        if result is False and not save_warning_shown:
+        if not result and not save_warning_shown:
             save_warning_shown = True
             messagebox.showwarning(
                 tr("settings.save_failed.title", "Settings Not Saved"),
@@ -289,9 +289,9 @@ def open_settings(app):
     def _apply_lang(*_):
         old = get_language()
         new = lang_var.get()
-        _report_save_result(set_language(new))
+        saved = _report_save_result(set_language(new))
         lang_name.config(text=I18N_LANGS.get(new, ""))
-        if old != new:
+        if old != new and saved:
             messagebox.showinfo(
                 tr("settings.language.changed.title", "Language Changed"),
                 tr(
