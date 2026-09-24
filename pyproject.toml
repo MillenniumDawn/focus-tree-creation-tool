@@ -35,12 +35,11 @@ packages = ["src/hoi4cm"]
 pythonpath = ["src", ".", "scripts"]
 testpaths = ["tests"]
 
-# `pytest --cov` measures the whole package. CI runs it twice: once over
-# `hoi4cm` with a floor that stops the package sliding backwards, and once
-# over `hoi4cm.wizards._generators` alone, so new wizard script/loc
-# generators can't land untested (see docs/dev/wizards.md and issue #51).
+# CI measures the package and the root-level Tk shell in the full suite, then
+# applies independent coverage floors to each source tree. The wizard generator
+# floor remains a separate targeted run (see docs/dev/wizards.md and issue #51).
 [tool.coverage.run]
-source = ["hoi4cm"]
+source = ["hoi4cm", "hoi4_content_maker"]
 branch = true
 
 [tool.coverage.report]
