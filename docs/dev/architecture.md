@@ -4,16 +4,22 @@
 
 `src/hoi4cm/`, one bullet per subpackage:
 
-- **`core/`**: logging, config, paths, i18n, image gating, path/XML
-  sanitizing, the sparse undo stack (`undo.py`, `UndoStack`), and a bounded
-  LRU mapping (`lru.py`, `LRUCache`) backing the in-memory `PhotoImage`
-  caches. Re-exported flat through `core/__init__.py` (the "facade", see
-  below). Everything else in the package can depend on `core`; core submodules
-  other than the facade depend on nothing else in `hoi4cm`.
+- **`core/`**: logging, config, paths, i18n, the Pillow import gate
+  (`image.py`, so a missing optional extra degrades to placeholders),
+  path/XML sanitizing, the sparse undo stack (`undo.py`, `UndoStack`), and
+  a bounded LRU mapping (`lru.py`, `LRUCache`) backing the in-memory
+  `PhotoImage` caches. Re-exported flat through `core/__init__.py` (the
+  "facade", see below). Everything else in the package can depend on `core`;
+  core submodules other than the facade depend on nothing else in `hoi4cm`.
 - **`data/`**: static tables: `EFFECT_DEFS`/`MODIFIER_DEFS`/`TRIGGER_DEFS` and
   the MD building/resource cost tables. No logic beyond lookup helpers.
-- **`models/`**: `Focus`, the plain-data class behind every canvas item.
-  `to_dict`/`from_dict` for JSON round-trips (autosave, tree files).
+- **`models/`**: `Focus`, the plain-data class behind every canvas item,
+  and `document.py` (`FocusDocument`/`TreeDocument`/`EditorWorkspace`, the
+  revision-tracked document the canvas caches key off, see "Revision
+  discipline"). `to_dict`/`from_dict` for JSON round-trips (autosave, tree
+  files). `sidebar_form.py` holds the pure sidebar-form snapshot helpers
+  (`FocusSidebarValues`, `sidebar_values_match_focus`) the select-away
+  autosave dirty check runs through.
 - **`script/`**: low-level HOI4 script marshalling: `dict_to_raw`,
   `normalize_effect_fields`, `append_scripted_loc`. Pure string/dict work.
 - **`focus_tree/`**: the parse/build/export pipeline for focus-tree script
@@ -25,16 +31,23 @@
   resolve each header, directory, and filename suffix,
   `drawio.py` walks a draw.io mxGraph XML export into the same `Focus`
   shape (`parse_drawio_graph`, `drawio_to_focus_data`,
-  `build_drawio_focuses`), and `batch_load.py` walks a file list into
-  parsed trees (`batch_load_trees`, `make_cancel_handle`).
+  `build_drawio_focuses`), `batch_load.py` walks a file list into parsed
+  trees (`batch_load_trees`, `make_cancel_handle`), `codec.py`/
+  `operations.py` hold the tree-script codec and focus operations, and
+  `export_plan.py` owns the plain-data export plans the Tk shells submit to
+  a sequential worker. `validate.py` is the pure validator (#132):
+  `validate_document` takes the focus map plus caller-supplied sprite and
+  loc-key sets, no Tk and no `MOD` globals.
 - **`mod/`**: `ModContext` (the `MOD` singleton): walks a mod's directory
   tree once and indexes sprites, focus/event/idea/decision IDs, scripted
   effects, scripted triggers, on-action hooks, dyn-mod IDs, country tags, and
   MD money-system paths. MD mode is detected from the mod identity or
   money-system file, unless `md_mode_override` is configured. `scan_cache.py`
-  is the SQLite per-file cache backing warm reloads. `gfx_writer.py` preserves
-  and extends sprite declarations. `workspace_files.py` is the single writer
-  every mod-file save goes through (see "Writing mod files" below).
+  is the SQLite per-file cache backing warm reloads, `workspace_cache.py`
+  stores the graphics snapshot that warm load restats, and `gfx_writer.py`
+  preserves and extends sprite declarations. `workspace_files.py` is the
+  single writer every mod-file save goes through (see "Writing mod files"
+  below).
 - **`wizards/`**: the five `open_*_wizard(app)` entry points (decision,
   event, national spirit, dynamic modifier, additional income) plus
   `_shared.py` for cross-wizard state, including shared effect/trigger pickers.
@@ -42,23 +55,45 @@
   five names through a module-level `__getattr__`, so importing one wizard
   doesn't load the other four; keep it that way when adding a sixth. See
   `wizards.md`.
-- **`ui/`**: Tk-facing code: `CanvasMixin`, `EffectsMixin`,
-  `ModLoadingMixin` (the three mixins `App` is built from), `gfx_browser.py`
-  (the universal GFX picker, the drag-to-place GFX editor, and the
-  sidebar's narrower focus-icon picker, see `monolith-migration.md` for why
-  there are two GFX browsers instead of one), `settings_dialog.py`
-  (`open_settings`), `menubar.py`/`toolbar.py` (`build_menubar`/
-  `build_toolbar_row2`, the one-shot builders behind `App`'s top bar),
-  `tutorial.py` (the first-launch teaching controller and widget highlights;
-  it drives preview-only dropdowns through `menubar.MenuController`),
-  `tasks.py` (the `run_bg`/`progress_modal` background-worker plumbing, see
-  "Threading model" below), theme constants, and small shared widgets
-  (`Tooltip`, `_safe_after`). One exception to "Tk-facing": `viewport.py`
+- **`ui/`**: Tk-facing code: the three mixins `App` is built from —
+  `CanvasMixin` (`canvas.py`), `EffectsMixin` (`effects_panel.py`, the
+  sidebar Effects tab, the effect browser popup and the per-effect
+  parameter form), and `ModLoadingMixin` (`mod_loading.py`) — plus
+  `gfx_browser.py` (the universal GFX picker, the drag-to-place GFX
+  editor, and the sidebar's narrower focus-icon picker, see
+  `monolith-migration.md` for why there are two GFX browsers instead of
+  one), `settings_dialog.py` (`open_settings`), `menubar.py`/`toolbar.py`
+  (`build_menubar`/`build_toolbar_row2`, the one-shot builders behind
+  `App`'s top bar), `tutorial.py` (the first-launch teaching controller
+  and widget highlights; it drives preview-only dropdowns through
+  `menubar.MenuController`), `tasks.py` (the `run_bg`/`progress_modal`
+  background-worker plumbing, see "Threading model" below), theme
+  constants, and small shared widgets (`Tooltip`, `_safe_after`).
+  The virtualized pooled-row lists live here too: `focus_list.py`'s
+  `VirtualFocusList` over `_PooledList`, reused by `checklist.py`'s
+  `VirtualChecklist` and `loaded_trees.py` (the sidebar's Loaded Trees
+  panel), plus `thumbnail_grid.py`'s own pooled virtual grid. Also
+  `scene_index.py` (hit-testing/culling over the document revision),
+  `image_broker.py` (bounded decoded-image caches, see `performance.md`'s
+  cache inventory), `canvas_renderer.py` (the `FocusCanvasBundle` drawn
+  per focus), `tree_badges.py` (per-tree badge table),
+  `error_report.py`/`file_errors.py` (handled-error dialog + log entry,
+  see "Writing mod files"), `startup_check.py` (the `--smoke-test`
+  runtime probe the release builds run), and `splash.py`. One exception
+  to "Tk-facing": `viewport.py`
   is pure, no-tkinter viewport-culling math (`visible_world_rect`,
   `focus_visible`, `edge_visible`) that `CanvasMixin` calls into, kept
   separate so it has real headless test coverage like `focus_tree/`,
   instead of joining the rest of `ui/`'s manual-only surface (see
   `testing.md`).
+- **`editor/`**: project save/load and autosave plumbing, no tkinter:
+  `project_codec.py` (`write_project`/`read_project`/`encode_project`/
+  `decode_project`, plus project-file-path validation) and
+  `workspace_autosave.py` (the `~/.hoi4cm/autosave/workspace.json` primary
+  and sibling `.autosave.json` paths, and their clearing).
+- **`perf/`**: the deterministic profiling harness (`tracking.py`, stdlib
+  only, no tkinter) that `scripts/track_perf.py` drives; see
+  `performance.md` for the areas and how to read a report.
 
 ## Dataflow
 
