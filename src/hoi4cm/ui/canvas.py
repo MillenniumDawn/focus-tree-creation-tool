@@ -84,6 +84,14 @@ class CanvasMixin:
     _grid_used: Any  # type: ignore[no-redef]
     _grid_key: Any  # type: ignore[no-redef]
     _grid_item: Any  # type: ignore[no-redef]
+    _coord_label_pools: Any  # type: ignore[no-redef]
+    _coord_label_styles: Any  # type: ignore[no-redef]
+    _coord_label_used: Any  # type: ignore[no-redef]
+    _coord_label_key: Any  # type: ignore[no-redef]
+    _legend_pool: Any  # type: ignore[no-redef]
+    _legend_used: Any  # type: ignore[no-redef]
+    _legend_key: Any  # type: ignore[no-redef]
+    _legend_stack_key: Any  # type: ignore[no-redef]
     _grid_on: Any  # type: ignore[no-redef]
     _canvas_min: Any  # type: ignore[no-redef]
     _canvas_max: Any  # type: ignore[no-redef]
@@ -566,104 +574,164 @@ class CanvasMixin:
 
     def _draw_coord_labels(self):
         """Draw HOI4 x/y grid numbers along top and left so exact position is clear."""
-        self.cv.delete("coord_lbl")
+        pools = getattr(
+            self,
+            "_coord_label_pools",
+            {"rectangle": [], "text": [], "line": []},
+        )
+        styles = getattr(
+            self,
+            "_coord_label_styles",
+            {"rectangle": [], "text": [], "line": []},
+        )
+        used_before = getattr(
+            self, "_coord_label_used", {"rectangle": 0, "text": 0, "line": 0}
+        )
+        # Recover if another canvas user cleared all items without resetting our
+        # retained ids. One sentinel probe is enough for the usual delete-all.
+        first_pool = next((pool for pool in pools.values() if pool), None)
+        if first_pool and not self._canvas_item_exists(first_pool[0]):
+            pools = {"rectangle": [], "text": [], "line": []}
+            styles = {"rectangle": [], "text": [], "line": []}
+            used_before = {"rectangle": 0, "text": 0, "line": 0}
+            self._coord_label_key = None
+        self._coord_label_pools = pools
+        self._coord_label_styles = styles
+        self._coord_label_used = used_before
+
         W = max(1, self.cv.winfo_width())
         H = max(1, self.cv.winfo_height())
         stepx = XGRID * self.zoom
         stepy = YGRID * self.zoom
         step = min(stepx, stepy)  # use smaller axis for density checks
-        if step < 16:
-            return  # too dense at low zoom
+        key = (W, H, self.zoom, tuple(self.offset))
+        if key == getattr(self, "_coord_label_key", None):
+            return
 
-        # Label every unit when zoomed in, every 2 when small
-        interval = 1 if step >= 80 else 2
-        fsz = max(7, min(10, int(step * 0.075)))
-        font = ("Courier", fsz, "bold")
+        used = {"rectangle": 0, "text": 0, "line": 0}
+        created = False
 
-        # ── X axis labels (top row) ──────────────────────────
-        world_left = -self.offset[0] / (XGRID * self.zoom)
-        gx = int(world_left) - 1
-        cx = gx * XGRID * self.zoom + self.offset[0]
-        while cx < W + step:
-            if gx % interval == 0:
-                col = "#6a9a4a" if gx % 2 == 0 else "#4a6a2a"
-                # Background chip
-                self.cv.create_rectangle(
-                    cx - fsz,
-                    1,
-                    cx + fsz,
-                    fsz * 2 + 2,
-                    fill="#0a0e08",
-                    outline="",
-                    tags="coord_lbl",
-                )
-                self.cv.create_text(
-                    cx,
-                    fsz + 1,
-                    text=str(gx),
-                    fill=col,
-                    font=font,
-                    anchor="center",
-                    tags="coord_lbl",
-                )
-            cx += XGRID * self.zoom
-            gx += 1
+        def draw(kind, *coords, **options):
+            nonlocal created
+            index = used[kind]
+            pool = pools[kind]
+            style_pool = styles[kind]
+            if index < len(pool):
+                item = pool[index]
+                self.cv.coords(item, *coords)
+                if index >= used_before[kind] or style_pool[index] != options:
+                    self.cv.itemconfig(item, state="normal", **options)
+                    style_pool[index] = options
+            else:
+                create = {
+                    "rectangle": self.cv.create_rectangle,
+                    "text": self.cv.create_text,
+                    "line": self.cv.create_line,
+                }[kind]
+                item = create(*coords, tags="coord_lbl", state="normal", **options)
+                pool.append(item)
+                style_pool.append(options)
+                created = True
+            used[kind] += 1
 
-        # ── Y axis labels (left column) ──────────────────────
-        world_top = -self.offset[1] / (YGRID * self.zoom)
-        gy = int(world_top) - 1
-        cy = gy * YGRID * self.zoom + self.offset[1]
-        while cy < H + step:
-            if gy % interval == 0:
-                col = "#6a9a4a" if gy % 2 == 0 else "#4a6a2a"
-                lbl = str(gy)
-                w = fsz * len(lbl)
-                self.cv.create_rectangle(
-                    1,
-                    cy - fsz,
-                    w + 6,
-                    cy + fsz,
-                    fill="#0a0e08",
-                    outline="",
-                    tags="coord_lbl",
-                )
-                self.cv.create_text(
-                    w // 2 + 3,
-                    cy,
-                    text=lbl,
-                    fill=col,
-                    font=font,
-                    anchor="center",
-                    tags="coord_lbl",
-                )
-            cy += YGRID * self.zoom
-            gy += 1
+        if step >= 16:
+            # Label every unit when zoomed in, every 2 when small
+            interval = 1 if step >= 80 else 2
+            fsz = max(7, min(10, int(step * 0.075)))
+            font = ("Courier", fsz, "bold")
 
-        # ── (0,0) origin marker — bright cross so you always know the anchor ──
-        ox, oy = self.w2c(0, 0)
-        ms = max(6, int(12 * self.zoom))  # marker size
-        self.cv.create_line(
-            ox - ms, oy, ox + ms, oy, fill="#4aaa4a", width=2, tags="coord_lbl"
-        )
-        self.cv.create_line(
-            ox, oy - ms, ox, oy + ms, fill="#4aaa4a", width=2, tags="coord_lbl"
-        )
-        self.cv.create_text(
-            ox + ms + 3,
-            oy - ms - 3,
-            text="(0,0)",
-            fill="#4aaa4a",
-            font=("Courier", 8, "bold"),
-            anchor="sw",
-            tags="coord_lbl",
-        )
+            # ── X axis labels (top row) ──────────────────────────
+            world_left = -self.offset[0] / stepx
+            gx = int(world_left) - 1
+            cx = gx * stepx + self.offset[0]
+            while cx < W + step:
+                if gx % interval == 0:
+                    col = "#6a9a4a" if gx % 2 == 0 else "#4a6a2a"
+                    draw(
+                        "rectangle",
+                        cx - fsz,
+                        1,
+                        cx + fsz,
+                        fsz * 2 + 2,
+                        fill="#0a0e08",
+                        outline="",
+                    )
+                    draw(
+                        "text",
+                        cx,
+                        fsz + 1,
+                        text=str(gx),
+                        fill=col,
+                        font=font,
+                        anchor="center",
+                    )
+                cx += stepx
+                gx += 1
 
-        # Keep above the grid lines, below focuses
-        if self.cv.find_withtag("grid"):
-            try:
-                self.cv.tag_raise("coord_lbl", "grid")
-            except tk.TclError:
-                pass
+            # ── Y axis labels (left column) ──────────────────────
+            world_top = -self.offset[1] / stepy
+            gy = int(world_top) - 1
+            cy = gy * stepy + self.offset[1]
+            while cy < H + step:
+                if gy % interval == 0:
+                    col = "#6a9a4a" if gy % 2 == 0 else "#4a6a2a"
+                    lbl = str(gy)
+                    w = fsz * len(lbl)
+                    draw(
+                        "rectangle",
+                        1,
+                        cy - fsz,
+                        w + 6,
+                        cy + fsz,
+                        fill="#0a0e08",
+                        outline="",
+                    )
+                    draw(
+                        "text",
+                        w // 2 + 3,
+                        cy,
+                        text=lbl,
+                        fill=col,
+                        font=font,
+                        anchor="center",
+                    )
+                cy += stepy
+                gy += 1
+
+            # ── (0,0) origin marker — bright cross so you always know the anchor ──
+            ox, oy = self.w2c(0, 0)
+            ms = max(6, int(12 * self.zoom))  # marker size
+            draw("line", ox - ms, oy, ox + ms, oy, fill="#4aaa4a", width=2)
+            draw("line", ox, oy - ms, ox, oy + ms, fill="#4aaa4a", width=2)
+            draw(
+                "text",
+                ox + ms + 3,
+                oy - ms - 3,
+                text="(0,0)",
+                fill="#4aaa4a",
+                font=("Courier", 8, "bold"),
+                anchor="sw",
+            )
+
+        for kind, pool in pools.items():
+            for item in pool[used[kind] : used_before[kind]]:
+                self.cv.itemconfig(item, state="hidden")
+        self._coord_label_used = used
+        self._coord_label_key = key
+
+        # New items must fit the established overlay layer: above the grid and
+        # below focus cards. Existing pooled items retain their stack position.
+        if created and any(used.values()):
+            if self.cv.find_withtag("grid"):
+                try:
+                    self.cv.tag_raise("coord_lbl", "grid")
+                except tk.TclError:
+                    pass
+            if self.cv.find_withtag("focus"):
+                try:
+                    self.cv.tag_lower("coord_lbl", "focus")
+                except tk.TclError:
+                    pass
 
     def _draw_lines(self, vis_rect=None):
         """Draw edges: solid blue elbow+arrow for prereqs; dashed orange for mutex."""
@@ -1392,48 +1460,96 @@ class CanvasMixin:
         self._hint(base)
 
     def _draw_canvas_legend(self):
-        """Draw a compact legend in the bottom-left when extra trees are loaded.
+        """Draw a compact pooled legend in the bottom-left for extra trees.
 
         Rows stack upward from the bottom edge, so only the ones that fit in
-        the canvas height are drawn: a Load All Trees session has hundreds of
-        entries, and the rest would be laid out above the top of the canvas —
-        a text item per loaded tree, per frame, none of them visible.
+        the canvas height are drawn. Reuse their text items across frames and
+        skip the Tk updates when the visible rows and canvas view are unchanged.
         """
-        self.cv.delete("legend")
-        if not getattr(self, "_extra_trees", []):
-            return
         cv = self.cv
+        pool = getattr(self, "_legend_pool", [])
+        used_before = getattr(self, "_legend_used", 0)
+        if pool and not self._canvas_item_exists(pool[0]):
+            pool = []
+            used_before = 0
+            self._legend_key = None
+            self._legend_stack_key = None
+        self._legend_pool = pool
+        self._legend_used = used_before
+
         ch = cv.winfo_height()
         x, y = 8, ch - 8
         row_height = 14
-        extra = self._extra_trees
-        # Rows that fit between the bottom margin and the top of the canvas,
-        # two of which are the header and the cross-tree note.
-        max_rows = max(3, (ch - 8) // row_height)
-        first = max(0, len(extra) - (max_rows - 2))
-        if first:
-            header = (f"■ … {first} more trees", TEXT_DIM)
+        extra = getattr(self, "_extra_trees", [])
+        rows: list[tuple[str, str]] = []
+        if extra:
+            # Rows that fit between the bottom margin and the top of the canvas,
+            # two of which are the header and the cross-tree note.
+            max_rows = max(3, (ch - 8) // row_height)
+            first = max(0, len(extra) - (max_rows - 2))
+            if first:
+                header = (f"■ … {first} more trees", TEXT_DIM)
+            else:
+                header = ("■ Main tree", FC_BORDER)
+            rows.append(header)
+            for idx in range(first, len(extra)):
+                et = extra[idx]
+                badge, col = self._get_tree_badge(idx + 1)
+                rows.append(
+                    (f"■ [{badge}] {et['type'].capitalize()}: {et['tree_id']}", col)
+                )
+            rows.append(("· · ·  cross-tree prereq", "#94a3b8"))
+
+        key = (ch, tuple(rows))
+        stack_key = (
+            ch,
+            self.zoom,
+            tuple(self.offset),
+            getattr(self.focuses, "revision", None),
+        )
+        if key == getattr(self, "_legend_key", None):
+            if rows and stack_key != getattr(self, "_legend_stack_key", None):
+                cv.tag_raise("legend")
+                self._legend_stack_key = stack_key
+            return
+
+        used = len(rows)
+        for index, (label, color) in enumerate(reversed(rows)):
+            ypos = y - index * row_height
+            if index < len(pool):
+                item = pool[index]
+                cv.coords(item, x, ypos)
+                cv.itemconfig(
+                    item,
+                    text=label,
+                    fill=color,
+                    anchor="sw",
+                    font=("Helvetica", 8),
+                    state="normal",
+                )
+            else:
+                item = cv.create_text(
+                    x,
+                    ypos,
+                    text=label,
+                    fill=color,
+                    anchor="sw",
+                    font=("Helvetica", 8),
+                    tags="legend",
+                )
+                pool.append(item)
+        for item in pool[used:used_before]:
+            cv.itemconfig(item, state="hidden")
+
+        self._legend_used = used
+        self._legend_key = key
+        if rows:
+            # New items were created after focus cards, and reused items can
+            # have fallen behind cards created since the previous legend pass.
+            cv.tag_raise("legend")
+            self._legend_stack_key = stack_key
         else:
-            header = ("■ Main tree", FC_BORDER)
-        rows: list[tuple[str, str]] = [header]
-        for idx in range(first, len(extra)):
-            et = extra[idx]
-            badge, col = self._get_tree_badge(idx + 1)
-            rows.append(
-                (f"■ [{badge}] {et['type'].capitalize()}: {et['tree_id']}", col)
-            )
-        rows.append(("· · ·  cross-tree prereq", "#94a3b8"))
-        for lbl, col in reversed(rows):
-            cv.create_text(
-                x,
-                y,
-                text=lbl,
-                fill=col,
-                anchor="sw",
-                font=("Helvetica", 8),
-                tags="legend",
-            )
-            y -= row_height
+            self._legend_stack_key = None
 
     def _draw_cfp_markers(self):
         """Draw continuous_focus_position marker boxes on the canvas.

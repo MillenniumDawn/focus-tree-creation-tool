@@ -96,6 +96,7 @@ schema and workload determinism on a tiny preset (under a second). Example
 | Five leftovers in the render loop still did whole-document work per frame after phase 8's culling: `SceneIndex.ensure` re-derived `signature()` on every SCENE frame, `_grow_canvas_to_focuses` walked every focus, the grid was generated across the whole canvas extent and deleted/recreated per zoom notch, `_draw_lines` re-hid the entire surplus line pool every frame, and `_get_tree_badge` did an O(extra trees) scan per visible focus per frame | `ui/scene_index.py` (`ensure`), `ui/canvas.py` (`_grow_canvas_to_focuses`, `_draw_grid`, `_draw_lines`, `_draw_canvas_legend`, `_draw_minimap_content`), `hoi4_content_maker.py` (`_get_tree_badge`) | `ensure` trusts `FocusDocument.revision` (`signature()` is now the `HOI4CM_SCENE_INDEX_VALIDATE` debug path); canvas growth offers up a revision-cached focus bbox instead of every position; the grid clips to the viewport plus a screen of margin and pools its line items; `_draw_lines` and the minimap pools track a used high-water mark and only hide newly freed slots; badges come from a `ui/tree_badges.py` table rebuilt when `_extra_trees` changes; the legend draws only the rows that fit on screen | fixed in issue #26 | synthetic 5,000-focus / 200-tree / 3,200-edge tree, 1600x900 viewport (Python 3.14): SCENE frame 34.2ms -> 22.1ms, idle VIEW frame 28.6ms -> 22.8ms, `_draw_lines` after a wide zoom-out 15.4ms -> 8.1ms, `_grow_canvas_to_focuses` 1.6ms -> 0.0ms, `_get_tree_badge` x200 0.79ms -> 0.03ms, legend 4.4ms -> 2.2ms. Grid regeneration becomes independent of canvas extent: at +-1000 cells 18.0ms -> 0.5ms. See the render-loop note below |
 | After Load All, seven leftover O(F) walks still ran on common actions: code-tab restore, drag-start occupancy, RMB occupancy, per-tree export lookup copies, the prereq Listbox, universal GFX `query()` with no `under`, and single extra-tree parse on the Tk thread | `hoi4_content_maker.py` (`_apply_focus_code`, `_pick_prereq`, `_load_extra_tree`), `ui/canvas.py` (`_foc_pr`, `_rmb`), `focus_tree/export_plan.py`, `ui/gfx_browser.py`, `mod/graphics_catalog.py` (`directory_paths`) | Code-tab restore calls `_redraw_now` (visible set). Drag start and RMB use `occupied_positions` / `position_free`. Export plans share one lookup mapping. Prereq picker reuses `VirtualFocusList`. GFX folder list comes from catalog directory records. `_load_extra_tree` uses the same `run_bg` shape as `_import_txt` | fixed in issue #118 | not yet measured, needs a display session against the real mod |
 | Visible full focus bundles were probed item-by-item, and unchanged line frames still updated pooled items | `ui/canvas.py` (`_render_frame`, `_draw_focus`, `_draw_lines`) | Validate one sentinel canvas item per frame and skip line redraw work when zoom, offset, scene revision and viewport are unchanged | fixed in issue #157 | Same workload (4,000 focuses, 663 visible, 680 visible edges / 1,360 line items, 1600x900, zoom 0.45, 21 no-op frames): origin/main 9,283 `cv.type` calls/frame, 12.970 ms median; branch 1 call/frame, 1.578 ms median |
+| Coordinate rulers rebuilt roughly 61 canvas objects on every pan motion, and the canvas legend deleted/recreated its visible row per redraw | `ui/canvas.py` (`_draw_coord_labels`, `_draw_canvas_legend`) | Pool ruler rectangle/text/marker items and legend text rows; hide surplus, recover stale ids after `cv.delete("all")`, and key unchanged views/legend rows to skip canvas updates | fixed in issue #163 | Tk on Linux, 1600x900, 100 extra trees; isolated `_pan_mv` (bounds drawing stubbed), 750 motions: median 3.0826ms → 0.0995ms each (20,840 rectangles / 21,590 texts / 1,500 lines created, 750 deletes → zero creates/deletes); 750 unchanged legend renders: 1.8978ms → 0.0132ms each (47,250 text creates / 750 deletes → zero canvas mutations) |
 The `_draw_key`/state-key check in `_draw_focus` (`ui/canvas.py:486`) already
 makes an unchanged focus close to free to redraw, but every `_redraw()` call
 still iterates the full focus dict to find that out. That per-redraw
@@ -178,15 +179,13 @@ with the viewport. Five rules now hold on the frame path:
   additionally draws only the rows that fit in the canvas height — with
   hundreds of trees loaded, the rest were laid out above the top edge.
 
-Two costs in the same loop are deliberately *not* addressed here. A wheel
-notch at moderate zoom is dominated by `_reclaim_focus_bundles` plus
-`_draw_focus`: each notch changes the visible set and every surviving
-focus's `draw_key`, so bundles churn (14 canvas items created and deleted
-per focus crossing the edge) and every visible card recomputes. And
-`_draw_coord_labels` deletes and recreates its rulers every frame. Both are
-viewport-bounded rather than document-bounded, so they don't grow with a
-Load All Trees session, but they are what a zoom frame actually spends its
-time on.
+A wheel notch at moderate zoom remains the notable churn in the same loop:
+`_reclaim_focus_bundles` plus `_draw_focus` changes the visible set and every
+surviving focus's `draw_key`, so bundles churn (14 canvas items created and
+deleted per focus crossing the edge) and every visible card recomputes. The
+coordinate ruler and legend are now pooled and unchanged keys skip their Tk
+updates; all these costs remain viewport-bounded rather than document-bounded,
+so they do not grow with a Load All Trees session.
 
 ### Script scanner rewrite
 
