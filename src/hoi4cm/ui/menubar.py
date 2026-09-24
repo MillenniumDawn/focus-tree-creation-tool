@@ -323,8 +323,19 @@ def build_menubar(app, toolbar, tutorial_command=None) -> MenuController:
                 "Ctrl+S",
                 tr(
                     "menu.save_project.tip",
-                    "Save as .json so you can reopen and keep editing later.",
+                    "Save the current project to its .json file, or choose a location for the first save.",
                 ),
+                "save_project",
+            ),
+            (
+                tr("menu.save_project_as", "Save Project As"),
+                app._save_as,
+                "Ctrl+Shift+S",
+                tr(
+                    "menu.save_project_as.tip",
+                    "Save a copy under a new .json filename.",
+                ),
+                "save_project_as",
             ),
             (
                 tr("menu.load_project", "Load Project"),

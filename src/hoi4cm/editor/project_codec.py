@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import ntpath
 import os
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
@@ -75,6 +75,18 @@ def decode_project(data: Mapping[str, Any]) -> EditorWorkspace:
         workspace = _decode_legacy(data)
     workspace.__dict__["_rejected_file_paths"] = tuple(rejected_paths)
     return workspace
+
+
+def choose_project_save_path(
+    current_path: str | None,
+    *,
+    save_as: bool,
+    choose_path: Callable[[], str | None],
+) -> str | None:
+    """Reuse the existing path for quick-save, otherwise ask for a destination."""
+    if current_path and not save_as:
+        return current_path
+    return choose_path()
 
 
 def write_project(path: str | Path, workspace: EditorWorkspace) -> None:

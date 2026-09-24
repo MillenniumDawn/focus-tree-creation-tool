@@ -110,6 +110,7 @@ def _make_fake_app_for_chrome(tk_root: tk.Tk, monkeypatch: pytest.MonkeyPatch) -
     for name in (
         "_new_tree_dialog",
         "_save",
+        "_save_as",
         "_load",
         "_load_mod_path",
         "_export",
