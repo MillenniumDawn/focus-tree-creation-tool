@@ -10,8 +10,8 @@ that).
 - **[monolith-migration.md](monolith-migration.md)**: the extraction story
   so far, the wiring convention, the migration status table, the extraction
   recipe, what's still deferred and why.
-- **[performance.md](performance.md)**: scale targets, the hot-path ledger,
-  GIL guidance, cache inventory.
+- **[performance.md](performance.md)**: scale targets, the profiling
+  harness, the hot-path ledger, GIL guidance, cache inventory.
 - **[testing.md](testing.md)**: fixture/isolation patterns, the headless
   constraint, manual verification checklist.
 - **[wizards.md](wizards.md)**: the five wizard modules, `_shared.py`
