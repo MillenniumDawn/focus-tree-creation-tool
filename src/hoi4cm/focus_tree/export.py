@@ -15,6 +15,66 @@ from .operations import build_focus_name_lookup
 GFX_DEFAULT = "GFX_goal_generic_political_pressure"
 
 
+def _emit_focus_id(name):
+    """Render a focus id without allowing an embedded quote to escape it.
+
+    Clausewitz has no string escape syntax, so ``emit_scalar`` deliberately
+    rejects double quotes. Focus ids can still arrive from hand-edited input
+    containing one; replace that impossible character before making the normal
+    scalar decision so export produces a parseable id instead of raw script.
+    """
+    try:
+        return emit_scalar(name)
+    except ValueError:
+        return emit_scalar(name.replace('"', "_"))
+
+
+def _country_raw_lines(country_raw):
+    """Return country-body lines with unmatched braces neutralized.
+
+    Imported country blocks are normally balanced, but project data can be
+    edited independently of the parsed source. An unmatched ``}`` in that
+    data would close the generated ``country`` block and inject following
+    script at tree level. Preserve balanced content verbatim and comment only
+    the first unmatched closer on a line; close unfinished nested blocks so
+    later output remains inside the country block.
+    """
+    lines = []
+    depth = 0
+    in_quote = False
+    for line in country_raw.splitlines():
+        rendered = []
+        index = 0
+        while index < len(line):
+            char = line[index]
+            if char == '"':
+                in_quote = not in_quote
+                rendered.append(char)
+            elif char == "#" and not in_quote:
+                rendered.append(line[index:])
+                break
+            elif not in_quote and char == "{":
+                depth += 1
+                rendered.append(char)
+            elif not in_quote and char == "}":
+                if depth == 0:
+                    rendered.append("#" + line[index:])
+                    break
+                depth -= 1
+                rendered.append(char)
+            else:
+                rendered.append(char)
+            index += 1
+        if "".join(rendered).strip():
+            lines.append("".join(rendered))
+
+    if in_quote:
+        lines.append('"')
+    for closing_depth in range(depth, 0, -1):
+        lines.append("\t" * (closing_depth - 1) + "}")
+    return lines
+
+
 def _emit_tree_extras(out, info):
     """Re-emit unrecognized focus_tree wrapper keys captured at parse time.
 
@@ -89,7 +149,7 @@ def export_focus_tree(
         block_kw = "joint_focus" if is_joint else "shared_focus"
         for f in focuses_in_tree:
             out.append(f"{block_kw} = {{")
-            out.append(f"\tid = {f.name}")
+            out.append(f"\tid = {_emit_focus_id(f.name)}")
             out.append(f"\ticon = {emit_scalar(getattr(f, 'gfx', GFX_DEFAULT))}")
             write_focus_body(f, out, "\t")
             out.append("}")
@@ -102,9 +162,8 @@ def export_focus_tree(
         country_raw = (info.get("country_raw") or "").strip()
         out.append("\tcountry = {")
         if country_raw:
-            for ln in country_raw.splitlines():
-                if ln.strip():
-                    out.append(f"\t\t{ln}")
+            for ln in _country_raw_lines(country_raw):
+                out.append(f"\t\t{ln}")
         else:
             out.append("\t\tfactor = 0")
             out.append("\t\tmodifier = {")
@@ -130,7 +189,7 @@ def export_focus_tree(
         _emit_tree_extras(out, info)
         for f in focuses_in_tree:
             out.append("\tfocus = {")
-            out.append(f"\t\tid = {f.name}")
+            out.append(f"\t\tid = {_emit_focus_id(f.name)}")
             out.append(f"\t\ticon = {emit_scalar(getattr(f, 'gfx', GFX_DEFAULT))}")
             write_focus_body(f, out, "\t\t")
             out.append("\t}")
@@ -183,9 +242,8 @@ def export_main_tree(
     country_raw = (info.get("country_raw") or "").strip()
     out.append("\tcountry = {")
     if country_raw:
-        for ln in country_raw.splitlines():
-            if ln.strip():
-                out.append(f"\t\t{ln}")
+        for ln in _country_raw_lines(country_raw):
+            out.append(f"\t\t{ln}")
     else:
         out.append("\t\tbase = 0")
         out.append("\t\tmodifier = {")
@@ -214,7 +272,7 @@ def export_main_tree(
 
     for f in focuses_in_tree:
         out.append("\tfocus = {")
-        out.append(f"\t\tid = {f.name}")
+        out.append(f"\t\tid = {_emit_focus_id(f.name)}")
         out.append(f"\t\ticon = {emit_scalar(getattr(f, 'gfx', GFX_DEFAULT))}")
         out.extend(
             render_focus_body(
