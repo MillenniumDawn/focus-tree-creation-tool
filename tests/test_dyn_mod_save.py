@@ -137,6 +137,20 @@ def test_save_creates_missing_dynamic_modifier(tmp_path, monkeypatch, tk_root):
     assert b"TAG_my_dynamic_modifier = {" in target.read_bytes()
 
 
+def test_save_rewrites_existing_dynamic_modifier_with_one_bom(
+    tmp_path, monkeypatch, tk_root
+):
+    target = tmp_path / "common" / "dynamic_modifiers" / "TAG_my_dynamic_modifier.txt"
+    target.parent.mkdir(parents=True)
+    target.write_bytes(
+        "TAG_my_dynamic_modifier = {\n\ticon = GFX_old\n}\n".encode("utf-8-sig")
+    )
+
+    _open_and_save(tk_root, tmp_path, monkeypatch)
+
+    assert target.read_bytes().count(bytes((0xEF, 0xBB, 0xBF))) == 1
+
+
 def test_save_skips_unreadable_loc(
     tmp_path, monkeypatch, tk_root, isolated_error_buffer
 ):
