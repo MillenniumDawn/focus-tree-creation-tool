@@ -51,7 +51,9 @@ class ScanCache:
         conn = None
         try:
             path = database_path(mod_root)
-            os.makedirs(os.path.dirname(path), exist_ok=True)
+            cache_dir = os.path.dirname(path)
+            os.makedirs(cache_dir, mode=0o700, exist_ok=True)
+            os.chmod(cache_dir, 0o700)
             conn = sqlite3.connect(path)
             conn.execute(_SCHEMA)
             conn.commit()

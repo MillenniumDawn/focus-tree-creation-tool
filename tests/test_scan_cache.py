@@ -6,6 +6,7 @@ Each test points ``STATE_DIR`` at a tmp dir so nothing touches the real
 
 import os
 import sqlite3
+import stat
 
 import pytest
 
@@ -18,6 +19,22 @@ def cache(tmp_path, monkeypatch):
     c = sc.ScanCache(str(tmp_path / "mod"))
     yield c
     c.close()
+
+
+@pytest.mark.parametrize("preexisting", [False, True])
+def test_cache_directory_has_private_permissions(tmp_path, monkeypatch, preexisting):
+    state_dir = tmp_path / "state"
+    cache_dir = state_dir / "scan_cache"
+    monkeypatch.setattr(sc, "STATE_DIR", str(state_dir))
+    if preexisting:
+        cache_dir.mkdir(parents=True)
+        os.chmod(cache_dir, 0o755)
+
+    cache = sc.ScanCache(str(tmp_path / "mod"))
+    try:
+        assert stat.S_IMODE(cache_dir.stat().st_mode) == 0o700
+    finally:
+        cache.close()
 
 
 def test_put_get_roundtrip(cache):

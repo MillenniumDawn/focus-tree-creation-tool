@@ -16,6 +16,8 @@ import sys
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR = os.path.dirname(SCRIPT_DIR)
 SOURCE = os.path.join(ROOT_DIR, "hoi4_content_maker.py")
+PILLOW_REQUIREMENT = "Pillow==12.3.0"
+PYINSTALLER_REQUIREMENT = "pyinstaller==6.22.2"
 
 
 def run(cmd, **kwargs):
@@ -47,7 +49,7 @@ def generate_icon():
         return
 
     print("  [INFO] Generating icon...")
-    ensure_package("Pillow", "PIL")
+    ensure_package(PILLOW_REQUIREMENT, "PIL")
 
     gen_script = os.path.join(SCRIPT_DIR, "generate_icon.py")
     run([sys.executable, gen_script, "--all-formats"], cwd=SCRIPT_DIR)
@@ -164,10 +166,11 @@ def main():
     print("[STEP 1/4] Checking dependencies...")
     # Honor the minimum version even when an older PyInstaller is installed.
     from importlib.metadata import version
-    ensure_package("pyinstaller>=6.22.2", "PyInstaller")
+
+    ensure_package(PYINSTALLER_REQUIREMENT, "PyInstaller")
     if tuple(int(part) for part in version("pyinstaller").split(".")[:3]) < (6, 22, 2):
-        run([sys.executable, "-m", "pip", "install", "pyinstaller>=6.22.2"])
-    ensure_package("Pillow", "PIL")
+        run([sys.executable, "-m", "pip", "install", PYINSTALLER_REQUIREMENT])
+    ensure_package(PILLOW_REQUIREMENT, "PIL")
     print()
 
     # Generate icon
