@@ -380,12 +380,14 @@ class ModContext:
     def note_file_written(self, path):
         maps = self.graphics_catalog.note_written(path, read_text=self._read)
         if maps is not None:
-            self._apply_graphics_maps(maps)
+            return self._apply_graphics_maps(maps)
+        return []
 
     def note_file_deleted(self, path):
         maps = self.graphics_catalog.note_deleted(path)
         if maps is not None:
-            self._apply_graphics_maps(maps)
+            return self._apply_graphics_maps(maps)
+        return []
 
     def _apply_graphics_maps(self, maps):
         for target, source, removed in (
@@ -407,7 +409,8 @@ class ModContext:
         changed.update(maps.removed_idea_sprites)
         changed.update(maps.removed_decision_sprites)
         if changed:
-            self.sprite_imgs.evict(lambda key: key[0] in changed)
+            return self.sprite_imgs.evict(lambda key: key[0] in changed)
+        return []
 
     # ── Per-file extractors (pure text → JSON-serialisable contribution) ──
     @staticmethod
@@ -789,10 +792,17 @@ class ModContext:
         return None
 
     def scan(self, root, progress_cb: Callable | None = None):
+        """Scan *root* and return image refs evicted before scanning.
+
+        The mod loader runs this method on a worker. Callers must keep the
+        returned values alive until the completion callback runs on Tk.
+        """
         self.root = root
         self.mod_name = os.path.basename(root)
         self.sprites.clear()
-        self.sprite_imgs.clear()
+        # Scans run on a worker. Keep removed PhotoImages in the return value
+        # until the Tk-thread completion callback releases them.
+        evicted_images = self.sprite_imgs.clear()
         self._img_errors.clear()
         self.decision_sprites.clear()
         self.focus_ids.clear()
@@ -869,6 +879,7 @@ class ModContext:
         self.loaded = True
         if progress_cb:
             progress_cb(len(steps), len(steps), "Done")
+        return evicted_images
 
     def summary(self):
         md_badge = "  [MD]" if self.is_md else ""
