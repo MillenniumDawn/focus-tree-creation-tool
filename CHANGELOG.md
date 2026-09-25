@@ -8,6 +8,8 @@ the version by hand. See `AGENTS.md`.
 
 ## Unreleased
 
+- Pin the CI lint and test toolchain, including Pillow, to hash-verified
+  `dev-requirements.txt` installs.
 - Isolate pytest's import-time user-home state from the developer's real HOME,
   preserving X11 authentication when needed.
 - Preserve unknown decision-category assignments across wizard imports and saves;
