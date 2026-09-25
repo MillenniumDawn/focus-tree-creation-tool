@@ -69,6 +69,35 @@ def test_from_dict_applies_defaults_for_missing_attrs():
     assert f.tree_idx == 0
 
 
+def test_from_dict_filters_unknown_fields_and_clamps_id():
+    Focus._next = 0
+    f = Focus.from_dict({"__dict__": 1, "id": 10**18, "evil": "x"})
+
+    assert f.id == 1_000_000
+    assert "__dict__" not in f.__dict__
+    assert not hasattr(f, "evil")
+    assert Focus._next == 1_000_001
+
+
+def test_from_dict_coerces_known_field_types():
+    f = Focus.from_dict(
+        {
+            "id": "7",
+            "x": "192",
+            "y": 3.0,
+            "cost": "7.5",
+            "cancel_if_invalid": "no",
+            "mutex": ["4", 5],
+            "unknown": {"ignored": True},
+        }
+    )
+
+    assert (f.id, f.x, f.y, f.cost) == (7, 192, 3, 7.5)
+    assert f.cancel_if_invalid is False
+    assert f.mutex == [4, 5]
+    assert "unknown" not in f.to_dict()
+
+
 def test_from_dict_bumps_counter():
     Focus._next = 0
     Focus.from_dict({"id": 42, "x": 0, "y": 0})
@@ -77,7 +106,7 @@ def test_from_dict_bumps_counter():
 
 def test_to_dict_excludes_dynamic_private_attrs():
     f = Focus()
-    f._items = ["a"]
+    f.__dict__.update(_items=["a"])
     f._draw_key = "key"  # type: ignore[assignment]
     restored = Focus.from_dict(f.to_dict())
     assert not hasattr(restored, "_items")
