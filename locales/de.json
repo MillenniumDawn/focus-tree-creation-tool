@@ -88,6 +88,7 @@
   "dialog.delete_selected.body": "{count} ausgewählte Foki löschen?\n\n{names}\n\nDadurch werden auch alle Voraussetzungen zu und von diesen Foki entfernt.",
   "dialog.delete_selected.title": "Ausgewählte löschen",
   "dialog.error.title": "Fehler",
+  "dialog.error.details_hint": "Details findest du unter Einstellungen -> Fehlerprotokoll.",
   "dialog.focus_id_empty": "Die Fokus-ID darf nicht leer sein.",
   "dialog.focus_numeric_fields": "Kosten, AI Will Do, X und Y müssen Ganzzahlen sein.",
   "dialog.gfx_goals_not_found": "gfx/interface/goals/ wurde im Mod nicht gefunden.",
