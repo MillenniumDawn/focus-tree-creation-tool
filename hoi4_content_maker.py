@@ -5653,53 +5653,65 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         )
         if not path:
             return
-        try:
-            workspace = read_project(path)
-        except Exception as e:
+
+        self._begin_document_generation()
+        modal = progress_modal(
+            self, tr("dialog.load_project.title", "Load Project"), determinate=False
+        )
+
+        def work():
+            return read_project(path)
+
+        def on_done(workspace):
+            modal.close()
+            self.cv.delete("all")
+            self.selected = None
+            self._lines.clear()
+            self._grid_item = None
+            self._grid_key = None
+            self._grid_img = None
+            self._install_workspace(workspace)
+            self._last_project_path = path
+            try:
+                self._mark_clean()
+            except Exception as e:
+                add_error(f"Failed to mark workspace clean: {e}")
+            try:
+                clear_workspace_autosave()
+            except Exception:
+                pass
+            self._detect_and_apply_tag()
+            self._refresh_tree_meta_panel()
+            self._refresh_loaded_trees_panel()
+            self._hide_form()
+            self._redraw()
+            self._invalidate_focus_list_structure()
+            rejected_paths = getattr(workspace, "_rejected_file_paths", ())
+            if rejected_paths:
+                messagebox.showwarning(
+                    tr("dialog.load_project_paths_ignored.title", "Project Load"),
+                    tr(
+                        "dialog.load_project_paths_ignored.body",
+                        "Stored export paths were ignored because they are unsafe:\n\n"
+                        "{paths}",
+                        paths="\n".join(f"  {path}" for path in rejected_paths),
+                    ),
+                    parent=self,
+                )
+
+        def on_error(exc):
+            modal.close()
             report_error(
                 tr(
                     "dialog.load_project_error.body",
                     "Could not load project:\n{error}",
-                    error=e,
+                    error=exc,
                 ),
-                e,
+                exc,
                 title=tr("dialog.load_project_error.title", "Load Project Error"),
             )
-            return
-        self.cv.delete("all")
-        self.selected = None
-        self._lines.clear()
-        self._grid_item = None
-        self._grid_key = None
-        self._grid_img = None
-        self._install_workspace(workspace)
-        self._last_project_path = path
-        try:
-            self._mark_clean()
-        except Exception as e:
-            add_error(f"Failed to mark workspace clean: {e}")
-        try:
-            clear_workspace_autosave()
-        except Exception:
-            pass
-        self._detect_and_apply_tag()
-        self._refresh_tree_meta_panel()
-        self._refresh_loaded_trees_panel()
-        self._hide_form()
-        self._redraw()
-        self._invalidate_focus_list_structure()
-        rejected_paths = getattr(workspace, "_rejected_file_paths", ())
-        if rejected_paths:
-            messagebox.showwarning(
-                tr("dialog.load_project_paths_ignored.title", "Project Load"),
-                tr(
-                    "dialog.load_project_paths_ignored.body",
-                    "Stored export paths were ignored because they are unsafe:\n\n"
-                    "{paths}",
-                    paths="\n".join(f"  {path}" for path in rejected_paths),
-                ),
-                parent=self,
-            )
+
+        run_bg(self, work, on_done, on_error=on_error, scope="document")
 
     # ── EXPORT ──────────────────────────────────────────────────
 
