@@ -34,7 +34,7 @@ def test_failure_is_logged_and_shown_with_the_file_name(shown):
     assert len(shown) == 1
     title, shown_message, _options = shown[0]
     assert title == "Write Failed"
-    assert shown_message == message
+    assert shown_message == f"{message}\n\nSee Settings -> Error Log for details."
     assert "05_USA.txt" in message
     assert "Permission denied" in message
     # And it lands in the in-app error log, not just a dialog the user dismisses.

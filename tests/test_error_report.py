@@ -23,10 +23,16 @@ def shown(monkeypatch):
     logmod.clear_errors()
 
 
-def test_message_is_logged_and_shown(shown):
+def test_message_is_logged_and_points_to_error_log(shown):
     message = error_report.report_error("Could not parse XML")
 
-    assert shown == [("Error", "Could not parse XML", {})]
+    assert shown == [
+        (
+            "Error",
+            "Could not parse XML\n\nSee Settings -> Error Log for details.",
+            {},
+        )
+    ]
     assert message == "Could not parse XML"
     entries = logmod.get_error_entries()
     assert len(entries) == 1
@@ -42,8 +48,8 @@ def test_exception_appends_traceback_to_log_entry_only(shown):
     entry = logmod.get_error_entries()[0][1]
     assert entry.startswith("Parse failed\nTraceback")
     assert "ValueError: bad value" in entry
-    # The dialog shows the message only, not the traceback.
-    assert shown[0][1] == "Parse failed"
+    # The dialog points to the log, where the full traceback is available.
+    assert shown[0][1] == "Parse failed\n\nSee Settings -> Error Log for details."
 
 
 def test_parent_is_omitted_rather_than_passed_as_none(shown):
@@ -74,4 +80,4 @@ def test_non_exception_error_object_does_not_crash(shown):
 
     assert message == "Write failed: x"
     assert len(logmod.get_error_entries()) == 1
-    assert shown[0][1] == "Write failed: x"
+    assert shown[0][1] == "Write failed: x\n\nSee Settings -> Error Log for details."

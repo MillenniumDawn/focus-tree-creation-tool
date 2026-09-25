@@ -8,6 +8,8 @@ the version by hand. See `AGENTS.md`.
 
 ## Unreleased
 
+- Point handled-error dialogs to Settings -> Error Log so full tracebacks remain
+  discoverable after the dialog is dismissed.
 - Isolate pytest's import-time user-home state from the developer's real HOME,
   preserving X11 authentication when needed.
 - Preserve unknown decision-category assignments across wizard imports and saves;

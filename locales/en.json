@@ -88,6 +88,7 @@
   "dialog.delete_selected.body": "Delete {count} selected focus(es)?\n\n{names}\n\nThis will also remove all prerequisite links to/from these focuses.",
   "dialog.delete_selected.title": "Delete Selected",
   "dialog.error.title": "Error",
+  "dialog.error.details_hint": "See Settings -> Error Log for details.",
   "dialog.focus_id_empty": "Focus ID cannot be empty.",
   "dialog.focus_numeric_fields": "Cost, AI Will Do, X and Y must be integers.",
   "dialog.gfx_goals_not_found": "Could not find gfx/interface/goals/ in mod.",
