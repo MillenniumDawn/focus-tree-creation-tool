@@ -137,6 +137,63 @@ def test_existing_event_id_is_skipped_without_changing_user_files(
     _cleanup(tk_root)
 
 
+def test_event_append_preserves_one_source_utf8_bom(tk_root, tmp_path):
+    root = tmp_path / "mod"
+    event_path = root / "events" / "my_namespace.txt"
+    loc_path = root / "localisation" / "english" / "my_namespace_l_english.yml"
+    event_path.parent.mkdir(parents=True)
+    loc_path.parent.mkdir(parents=True)
+    event_path.write_bytes(
+        (
+            "add_namespace = my_namespace\n\n"
+            "country_event = {\n\tid = my_namespace.99\n}\n"
+        ).encode("utf-8-sig")
+    )
+    loc_path.write_text("l_english:\n", encoding="utf-8")
+    MOD.loaded = True
+    MOD.root = str(root)
+    MOD.edit_events_file = str(event_path)
+    MOD.edit_loc_file = str(loc_path)
+
+    event_mod.open_event_wizard(tk_root)
+    save_button = _button_by_text(tk_root, "Save to Mod")
+    assert save_button is not None
+    save_button.invoke()
+
+    assert event_path.read_bytes().count(bytes((0xEF, 0xBB, 0xBF))) == 1
+    assert "my_namespace.1" in event_path.read_text(encoding="utf-8-sig")
+    _cleanup(tk_root)
+
+
+def test_spirit_append_preserves_one_source_utf8_bom(tk_root, tmp_path):
+    root = tmp_path / "mod"
+    ideas_path = root / "common" / "ideas" / "existing.txt"
+    loc_path = root / "localisation" / "english" / "existing_l_english.yml"
+    ideas_path.parent.mkdir(parents=True)
+    loc_path.parent.mkdir(parents=True)
+    ideas_path.write_bytes(
+        (
+            "ideas = {\n\tcountry = {\n"
+            "\t\tOTHER_spirit = {\n\t\t\tname = OTHER_spirit\n\t\t}\n"
+            "\t}\n}\n"
+        ).encode("utf-8-sig")
+    )
+    loc_path.write_text("l_english:\n", encoding="utf-8")
+    MOD.loaded = True
+    MOD.root = str(root)
+    MOD.edit_ideas_file = str(ideas_path)
+    MOD.edit_loc_file = str(loc_path)
+
+    spirit_mod.open_national_spirit_wizard(tk_root)
+    save_button = _button_by_text(tk_root, "Save to Mod")
+    assert save_button is not None
+    save_button.invoke()
+
+    assert ideas_path.read_bytes().count(bytes((0xEF, 0xBB, 0xBF))) == 1
+    assert "TAG_my_spirit" in ideas_path.read_text(encoding="utf-8-sig")
+    _cleanup(tk_root)
+
+
 def test_existing_spirit_id_is_skipped_without_changing_user_files(tk_root, tmp_path):
     root = tmp_path / "mod"
     ideas_path = root / "common" / "ideas" / "existing.txt"
