@@ -1,6 +1,7 @@
 """Regression coverage for the standard and legacy PyInstaller specs."""
 
 import importlib.util
+import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -25,6 +26,26 @@ def _load_build_script():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def _locked_version(package):
+    requirements = (ROOT / "build" / "requirements.txt").read_text(encoding="utf-8")
+    match = re.search(rf"^{re.escape(package)}==([^\s\\]+)", requirements, re.MULTILINE)
+    assert match is not None
+    return match.group(1)
+
+
+def test_build_fallbacks_match_hashed_requirements():
+    build_script = _load_build_script()
+    pillow = _locked_version("pillow")
+    pyinstaller = _locked_version("pyinstaller")
+
+    assert build_script.PILLOW_REQUIREMENT == f"Pillow=={pillow}"
+    assert build_script.PYINSTALLER_REQUIREMENT == f"pyinstaller=={pyinstaller}"
+
+    batch = (ROOT / "build" / "build.bat").read_text(encoding="utf-8")
+    assert f'pip install "Pillow=={pillow}"' in batch
+    assert f'pip install "pyinstaller=={pyinstaller}"' in batch
 
 
 def test_generated_spec_is_windowless_and_bundles_runtime_assets(tmp_path, monkeypatch):
