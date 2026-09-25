@@ -179,15 +179,18 @@ class ModLoadingMixin:
         report_progress = make_progress(pw, progress, scope="mod")
 
         def worker():
-            MOD.scan(root, progress_cb=report_progress)
-            return root
+            evicted_images = MOD.scan(root, progress_cb=report_progress)
+            return root, evicted_images
 
-        run_bg(
-            pw,
-            worker,
-            lambda loaded_root: self._on_mod_loaded(pw, loaded_root),
-            scope="mod",
-        )
+        def on_loaded(result):
+            loaded_root, evicted_images = result
+            try:
+                self._on_mod_loaded(pw, loaded_root)
+            finally:
+                # Releasing the scan's old PhotoImages must happen on Tk.
+                evicted_images.clear()
+
+        run_bg(pw, worker, on_loaded, scope="mod")
 
     def _on_mod_loaded(self, pw, root):
         pw.grab_release()
