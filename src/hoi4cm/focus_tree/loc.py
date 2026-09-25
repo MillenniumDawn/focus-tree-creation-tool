@@ -14,6 +14,12 @@ _KEY_RE = re.compile(
     r'(?P<suffix>".*)$',
     re.MULTILINE,
 )
+_LOC_KEY_RE = re.compile(r"[^A-Za-z0-9_]")
+
+
+def _safe_loc_key(name):
+    """Keep a focus name on one valid localisation-key line."""
+    return _LOC_KEY_RE.sub("_", str(name)) or "_"
 
 
 @dataclass(frozen=True)
@@ -84,9 +90,10 @@ def hydrate_focus_localization(text, focuses):
             continue
 
     for focus in focuses:
-        if focus.name in values:
-            focus.loc_name = values[focus.name]
-        desc_key = f"{focus.name}_desc"
+        loc_key = _safe_loc_key(focus.name)
+        if loc_key in values:
+            focus.loc_name = values[loc_key]
+        desc_key = f"{loc_key}_desc"
         if desc_key in values:
             focus.desc = values[desc_key]
 
@@ -115,14 +122,15 @@ def build_loc_yml(existing_text, focuses, country_tag, *, language="english"):
         loc_name = (getattr(f, "loc_name", "") or "").strip()
         title = loc_name or f.name.replace("_", " ").title()
         desc = f.desc if f.desc else f"Complete the {title} national focus."
-        if f.name not in existing_values:
-            to_add[f.name] = title
+        loc_key = _safe_loc_key(f.name)
+        if loc_key not in existing_values:
+            to_add[loc_key] = title
         elif loc_name:
             escaped = json.dumps(loc_name, ensure_ascii=False)[1:-1]
-            if existing_values[f.name] != escaped:
-                to_update[f.name] = loc_name
+            if existing_values[loc_key] != escaped:
+                to_update[loc_key] = loc_name
 
-        desc_key = f"{f.name}_desc"
+        desc_key = f"{loc_key}_desc"
         if desc_key not in existing_values:
             to_add[desc_key] = desc
         elif f.desc:

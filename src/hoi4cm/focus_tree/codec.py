@@ -241,8 +241,9 @@ def render_focus_body(
         and any(effect.get("type") == "_raw_block" for effect in focus.effects)
     )
     if completion_reward_policy == "main" and not has_raw_reward:
+        focus_label = focus.name.replace('"', "_")
         out.append(
-            f'{inner_indent}log = "[GetDateText]: [Root.GetName]: Focus {focus.name}"'
+            f'{inner_indent}log = "[GetDateText]: [Root.GetName]: Focus {focus_label}"'
         )
     if focus.effects:
         out.extend(

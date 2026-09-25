@@ -7,6 +7,7 @@ import pytest
 from hoi4cm.core import read_file
 from hoi4cm.focus_tree.build import build_focuses
 from hoi4cm.focus_tree.export import export_main_tree
+from hoi4cm.focus_tree.loc import build_loc_yml
 from hoi4cm.focus_tree.parse import parse_focus_tree
 from hoi4cm.models import Focus
 
@@ -226,6 +227,29 @@ def test_relative_position_first_match_wins_on_duplicate_names():
     assert "y = 1" in text
 
 
+def test_focus_id_with_quote_and_newline_round_trips_once_with_safe_loc_keys():
+    focus = Focus(0, 0)
+    focus.name = 'a"\n b: c'
+    text = export_main_tree(
+        [focus],
+        _info(),
+        focus_lookup={focus.id: focus},
+        effect_renderer=raw_block_renderer,
+    )
+
+    parsed = parse_focus_tree(text, "/tmp/x.txt")
+    assert len(parsed.focuses_data) == 1
+
+    loc_text, count = build_loc_yml(None, [focus], "TST")
+    assert count == 2
+    assert loc_text is not None
+    loc_entries = [line for line in loc_text.splitlines() if line.startswith(" ")]
+    assert len(loc_entries) == 3  # section header plus title and description
+    assert all(":" in line and "\n" not in line for line in loc_entries[1:])
+    assert loc_entries[1].startswith(" a_")
+    assert loc_entries[2].startswith(" a_")
+
+
 def test_country_raw_written_verbatim_with_nested_indent_preserved():
     root = Focus(0, 0)
     root.name = "TST_root"
@@ -250,6 +274,20 @@ def test_country_raw_written_verbatim_with_nested_indent_preserved():
     assert expected_country_block in text
     # The default block must not appear alongside the verbatim one.
     assert "base = 0" not in text
+
+
+def test_country_raw_unmatched_closer_stays_inside_country_block():
+    root = Focus(0, 0)
+    root.name = "TST_root"
+    info = _info(country_raw="factor = 0\n}\ninjected = {\n\tvalue = yes\n}\n")
+
+    text = export_main_tree(
+        [root], info, focus_lookup={root.id: root}, effect_renderer=raw_block_renderer
+    )
+
+    assert "\t\t#}" in text
+    parsed = parse_focus_tree(text, "/tmp/x.txt")
+    assert len(parsed.focuses_data) == 1
 
 
 def test_tree_extras_written_after_continuous_focus_position():
