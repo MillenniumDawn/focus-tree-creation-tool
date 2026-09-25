@@ -62,4 +62,15 @@ Publishing runs on two channels, neither of them from a developer's machine.
 
 Both the release PR and the release tag are pushed with a GitHub App token (`melon-release-bot`, secrets `RELEASE_PR_APP_ID` / `RELEASE_PR_APP_PRIVATE_KEY`), because a pull request or tag created with `GITHUB_TOKEN` triggers no workflow. Each mint step is guarded and `continue-on-error`, falling back to `github.token` — the PR still opens and the tag still pushes, they just won't trigger CI on themselves.
 
-`ci.yml` still runs lint, test, then the Win/macOS/Linux build matrix on every push and PR. Executables are never committed. Build deps are hash-pinned in `build/requirements.txt`, regenerated with `uv pip compile --generate-hashes --universal --extra build pyproject.toml -o build/requirements.txt`.
+`ci.yml` still runs lint, test, then the Win/macOS/Linux build matrix on every push and PR.
+Executables are never committed. Build deps are hash-pinned in
+`build/requirements.txt`, and the lint/test toolchain including Pillow is
+hash-pinned in `dev-requirements.txt`. Regenerate them with:
+
+```text
+uv pip compile --generate-hashes --universal --extra build pyproject.toml \
+  -o build/requirements.txt
+uv pip compile --generate-hashes --universal --extra dev \
+  --extra image pyproject.toml \
+  -o dev-requirements.txt
+```
