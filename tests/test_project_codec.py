@@ -20,9 +20,10 @@ from hoi4cm.models import (
     TreeDocument,
     TreeMetadata,
 )
+from hoi4cm.models.focus import MAX_FOCUS_ID
 
 
-def test_legacy_two_field_project_loads_without_changing_focus_data():
+def test_legacy_two_field_project_loads_known_focus_data():
     legacy = {
         "tree_name": "legacy_tree",
         "focuses": [
@@ -54,7 +55,7 @@ def test_legacy_two_field_project_loads_without_changing_focus_data():
     assert workspace.main_tree.metadata.tree_id == "legacy_tree"
     assert list(restored.focuses) == [91, 92]
     assert restored.focuses[91].loc_name == ""
-    assert restored.focuses[91].to_dict()["unknown_focus_field"] == {"kept": True}
+    assert "unknown_focus_field" not in restored.focuses[91].to_dict()
     assert restored.focuses.names["duplicate"] == (91, 92)
 
 
@@ -183,9 +184,9 @@ def test_v2_roundtrip_preserves_workspace_and_tree_metadata():
     assert restored.default_focus_prefix == "ABC_"
     assert restored.workspace_extras == {"future_workspace_field": {"enabled": True}}
     assert restored.extras == {"future_root_field": [1, 2, 3]}
-    assert list(restored.focuses) == [main.id, extra.id]
-    assert restored.focuses[main.id].loc_name == "Same Name"
-    assert restored.focuses.names["same_name"] == (main.id, extra.id)
+    assert list(restored.focuses) == [MAX_FOCUS_ID, extra.id]
+    assert restored.focuses[MAX_FOCUS_ID].loc_name == "Same Name"
+    assert restored.focuses.names["same_name"] == (MAX_FOCUS_ID, extra.id)
 
 
 def test_focus_counter_is_reset_after_large_project_id_roundtrip():
