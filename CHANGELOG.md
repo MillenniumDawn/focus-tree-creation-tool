@@ -21,6 +21,8 @@ the version by hand. See `AGENTS.md`.
   frames make zero `coords`, `itemconfig`, or `tag_lower` calls.
 - Skip unreadable or oversize scan files without aborting valid sibling results; failed
   reads remain retryable.
+- Route project loading through a background progress modal to keep the UI responsive
+  for large projects.
 
 ### Focus-tree parser
 
