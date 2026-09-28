@@ -8,6 +8,12 @@ the version by hand. See `AGENTS.md`.
 
 ## Unreleased
 
+- Refresh the dev docs' inventories (package map, migration status table,
+  what's-left method groups, wizard line counts) to match the current tree,
+  and document the modules that had no doc coverage:
+  `focus_tree/validate.py`, `editor/workspace_autosave.py`,
+  `ui/loaded_trees.py`, `models/sidebar_form.py`, `data/triggers.py`, and
+  the `perf/` profiling harness.
 - Isolate pytest's import-time user-home state from the developer's real HOME,
   preserving X11 authentication when needed.
 - Preserve unknown decision-category assignments across wizard imports and saves;
