@@ -71,11 +71,19 @@ jobs:
           pip install ".[dev]" "Pillow==$pillow_version"
       - name: Run tests
         # Xvfb gives the Tk widget tests a display; without it they skip.
+        # Coverage sources in pyproject.toml include both hoi4cm and the
+        # root-level monolith; gate them independently below.
         run: >
           xvfb-run -a pytest
           --cov
           --cov-report=term-missing
-          --cov-fail-under=50
+      - name: Coverage gate (hoi4cm package)
+        # Ratchet one point below the current measured 68% package coverage.
+        run: coverage report --include='src/hoi4cm/*' --fail-under=67
+      - name: Coverage gate (monolith)
+        # Independent floor: the 31% baseline is lower, but keeps existing
+        # shell seams covered while the monolith migration continues.
+        run: coverage report --include='hoi4_content_maker.py' --fail-under=30
       - name: Coverage gate (wizard generators)
         # Per-module floor on `hoi4cm.wizards._generators` keeps new
         # script/loc extractions tested (see docs/dev/wizards.md). No Xvfb
