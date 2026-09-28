@@ -8,6 +8,8 @@ the version by hand. See `AGENTS.md`.
 
 ## Unreleased
 
+- Preserve exactly one UTF-8 BOM when rewriting BOM-prefixed mod scripts, while
+  keeping BOM-free scripts BOM-free and consistently decoding event/decision files.
 - Refresh the dev docs' inventories (package map, migration status table,
   what's-left method groups, wizard line counts) to match the current tree,
   and document the modules that had no doc coverage:
