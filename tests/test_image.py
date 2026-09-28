@@ -21,7 +21,7 @@ def _force_pil_missing(monkeypatch):
     monkeypatch.setattr(builtins, "__import__", fake_import)
 
 
-def test_ci_pillow_matches_build_pin():
+def test_ci_pillow_matches_dev_pin():
     if os.environ.get("HOI4CM_REQUIRE_PINNED_PILLOW") != "1":
         pytest.skip("Pillow pin assertion is CI-only")
 
@@ -30,7 +30,7 @@ def test_ci_pillow_matches_build_pin():
     except ImportError:
         pytest.fail("CI requires Pillow, but it is unavailable")
 
-    lock_path = Path(__file__).resolve().parents[1] / "build" / "requirements.txt"
+    lock_path = Path(__file__).resolve().parents[1] / "dev-requirements.txt"
     pillow_lines = [
         line
         for line in lock_path.read_text(encoding="utf-8").splitlines()

@@ -8,6 +8,8 @@ the version by hand. See `AGENTS.md`.
 
 ## Unreleased
 
+- Pin the CI lint and test toolchain, including Pillow, to hash-verified
+  `dev-requirements.txt` installs.
 - Preserve exactly one UTF-8 BOM when rewriting BOM-prefixed mod scripts, while
   keeping BOM-free scripts BOM-free and consistently decoding event/decision files.
 - Refresh the dev docs' inventories (package map, migration status table,
