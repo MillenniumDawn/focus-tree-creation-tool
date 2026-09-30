@@ -116,8 +116,11 @@ def _as_dict(value: object) -> dict[str, object] | None:
 
 
 def _bounded_id(value: object) -> int:
-    # Keep malformed project IDs from exhausting the process-global allocator.
-    return max(0, min(MAX_FOCUS_ID, _as_int(value, 1)))
+    # Reject rather than merge distinct IDs or leave references pointing at old IDs.
+    focus_id = _as_int(value, 1)
+    if not 0 <= focus_id <= MAX_FOCUS_ID:
+        raise ValueError(f"focus id must be between 0 and {MAX_FOCUS_ID}")
+    return focus_id
 
 
 _FIELD_COERCERS: dict[str, Callable[[object], object]] = {
@@ -165,6 +168,13 @@ class Focus:
 
     _next = 0
 
+    @staticmethod
+    def _allocate_id() -> int:
+        if Focus._next >= MAX_FOCUS_ID:
+            raise ValueError("focus id allocator exhausted")
+        Focus._next += 1
+        return Focus._next
+
     # Set only when a focus is built from a parsed file; used to preserve the
     # original coordinates across edits. Declared here (no default) so mypy
     # knows they exist while `hasattr` still reports them absent on fresh
@@ -177,8 +187,7 @@ class Focus:
     _script_extras: dict[str, object] | None
 
     def __init__(self, x=0, y=0):
-        Focus._next += 1
-        self.id = Focus._next
+        self.id = Focus._allocate_id()
         self.name = f"focus_{self.id}"
         self.loc_name = ""
         self.icon = "⚔"
@@ -216,8 +225,7 @@ class Focus:
     def duplicate(self):
         """Deep copy with a fresh counter id and no stale imported coordinates."""
         nf = copy.deepcopy(self)
-        Focus._next += 1
-        nf.id = Focus._next
+        nf.id = Focus._allocate_id()
         for attr in ("_raw_gx", "_raw_gy", "_rel_dx", "_rel_dy"):
             if attr in nf.__dict__:
                 del nf.__dict__[attr]
@@ -274,6 +282,5 @@ class Focus:
                 f.x = f.x // 96
             if f.y >= 96 and f.y % 96 == 0:
                 f.y = f.y // 96
-        if f.id >= Focus._next:
-            Focus._next = f.id + 1
+        Focus._next = max(Focus._next, f.id)
         return f

@@ -21,8 +21,8 @@ the version by hand. See `AGENTS.md`.
   frames make zero `coords`, `itemconfig`, or `tag_lower` calls.
 - Skip unreadable or oversize scan files without aborting valid sibling results; failed
   reads remain retryable.
-- Validate focus fields while loading projects, dropping unknown values and bounding
-  imported focus IDs.
+- Validate focus fields while loading projects, dropping unknown values and rejecting
+  out-of-range or duplicate focus IDs before data can be lost.
 
 ### Focus-tree parser
 
