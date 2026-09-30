@@ -23,7 +23,7 @@ def _dialog_message(msg):
     """Add a pointer to the full traceback in the in-app error log."""
     hint = tr(
         "dialog.error.details_hint",
-        "See Settings -> Error Log for details.",
+        "See Settings -> SESSION LOG -> Open Full Log Window for details.",
     )
     return f"{msg}\n\n{hint}"
 
