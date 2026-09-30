@@ -3131,6 +3131,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
 
             # Prefill new focus default name with prefix
             self._default_focus_prefix = foc_pfx
+            self._last_project_path = None
 
             win.destroy()
             messagebox.showinfo(
@@ -4271,6 +4272,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         # Build Focus objects (sorted by visual order) and wire prerequisites.
         new_focuses = build_drawio_focuses(drawio_result)
         self.focuses.load(new_focuses)
+        self._last_project_path = None
 
         self._redraw()
         self._invalidate_focus_list_structure()
@@ -4446,6 +4448,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
                 self._tree_country_tag = parsed.country_tag
 
             self.focuses.load(new_focuses)
+            self._last_project_path = None
 
             self._detect_and_apply_tag()  # scan IDs now all focuses are loaded
             # If explicit tag was read from original_tag, ensure prefix is

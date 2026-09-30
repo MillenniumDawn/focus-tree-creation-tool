@@ -4,6 +4,8 @@ from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import MagicMock
 
+import pytest
+
 import hoi4_content_maker as app_module
 from hoi4cm.editor.project_codec import choose_project_save_path
 
@@ -170,3 +172,196 @@ def test_failed_quick_save_preserves_path_and_dirty_state(monkeypatch):
     assert app._saved_fingerprint == saved_fingerprint
     app._mark_clean.assert_not_called()
     report_failure.assert_called_once()
+
+
+def _replacement_app(root, monkeypatch):
+    from hoi4cm.models import Focus, FocusDocument
+
+    app = cast(Any, root)
+    for name, value in vars(_fake_app()).items():
+        setattr(app, name, value)
+    old_focus = Focus()
+    old_focus.name = "OLD_focus"
+    app.focuses = FocusDocument([old_focus])
+    app.cv = MagicMock()
+    app._lines = set()
+    app._extra_trees = []
+    app._focus_bundles = {}
+    app._shared_focuses = []
+    app._joint_focuses = []
+    app._tree_id = app_module.tk.StringVar(master=root)
+    app._cfp_x_var = app_module.tk.StringVar(master=root)
+    app._cfp_y_var = app_module.tk.StringVar(master=root)
+    app._default_focus_prefix = ""
+    app._tree_country_tag = "OLD"
+    app._import_generation = 0
+    app._is_dirty = MagicMock(return_value=True)
+    app._confirm_discard = lambda **_kwargs: app_module.App._save(app)
+    app._save = lambda: app_module.App._save(app)
+    for name in (
+        "_begin_document_generation",
+        "_reset_canvas_bounds",
+        "_invalidate_tree_badges",
+        "_refresh_loaded_trees_panel",
+        "_hide_form",
+        "_update_title",
+        "_detect_and_apply_tag",
+        "_refresh_tree_meta_panel",
+        "_redraw",
+        "_redraw_now",
+        "_invalidate_focus_list_structure",
+        "_fit_all",
+        "_push_undo",
+        "_hint",
+        "_draw_grid",
+    ):
+        setattr(app, name, MagicMock())
+    app._capture_workspace.side_effect = lambda: tuple(
+        focus.name for focus in app.focuses.values()
+    )
+    monkeypatch.setattr(app_module.MOD, "loaded", False)
+    monkeypatch.setattr(app_module.MOD, "edit_focus_file", "")
+    monkeypatch.setattr(app_module.messagebox, "showinfo", MagicMock())
+    monkeypatch.setattr(app_module.messagebox, "askyesnocancel", lambda *a, **kw: True)
+    monkeypatch.setattr(app_module, "clear_workspace_autosave", lambda *a: None)
+    monkeypatch.setattr(
+        app_module,
+        "progress_modal",
+        lambda *a, **kw: SimpleNamespace(close=lambda: None),
+    )
+    monkeypatch.setattr(
+        app_module, "run_bg", lambda app, work, done, **kw: done(work())
+    )
+    return app
+
+
+def _widgets(parent):
+    for child in parent.winfo_children():
+        yield child
+        yield from _widgets(child)
+
+
+def _dialog_action(window, button_text):
+    widgets = list(_widgets(window))
+    entries = [w for w in widgets if isinstance(w, app_module.tk.Entry)]
+    if entries:
+        entries[0].insert(0, "NEW")
+    button = next(
+        w
+        for w in widgets
+        if isinstance(w, app_module.tk.Button) and w.cget("text") == button_text
+    )
+    button.invoke()
+
+
+def _replace(app, route, monkeypatch, tmp_path, *, cancel=False):
+    if route == "new":
+        app_module.App._new_tree_dialog(app)
+        window = next(
+            w for w in app.winfo_children() if isinstance(w, app_module.tk.Toplevel)
+        )
+        _dialog_action(window, "Cancel" if cancel else "Create Tree")
+    elif route.startswith("drawio"):
+        from hoi4cm.focus_tree.drawio import DrawioGraph, DrawioVertex
+
+        def advance(window):
+            if cancel and (route == "drawio" or "Preview" in window.title()):
+                _dialog_action(window, "Cancel")
+            else:
+                _dialog_action(
+                    window,
+                    "Next" if "Setup" in window.title() else "Import as Skeleton",
+                )
+
+        monkeypatch.setattr(app_module.tk.Toplevel, "wait_window", advance)
+        graph = DrawioGraph({"1": DrawioVertex("1", "new_focus", 0, 0)}, [])
+        app_module.App._import_drawio_continue(app, graph, "new.drawio")
+    else:
+        path = tmp_path / "new.txt"
+        path.write_text(
+            "focus_tree = { id = new_tree focus = { id = NEW_focus x = 0 y = 0 } }",
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(
+            app_module.filedialog,
+            "askopenfilename",
+            lambda **kw: "" if cancel else str(path),
+        )
+        app_module.App._import_txt(app)
+
+
+@pytest.mark.parametrize("route", ["new", "drawio", "txt"])
+def test_replacement_then_quick_save_prompts_for_new_destination(
+    route, tk_root, monkeypatch, tmp_path
+):
+    app = _replacement_app(tk_root, monkeypatch)
+    write = MagicMock()
+    picker = MagicMock(return_value="/saved/replacement.json")
+    monkeypatch.setattr(app_module, "write_project", write)
+    monkeypatch.setattr(app_module.filedialog, "asksaveasfilename", picker)
+
+    _replace(app, route, monkeypatch, tmp_path)
+
+    assert app._last_project_path is None
+    picker.assert_not_called()
+    if route in ("new", "txt"):
+        write.assert_called_once_with("/saved/project.json", ("OLD_focus",))
+    else:
+        write.assert_not_called()
+    write.reset_mock()
+    assert app_module.App._save(app) is True
+    picker.assert_called_once()
+    write.assert_called_once_with("/saved/replacement.json", app._capture_workspace())
+    assert app._last_project_path == "/saved/replacement.json"
+
+
+@pytest.mark.parametrize("route", ["new", "drawio", "drawio-preview", "txt"])
+def test_cancelled_replacement_retains_quick_save_destination(
+    route, tk_root, monkeypatch, tmp_path
+):
+    app = _replacement_app(tk_root, monkeypatch)
+    write = MagicMock()
+    picker = MagicMock(side_effect=AssertionError("picker should not open"))
+    monkeypatch.setattr(app_module, "write_project", write)
+    monkeypatch.setattr(app_module.filedialog, "asksaveasfilename", picker)
+
+    _replace(app, route, monkeypatch, tmp_path, cancel=True)
+
+    assert [f.name for f in app.focuses.values()] == ["OLD_focus"]
+    assert app._last_project_path == "/saved/project.json"
+    write.reset_mock()
+    assert app_module.App._save(app) is True
+    write.assert_called_once_with("/saved/project.json", ("OLD_focus",))
+    picker.assert_not_called()
+
+
+@pytest.mark.parametrize("route", ["new", "txt"])
+def test_failed_outgoing_save_prevents_replacement(
+    route, tk_root, monkeypatch, tmp_path
+):
+    app = _replacement_app(tk_root, monkeypatch)
+    monkeypatch.setattr(
+        app_module, "write_project", MagicMock(side_effect=OSError("disk full"))
+    )
+    monkeypatch.setattr(app_module, "report_write_failure", MagicMock())
+
+    _replace(app, route, monkeypatch, tmp_path)
+
+    assert [f.name for f in app.focuses.values()] == ["OLD_focus"]
+    assert app._last_project_path == "/saved/project.json"
+
+
+def test_clear_all_is_an_edit_and_retains_quick_save_destination(tk_root, monkeypatch):
+    app = _replacement_app(tk_root, monkeypatch)
+    write = MagicMock()
+    monkeypatch.setattr(app_module, "write_project", write)
+    monkeypatch.setattr(app_module.messagebox, "askyesno", lambda *a: True)
+    monkeypatch.setattr(
+        app_module.filedialog,
+        "asksaveasfilename",
+        MagicMock(side_effect=AssertionError("picker should not open")),
+    )
+
+    app_module.App._clear_all(app)
+    assert app_module.App._save(app) is True
+    write.assert_called_once_with("/saved/project.json", ())
