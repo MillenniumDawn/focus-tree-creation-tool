@@ -3,13 +3,13 @@
 `src/hoi4cm/wizards/` holds the five modal builder dialogs, each a single
 `open_*_wizard(app)` entry point re-exported from `wizards/__init__.py`.
 
-| Wizard | Entry point | Lines | Purpose |
-|---|---|---|---|
-| Decision | `open_decision_wizard(app)` | 5,167 | Build a decision or decision category |
-| Event | `open_event_wizard(app)` | 2,922 | Build a HOI4 event |
-| National Spirit | `open_national_spirit_wizard(app)` | 2,090 | Build a national spirit / idea |
-| Dynamic Modifier | `open_dyn_mod_wizard(app)` | 1,649 | Build a dynamic modifier |
-| Additional Income | `open_additional_income_wizard(app)` | 637 | Build an MD additional-income entry |
+| Wizard | Entry point | Purpose |
+| --- | --- | --- |
+| Decision | `open_decision_wizard(app)` | Build a decision or decision category |
+| Event | `open_event_wizard(app)` | Build a HOI4 event |
+| National Spirit | `open_national_spirit_wizard(app)` | Build a national spirit / idea |
+| Dynamic Modifier | `open_dyn_mod_wizard(app)` | Build a dynamic modifier |
+| Additional Income | `open_additional_income_wizard(app)` | Build an MD additional-income entry |
 
 Event dropped from its original 3,445 lines when `_open_effect_picker`
 moved into `_shared.py` as `open_effect_picker` (issue #45) — decision.py

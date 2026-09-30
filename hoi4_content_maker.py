@@ -27,7 +27,7 @@ Copyright (c) 2025 Millennium Dawn Team.
 
 Wiki    : https://hoi4.paradoxwikis.com/National_focus_modding
 Requires: Python 3.14+  (tkinter built-in, no pip install needed)
-Run     : python hoi4_focus_maker.py
+Run     : python hoi4_content_maker.py
 
 Controls:
   Right-click canvas   = place a new focus
