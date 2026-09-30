@@ -10,6 +10,7 @@ from hoi4cm.ui.menubar import build_menubar
 _MENU_CALLBACKS = (
     "_new_tree_dialog",
     "_save",
+    "_save_as",
     "_load",
     "_load_mod_path",
     "_export",
@@ -40,6 +41,27 @@ def _descendants(parent: tk.Misc):
     for child in parent.winfo_children():
         yield child
         yield from _descendants(child)
+
+
+def test_file_menu_exposes_save_project_and_save_as(tk_root):
+    for name in _MENU_CALLBACKS:
+        setattr(tk_root, name, MagicMock())
+
+    toolbar = tk.Frame(tk_root)
+    toolbar.pack()
+    controller = build_menubar(tk_root, toolbar)
+    rows = controller.show_preview("file", ("save_project", "save_project_as"))
+    tk_root.update()
+
+    labels = {
+        widget.cget("text")
+        for row in rows
+        for widget in _descendants(row)
+        if isinstance(widget, tk.Button)
+    }
+    assert labels == {"Save Project", "Save Project As"}
+
+    controller.close()
 
 
 def test_load_mod_is_only_in_file_import_export(tk_root):

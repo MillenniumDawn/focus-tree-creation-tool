@@ -77,6 +77,7 @@ from hoi4cm.core import (  # noqa: E402
     tr,
 )
 from hoi4cm.editor import (  # noqa: E402
+    choose_project_save_path,
     clear_workspace_autosave,
     read_project,
     sibling_autosave_path,
@@ -650,6 +651,8 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         self.bind("<Control-Shift-z>", lambda e: self._redo())
         self.bind("<Control-n>", lambda e: self._new_tree_dialog())
         self.bind("<Control-s>", lambda e: self._save())
+        self.bind("<Control-Shift-s>", lambda e: self._save_as())
+        self.bind("<Control-Shift-S>", lambda e: self._save_as())
         self.bind("<Control-o>", lambda e: self._load())
         self.bind("<Control-e>", lambda e: self._export())
         self.bind("<Control-d>", lambda e: self._duplicate_focus())
@@ -3128,6 +3131,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
 
             # Prefill new focus default name with prefix
             self._default_focus_prefix = foc_pfx
+            self._last_project_path = None
 
             win.destroy()
             messagebox.showinfo(
@@ -4272,6 +4276,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         # Build Focus objects (sorted by visual order) and wire prerequisites.
         new_focuses = build_drawio_focuses(drawio_result)
         self.focuses.load(new_focuses)
+        self._last_project_path = None
 
         self._redraw()
         self._invalidate_focus_list_structure()
@@ -4447,6 +4452,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
                 self._tree_country_tag = parsed.country_tag
 
             self.focuses.load(new_focuses)
+            self._last_project_path = None
 
             self._detect_and_apply_tag()  # scan IDs now all focuses are loaded
             # If explicit tag was read from original_tag, ensure prefix is
@@ -5580,14 +5586,25 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         self._canvas_max = list(workspace.canvas_max)
         self._default_focus_prefix = workspace.default_focus_prefix
 
-    def _save(self):
-        path = filedialog.asksaveasfilename(
-            defaultextension=".json",
-            filetypes=[
-                (tr("filetype.json_project", "JSON Project"), "*.json"),
-                (tr("filetype.all", "All"), "*.*"),
-            ],
-            title=tr("filedialog.save_project", "Save Project"),
+    def _save(self, *, save_as=False):
+        path = choose_project_save_path(
+            getattr(self, "_last_project_path", None),
+            save_as=save_as,
+            choose_path=lambda: filedialog.asksaveasfilename(
+                defaultextension=".json",
+                filetypes=[
+                    (tr("filetype.json_project", "JSON Project"), "*.json"),
+                    (tr("filetype.all", "All"), "*.*"),
+                ],
+                title=tr(
+                    (
+                        "filedialog.save_project_as"
+                        if save_as
+                        else "filedialog.save_project"
+                    ),
+                    "Save Project As" if save_as else "Save Project",
+                ),
+            ),
         )
         if not path:
             return False
@@ -5615,6 +5632,9 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             tr("dialog.project_saved", "Project saved:\n{path}", path=path),
         )
         return True
+
+    def _save_as(self):
+        return self._save(save_as=True)
 
     def _detect_and_apply_tag(self):
         """Detect common tag prefix from loaded focuses."""
