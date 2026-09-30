@@ -336,6 +336,12 @@ paths. They do not recursively enumerate directories or reparse `.gfx` files.
 Statting the known images is what catches an in-place overwrite (the directory
 mtime doesn't move when a file's content changes), and it's far cheaper than a
 full rescan. `ScanCache.prune`'s stale-path removal remains its only eviction.
+Before opening SQLite, `ScanCache` restricts its directory to mode `0700` on
+POSIX or a protected current-user-only DACL on Windows. The Windows ACE inherits
+to new files and replaces inherited access on existing cache files; explicit
+child-file grants are not changed. Permission failures disable this optional
+cache before SQLite opens it. Windows tests inspect actual directory and
+database DACLs rather than `stat` mode bits.
 The image brokers bound decoded Tk images and visible pins independently.
 
 Wizard writes are not re-stored per file: `note_written`/`note_deleted` patch

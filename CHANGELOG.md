@@ -8,6 +8,8 @@ the version by hand. See `AGENTS.md`.
 
 ## Unreleased
 
+- Pin pre-commit hooks and local build fallbacks, and create scan-cache directories
+  with private permissions, repairing existing POSIX modes and Windows DACLs.
 - Prompt for a new project save destination after New Tree or a successful
   main-tree .txt/Draw.io import, preserving the previous project's JSON.
 - Keep pooled ruler labels above their background chips when the pool grows,

@@ -3,7 +3,7 @@
 # mypy, pylint all read it), so the hooks here are thin wrappers.
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v5.0.0
+    rev: cef0300fd0fc4d2a87a85fa2093c6b283ea36f4b # v5.0.0
     hooks:
       - id: trailing-whitespace
       - id: end-of-file-fixer
@@ -13,13 +13,13 @@ repos:
       - id: check-ast
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.16.0
+    rev: cb8c523fd4835aba42af70f4cad5568db4df0b6c # v0.16.0
     hooks:
       - id: ruff
         args: [--fix]
 
   - repo: https://github.com/psf/black-pre-commit-mirror
-    rev: 26.5.1
+    rev: 4160603246a6b365d4a2af661c6d71b0a0f50478 # 26.5.1
     hooks:
       - id: black
         # Files are passed explicitly by pre-commit, which bypasses black's
@@ -28,12 +28,12 @@ repos:
         args: [--force-exclude, "build/"]
 
   - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v2.3.0
+    rev: 41e691678310dfd3833f7ab4e180ddb014310356 # v2.3.0
     hooks:
       - id: mypy
         args: [--config-file=pyproject.toml]
 
   - repo: https://github.com/PyCQA/pylint
-    rev: v4.0.7
+    rev: c6768d3f1a45fbfad6a4ff9e167ca4f71dd5c991 # v4.0.7
     hooks:
       - id: pylint
