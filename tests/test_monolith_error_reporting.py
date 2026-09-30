@@ -6,6 +6,7 @@ the real reporter: the dialog call is the only stub, the error buffer and
 touching any widget state, so a bare shell stands in for the App.
 """
 
+import json
 from types import SimpleNamespace
 from typing import cast
 
@@ -16,6 +17,7 @@ import hoi4cm.core.logger as logmod
 import hoi4cm.ui.error_report as error_report
 from hoi4cm.editor import decode_project
 from hoi4cm.models import Focus, FocusDocument
+from hoi4cm.models.focus import MAX_FOCUS_ID
 
 
 @pytest.fixture
@@ -53,6 +55,52 @@ def test_load_reports_a_corrupt_project(shown, monkeypatch):
     assert len(entries) == 1
     assert "invalid JSON" in entries[0][1]
     assert "Traceback" in entries[0][1]
+
+
+def test_load_reports_out_of_range_ids_before_touching_live_state(
+    shown, monkeypatch, tmp_path
+):
+    path = tmp_path / "invalid_ids.json"
+    path.write_text(
+        json.dumps(
+            {
+                "format": "hoi4cm-project",
+                "version": 2,
+                "workspace": {
+                    "focuses": [{"id": MAX_FOCUS_ID + 1}, {"id": MAX_FOCUS_ID + 2}],
+                    "main_tree": {"focus_ids": [MAX_FOCUS_ID + 1]},
+                    "extra_trees": [{"focus_ids": [MAX_FOCUS_ID + 2]}],
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(m.filedialog, "askopenfilename", lambda **_kw: str(path))
+    existing = Focus()
+    shell = SimpleNamespace(focuses=FocusDocument([existing]))
+
+    m.App._load(cast(m.App, shell))
+
+    assert list(shell.focuses.values()) == [existing]
+    assert Focus._next == existing.id
+    assert len(shown) == 1
+    assert shown[0][0] == "Load Project Error"
+    assert "focus id must be between" in shown[0][1]
+
+
+@pytest.mark.parametrize("duplicate", [False, True])
+def test_exhausted_allocator_reports_before_mutating_widgets_or_undo(shown, duplicate):
+    selected = Focus.from_dict({"id": MAX_FOCUS_ID})
+    shell = SimpleNamespace(selected=selected)
+
+    if duplicate:
+        m.App._duplicate_focus(cast(m.App, shell))
+    else:
+        m.App._new_focus_at(cast(m.App, shell), 0, 0)
+
+    assert Focus._next == MAX_FOCUS_ID
+    assert len(shown) == 1
+    assert "focus id allocator exhausted" in shown[0][1]
 
 
 def test_load_warns_when_stored_export_paths_are_dropped(shown, monkeypatch):

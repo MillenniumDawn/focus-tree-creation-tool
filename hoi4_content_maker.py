@@ -3187,8 +3187,12 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         self._new_focus_at(gx, gy)
 
     def _new_focus_at(self, wx, wy):
+        try:
+            f = Focus(wx, wy)
+        except ValueError as e:
+            report_error(str(e), e)
+            return
         self._push_undo("add focus", touched_ids=())
-        f = Focus(wx, wy)
         pfx = self._default_focus_prefix
         if pfx:
             f.name = f"{pfx}focus_{f.id:d}"
@@ -5917,7 +5921,11 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             return
 
         f = self.selected
-        nf = f.duplicate()
+        try:
+            nf = f.duplicate()
+        except ValueError as e:
+            report_error(str(e), e)
+            return
         # Generate new unique name
         base = re.sub(r"_copy\d*$", "", f.name) + "_copy"
         existing_names = {foc.name for foc in self.focuses.values()}

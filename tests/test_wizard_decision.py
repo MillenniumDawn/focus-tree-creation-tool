@@ -96,14 +96,15 @@ def _cleanup(root: tk.Tk) -> None:
     root.update_idletasks()
 
 
-def _write_decision_pair(root):
+def _write_decision_pair(root, *, bom=False):
     decisions = root / "common" / "decisions" / "TAG_decisions.txt"
     categories = root / "common" / "decisions" / "categories" / "TAG_decisions.txt"
     decisions.parent.mkdir(parents=True)
     categories.parent.mkdir(parents=True)
+    encoding = "utf-8-sig" if bom else "utf-8"
     decisions.write_text(
         "TAG_cat = {\n\tTAG_decision = {\n\t\tallowed = { always = yes }\n\t}\n}\n",
-        encoding="utf-8",
+        encoding=encoding,
     )
     categories.write_text(
         "TAG_cat = {\n"
@@ -112,7 +113,7 @@ def _write_decision_pair(root):
         "\tcustom_category_key = { category_flag = yes }\n"
         "\tcustom_category_key = category_value\n"
         "}\n",
-        encoding="utf-8",
+        encoding=encoding,
     )
     return decisions, categories
 
@@ -122,7 +123,7 @@ def test_imported_category_fields_and_extras_survive_paired_save(
 ):
     _ensure_dnd_available(monkeypatch)
     mod_root = tmp_path / "mod"
-    decisions, categories = _write_decision_pair(mod_root)
+    decisions, categories = _write_decision_pair(mod_root, bom=True)
     MOD.root = str(mod_root)
     monkeypatch.setattr(
         "tkinter.filedialog.askopenfilenames",
@@ -165,6 +166,9 @@ def test_imported_category_fields_and_extras_survive_paired_save(
     assert "TAG_decision" not in saved_categories
     assert "TAG_decision" in saved_decisions
     assert "custom_category_key" not in saved_decisions
+    bom = b"\xef\xbb\xbf"
+    assert decisions.read_bytes().count(bom) == 1
+    assert categories.read_bytes().count(bom) == 1
     _cleanup(tk_root)
 
 

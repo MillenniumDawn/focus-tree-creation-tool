@@ -57,6 +57,16 @@ def encode_project(workspace: EditorWorkspace) -> dict[str, Any]:
 
 
 def decode_project(data: Mapping[str, Any]) -> EditorWorkspace:
+    next_id = Focus._next
+    try:
+        return _decode_project(data)
+    except Exception:
+        # Rejected projects never become live, including their allocator state.
+        Focus._next = next_id
+        raise
+
+
+def _decode_project(data: Mapping[str, Any]) -> EditorWorkspace:
     rejected_paths: list[str] = []
     format_name = data.get("format")
     if format_name is not None:

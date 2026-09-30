@@ -250,7 +250,11 @@ class FocusDocument(MutableMapping[int, Focus]):
     def load(self, focuses: Iterable[Focus] | Mapping[int, Focus]) -> None:
         if isinstance(focuses, Mapping):
             focuses = focuses.values()
-        loaded = {focus.id: focus for focus in focuses}
+        loaded: dict[int, Focus] = {}
+        for focus in focuses:
+            if focus.id in loaded:
+                raise ValueError(f"focus batch contains duplicate id: {focus.id}")
+            loaded[focus.id] = focus
         changed = loaded != self._focuses
         self._focuses = loaded
         if changed:
