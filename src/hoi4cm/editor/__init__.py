@@ -1,4 +1,5 @@
 from .project_codec import (
+    choose_project_save_path,
     decode_project,
     encode_project,
     read_project,
@@ -15,6 +16,7 @@ from .workspace_autosave import (
 __all__ = [
     "AUTOSAVE_NAME",
     "clear_workspace_autosave",
+    "choose_project_save_path",
     "decode_project",
     "encode_project",
     "read_project",

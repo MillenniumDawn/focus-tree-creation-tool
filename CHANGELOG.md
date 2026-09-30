@@ -8,6 +8,8 @@ the version by hand. See `AGENTS.md`.
 
 ## Unreleased
 
+- Prompt for a new project save destination after New Tree or a successful
+  main-tree .txt/Draw.io import, preserving the previous project's JSON.
 - Keep pooled ruler labels above their background chips when the pool grows,
   and retained canvas legends above recreated continuous-focus markers.
 - Pin the CI lint and test toolchain, including Pillow, to hash-verified
