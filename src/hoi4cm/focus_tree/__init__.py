@@ -23,6 +23,7 @@ from .export_plan import (
     make_main_export_plan,
     render_export_plan,
 )
+from .identifiers import checked_focus_names, focus_identifier
 from .loc import (
     LOC_LANGUAGE_NAMES,
     LocTarget,
@@ -72,6 +73,8 @@ __all__ = [
     "render_focus_block",
     "render_focus_body",
     "build_loc_yml",
+    "checked_focus_names",
+    "focus_identifier",
     "hydrate_focus_localization",
     "LOC_LANGUAGE_NAMES",
     "LocTarget",

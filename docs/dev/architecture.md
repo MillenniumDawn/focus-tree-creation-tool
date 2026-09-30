@@ -79,6 +79,12 @@ targets remain explicit overrides, while automatic discovery recursively
 filters `localisation/` for the configured language. Focus exports default to
 `<TAG>_focus_l_<lang>.yml`.
 
+Focus exports use `focus_tree/identifiers.py` to preserve IDs unchanged across
+script declarations, references and localisation keys. Unsafe IDs and duplicate
+title/description keys raise `ValueError` before the export plan writes its atomic
+group. IDs are never silently normalized: preserved raw script may refer to them.
+Localisation hydration looks up the original key exactly.
+
 Parsing and export are pure and tested without a display. Everything from
 `App.focuses` onward touches Tk and is exercised manually (see
 `testing.md`).

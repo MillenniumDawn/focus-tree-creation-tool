@@ -8,18 +8,14 @@ import json
 import re
 from dataclasses import dataclass
 
+from .identifiers import checked_focus_names
+
 _KEY_RE = re.compile(
     r'^(?P<prefix>\s+(?P<key>\S+?)(?::\d+)?\s*[=:]?\s*")'
     r'(?P<value>(?:[^"\\]|\\.)*)'
     r'(?P<suffix>".*)$',
     re.MULTILINE,
 )
-_LOC_KEY_RE = re.compile(r"[^A-Za-z0-9_]")
-
-
-def _safe_loc_key(name):
-    """Keep a focus name on one valid localisation-key line."""
-    return _LOC_KEY_RE.sub("_", str(name)) or "_"
 
 
 @dataclass(frozen=True)
@@ -90,7 +86,7 @@ def hydrate_focus_localization(text, focuses):
             continue
 
     for focus in focuses:
-        loc_key = _safe_loc_key(focus.name)
+        loc_key = focus.name
         if loc_key in values:
             focus.loc_name = values[loc_key]
         desc_key = f"{loc_key}_desc"
@@ -111,6 +107,8 @@ def build_loc_yml(existing_text, focuses, country_tag, *, language="english"):
     on that line. Blank values never overwrite a hand edit. Returns ``(None,
     0)`` when nothing needs to change — the caller should skip the write.
     """
+    focuses = tuple(focuses)
+    exported_names = checked_focus_names(focuses)
     existing_values = {}
     if existing_text is not None:
         for m in _KEY_RE.finditer(existing_text):
@@ -122,7 +120,7 @@ def build_loc_yml(existing_text, focuses, country_tag, *, language="english"):
         loc_name = (getattr(f, "loc_name", "") or "").strip()
         title = loc_name or f.name.replace("_", " ").title()
         desc = f.desc if f.desc else f"Complete the {title} national focus."
-        loc_key = _safe_loc_key(f.name)
+        loc_key = exported_names[f.name]
         if loc_key not in existing_values:
             to_add[loc_key] = title
         elif loc_name:

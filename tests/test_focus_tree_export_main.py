@@ -227,27 +227,14 @@ def test_relative_position_first_match_wins_on_duplicate_names():
     assert "y = 1" in text
 
 
-def test_focus_id_with_quote_and_newline_round_trips_once_with_safe_loc_keys():
+def test_focus_id_with_quote_and_newline_is_rejected_without_renaming():
     focus = Focus(0, 0)
     focus.name = 'a"\n b: c'
-    text = export_main_tree(
-        [focus],
-        _info(),
-        focus_lookup={focus.id: focus},
-        effect_renderer=raw_block_renderer,
-    )
-
-    parsed = parse_focus_tree(text, "/tmp/x.txt")
-    assert len(parsed.focuses_data) == 1
-
-    loc_text, count = build_loc_yml(None, [focus], "TST")
-    assert count == 2
-    assert loc_text is not None
-    loc_entries = [line for line in loc_text.splitlines() if line.startswith(" ")]
-    assert len(loc_entries) == 3  # section header plus title and description
-    assert all(":" in line and "\n" not in line for line in loc_entries[1:])
-    assert loc_entries[1].startswith(" a_")
-    assert loc_entries[2].startswith(" a_")
+    with pytest.raises(ValueError, match="cannot be exported safely"):
+        export_main_tree([focus], _info(), focus_lookup={focus.id: focus})
+    with pytest.raises(ValueError, match="cannot be exported safely"):
+        build_loc_yml(None, [focus], "TST")
+    assert focus.name == 'a"\n b: c'
 
 
 def test_country_raw_written_verbatim_with_nested_indent_preserved():

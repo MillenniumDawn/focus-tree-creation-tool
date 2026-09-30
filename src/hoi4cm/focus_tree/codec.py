@@ -12,6 +12,7 @@ from hoi4cm.script.effects import render_effect
 from hoi4cm.script.syntax import emit_scalar, serialize_block
 
 from .build import build_focuses
+from .identifiers import focus_identifier
 from .parse import parse_focus_tree
 
 __all__ = ["apply_focus_code", "render_focus_block", "render_focus_body"]
@@ -151,7 +152,8 @@ def render_focus_body(
     )
     out.extend((f"{indent}x = {x}", f"{indent}y = {y}"))
     if relative_id:
-        out.append(f"{indent}relative_position_id = {relative_id}")
+        relative_name = emit_scalar(focus_identifier(relative_id))
+        out.append(f"{indent}relative_position_id = {relative_name}")
 
     for offset in getattr(focus, "offsets", []):
         out.extend(
@@ -187,15 +189,14 @@ def render_focus_body(
         valid = [focus_id for focus_id in group if focus_id in focus_lookup]
         if valid:
             values = " ".join(
-                f"focus = {focus_lookup[focus_id].name}" for focus_id in valid
+                f"focus = {emit_scalar(focus_identifier(focus_lookup[focus_id].name))}"
+                for focus_id in valid
             )
             out.append(f"{indent}prerequisite = {{ {values} }}")
     for focus_id in focus.mutex:
         if focus_id in focus_lookup:
-            out.append(
-                f"{indent}mutually_exclusive = "
-                f"{{ focus = {focus_lookup[focus_id].name} }}"
-            )
+            mutex_name = emit_scalar(focus_identifier(focus_lookup[focus_id].name))
+            out.append(f"{indent}mutually_exclusive = " f"{{ focus = {mutex_name} }}")
 
     search_filters = getattr(focus, "search_filters", "").strip()
     if search_filters:
