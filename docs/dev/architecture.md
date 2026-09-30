@@ -223,8 +223,13 @@ or state leaks across tests:
   all module globals. `test_logger.py`'s `log_state` fixture snapshots and
   restores all three around each test.
 - **`Focus._next`** (`hoi4cm.models.focus.Focus`): a class-level counter
-  used to assign IDs. `Focus.from_dict` bumps it past any ID it loads, so
-  freshly created focuses never collide with imported ones. Tests that
+  used to assign IDs. `Focus.from_dict` raises it to any larger ID it loads;
+  allocation increments it before use, so freshly created focuses never collide
+  with imported ones. Loaded IDs outside `0..MAX_FOCUS_ID` are rejected rather
+  than clamped; fresh/duplicate allocation fails at the cap without changing the
+  counter. `FocusDocument.load` rejects duplicate IDs before replacing its data,
+  preserving existing focuses and references on failure. Project decoding restores
+  the allocator counter on rejection, before the UI installs the workspace. Tests that
   create focuses reset it in a fixture (see `test_focus_tree_roundtrip.py`).
 
 ## Revision discipline

@@ -1,3 +1,4 @@
+import copy
 from pathlib import Path
 
 import pytest
@@ -20,9 +21,10 @@ from hoi4cm.models import (
     TreeDocument,
     TreeMetadata,
 )
+from hoi4cm.models.focus import MAX_FOCUS_ID
 
 
-def test_legacy_two_field_project_loads_without_changing_focus_data():
+def test_legacy_two_field_project_loads_known_focus_data():
     legacy = {
         "tree_name": "legacy_tree",
         "focuses": [
@@ -54,7 +56,7 @@ def test_legacy_two_field_project_loads_without_changing_focus_data():
     assert workspace.main_tree.metadata.tree_id == "legacy_tree"
     assert list(restored.focuses) == [91, 92]
     assert restored.focuses[91].loc_name == ""
-    assert restored.focuses[91].to_dict()["unknown_focus_field"] == {"kept": True}
+    assert "unknown_focus_field" not in restored.focuses[91].to_dict()
     assert restored.focuses.names["duplicate"] == (91, 92)
 
 
@@ -131,7 +133,7 @@ def test_validate_project_file_path_requires_containment(tmp_path):
 
 def test_v2_roundtrip_preserves_workspace_and_tree_metadata():
     main = Focus(1, 2)
-    main.id = 12345678901234567890
+    main.id = MAX_FOCUS_ID
     main.name = "same_name"
     main.loc_name = "Same Name"
     extra = Focus(8, 9)
@@ -183,14 +185,96 @@ def test_v2_roundtrip_preserves_workspace_and_tree_metadata():
     assert restored.default_focus_prefix == "ABC_"
     assert restored.workspace_extras == {"future_workspace_field": {"enabled": True}}
     assert restored.extras == {"future_root_field": [1, 2, 3]}
-    assert list(restored.focuses) == [main.id, extra.id]
-    assert restored.focuses[main.id].loc_name == "Same Name"
-    assert restored.focuses.names["same_name"] == (main.id, extra.id)
+    assert list(restored.focuses) == [MAX_FOCUS_ID, extra.id]
+    assert restored.focuses[MAX_FOCUS_ID].loc_name == "Same Name"
+    assert restored.focuses.names["same_name"] == (MAX_FOCUS_ID, extra.id)
 
 
 def test_focus_counter_is_reset_after_large_project_id_roundtrip():
     """A loaded large ID must not leak into the next test's allocator."""
     assert Focus().id == 1
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+@pytest.mark.parametrize("ids", [(MAX_FOCUS_ID + 1, MAX_FOCUS_ID + 2), (7, "7")])
+def test_invalid_project_ids_reject_without_losing_existing_data(legacy, ids):
+    existing = Focus()
+    live = FocusDocument([existing])
+    focuses = [
+        {"id": 20, "name": "valid_first"},
+        {"id": ids[0], "name": "first", "mutex": [ids[1]]},
+        {"id": ids[1], "name": "second", "prereqs": [[ids[0]]]},
+    ]
+    project = (
+        {"focuses": focuses}
+        if legacy
+        else {
+            "format": "hoi4cm-project",
+            "version": 2,
+            "workspace": {
+                "focuses": focuses,
+                "main_tree": {"focus_ids": [ids[0]]},
+                "extra_trees": [{"focus_ids": [ids[1]]}],
+            },
+        }
+    )
+    original = copy.deepcopy(project)
+    next_id = Focus._next
+
+    with pytest.raises(ValueError, match="focus.*id"):
+        live.load(decode_project(project).focuses)
+
+    assert project == original
+    assert list(live.values()) == [existing]
+    assert Focus._next == next_id
+
+
+def test_duplicate_document_load_keeps_existing_data():
+    existing = Focus()
+    document = FocusDocument([existing])
+    revision = document.revision
+    first = Focus.from_dict({"id": 7, "name": "first"})
+    second = Focus.from_dict({"id": 7, "name": "second"})
+
+    with pytest.raises(ValueError, match="duplicate id: 7"):
+        document.load([first, second])
+
+    assert list(document.values()) == [existing]
+    assert document.revision == revision
+    assert document.first_by_name == {existing.name: existing.id}
+
+
+def test_near_cap_add_duplicate_save_reload_preserves_ids_and_references(tmp_path):
+    parent = Focus.from_dict({"id": MAX_FOCUS_ID - 2, "name": "parent"})
+    child = Focus()
+    child.name = "child"
+    child.tree_idx = 1
+    child.prereqs = [[parent.id]]
+    child.mutex = [parent.id]
+    workspace = EditorWorkspace(
+        focuses=FocusDocument([parent, child]),
+        main_tree=TreeDocument(focus_ids={parent.id}),
+        extra_trees=[TreeDocument(focus_ids={child.id})],
+    )
+    duplicate = child.duplicate()
+    duplicate.name = "duplicate"
+    workspace.focuses.add(duplicate)
+    workspace.extra_trees[0].focus_ids.add(duplicate.id)
+    path = tmp_path / "at_cap.json"
+
+    write_project(path, workspace)
+    restored = read_project(path)
+
+    assert encode_project(restored) == encode_project(workspace)
+    assert set(restored.focuses) == {MAX_FOCUS_ID - 2, MAX_FOCUS_ID - 1, MAX_FOCUS_ID}
+    assert restored.focuses[child.id].prereqs == [[parent.id]]
+    assert restored.focuses[duplicate.id].mutex == [parent.id]
+    assert Focus._next == MAX_FOCUS_ID
+    for create in (Focus, restored.focuses[child.id].duplicate):
+        with pytest.raises(ValueError, match="allocator exhausted"):
+            create()
+        assert Focus._next == MAX_FOCUS_ID
+    assert encode_project(restored) == encode_project(workspace)
 
 
 def test_v2_roundtrip_preserves_grid_coords_that_are_multiples_of_96():
