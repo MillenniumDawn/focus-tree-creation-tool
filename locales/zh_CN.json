@@ -88,6 +88,7 @@
   "dialog.delete_selected.body": "删除选中的 {count} 个国策？\n\n{names}\n\n这也会移除这些国策相关的全部前置连接。",
   "dialog.delete_selected.title": "删除选中项",
   "dialog.error.title": "错误",
+  "dialog.error.details_hint": "详细信息请参见“设置 -> 错误日志”。",
   "dialog.focus_id_empty": "国策 ID 不能为空。",
   "dialog.focus_numeric_fields": "Cost、AI Will Do、X 和 Y 必须是整数。",
   "dialog.gfx_goals_not_found": "在 Mod 中找不到 gfx/interface/goals/。",
