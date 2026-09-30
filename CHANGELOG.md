@@ -8,6 +8,8 @@ the version by hand. See `AGENTS.md`.
 
 ## Unreleased
 
+- Keep pooled ruler labels above their background chips when the pool grows,
+  and retained canvas legends above recreated continuous-focus markers.
 - Pin the CI lint and test toolchain, including Pillow, to hash-verified
   `dev-requirements.txt` installs.
 - Preserve exactly one UTF-8 BOM when rewriting BOM-prefixed mod scripts, while

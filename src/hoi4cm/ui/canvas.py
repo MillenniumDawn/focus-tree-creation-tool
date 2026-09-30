@@ -632,6 +632,10 @@ class CanvasMixin:
                 pool.append(item)
                 style_pool.append(options)
                 created = True
+                if kind == "rectangle" and index < len(pools["text"]):
+                    # Pool growth can reuse the old origin text for an axis
+                    # label. Its new chip must stay below that retained text.
+                    self.cv.tag_raise(pools["text"][index], item)
             used[kind] += 1
 
         if step >= 16:
@@ -1572,6 +1576,9 @@ class CanvasMixin:
             if vis_rect is not None and not focus_visible(gx, gy, vis_rect):
                 return
             cx, cy = self.w2c(gx, gy)
+            # Recreated markers sit above retained legend items even when the
+            # viewport and focus revision are unchanged.
+            self._legend_stack_key = None
             # Subtle tinted fill via stipple (tkinter has no native alpha)
             cv.create_rectangle(
                 cx - h,

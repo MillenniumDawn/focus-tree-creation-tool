@@ -623,6 +623,33 @@ def test_coord_labels_keep_grid_and_focus_layering(mapped_canvas):
     assert max(order.index(item) for item in labels) < order.index(focus)
 
 
+def test_coord_label_pool_growth_keeps_text_above_its_chip(mapped_canvas):
+    cv = mapped_canvas
+    app = _FakeApp(cv)
+    app.offset = [40, 40]
+    app._draw_grid()
+    focus = cv.create_rectangle(200, 100, 210, 110, tags="focus")
+    app._draw_coord_labels()
+    old_rectangles = len(app._coord_label_pools["rectangle"])
+    old_origin = app._coord_label_pools["text"][-1]
+
+    for zoom in (0.3, 1.0, 0.3):
+        app.zoom = zoom
+        app._draw_coord_labels()
+        used = app._coord_label_used["rectangle"]
+        order = cv.find_all()
+        rectangles = app._coord_label_pools["rectangle"][:used]
+        texts = app._coord_label_pools["text"][:used]
+        if zoom == 0.3:
+            assert used > old_rectangles
+            assert old_origin in texts
+        for chip, text in zip(rectangles, texts, strict=True):
+            assert order.index(chip) < order.index(text) < order.index(focus)
+            x0, y0, x1, y1 = cv.coords(chip)
+            x, y = cv.coords(text)
+            assert x0 <= x <= x1 and y0 <= y <= y1
+
+
 def test_legend_pool_skips_unchanged_rows_and_hides_surplus(mapped_canvas, monkeypatch):
     cv = mapped_canvas
     app = _FakeApp(cv)
@@ -682,6 +709,39 @@ def test_legend_stays_above_focus_items_after_view_changes(mapped_canvas):
     order = cv.find_all()
     legend = cv.find_withtag("legend")
     assert order.index(focus) < min(order.index(item) for item in legend)
+
+
+@pytest.mark.parametrize("marker_tree", ["main", "extra"])
+def test_same_view_frames_keep_legend_above_recreated_cfp(
+    mapped_canvas, monkeypatch, marker_tree
+):
+    cv = mapped_canvas
+    app = _FakeApp(cv)
+    app._extra_trees = [{"tree_id": "shared", "type": "shared"}]
+    cfp = {"cfp_x": 16, "cfp_y": cv.winfo_height() - 20}
+    if marker_tree == "main":
+        app._cfp_x, app._cfp_y = cfp.values()
+    else:
+        app._extra_trees[0].update(cfp)
+    monkeypatch.setattr(app, "_draw_minimap", lambda: None)
+
+    app._render_frame(RedrawChannel.VIEW)
+    legend = cv.find_withtag("legend")
+    old_markers = cv.find_withtag("cfp_marker")
+    legend_key = app._legend_key
+    stack_key = app._legend_stack_key
+    assert legend and old_markers
+
+    app._render_frame(RedrawChannel.VIEW)
+    markers = cv.find_withtag("cfp_marker")
+    assert markers and set(old_markers).isdisjoint(markers)
+    assert cv.find_withtag("legend") == legend
+    assert app._legend_key == legend_key
+    assert app._legend_stack_key == stack_key
+    order = cv.find_all()
+    assert max(order.index(item) for item in markers) < min(
+        order.index(item) for item in legend
+    )
 
 
 def test_canvas_pools_recover_after_external_delete_all(mapped_canvas):

@@ -184,8 +184,11 @@ A wheel notch at moderate zoom remains the notable churn in the same loop:
 surviving focus's `draw_key`, so bundles churn (14 canvas items created and
 deleted per focus crossing the edge) and every visible card recomputes. The
 coordinate ruler and legend are now pooled and unchanged keys skip their Tk
-updates; all these costs remain viewport-bounded rather than document-bounded,
-so they do not grow with a Load All Trees session.
+updates. Ruler pool growth restores retained axis text above its new chip;
+visible CFP marker recreation invalidates legend stacking so the unchanged-row
+pass raises the legend once. Frames without recreated markers keep the legend's
+zero-mutation fast path. All these costs remain viewport-bounded rather than
+document-bounded, so they do not grow with a Load All Trees session.
 
 ### Script scanner rewrite
 
