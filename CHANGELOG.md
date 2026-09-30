@@ -10,6 +10,10 @@ the version by hand. See `AGENTS.md`.
 
 - Point handled-error dialogs to Settings -> SESSION LOG -> Open Full Log Window
   so full tracebacks remain discoverable after the dialog is dismissed.
+- Pin pre-commit hooks and local build fallbacks, and create scan-cache directories
+  with private permissions, repairing existing POSIX modes and Windows DACLs.
+- Prompt for a new project save destination after New Tree or a successful
+  main-tree .txt/Draw.io import, preserving the previous project's JSON.
 - Keep pooled ruler labels above their background chips when the pool grows,
   and retained canvas legends above recreated continuous-focus markers.
 - Pin the CI lint and test toolchain, including Pillow, to hash-verified
