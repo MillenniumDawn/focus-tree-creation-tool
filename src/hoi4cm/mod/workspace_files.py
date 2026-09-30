@@ -55,6 +55,19 @@ def _existing_newline(target: Path) -> str:
     return "\r" if pending_cr else "\n"
 
 
+def _encode_text(text: str, encoding: str) -> bytes:
+    """Encode text without turning a leading Unicode BOM into file content.
+
+    ``read_file_with_encoding`` removes a UTF-8 BOM from returned text and
+    reports ``utf-8-sig`` separately.  Keep that contract at the write seam as
+    well: a caller that still has the marker in its buffer must get exactly one
+    BOM for ``utf-8-sig`` and none for plain ``utf-8``.
+    """
+    if encoding in ("utf-8", "utf-8-sig"):
+        text = text.lstrip("\ufeff")
+    return text.encode(encoding)
+
+
 def _stage(target: Path, text: str, encoding: str) -> Path:
     """Write ``text`` to a sibling temp file, fully flushed to disk.
 
@@ -62,7 +75,7 @@ def _stage(target: Path, text: str, encoding: str) -> Path:
     directory, a bad encoding, a full disk — fails here, before the target
     itself is touched.
     """
-    return _stage_bytes(target, text.encode(encoding))
+    return _stage_bytes(target, _encode_text(text, encoding))
 
 
 def _stage_bytes(target: Path, content: bytes) -> Path:
@@ -158,7 +171,9 @@ class WorkspaceFiles:
         payload_encoding = (
             "utf-8" if (original and encoding == "utf-8-sig") else encoding
         )
-        temporary = _stage_bytes(target, original + text.encode(payload_encoding))
+        temporary = _stage_bytes(
+            target, original + _encode_text(text, payload_encoding)
+        )
         try:
             os.replace(temporary, target)
         finally:

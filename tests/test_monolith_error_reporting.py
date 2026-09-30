@@ -6,6 +6,7 @@ the real reporter: the dialog call is the only stub, the error buffer and
 touching any widget state, so a bare shell stands in for the App.
 """
 
+import json
 import threading
 from types import SimpleNamespace
 from typing import cast
@@ -17,6 +18,7 @@ import hoi4cm.core.logger as logmod
 import hoi4cm.ui.error_report as error_report
 from hoi4cm.editor import decode_project
 from hoi4cm.models import Focus, FocusDocument
+from hoi4cm.models.focus import MAX_FOCUS_ID
 
 
 @pytest.fixture
@@ -43,13 +45,19 @@ def _patch_load_background(monkeypatch):
         lambda *_args, **_kwargs: SimpleNamespace(close=lambda: None),
     )
 
-    def run_background(_app, work, on_done, on_error=None, **_kwargs):
+    def run_background(
+        _app, work, on_done, on_error=None, *, on_finally=None, **_kwargs
+    ):
         try:
             result = work()
         except Exception as exc:  # noqa: BLE001
+            if on_finally is not None:
+                on_finally()
             if on_error is not None:
                 on_error(exc)
         else:
+            if on_finally is not None:
+                on_finally()
             on_done(result)
 
     monkeypatch.setattr(m, "run_bg", run_background)
@@ -75,6 +83,55 @@ def test_load_reports_a_corrupt_project(shown, monkeypatch):
     assert len(entries) == 1
     assert "invalid JSON" in entries[0][1]
     assert "Traceback" in entries[0][1]
+
+
+def test_load_reports_out_of_range_ids_before_touching_live_state(
+    shown, monkeypatch, tmp_path
+):
+    path = tmp_path / "invalid_ids.json"
+    path.write_text(
+        json.dumps(
+            {
+                "format": "hoi4cm-project",
+                "version": 2,
+                "workspace": {
+                    "focuses": [{"id": MAX_FOCUS_ID + 1}, {"id": MAX_FOCUS_ID + 2}],
+                    "main_tree": {"focus_ids": [MAX_FOCUS_ID + 1]},
+                    "extra_trees": [{"focus_ids": [MAX_FOCUS_ID + 2]}],
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(m.filedialog, "askopenfilename", lambda **_kw: str(path))
+    _patch_load_background(monkeypatch)
+    existing = Focus()
+    shell = SimpleNamespace(
+        focuses=FocusDocument([existing]), _begin_document_generation=lambda: None
+    )
+
+    m.App._load(cast(m.App, shell))
+
+    assert list(shell.focuses.values()) == [existing]
+    assert Focus._next == existing.id
+    assert len(shown) == 1
+    assert shown[0][0] == "Load Project Error"
+    assert "focus id must be between" in shown[0][1]
+
+
+@pytest.mark.parametrize("duplicate", [False, True])
+def test_exhausted_allocator_reports_before_mutating_widgets_or_undo(shown, duplicate):
+    selected = Focus.from_dict({"id": MAX_FOCUS_ID})
+    shell = SimpleNamespace(selected=selected)
+
+    if duplicate:
+        m.App._duplicate_focus(cast(m.App, shell))
+    else:
+        m.App._new_focus_at(cast(m.App, shell), 0, 0)
+
+    assert Focus._next == MAX_FOCUS_ID
+    assert len(shown) == 1
+    assert "focus id allocator exhausted" in shown[0][1]
 
 
 def test_load_warns_when_stored_export_paths_are_dropped(shown, monkeypatch):
@@ -170,7 +227,9 @@ def test_load_parses_on_worker_before_installing_workspace(monkeypatch):
         m, "clear_workspace_autosave", lambda: events.append("autosave")
     )
 
-    def run_background(_app, work, on_done, on_error=None, **_kwargs):
+    def run_background(
+        _app, work, on_done, on_error=None, *, on_finally=None, **_kwargs
+    ):
         result = []
         errors = []
 
@@ -183,11 +242,13 @@ def test_load_parses_on_worker_before_installing_workspace(monkeypatch):
         thread = threading.Thread(target=worker)
         thread.start()
         thread.join()
+        assert events == ["begin"]
+        if on_finally is not None:
+            on_finally()
         if errors:
             if on_error is not None:
                 on_error(errors[0])
         else:
-            assert events == ["begin"]
             on_done(result[0])
 
     monkeypatch.setattr(m, "run_bg", run_background)

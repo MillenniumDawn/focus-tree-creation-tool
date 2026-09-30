@@ -22,31 +22,41 @@ the file that uses it.
 
 ## Coverage
 
-`pytest --cov` measures the whole `hoi4cm` package with branch coverage on
-(`[tool.coverage.run]` in `pyproject.toml`), so no `--cov=` argument is
-needed for the normal case. `pytest --cov --cov-report=term-missing` prints
-the per-module gaps. The coverage source intentionally excludes
-`hoi4_content_maker.py`, which is the Tk shell. Tests that call its seams are
-still regression coverage, but they do not change this package percentage.
+`pytest --cov` measures both the `hoi4cm` package and the root-level
+`hoi4_content_maker.py` Tk shell, with branch coverage on. The source list is
+in `[tool.coverage.run]` in `pyproject.toml`; `--cov` without a value uses
+that list. `pytest --cov --cov-report=term-missing` prints per-file gaps.
+CI follows the full test run with two filtered reports so the sources have
+independent floors rather than one blended percentage:
 
-CI gates it twice:
+```sh
+coverage report --include='src/hoi4cm/*' --fail-under=67
+coverage report --include='hoi4_content_maker.py' --fail-under=30
+```
 
-- The full run carries `--cov-fail-under=50`, a backstop against a large
-  untested addition. It's a floor, not a target: raise it as coverage
-  climbs.
-- `pytest tests/test_wizard_generators_*.py --cov=hoi4cm.wizards._generators
-  --cov-fail-under=95` keeps the wizard script/loc renderers near-fully
-  covered, and runs without Xvfb on purpose so they can't quietly grow a
-  Tk dependency.
+The baseline was measured on the complete test suite against the current
+sources: package coverage was 68% and monolith coverage was 31%. CI's package
+ratchet is 67%, just below that measurement; its separate 30% monolith floor
+is deliberately lower while the shell continues to be migrated. These are
+floors, not targets: raise them as coverage climbs. The package and monolith
+must stay separately included in `pyproject.toml` so a future change cannot
+silently stop measuring either source.
 
-The package number (~53% with a display, via `xvfb-run -a`) is still
+The additional gate
+`pytest tests/test_wizard_generators_*.py --cov=hoi4cm.wizards._generators
+--cov-fail-under=95` keeps the wizard script/loc renderers near-fully
+covered, and runs without Xvfb on purpose so they can't quietly grow a
+Tk dependency.
+
+The package number is still
 dominated by the large Tk dialog bodies, but construction is now
 smoke-tested (`tests/test_wizard_smoke.py`,
-`tests/test_ui_dialog_smoke.py`): `wizards/decision.py` 9%, `event.py` 26%,
-`national_spirit.py` 20%, `dyn_mod.py` 15%, `additional_income.py` 56%,
-`ui/gfx_browser.py` 48%, `ui/settings_dialog.py` 62%,
-`ui/mod_loading.py` 31%, `ui/menubar.py` 75%, `ui/toolbar.py` 88% and
-`ui/splash.py` 66%. Everything pure is 82-100%. Extracting logic out of
+`tests/test_ui_dialog_smoke.py`): in the measured run, `wizards/decision.py`
+was 41%, `event.py` 41%, `national_spirit.py` 26%, `dyn_mod.py` 33%,
+`additional_income.py` 53%, `ui/gfx_browser.py` 60%,
+`ui/settings_dialog.py` 68%, `ui/mod_loading.py` 53%, `ui/menubar.py` 85%,
+`ui/toolbar.py` 88% and `ui/splash.py` 98%. The pure modules remain much
+more thoroughly tested. Extracting logic out of
 those closures (the `_generators.py` pattern) is what moves the number;
 the smokes are a backstop against NameError regressions (see #45), not a
 substitute for that extraction.

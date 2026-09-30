@@ -8,6 +8,8 @@ import json
 import re
 from dataclasses import dataclass
 
+from .identifiers import checked_focus_names
+
 _KEY_RE = re.compile(
     r'^(?P<prefix>\s+(?P<key>\S+?)(?::\d+)?\s*[=:]?\s*")'
     r'(?P<value>(?:[^"\\]|\\.)*)'
@@ -84,9 +86,10 @@ def hydrate_focus_localization(text, focuses):
             continue
 
     for focus in focuses:
-        if focus.name in values:
-            focus.loc_name = values[focus.name]
-        desc_key = f"{focus.name}_desc"
+        loc_key = focus.name
+        if loc_key in values:
+            focus.loc_name = values[loc_key]
+        desc_key = f"{loc_key}_desc"
         if desc_key in values:
             focus.desc = values[desc_key]
 
@@ -104,6 +107,8 @@ def build_loc_yml(existing_text, focuses, country_tag, *, language="english"):
     on that line. Blank values never overwrite a hand edit. Returns ``(None,
     0)`` when nothing needs to change — the caller should skip the write.
     """
+    focuses = tuple(focuses)
+    exported_names = checked_focus_names(focuses)
     existing_values = {}
     if existing_text is not None:
         for m in _KEY_RE.finditer(existing_text):
@@ -115,14 +120,15 @@ def build_loc_yml(existing_text, focuses, country_tag, *, language="english"):
         loc_name = (getattr(f, "loc_name", "") or "").strip()
         title = loc_name or f.name.replace("_", " ").title()
         desc = f.desc if f.desc else f"Complete the {title} national focus."
-        if f.name not in existing_values:
-            to_add[f.name] = title
+        loc_key = exported_names[f.name]
+        if loc_key not in existing_values:
+            to_add[loc_key] = title
         elif loc_name:
             escaped = json.dumps(loc_name, ensure_ascii=False)[1:-1]
-            if existing_values[f.name] != escaped:
-                to_update[f.name] = loc_name
+            if existing_values[loc_key] != escaped:
+                to_update[loc_key] = loc_name
 
-        desc_key = f"{f.name}_desc"
+        desc_key = f"{loc_key}_desc"
         if desc_key not in existing_values:
             to_add[desc_key] = desc
         elif f.desc:
