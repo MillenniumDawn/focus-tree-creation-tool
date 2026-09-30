@@ -36,6 +36,9 @@ the version by hand. See `AGENTS.md`.
 
 ### Focus-tree parser
 
+- Preserve focus IDs consistently in script and localisation; reject unsafe or
+  colliding keys before export, and keep malformed country-block data from
+  breaking generated mod files.
 - Bound malformed nested-block rescans and let batch imports cancel a
   file without returning partial model data.
 

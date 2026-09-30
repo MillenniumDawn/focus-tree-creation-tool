@@ -10,9 +10,56 @@ from hoi4cm.script.effects import render_effect
 from hoi4cm.script.syntax import emit_scalar, serialize_block
 
 from .codec import render_focus_body
+from .identifiers import checked_focus_names, focus_identifier
 from .operations import build_focus_name_lookup
 
 GFX_DEFAULT = "GFX_goal_generic_political_pressure"
+
+
+def _country_raw_lines(country_raw):
+    """Return country-body lines with unmatched braces neutralized.
+
+    Imported country blocks are normally balanced, but project data can be
+    edited independently of the parsed source. An unmatched ``}`` in that
+    data would close the generated ``country`` block and inject following
+    script at tree level. Preserve balanced content verbatim and comment only
+    the first unmatched closer on a line; close unfinished nested blocks so
+    later output remains inside the country block.
+    """
+    lines = []
+    depth = 0
+    in_quote = False
+    for line in country_raw.splitlines():
+        rendered = []
+        index = 0
+        while index < len(line):
+            char = line[index]
+            if char == '"':
+                in_quote = not in_quote
+                rendered.append(char)
+            elif char == "#" and not in_quote:
+                rendered.append(line[index:])
+                break
+            elif not in_quote and char == "{":
+                depth += 1
+                rendered.append(char)
+            elif not in_quote and char == "}":
+                if depth == 0:
+                    rendered.append("#" + line[index:])
+                    break
+                depth -= 1
+                rendered.append(char)
+            else:
+                rendered.append(char)
+            index += 1
+        if "".join(rendered).strip():
+            lines.append("".join(rendered))
+
+    if in_quote:
+        lines.append('"')
+    for closing_depth in range(depth, 0, -1):
+        lines.append("\t" * (closing_depth - 1) + "}")
+    return lines
 
 
 def _emit_tree_extras(out, info):
@@ -52,6 +99,8 @@ def export_focus_tree(
     (for prerequisite / mutex / relative-position name resolution).
     ``effect_renderer`` renders one effect dict to script text.
     """
+    focuses_in_tree = tuple(focuses_in_tree)
+    exported_names = checked_focus_names(focuses_in_tree)
     tid = re.sub(r"[^A-Za-z0-9_]", "_", info["tree_id"].strip()) or "TAG_focus_tree"
     country_tag = info.get("country_tag", "TAG")
     cfp_x = info.get("cfp_x")
@@ -89,7 +138,7 @@ def export_focus_tree(
         block_kw = "joint_focus" if is_joint else "shared_focus"
         for f in focuses_in_tree:
             out.append(f"{block_kw} = {{")
-            out.append(f"\tid = {f.name}")
+            out.append(f"\tid = {emit_scalar(exported_names[f.name])}")
             out.append(f"\ticon = {emit_scalar(getattr(f, 'gfx', GFX_DEFAULT))}")
             write_focus_body(f, out, "\t")
             out.append("}")
@@ -102,9 +151,8 @@ def export_focus_tree(
         country_raw = (info.get("country_raw") or "").strip()
         out.append("\tcountry = {")
         if country_raw:
-            for ln in country_raw.splitlines():
-                if ln.strip():
-                    out.append(f"\t\t{ln}")
+            for ln in _country_raw_lines(country_raw):
+                out.append(f"\t\t{ln}")
         else:
             out.append("\t\tfactor = 0")
             out.append("\t\tmodifier = {")
@@ -114,9 +162,9 @@ def export_focus_tree(
         out.append("\t}")
         out.append("")
         for sf in info.get("shared_focuses", []):
-            out.append(f"\tshared_focus = {sf}")
+            out.append(f"\tshared_focus = {emit_scalar(focus_identifier(sf))}")
         for jf in info.get("joint_focuses", []):
-            out.append(f"\tjoint_focus = {jf}")
+            out.append(f"\tjoint_focus = {emit_scalar(focus_identifier(jf))}")
         if info.get("shared_focuses") or info.get("joint_focuses"):
             out.append("")
         if cfp_x is None or cfp_y is None:
@@ -130,7 +178,7 @@ def export_focus_tree(
         _emit_tree_extras(out, info)
         for f in focuses_in_tree:
             out.append("\tfocus = {")
-            out.append(f"\t\tid = {f.name}")
+            out.append(f"\t\tid = {emit_scalar(exported_names[f.name])}")
             out.append(f"\t\ticon = {emit_scalar(getattr(f, 'gfx', GFX_DEFAULT))}")
             write_focus_body(f, out, "\t\t")
             out.append("\t}")
@@ -164,6 +212,8 @@ def export_main_tree(
     Both exporters use the canonical focus body codec. This path selects main
     tree coordinate and completion-reward policies.
     """
+    focuses_in_tree = tuple(focuses_in_tree)
+    exported_names = checked_focus_names(focuses_in_tree)
     tid = re.sub(r"[^A-Za-z0-9_]", "_", info["tree_id"].strip()) or "TAG_focus_tree"
     country_tag = info.get("country_tag", "TAG")
     cfp_x = info.get("cfp_x")
@@ -183,9 +233,8 @@ def export_main_tree(
     country_raw = (info.get("country_raw") or "").strip()
     out.append("\tcountry = {")
     if country_raw:
-        for ln in country_raw.splitlines():
-            if ln.strip():
-                out.append(f"\t\t{ln}")
+        for ln in _country_raw_lines(country_raw):
+            out.append(f"\t\t{ln}")
     else:
         out.append("\t\tbase = 0")
         out.append("\t\tmodifier = {")
@@ -196,9 +245,9 @@ def export_main_tree(
     out.append("")
 
     for sf in info.get("shared_focuses", []):
-        out.append(f"\tshared_focus = {sf}")
+        out.append(f"\tshared_focus = {emit_scalar(focus_identifier(sf))}")
     for jf in info.get("joint_focuses", []):
-        out.append(f"\tjoint_focus = {jf}")
+        out.append(f"\tjoint_focus = {emit_scalar(focus_identifier(jf))}")
     if info.get("shared_focuses") or info.get("joint_focuses"):
         out.append("")
 
@@ -214,7 +263,7 @@ def export_main_tree(
 
     for f in focuses_in_tree:
         out.append("\tfocus = {")
-        out.append(f"\t\tid = {f.name}")
+        out.append(f"\t\tid = {emit_scalar(exported_names[f.name])}")
         out.append(f"\t\ticon = {emit_scalar(getattr(f, 'gfx', GFX_DEFAULT))}")
         out.extend(
             render_focus_body(
