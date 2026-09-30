@@ -69,15 +69,62 @@ def test_from_dict_applies_defaults_for_missing_attrs():
     assert f.tree_idx == 0
 
 
+def test_from_dict_filters_unknown_fields():
+    Focus._next = 0
+    f = Focus.from_dict({"__dict__": 1, "id": 7, "evil": "x"})
+
+    assert f.id == 7
+    assert "__dict__" not in f.__dict__
+    assert not hasattr(f, "evil")
+    assert Focus._next == 7
+
+
+@pytest.mark.parametrize("focus_id", [-1, 1_000_001, 10**18])
+def test_from_dict_rejects_out_of_range_id_without_changing_allocator(focus_id):
+    Focus._next = 12
+    with pytest.raises(ValueError, match="focus id must be between"):
+        Focus.from_dict({"id": focus_id})
+    assert Focus._next == 12
+
+
+@pytest.mark.parametrize("counter", [1_000_000, 1_000_001])
+def test_from_dict_loads_valid_existing_id_when_allocator_is_exhausted(counter):
+    Focus._next = counter
+
+    restored = Focus.from_dict({"id": 7, "name": "existing"})
+
+    assert (restored.id, restored.name) == (7, "existing")
+    assert Focus._next == counter
+
+
+def test_from_dict_coerces_known_field_types():
+    f = Focus.from_dict(
+        {
+            "id": "7",
+            "x": "192",
+            "y": 3.0,
+            "cost": "7.5",
+            "cancel_if_invalid": "no",
+            "mutex": ["4", 5],
+            "unknown": {"ignored": True},
+        }
+    )
+
+    assert (f.id, f.x, f.y, f.cost) == (7, 192, 3, 7.5)
+    assert f.cancel_if_invalid is False
+    assert f.mutex == [4, 5]
+    assert "unknown" not in f.to_dict()
+
+
 def test_from_dict_bumps_counter():
     Focus._next = 0
     Focus.from_dict({"id": 42, "x": 0, "y": 0})
-    assert Focus._next == 43
+    assert Focus._next == 42
 
 
 def test_to_dict_excludes_dynamic_private_attrs():
     f = Focus()
-    f._items = ["a"]
+    f.__dict__.update(_items=["a"])
     f._draw_key = "key"  # type: ignore[assignment]
     restored = Focus.from_dict(f.to_dict())
     assert not hasattr(restored, "_items")
@@ -96,7 +143,7 @@ def test_duplicate_after_load_stays_small_and_unique():
     Focus.from_dict({"id": base, "x": 0, "y": 0})
     f = Focus.from_dict({"id": base + 1, "x": 0, "y": 0})
     nf = f.duplicate()
-    assert nf.id == base + 3
+    assert nf.id == base + 2
     assert nf.id != f.id
 
 

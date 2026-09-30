@@ -3,7 +3,7 @@
 ## The story so far
 
 `hoi4_content_maker.py` started as a single ~21k-line file. It's down to about
-6k lines. What moved, and when:
+6.5k lines. What moved, and when:
 
 - **#8**: logging pulled into `hoi4cm.core.logger`, plus the packaging/tooling
   setup (`pyproject.toml`, ruff/black scoping, pytest config) that made an
@@ -128,47 +128,82 @@
   wiring) stays a Tk shell in the monolith; only the row rendering and
   selection logic moved. See `performance.md`'s "Checklist dialog for Load
   All Trees" row for the perf fix this was.
+- **Post-#31 extractions**: workspace autosave and crash recovery (#96:
+  `editor/workspace_autosave.py` holds the autosave paths and clearing;
+  the `_autosave`/`_maybe_offer_autosave_restore` Tk family stays in the
+  monolith), Validate Tree rebuilt as a pure validator (#94, run off the
+  Tk thread with a lifecycle scope in #132: `focus_tree/validate.py`), the
+  virtualized Loaded Trees panel (#138: `ui/loaded_trees.py`), the trigger
+  catalogue and picker (#151: `data/triggers.py` + `open_trigger_picker`
+  in `wizards/_shared.py`), and the sidebar-form snapshot layer (#73,
+  issue #25: `models/sidebar_form.py`).
 
 What's left in `hoi4_content_maker.py` today is essentially: the `sys.path`
-shim and import block (lines ~62-152), two Windows-DPI helpers (~155-207),
+shim and import block (lines ~40-166), two Windows-DPI helpers (~172-222),
 and `class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk)`
-(~204-6336, 139 methods, most bodies much smaller now), plus the
-`__main__` entry point that calls `show_splash(_launch)`. Those 139
-methods group into:
+(~224-6455, 143 methods, most bodies much smaller now), plus the
+`__main__` entry point (`--smoke-test` routes to
+`ui/startup_check.py`'s `check_tk_startup`) that calls
+`show_splash(_launch)`. Those 143 methods group into:
 
 - **Sidebar** (still deferred, see below): `_build_sidebar`,
   `_build_sidebar_props`, `_build_sidebar_conditions`, `_build_sidebar_code`,
-  the dozen `_sb_*`/`_show_form`/`_hide_form`/`_flash_added` field-widget
-  helpers, the offset editor (`_refresh_offsets`, `_add_offset`,
-  `_del_offset`, `_save_offsets_to_focus`, `_focus_flag_label`), and the
-  focus-icon field (`_sb_gfx_picker`, `_set_gfx`, `_update_gfx_preview`,
-  `_open_gfx_browser`, now a delegate into `ui/gfx_browser.py`).
+  the `_sb_*`/`_show_form`/`_hide_form`/`_flash_added` field-widget helpers
+  (`_sb_scroll` is the sidebar's mousewheel handler), the offset editor
+  (`_refresh_offsets`, `_add_offset`,
+  `_del_offset`, `_read_offsets_from_form`, `_save_offsets_to_focus`,
+  `_focus_flag_label`), and the focus-icon field (`_sb_gfx_picker`, a
+  plain-text entry with no sidebar preview whose browse button opens
+  `ui/gfx_browser.py`'s `open_focus_icon_browser`;
+  `_set_gfx`/`_update_gfx_preview` commit the name and invalidate the
+  canvas). The form-snapshot half the autosave dirty check leans on is
+  extracted: `_read_sidebar_values` builds `models/sidebar_form.py`'s
+  `FocusSidebarValues`, with `_coerce_numeric`/`_set_field_error` handling
+  per-field numeric fallbacks.
+- **Autosave / dirty-state** (#96): `_workspace_fingerprint`, `_is_dirty`,
+  `_mark_clean`, `_confirm_discard`, `_schedule_autosave`,
+  `_cancel_autosave`, `_autosave_tick`, `_maybe_offer_autosave_restore`,
+  and `_autosave` (the select-away save that snapshots through
+  `_read_sidebar_values`).
 - **CRUD/selection**: `_select`, `_deselect`, `_populate`, `_add_focus`,
   `_new_focus_at`, `_apply`, `_delete_focus`, `_delete_selected`,
   `_key_delete`, `_clear_all`, `_toggle_multisel`, `_select_all_focuses`,
   `_duplicate_focus`, `_on_icon_change`.
 - **Prereq/mutex picking**: `_pick_prereq`, `_toggle_connect`,
   `_make_prereq`, `_rm_prereq`, `_toggle_mutex`, `_end_mutex`, `_make_mutex`,
-  `_rm_mutex`, `_refresh_prereqs`, `_refresh_mutex`.
+  `_rm_mutex`, `_refresh_prereqs`, `_refresh_mutex`, `_ref_name` (resolves
+  row targets through `self.focuses`).
 - **View-code / Code-tab**: `_refresh_code_tab`, `_apply_focus_code`,
   `_build_focus_code`, `_view_code`, `_add_effect`.
-- **Validation**: `_validate_tree`.
+- **Validation** (#132): `_validate_tree`, `_refresh_validation_dialog`,
+  and the debounced background pass (`_schedule_validation`,
+  `_run_validation`, `_apply_validation_result` plus
+  `_validation_sprites`/`_validation_loc_keys` snapshotting the `MOD`
+  bits); the pure logic lives in `focus_tree/validate.py`
+  (`validate_document`, `worst_severity_per_focus`).
 - **New-tree dialog**: `_new_tree_dialog`.
 - **Bulk rename**: `_bulk_rename_dialog`.
 - **Save/load (project + mod)**: `_save`, `_load`, `_detect_and_apply_tag`,
-  `_apply_md_visibility`, `_update_title`.
-- **Export**: `_export`.
+  `_apply_md_visibility`, `_update_title`, and the workspace snapshot
+  build/apply pair (`_capture_workspace`, `_install_workspace`) shared by
+  save, load, and autosave restore.
+- **Export**: `_export`, the plan pipeline (`_make_main_export_plan`,
+  `_make_extra_export_plan`, `_run_export_plans`, `_apply_export_results`),
+  and the GFX-export helper (`_focus_gfx_export`).
 - **Import**: `_import_drawio`, `_import_drawio_continue`, `_import_txt`
   (the Tk-shell wrappers described above; the parse/build logic itself
   already moved).
 - **Multi-tree** (shared/joint trees loaded alongside the main one):
-  `_get_tree_badge`, `_install_extra_tree`, `_load_extra_tree`,
-  `_unload_extra_tree`, `_refresh_loaded_trees_panel`,
+  `_get_tree_badge`/`_invalidate_tree_badges` (the badge table comes from
+  `ui/tree_badges.py`, rebuilt when `_extra_trees` changes),
+  `_install_extra_tree`, `_load_extra_tree`,
+  `_unload_extra_tree`, `_refresh_loaded_trees_panel` (rows rendered by
+  `ui/loaded_trees.py`'s `VirtualLoadedTreesList`),
   `_export_extra_tree`, `_batch_load_trees_worker` (one-line delegate into
   `focus_tree/batch_load.py`), `_load_all_trees`, `_save_all_trees`.
 - **Focus list panel**: `_refresh_focus_list_debounced`,
-  `_refresh_focus_list`, `_update_focus_list_selection`,
-  `_toggle_focus_list`.
+  `_invalidate_focus_list_structure`, `_update_focus_list_selection`,
+  `_select_focus_from_list`, `_toggle_focus_list`.
 - **Wizard/dialog delegates**: `_open_settings`, `_additional_income_wizard`,
   `_national_spirit_wizard`, `_dyn_mod_wizard`, `_decision_wizard`,
   `_event_wizard`, one-line calls into their `hoi4cm` modules.
@@ -182,8 +217,13 @@ methods group into:
 - **Widget factories / low-level helpers**: `_mk_btn`, `_mk_lbl`,
   `_mk_entry`, `_mk_hsep`, `_hint`, `_sash_pr`/`_sash_mv`/`_sash_rl`
   (sidebar-splitter drag), `_update_statusbar`,
-  `_refresh_tree_meta_panel`.
-- **Bootstrap**: `__init__`, `_on_app_close`, `_build_ui`, `_build_keybinds`,
+  `_refresh_tree_meta_panel`/`_fill_tree_meta_box`, the canvas redraw
+  wrappers (`_redraw`, `_redraw_now`, `_center_on_focus`).
+- **Bootstrap**: `__init__`, `_on_app_close`, `_close_app_caches`,
+  `_begin_document_generation` (the lifecycle scope + canvas-image
+  invalidation every document-replacement path runs through),
+  `_run_startup_prompts` (autosave recovery before the tutorial),
+  `_build_ui`, `_build_keybinds`,
   `_build_layout`, plus the two module-level DPI helpers
   (`_enable_windows_dpi_awareness`, `_apply_tk_dpi_scaling`).
 
@@ -218,6 +258,11 @@ needs it via `hoi4cm.core`.
 | Canvas image pipeline + lifecycle / scene index / scheduler | n/a | `ui/image_broker.py`, `ui/lifecycle.py`, `ui/scene_index.py`, `ui/thumbnail_grid.py`, `ui/focus_list.py`, `ui/canvas_scheduler.py` | **done** (modernization) |
 | Wizard GFX helpers + async image loader | n/a | `wizards/_graphics.py`, `wizards/_image_loader.py` | **done** (modernization) |
 | `_load_all_trees` row-building loop | ~4327-4638 (~312, was ~4349-4755/407) | `ui/checklist.py` (`VirtualChecklist`, `ChecklistItem`, `apply_select_mode`, `default_tree_type`, `is_loadable`), reusing `_PooledList` factored out of `ui/focus_list.py` | **done** (#31), dialog shell stays in `_load_all_trees` |
+| `_read_sidebar_values` (+ `_coerce_numeric`, `_set_field_error`) | ~2376-2444 (~69) | `models/sidebar_form.py` (`FocusSidebarValues`, `sidebar_values_match_focus`, `parse_ai_will_do`, `parse_focus_cost`) | **done** (#73, issue #25) |
+| Workspace autosave / crash recovery | n/a | `editor/workspace_autosave.py` (`workspace_autosave_path`, `sibling_autosave_path`, `clear_workspace_autosave`), decoded via `editor/project_codec.py` | **done** (#96) |
+| `_validate_tree` + background validation pass (`_schedule_validation`, `_run_validation`, `_apply_validation_result`, `_refresh_validation_dialog`, `_validation_sprites`, `_validation_loc_keys`) | ~1036-1110 + ~6109-6386 (~353) | `focus_tree/validate.py` (`validate_document`, `worst_severity_per_focus`), off the Tk thread via `run_bg` with a lifecycle scope | **done** (#94, #132) |
+| `_refresh_loaded_trees_panel` row loop | ~4688-4716 (~29) | `ui/loaded_trees.py` (`VirtualLoadedTreesList`, `LoadedTreeRowItem`), over `_PooledList` | **done** (#138) |
+| Trigger catalogue + picker | n/a | `data/triggers.py` (`TRIGGER_DEFS`) + `wizards/_shared.py` (`open_trigger_picker`) | **done** (#151) |
 
 `_import_txt` was worth calling out: it had been a third, independent copy of
 the tokenizer/parser logic that already existed in `focus_tree/parse.py`.
@@ -268,4 +313,9 @@ pinned-thumbnail image cache the sibling browser already had, in place of
 - **Sidebar builders**: tightly coupled to `App`'s live form state (the
   selected `Focus`, the current sidebar widgets, in-place mutation on
   every keystroke). Extracting them cleanly needs a form-state redesign
-  first, not just a lift-and-shift.
+  first, not just a lift-and-shift. The form-state half of that redesign
+  has landed (#73, issue #25): `_read_sidebar_values` snapshots the form
+  into `models/sidebar_form.py`'s `FocusSidebarValues` and
+  `sidebar_values_match_focus` does the dirty check headlessly, so a missed
+  field is a unit-test failure instead of a silently dropped edit. What's
+  still deferred is the widget construction and `_populate` layer itself.
