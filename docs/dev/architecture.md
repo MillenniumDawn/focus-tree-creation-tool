@@ -317,6 +317,12 @@ the event. `Future.cancel()`
 only drops queued jobs, and skipping `on_done` would throw away the partial
 result.
 
+The mod loader evicts cached PhotoImages on Tk before submitting its scan.
+The evicted list is a lifecycle resource, cleared on normal completion, scan
+failure, or app close before Tcl teardown. UI scans use `clear_images=False`;
+workers and their results never retain these images, so rejecting completion
+after `begin_close()` cannot run image finalizers on a worker.
+
 ### Executor lifecycle
 
 `get_executor()` creates the pool on first use and returns the same

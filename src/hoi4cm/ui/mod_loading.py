@@ -178,16 +178,30 @@ class ModLoadingMixin:
             lifecycle.begin("mod")
         report_progress = make_progress(pw, progress, scope="mod")
 
+        # Evict on Tk before submitting work. Neither the worker nor its result
+        # may own image references when close rejects the completion callback.
+        evicted_images = MOD.sprite_imgs.clear()
+        remove_resource = (
+            lifecycle.add_resource(evicted_images.clear)
+            if lifecycle is not None
+            else lambda: None
+        )
+
+        def release_images():
+            evicted_images.clear()
+            remove_resource()
+
         def worker():
-            MOD.scan(root, progress_cb=report_progress)
+            MOD.scan(root, progress_cb=report_progress, clear_images=False)
             return root
 
-        run_bg(
-            pw,
-            worker,
-            lambda loaded_root: self._on_mod_loaded(pw, loaded_root),
-            scope="mod",
-        )
+        def on_loaded(loaded_root):
+            try:
+                self._on_mod_loaded(pw, loaded_root)
+            finally:
+                release_images()
+
+        run_bg(pw, worker, on_loaded, lambda _exc: release_images(), scope="mod")
 
     def _on_mod_loaded(self, pw, root):
         pw.grab_release()

@@ -88,6 +88,9 @@ class _AcceptingLifecycle:
     def begin(self, scope: str) -> None:
         self.begun.append(scope)
 
+    def add_resource(self, cleanup: Callable[[], None]) -> Callable[[], None]:
+        return lambda: None
+
 
 def _patch_progress_window(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(mod_loading.tk, "Toplevel", _FakeWidget)
@@ -118,7 +121,7 @@ def test_load_mod_moves_duplicate_to_front_and_caps_recent_mods(
     _patch_progress_window(monkeypatch)
     background_calls: list[tuple[object, object, str]] = []
 
-    def run_bg(widget, worker, on_done, *, scope: str) -> None:
+    def run_bg(widget, worker, on_done, on_error, *, scope: str) -> None:
         background_calls.append((worker, on_done, scope))
 
     monkeypatch.setattr(mod_loading, "run_bg", run_bg)

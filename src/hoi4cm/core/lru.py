@@ -48,13 +48,15 @@ class LRUCache:
         return self._data[key]
 
     def clear(self):
+        """Remove every entry and return its values."""
+        values = list(self._data.values())
         self._data.clear()
+        return values
 
     def evict(self, predicate):
-        """Drop every key for which *predicate* returns True."""
+        """Drop matching keys and return the values they held."""
         stale = [key for key in self._data if predicate(key)]
-        for key in stale:
-            del self._data[key]
+        return [self._data.pop(key) for key in stale]
 
 
 __all__ = ["LRUCache"]

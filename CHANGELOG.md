@@ -8,6 +8,7 @@ the version by hand. See `AGENTS.md`.
 
 ## Unreleased
 
+- Release cached Tk images on the Tk thread after mod-scan completion or app close.
 - Point handled-error dialogs to Settings -> SESSION LOG -> Open Full Log Window
   so full tracebacks remain discoverable after the dialog is dismissed.
 - Pin pre-commit hooks and local build fallbacks, and create scan-cache directories
