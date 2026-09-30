@@ -40,6 +40,7 @@ def _shell():
         _import_generation=0,
         _confirm_discard=Mock(return_value=True),
         _push_undo=Mock(),
+        _last_project_path="old-project.json",
     )
     return app, old_focus
 
@@ -122,6 +123,7 @@ def test_import_budget_failure_preserves_targets_and_model(tmp_path, monkeypatch
     assert m.MOD.edit_focus_file == str(old_focus)
     assert m.MOD.edit_loc_file == str(old_loc)
     assert list(app.focuses.values()) == [old_model_focus]
+    assert app._last_project_path == "old-project.json"
     assert warnings and "parse budget exhausted" in warnings[0][1]
     assert infos == []
 
@@ -143,5 +145,6 @@ def test_import_success_assigns_targets_after_build(tmp_path, monkeypatch):
     assert m.MOD.edit_focus_file == str(focus_path)
     assert m.MOD.edit_loc_file == str(loc_path)
     assert [focus.name for focus in app.focuses.values()] == ["TST_new_focus"]
+    assert app._last_project_path is None
     assert warnings == []
     assert infos

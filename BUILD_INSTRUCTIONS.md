@@ -1,183 +1,110 @@
 # Build Instructions
 
-How to compile `hoi4_content_maker.py` into a standalone executable that:
+Use `build/build.py` to compile HOI4 Content Maker into a standalone executable.
+The script supports Windows, macOS, and Linux.
 
-- Requires **no Python installation** on the user's machine
-- Works on **Windows, macOS, and Linux**
-- Shows **no CMD/terminal window** when launched
-- Has **bytecode protection** so the source code is not trivially readable
+## Requirements
 
----
+- Python 3.14 or newer, with `tkinter` available.
+- PyInstaller 6.22.2 or newer and Pillow. Install both from the project root:
 
-## One-time setup (your machine only)
+  ```bash
+  pip install ".[build]"
+  ```
 
-Open a terminal and run:
+- On Linux, install the system tkinter package if needed:
 
-```bash
-pip install ".[build]"
-```
+  ```bash
+  sudo apt-get install python3-tk    # Debian/Ubuntu
+  sudo dnf install python3-tkinter   # Fedora
+  ```
 
-This installs PyInstaller and Pillow (declared in `pyproject.toml`). You only need to do this once.
+The executable smoke test opens Tk, so it needs a display. On a headless Linux
+machine, install `xvfb` and run the smoke test under `xvfb-run` as shown below.
 
-PyInstaller 6.22.2 or newer is required for Python distributions that embed
-Tcl/Tk 9 scripts in DLLs. Older versions can produce an executable that fails
-with `Tcl data directory ... _tcl_data not found`. Rebuild with the updated
-dependencies; installing Python on the end user's machine does not repair
-an already-built executable.
+## Build
 
-Run `HOI4ContentMaker.exe --smoke-test` after building on Windows (or the
-corresponding binary on macOS/Linux). This initializes Tcl, Tk and ttk, then
-exits without opening the editor. Linux needs a display, such as
-`xvfb-run -a ./HOI4ContentMaker-linux --smoke-test`. Both publishing pipelines
-run this check before uploading artifacts.
-
-On **Linux**, you also need tkinter (not bundled with pip):
+From the project root, run:
 
 ```bash
-sudo apt-get install python3-tk    # Debian/Ubuntu
-sudo dnf install python3-tkinter   # Fedora
+python build/build.py
 ```
 
----
-
-## Building
-
-### Cross-platform build (recommended)
-
-From the project root:
-
-```bash
-python build/build.py              # standard build
-```
-
-This auto-detects your platform and produces the correct output:
+The script detects the current platform, generates a temporary PyInstaller spec,
+builds the executable in the repository root, and removes its temporary spec and
+work directory afterward.
 
 | Platform | Output |
-|----------|--------|
+| --- | --- |
 | Windows | `HOI4ContentMaker.exe` |
 | macOS | `HOI4ContentMaker-mac` |
 | Linux | `HOI4ContentMaker-linux` |
 
-### Windows-only build (legacy)
+Only the executable for the target platform needs to be distributed. Builds are
+platform-specific, so build separately on each operating system.
 
-If you prefer the old Windows `.bat` scripts:
+## Smoke-test the executable
 
-```
-Double-click:  build/build.bat
-```
+The `--smoke-test` option initializes Tcl, Tk, and ttk, then exits without opening
+the editor. Use the matching command after building:
 
-Or from the terminal:
-
-```bat
-build\build.bat
+```powershell
+.\HOI4ContentMaker.exe --smoke-test
 ```
 
-## What each file does
+```bash
+./HOI4ContentMaker-mac --smoke-test
+```
+
+```bash
+xvfb-run -a ./HOI4ContentMaker-linux --smoke-test
+```
+
+On Linux with a desktop session, `./HOI4ContentMaker-linux --smoke-test` can be
+run directly instead.
+
+## Build files
 
 | File | Purpose |
-|---|---|
-| `build/build.py` | Cross-platform build script (Windows, macOS, Linux) |
-| `build/build.bat` | Windows-only one-click build script (legacy) |
-| `build/hoi4_content_maker.spec` | PyInstaller spec for Windows `.bat` builds |
-| `build/version_info.txt` | Windows file properties (right-click → Properties) |
-| `build/generate_icon.py` | Generates `icon.ico` and `icon.png` automatically |
-| `pyproject.toml` | Dependencies + extras (`image`, `dev`, `build`) and package metadata |
-| `.github/workflows/release.yml` | CI workflow — auto-builds and publishes releases |
+| --- | --- |
+| `build/build.py` | Current cross-platform PyInstaller build script |
+| `build/requirements.txt` | Hash-pinned build dependencies used by CI |
+| `build/build.bat` | Legacy Windows script with a machine-specific Python path |
+| `build/hoi4_content_maker.spec` | Static spec used by the legacy Windows script; `build.py` generates its own temporary spec |
+| `build/generate_icon.py` | Generates the application icon files |
+| `build/version_info.txt` | Windows executable version metadata |
+| `pyproject.toml` | Project metadata and optional dependency groups |
 
----
+## Automated builds and releases
 
-## Using your own icon
+`.github/workflows/ci.yml` runs linting and tests for pull requests and pushes to
+`main`. It also builds and smoke-tests executables on Windows, macOS, and Linux.
+When a stable `vX.Y.Z` tag is pushed, CI runs the same checks and builds, then
+publishes a GitHub Release with the three executables and `SHA256SUMS.txt`.
+Stable release tags must use an even minor version; CI rejects tags on the odd
+pre-release line and skips tags ending in `-pre.<attempt>`.
 
-Replace `icon.ico` with any `.ico` file before running the build. A 256×256 icon is recommended. You can create one from a PNG at [icoconvert.com](https://icoconvert.com) or using image editors like GIMP or Photoshop.
+Stable releases are prepared by the release pull request workflow, not by
+committing a tag or changing version files by hand. On pushes to `main`,
+`.github/workflows/release-pr.yml` regenerates the `release/version-bump` branch
+from `main` and, when there are unreleased changelog entries, opens or updates a
+pull request. Merging that pull request updates the project version and
+changelog. `.github/workflows/tag-release.yml` then checks that the project
+version matches the changelog and pushes the corresponding `vX.Y.Z` tag. With
+the configured GitHub App token, that tag starts the CI release job. The release
+workflows fall back to `GITHUB_TOKEN` if the app token cannot be created, but
+writes made with that token do not trigger downstream workflows.
 
----
+The release pull request workflow can also be run manually with a `patch`,
+`minor`, or `major` bump. Each push to `main` also starts
+`.github/workflows/pre-release.yml`, which builds and publishes a GitHub
+prerelease with the three executables and checksums. That workflow can be run
+manually as well. Pre-release versions use the odd minor above the current
+stable version, with the GitHub Actions run number as the patch; their tags end
+in `-pre.<attempt>` and are not published by the stable release job.
 
-## Build output
+## macOS notes
 
-```
-your-folder/
-├── HOI4ContentMaker.exe       ← Windows (distribute this)
-├── HOI4ContentMaker-mac       ← macOS (distribute this)
-├── HOI4ContentMaker-linux     ← Linux (distribute this)
-└── build/                     ← build scripts (not output)
-```
-
-Only the executable for your platform needs to be distributed. Temp files are cleaned up automatically by `build.py`.
-
----
-
-## Protection level comparison
-
-| Method | CMD window | Source readable? | Size |
-|---|---|---|---|
-| Running `.py` directly | Yes | Yes (it's the source) | — |
-| `build.bat` (standard) | **No** | Bytecode only (harder to read) | ~15–25 MB |
-
-## Cross-Platform Build (Windows / macOS / Linux)
-
-A Python build script replaces the Windows-only `.bat` files. It works on all platforms:
-
-```bash
-python build/build.py              # standard build
-```
-
-### One-time setup
-
-```bash
-pip install ".[build]"
-```
-
-On **Linux**, you also need tkinter:
-
-```bash
-sudo apt-get install python3-tk    # Debian/Ubuntu
-sudo dnf install python3-tkinter   # Fedora
-```
-
-### Output per platform
-
-| Platform | Output file | Size |
-|----------|------------|------|
-| Windows | `HOI4ContentMaker.exe` | ~18 MB |
-| macOS | `HOI4ContentMaker-mac` | ~18 MB |
-| Linux | `HOI4ContentMaker-linux` | ~18 MB |
-
-### Automated releases (CI)
-
-Every push to `main` that changes `hoi4_content_maker.py` triggers a GitHub Actions workflow that:
-
-1. Extracts the version from the source header (e.g., `Version 2.0`)
-2. Creates a git tag like `v2.0.1`, `v2.0.2`, etc.
-3. Builds executables on Windows, macOS, and Linux
-4. Publishes all three binaries as a GitHub Release
-
-You can also trigger a release manually from the Actions tab (`workflow_dispatch`).
-
-### macOS notes
-
-- PyInstaller builds will trigger Gatekeeper warnings without code signing
-- Users can bypass with: right-click > Open, or `xattr -cr HOI4ContentMaker-mac`
-
----
-
-## Troubleshooting
-
-**"Failed to execute script" when running the .exe**
-
-- Run `build.bat` from a terminal to see the full error output
-- Make sure `hoi4_content_maker.py` is in the same folder as `build.bat`
-
-**`.exe` triggers Windows Defender / antivirus**
-
-- This is common with PyInstaller builds (false positive)
-- Code-signing with a certificate eliminates this, but certificates cost money
-- Users can add an exception in Windows Security
-
-**Build is very slow on first run**
-
-- Normal — PyInstaller is building a Python runtime. Subsequent builds are faster.
-
-**Icon doesn't appear on the .exe**
-
-- Windows caches icons aggressively. Try: right-click desktop → Refresh, or log out and back in
-- Or run: `ie4uinit.exe -show` in a terminal to flush the icon cache
+PyInstaller builds are not code-signed, so macOS may show a Gatekeeper warning.
+Users can open the app using the right-click menu, or remove the quarantine flag
+with `xattr -cr HOI4ContentMaker-mac`.

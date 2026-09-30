@@ -16,7 +16,7 @@ HOI4 Content Maker is a standalone Python/Tkinter desktop application that lets 
 ### Wizards included
 
 | Wizard | What it does |
-|---|---|
+| --- | --- |
 | **Focus Tree Editor** | Visual drag-and-drop canvas for national focus trees. Place, connect, and configure focuses with a live code view. |
 | **Decision Maker** | Full categories + decisions editor with live HOI4-themed preview, GFX icon picker, and import/export of existing `.txt` files. |
 | **National Spirit Wizard** | Generates `ideas` blocks for national spirits/advisors with GFX browser. |
@@ -34,7 +34,7 @@ HOI4 Content Maker is a standalone Python/Tkinter desktop application that lets 
 ## Requirements
 
 | Requirement | Notes |
-|---|---|
+| --- | --- |
 | **Python 3.14 or newer** | Tested on Python 3.14. |
 | **tkinter** | Included with most Python installations. See platform-specific notes below. |
 | **Pillow** *(optional)* | Enables GFX icon previews (`.png`, `.tga`). Without it the app still runs, but icons show as placeholders. |
@@ -43,7 +43,7 @@ HOI4 Content Maker is a standalone Python/Tkinter desktop application that lets 
 ### Platform-specific requirements
 
 | Platform | tkinter | Notes |
-|----------|---------|-------|
+| ---------- | --------- | ------- |
 | **Windows** | Included with Python installer | Make sure "tcl/tk and IDLE" is checked during install |
 | **macOS** | Included with python.org installer | Homebrew Python sometimes omits tkinter — use the official installer |
 | **Linux** | Separate package | `sudo apt install python3-tk` (Debian/Ubuntu) or `sudo dnf install python3-tkinter` (Fedora) |
@@ -72,7 +72,7 @@ pip install pillow-dds      # .dds texture support
 Download the latest release for your platform from the [Releases](../../releases) page:
 
 | Platform | File |
-|----------|------|
+| ---------- | ------ |
 | Windows | `HOI4ContentMaker.exe` |
 | macOS | `HOI4ContentMaker-mac` |
 | Linux | `HOI4ContentMaker-linux` |
@@ -156,7 +156,7 @@ The main screen is the Focus Tree Editor — a zoomable, pannable canvas where y
 **Controls:**
 
 | Action | Input |
-|---|---|
+| --- | --- |
 | Place new focus | Right-click on canvas |
 | Select focus | Left-click |
 | Move focus | Left-click + drag |
@@ -238,7 +238,7 @@ A full event authoring tool.
 Access via *File → Settings* or the gear icon in the toolbar.
 
 | Setting | Description |
-|---|---|
+| --- | --- |
 | **Mod Root Path** | Override the auto-detected mod folder path |
 | **HOI4 Localisation** | Choose the language used for localisation headers, folders, filenames, and discovery |
 | **GFX Paths** | Customise where the app looks for goal icons, idea sprites, and event pictures |
@@ -254,51 +254,52 @@ Settings are saved automatically to `~/.hoi4_focus_maker.json`.
 ## File Structure
 
 ```
-hoi4_content_maker.py       ← application entry point (the GUI)
-src/hoi4cm/                 ← modular package (logging + shared core)
-  core/
-    logger.py               ← logging setup, error buffer, excepthook
-    config.py               ← persistent user config load/save
-    paths.py                ← mod-dir defaults + tolerant file reading
-tests/                      ← pytest suite
-  test_logger.py            ← logging module tests
-pyproject.toml              ← dependencies (extras: image/dev/build), metadata, pytest config
-README.md
-CHANGELOG.md
-BUILD_INSTRUCTIONS.md       ← how to compile executables
+hoi4_content_maker.py       ← application entry point and Tk shell
+src/hoi4cm/                 ← application package, organized by domain
+  core/                     ← configuration, logging, paths, and shared services
+  data/                     ← effect and trigger catalogues
+  editor/                   ← project encoding and workspace autosave
+  focus_tree/               ← focus-tree parsing, validation, and export
+  mod/                      ← mod context, graphics, and workspace caches
+  models/                   ← focus and document models
+  perf/                     ← profiling helpers
+  script/                   ← script syntax and effect helpers
+  ui/                       ← canvas, widgets, dialogs, and shared UI
+  wizards/                  ← content wizards and script/loc generators
+scripts/                    ← release and versioning tools
+  release_pr.py             ← prepares version-bump pull requests
+  versioning.py             ← release version arithmetic
 build/
-  build.py                  ← cross-platform build script
-  requirements.txt          ← hash-pinned build deps (pyinstaller, Pillow)
-  build.bat                 ← Windows-only build script (legacy)
-  hoi4_content_maker.spec   ← PyInstaller spec (Windows)
-  generate_icon.py          ← generates app icons (.ico, .png)
-  version_info.txt          ← Windows file properties metadata
+  build.py                  ← cross-platform executable builder
+  requirements.txt          ← hash-pinned build dependencies
 .github/workflows/
-  ci.yml                    ← CI: lint, test, build; publishes to Releases on tag push
-docs/
-  FOCUS_TREE.md             ← Focus Tree Editor deep-dive
-  DECISION_MAKER.md         ← Decision Maker deep-dive
-  CONTRIBUTING.md           ← contribution guidelines
+  ci.yml                    ← lint, tests, platform builds, and tagged releases
+  pre-release.yml           ← builds prereleases from main
+  release-pr.yml            ← prepares the stable release pull request
+  tag-release.yml           ← tags a merged stable release
+tests/                      ← pytest suite
+docs/                       ← user and developer documentation
 ```
 
-> The app is being split out of a single file into the `hoi4cm` package one module at
-> a time. Logging and the shared core came first; `hoi4_content_maker.py` is still the
-> launch point.
+The package contains the extracted application modules; the root script remains
+the launcher and Tk application shell.
 
 ---
 
 ## Keyboard Shortcuts
 
 | Shortcut | Action |
-|---|---|
+| --- | --- |
 | `Ctrl + Z` | Undo |
 | `Ctrl + Y` | Redo |
-| `Ctrl + S` | Save / export current wizard |
-| `Ctrl + N` | New focus / decision |
-| `Delete` | Delete selected item |
-| `Ctrl + D` | Duplicate selected item |
-| `Ctrl + A` | Select all (Focus Tree) |
-| `Escape` | Deselect |
+| `Ctrl + Shift + Z` | Redo |
+| `Ctrl + N` | New tree |
+| `Ctrl + S` | Save project |
+| `Ctrl + O` | Open project |
+| `Ctrl + E` | Export tree |
+| `Ctrl + D` | Duplicate selected focus |
+| `Ctrl + A` | Select all focuses |
+| `Delete` | Delete selected focus |
 
 ---
 

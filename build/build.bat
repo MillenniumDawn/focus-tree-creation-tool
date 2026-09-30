@@ -30,7 +30,7 @@ echo  Checking PyInstaller...
 %PYTHON% -c "from importlib.metadata import version; assert tuple(int(p) for p in version('pyinstaller').split('.')[:3]) >= (6, 22, 2)" 2>nul
 if errorlevel 1 (
     echo  [INFO] Installing PyInstaller...
-    %PYTHON% -m pip install "pyinstaller>=6.22.2"
+    %PYTHON% -m pip install "pyinstaller==6.22.2"
     if errorlevel 1 (
         echo  [ERROR] Failed to install PyInstaller.
         pause
@@ -42,7 +42,7 @@ if errorlevel 1 (
 %PYTHON% -c "from PIL import Image" >nul 2>&1
 if errorlevel 1 (
     echo  [INFO] Installing Pillow...
-    %PYTHON% -m pip install Pillow
+    %PYTHON% -m pip install "Pillow==12.3.0"
 )
 
 :: ── Generate icon ─────────────────────────────────────────────

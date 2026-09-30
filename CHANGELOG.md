@@ -9,6 +9,22 @@ the version by hand. See `AGENTS.md`.
 ## Unreleased
 
 - Release cached Tk images on the Tk thread after mod-scan completion or app close.
+- Pin pre-commit hooks and local build fallbacks, and create scan-cache directories
+  with private permissions, repairing existing POSIX modes and Windows DACLs.
+- Prompt for a new project save destination after New Tree or a successful
+  main-tree .txt/Draw.io import, preserving the previous project's JSON.
+- Keep pooled ruler labels above their background chips when the pool grows,
+  and retained canvas legends above recreated continuous-focus markers.
+- Pin the CI lint and test toolchain, including Pillow, to hash-verified
+  `dev-requirements.txt` installs.
+- Preserve exactly one UTF-8 BOM when rewriting BOM-prefixed mod scripts, while
+  keeping BOM-free scripts BOM-free and consistently decoding event/decision files.
+- Refresh the dev docs' inventories (package map, migration status table,
+  what's-left method groups, wizard line counts) to match the current tree,
+  and document the modules that had no doc coverage:
+  `focus_tree/validate.py`, `editor/workspace_autosave.py`,
+  `ui/loaded_trees.py`, `models/sidebar_form.py`, `data/triggers.py`, and
+  the `perf/` profiling harness.
 - Isolate pytest's import-time user-home state from the developer's real HOME,
   preserving X11 authentication when needed.
 - Preserve unknown decision-category assignments across wizard imports and saves;
@@ -22,9 +38,14 @@ the version by hand. See `AGENTS.md`.
   frames make zero `coords`, `itemconfig`, or `tag_lower` calls.
 - Skip unreadable or oversize scan files without aborting valid sibling results; failed
   reads remain retryable.
+- Validate focus fields while loading projects, dropping unknown values and rejecting
+  out-of-range or duplicate focus IDs before data can be lost.
 
 ### Focus-tree parser
 
+- Preserve focus IDs consistently in script and localisation; reject unsafe or
+  colliding keys before export, and keep malformed country-block data from
+  breaking generated mod files.
 - Bound malformed nested-block rescans and let batch imports cancel a
   file without returning partial model data.
 
