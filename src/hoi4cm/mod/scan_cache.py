@@ -17,6 +17,7 @@ import os
 import sqlite3
 
 from hoi4cm.core.logger import get_logger
+from hoi4cm.mod._cache_permissions import restrict_directory
 
 _log = get_logger("scan_cache")
 
@@ -53,7 +54,7 @@ class ScanCache:
             path = database_path(mod_root)
             cache_dir = os.path.dirname(path)
             os.makedirs(cache_dir, mode=0o700, exist_ok=True)
-            os.chmod(cache_dir, 0o700)
+            restrict_directory(cache_dir)
             conn = sqlite3.connect(path)
             conn.execute(_SCHEMA)
             conn.commit()

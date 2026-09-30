@@ -9,7 +9,7 @@ the version by hand. See `AGENTS.md`.
 ## Unreleased
 
 - Pin pre-commit hooks and local build fallbacks, and create scan-cache directories
-  with private permissions.
+  with private permissions, repairing existing POSIX modes and Windows DACLs.
 - Isolate pytest's import-time user-home state from the developer's real HOME,
   preserving X11 authentication when needed.
 - Preserve unknown decision-category assignments across wizard imports and saves;
