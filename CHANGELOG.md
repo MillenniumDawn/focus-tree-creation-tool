@@ -22,7 +22,7 @@ the version by hand. See `AGENTS.md`.
 - Skip unreadable or oversize scan files without aborting valid sibling results; failed
   reads remain retryable.
 - Route project loading through a background progress modal to keep the UI responsive
-  for large projects.
+  for large projects; release its modal grab when a load is cancelled or superseded.
 
 ### Focus-tree parser
 

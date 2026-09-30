@@ -215,7 +215,14 @@ worker-thread-plus-`_safe_after` shape into `run_bg`.
 `thread_name_prefix="hoi4cm-bg"`). On success, `on_done(result)` runs on the
 Tk thread via `_safe_after`. On any exception from `work`, it's logged
 (`log.exception`) and recorded via `add_error` so it reaches the in-app
-error log, then `on_error(exc)` runs on the Tk thread if given.
+error log, then `on_error(exc)` runs on the Tk thread if given. Optional
+`on_finally()` releases task UI once, before delivering the outcome, after
+queued cancellation, or on completion of a stale task. This cleanup
+uses the application lifetime, so replacing a document cannot suppress it;
+application close or widget destruction still suppresses late callbacks.
+Project loading uses this hook to release its progress-modal grab. Superseded
+running work retains its grab until the worker finishes; `Future.cancel()`
+cannot stop an already running parse.
 
 The hard rule for anything inside `work`: **never touch Tk** (widgets,
 `StringVar`/`BooleanVar`, canvas items, dialogs; Tkinter isn't

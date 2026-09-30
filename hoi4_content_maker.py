@@ -5663,7 +5663,6 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             return read_project(path)
 
         def on_done(workspace):
-            modal.close()
             self.cv.delete("all")
             self.selected = None
             self._lines.clear()
@@ -5700,7 +5699,6 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
                 )
 
         def on_error(exc):
-            modal.close()
             report_error(
                 tr(
                     "dialog.load_project_error.body",
@@ -5711,7 +5709,14 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
                 title=tr("dialog.load_project_error.title", "Load Project Error"),
             )
 
-        run_bg(self, work, on_done, on_error=on_error, scope="document")
+        run_bg(
+            self,
+            work,
+            on_done,
+            on_error=on_error,
+            scope="document",
+            on_finally=modal.close,
+        )
 
     # ── EXPORT ──────────────────────────────────────────────────
 

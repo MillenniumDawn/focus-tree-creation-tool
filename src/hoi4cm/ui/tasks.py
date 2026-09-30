@@ -71,7 +71,9 @@ def shutdown_executor():
         _executor = None
 
 
-def run_bg(widget, work, on_done, on_error=None, *, scope="application"):
+def run_bg(
+    widget, work, on_done, on_error=None, *, scope="application", on_finally=None
+):
     """Run ``work`` on a background thread; marshal the outcome to ``widget``.
 
     ``work`` is a zero-arg callable. Callers that need progress reporting can
@@ -88,6 +90,11 @@ def run_bg(widget, work, on_done, on_error=None, *, scope="application"):
     the worker thread's job, same as an uncaught exception in any other Tk
     callback.
 
+    Optional ``on_finally()`` runs once on the Tk thread before an outcome
+    callback, after queued cancellation, or on completion of a stale task.
+    Cleanup is guarded by the application lifetime rather than ``scope``;
+    it is skipped after the widget is destroyed or the application closes.
+
     Returns the submitted ``Future``. Production call sites can ignore it;
     it exists mainly so tests can wait for completion deterministically
     (``future.result(timeout=...)``) instead of sleeping.
@@ -95,12 +102,29 @@ def run_bg(widget, work, on_done, on_error=None, *, scope="application"):
 
     lifecycle = find_lifecycle(widget)
     token = lifecycle.token(scope) if lifecycle is not None else None
+    cleaned_up = False
+
+    def cleanup():
+        nonlocal cleaned_up
+        if not cleaned_up and on_finally is not None:
+            cleaned_up = True
+            on_finally()
+
+    def schedule_cleanup(_future):
+        if lifecycle is not None:
+            lifecycle.after(widget, 0, cleanup)
+        else:
+            _safe_after(widget, 0, cleanup)
 
     def schedule(callback):
+        def deliver():
+            cleanup()
+            callback()
+
         if lifecycle is not None:
-            lifecycle.after(widget, 0, callback, token=token)
+            lifecycle.after(widget, 0, deliver, token=token)
         else:
-            _safe_after(widget, 0, callback)
+            _safe_after(widget, 0, deliver)
 
     def _job():
         try:
@@ -120,11 +144,12 @@ def run_bg(widget, work, on_done, on_error=None, *, scope="application"):
         future = get_executor(widget).submit(_job)
         if lifecycle is not None and token is not None:
             lifecycle.track_future(future, token)
-        return future
     except RuntimeError:
         future = Future()
         future.cancel()
-        return future
+    if on_finally is not None:
+        future.add_done_callback(schedule_cleanup)
+    return future
 
 
 def make_progress(widget, fn, *, scope="application"):
