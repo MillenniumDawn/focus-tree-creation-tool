@@ -4,6 +4,7 @@ import stat
 import pytest
 
 import hoi4cm.mod.workspace_files as workspace_files_module
+from hoi4cm.core.paths import read_file_with_encoding
 from hoi4cm.mod.workspace_files import WorkspaceFiles
 
 
@@ -196,6 +197,50 @@ def test_write_text_still_takes_the_single_entry_path(tmp_path, monkeypatch):
     WorkspaceFiles().write_text(target, "new", encoding="utf-8")
 
     assert target.read_text() == "new"
+
+
+@pytest.mark.parametrize(
+    ("source_encoding", "expected_bom_count"),
+    [("utf-8-sig", 1), ("utf-8", 0)],
+)
+def test_rewrite_preserves_source_utf8_bom(
+    tmp_path, source_encoding, expected_bom_count
+):
+    target = tmp_path / "script.txt"
+    target.write_text("existing\n", encoding=source_encoding)
+    text, encoding = read_file_with_encoding(str(target))
+    assert text is not None
+    assert encoding is not None
+
+    WorkspaceFiles().write_text(target, text + "updated\n", encoding=encoding)
+
+    assert target.read_bytes().count(bytes((0xEF, 0xBB, 0xBF))) == expected_bom_count
+    assert target.read_text(encoding="utf-8-sig") == "existing\nupdated\n"
+
+
+@pytest.mark.parametrize(
+    ("encoding", "expected_bom_count"),
+    [("utf-8-sig", 1), ("utf-8", 0)],
+)
+def test_write_text_normalizes_leading_utf8_bom(tmp_path, encoding, expected_bom_count):
+    target = tmp_path / "script.txt"
+
+    WorkspaceFiles().write_text(target, "\ufeffpayload", encoding=encoding)
+
+    assert target.read_bytes().count(bytes((0xEF, 0xBB, 0xBF))) == expected_bom_count
+
+
+def test_append_preserves_one_source_utf8_bom(tmp_path):
+    target = tmp_path / "script.txt"
+    target.write_text("existing\n", encoding="utf-8-sig")
+    text, encoding = read_file_with_encoding(str(target))
+    assert text == "existing\n"
+    assert encoding == "utf-8-sig"
+
+    WorkspaceFiles().append_text(target, "updated\n", encoding=encoding)
+
+    assert target.read_bytes().count(bytes((0xEF, 0xBB, 0xBF))) == 1
+    assert target.read_text(encoding="utf-8-sig") == "existing\nupdated\n"
 
 
 def test_write_existing_text_preserves_line_endings(tmp_path):

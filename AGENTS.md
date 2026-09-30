@@ -10,7 +10,7 @@ A standalone Python/Tkinter desktop app for authoring Hearts of Iron IV mod cont
 
 **New code goes in `src/hoi4cm/`. Do not grow the monolith.**
 
-`hoi4_content_maker.py` is down to ~5.7k lines from its original ~21k. What's left is essentially `class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk)` holding the Tk shells: dialogs, wiring, event bindings, and the one-line delegates into extracted modules. The sidebar form is the last big chunk still in the monolith and is deliberately deferred (see `docs/dev/monolith-migration.md` for the full status table and why). When adding or refactoring, extract into a `src/hoi4cm/` module and pair it with a test — don't add features to the monolith. Edits to the monolith should be confined to bug fixes and the wiring needed to call into newly-extracted modules.
+`hoi4_content_maker.py` is down to ~6.5k lines from its original ~21k. What's left is essentially `class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk)` holding the Tk shells: dialogs, wiring, event bindings, and the one-line delegates into extracted modules. The sidebar form is the last big chunk still in the monolith and is deliberately deferred (see `docs/dev/monolith-migration.md` for the full status table and why). When adding or refactoring, extract into a `src/hoi4cm/` module and pair it with a test — don't add features to the monolith. Edits to the monolith should be confined to bug fixes and the wiring needed to call into newly-extracted modules.
 
 ## Commands
 
@@ -35,7 +35,7 @@ CI runs ruff, black, mypy, pylint and pytest, all on 3.14 (the project's floor).
 ## Layout
 
 - **`hoi4_content_maker.py`** — the launch point and (still) most of the app: `App(tk.Tk)`, its Tk-shell methods and one-line delegates into extracted modules, and the deferred sidebar form. Entry point at the bottom calls `show_splash(_launch)`.
-- **`src/hoi4cm/`** — the extracted package, organized by domain: `core/` (logger, config, paths, undo, i18n, concurrency, safe file/xml helpers), `models/` (`Focus`, `FocusDocument`, `EditorWorkspace`), `focus_tree/` (parse/build/export, codec, operations, drawio, loc), `ui/` (canvas, splash, menubar, toolbar, settings dialog, gfx browser, image pipeline), `wizards/` (the five authoring wizards + shared helpers), `mod/` (mod context, GFX catalog, scan/workspace caches), `script/` (effects + syntax), `editor/` (project save/load), `data/` (effect/modifier tables). New modules land in the owning subpackage, not a catch-all.
+- **`src/hoi4cm/`** — the extracted package, organized by domain: `core/` (logger, config, paths, undo, i18n, concurrency, safe file/xml helpers, Pillow gating), `models/` (`Focus`, `FocusDocument`, `EditorWorkspace`, sidebar-form snapshots), `focus_tree/` (parse/build/export, codec, operations, drawio, loc, batch load, export plans, pure validation), `ui/` (canvas, splash, menubar, toolbar, settings dialog, gfx browser, image pipeline, virtualized lists, error reporting), `wizards/` (the five authoring wizards + shared helpers + `_generators.py`), `mod/` (mod context, GFX catalog + writer, scan/workspace caches), `script/` (effects + syntax), `editor/` (project save/load, workspace autosave), `data/` (effect/trigger/modifier tables), `perf/` (profiling harness). New modules land in the owning subpackage, not a catch-all.
 - **`scripts/`** — release tooling the workflows call: `versioning.py` (version arithmetic for both channels, and the table of every file that states the version) and `release_pr.py` (promotes `## Unreleased`). Linted and type-checked like packaged code, and tested under `tests/`. Not shipped in the executable — `build/` is the PyInstaller side.
 - **`docs/dev/`**: developer docs, architecture, migration status, performance, testing, wizards. Start at `docs/dev/README.md`. They carry a maintenance rule: any PR that changes architecture, hot paths, or migration status updates the matching doc in the same PR.
 
@@ -62,4 +62,15 @@ Publishing runs on two channels, neither of them from a developer's machine.
 
 Both the release PR and the release tag are pushed with a GitHub App token (`melon-release-bot`, secrets `RELEASE_PR_APP_ID` / `RELEASE_PR_APP_PRIVATE_KEY`), because a pull request or tag created with `GITHUB_TOKEN` triggers no workflow. Each mint step is guarded and `continue-on-error`, falling back to `github.token` — the PR still opens and the tag still pushes, they just won't trigger CI on themselves.
 
-`ci.yml` still runs lint, test, then the Win/macOS/Linux build matrix on every push and PR. Executables are never committed. Build deps are hash-pinned in `build/requirements.txt`, regenerated with `uv pip compile --generate-hashes --universal --extra build pyproject.toml -o build/requirements.txt`.
+`ci.yml` still runs lint, test, then the Win/macOS/Linux build matrix on every push and PR.
+Executables are never committed. Build deps are hash-pinned in
+`build/requirements.txt`, and the lint/test toolchain including Pillow is
+hash-pinned in `dev-requirements.txt`. Regenerate them with:
+
+```text
+uv pip compile --generate-hashes --universal --extra build pyproject.toml \
+  -o build/requirements.txt
+uv pip compile --generate-hashes --universal --extra dev \
+  --extra image pyproject.toml \
+  -o dev-requirements.txt
+```

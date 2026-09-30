@@ -5,11 +5,11 @@
 
 | Wizard | Entry point | Lines | Purpose |
 |---|---|---|---|
-| Decision | `open_decision_wizard(app)` | 4,958 | Build a decision or decision category |
-| Event | `open_event_wizard(app)` | 2,849 | Build a HOI4 event |
-| National Spirit | `open_national_spirit_wizard(app)` | 2,113 | Build a national spirit / idea |
-| Dynamic Modifier | `open_dyn_mod_wizard(app)` | 1,662 | Build a dynamic modifier |
-| Additional Income | `open_additional_income_wizard(app)` | 582 | Build an MD additional-income entry |
+| Decision | `open_decision_wizard(app)` | 5,167 | Build a decision or decision category |
+| Event | `open_event_wizard(app)` | 2,922 | Build a HOI4 event |
+| National Spirit | `open_national_spirit_wizard(app)` | 2,090 | Build a national spirit / idea |
+| Dynamic Modifier | `open_dyn_mod_wizard(app)` | 1,649 | Build a dynamic modifier |
+| Additional Income | `open_additional_income_wizard(app)` | 637 | Build an MD additional-income entry |
 
 Event dropped from its original 3,445 lines when `_open_effect_picker`
 moved into `_shared.py` as `open_effect_picker` (issue #45) — decision.py
@@ -20,7 +20,7 @@ second copy.
 ## `_shared.py`
 
 State that used to be plain module-level globals in the monolith's
-Tk-handling block, plus one popup shared across wizards:
+Tk-handling block, plus the picker popups shared across wizards:
 
 - `_app_img_caches`: a registry list every wizard appends its own image
   caches to, so the App can clear all of them in one place on mod reload
@@ -36,6 +36,23 @@ Tk-handling block, plus one popup shared across wizards:
   wizard can call it too. Renders a snippet into `target_text`; `on_insert`
   is an optional no-arg callback fired after a successful insert (the event
   wizard passes its `_schedule_preview`, decision passes nothing).
+- `open_script_picker(parent, target_text, definitions, categories, *,
+  picker_name="Effect", on_insert=None)`: the shared catalogue picker
+  behind both `open_effect_picker` and `open_trigger_picker` (#151),
+  parameterized over a catalogue table (`EFFECT_DEFS`, `TRIGGER_DEFS`) and
+  its category list. Inserts only into the `target_text` that opened it.
+- `open_trigger_picker(parent, target_text, on_insert=None)`: the trigger
+  flavour of the same picker, rendered from `data/triggers.py`'s
+  `TRIGGER_DEFS` (the vanilla trigger catalogue, same entry shape as
+  `EFFECT_DEFS`).
+- `render_script_snippet(key, definition, values, *, is_trigger=False)`:
+  renders one catalogue entry's script text from its field values, no Tk
+  (`is_trigger=True` switches to the trigger insertion shapes).
+- `notifying_workspace_files(MOD, mod_root)`: the `WorkspaceFiles` factory
+  the wizards save through, with the `on_written` hook that pokes the
+  graphics catalog (see `architecture.md`'s "Writing mod files").
+- `svar_get(var, default)`: safe variable read — coerces to `str` and
+  returns `default` when the variable is missing or its read raises.
 
 Pulling these into one module keeps the wizards free of cross-wizard
 coupling (no wizard imports another wizard's globals directly) while still
