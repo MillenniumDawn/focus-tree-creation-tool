@@ -538,6 +538,231 @@ def test_grid_toggled_off_hides_every_line(mapped_canvas):
     assert _grid_lines(cv) == []
 
 
+def _visible_items(cv, tag):
+    return [
+        item for item in cv.find_withtag(tag) if cv.itemcget(item, "state") != "hidden"
+    ]
+
+
+def test_coord_labels_reuse_items_and_skip_an_unchanged_view(
+    mapped_canvas, monkeypatch
+):
+    cv = mapped_canvas
+    app = _FakeApp(cv)
+    app._draw_coord_labels()
+    original_items = set(cv.find_withtag("coord_lbl"))
+    origin_line = app._coord_label_pools["line"][0]
+    origin_before = cv.coords(origin_line)
+
+    calls = {
+        name: 0
+        for name in (
+            "coords",
+            "itemconfig",
+            "create_rectangle",
+            "create_text",
+            "create_line",
+            "delete",
+            "tag_raise",
+            "tag_lower",
+        )
+    }
+    for name in calls:
+        original = getattr(cv, name)
+        monkeypatch.setattr(
+            cv,
+            name,
+            lambda *args, _original=original, _name=name, **kwargs: (
+                calls.__setitem__(_name, calls[_name] + 1) or _original(*args, **kwargs)
+            ),
+        )
+
+    app._draw_coord_labels()
+    assert calls == {name: 0 for name in calls}
+
+    app.offset[0] = 1
+    app._draw_coord_labels()
+    assert set(cv.find_withtag("coord_lbl")) == original_items
+    assert cv.coords(origin_line)[0] == origin_before[0] + 1
+    assert (
+        calls["create_rectangle"] == calls["create_text"] == calls["create_line"] == 0
+    )
+    assert calls["delete"] == 0
+
+
+def test_coord_label_surplus_is_hidden_and_reused(mapped_canvas):
+    cv = mapped_canvas
+    app = _FakeApp(cv)
+    app._draw_coord_labels()
+    pool_ids = {item for pool in app._coord_label_pools.values() for item in pool}
+
+    app.zoom = 0.1  # ruler is too dense at this zoom
+    app._draw_coord_labels()
+    assert not _visible_items(cv, "coord_lbl")
+    assert set(cv.find_withtag("coord_lbl")) == pool_ids
+
+    app.zoom = 1.0
+    app._draw_coord_labels()
+    assert set(cv.find_withtag("coord_lbl")) == pool_ids
+    assert set(_visible_items(cv, "coord_lbl")) == pool_ids
+
+
+def test_coord_labels_keep_grid_and_focus_layering(mapped_canvas):
+    cv = mapped_canvas
+    app = _FakeApp(cv)
+    app._draw_grid()
+    focus = cv.create_rectangle(200, 100, 210, 110, tags="focus")
+    app._draw_coord_labels()
+
+    order = cv.find_all()
+    grid = cv.find_withtag("grid")
+    labels = cv.find_withtag("coord_lbl")
+    assert max(order.index(item) for item in grid) < min(
+        order.index(item) for item in labels
+    )
+    assert max(order.index(item) for item in labels) < order.index(focus)
+
+
+def test_coord_label_pool_growth_keeps_text_above_its_chip(mapped_canvas):
+    cv = mapped_canvas
+    app = _FakeApp(cv)
+    app.offset = [40, 40]
+    app._draw_grid()
+    focus = cv.create_rectangle(200, 100, 210, 110, tags="focus")
+    app._draw_coord_labels()
+    old_rectangles = len(app._coord_label_pools["rectangle"])
+    old_origin = app._coord_label_pools["text"][-1]
+
+    for zoom in (0.3, 1.0, 0.3):
+        app.zoom = zoom
+        app._draw_coord_labels()
+        used = app._coord_label_used["rectangle"]
+        order = cv.find_all()
+        rectangles = app._coord_label_pools["rectangle"][:used]
+        texts = app._coord_label_pools["text"][:used]
+        if zoom == 0.3:
+            assert used > old_rectangles
+            assert old_origin in texts
+        for chip, text in zip(rectangles, texts, strict=True):
+            assert order.index(chip) < order.index(text) < order.index(focus)
+            x0, y0, x1, y1 = cv.coords(chip)
+            x, y = cv.coords(text)
+            assert x0 <= x <= x1 and y0 <= y <= y1
+
+
+def test_legend_pool_skips_unchanged_rows_and_hides_surplus(mapped_canvas, monkeypatch):
+    cv = mapped_canvas
+    app = _FakeApp(cv)
+    app._extra_trees = [
+        {"tree_id": f"tree_{index}", "type": "shared"} for index in range(3)
+    ]
+    app._draw_canvas_legend()
+    first = set(cv.find_withtag("legend"))
+
+    calls = {
+        name: 0
+        for name in ("coords", "itemconfig", "create_text", "delete", "tag_raise")
+    }
+    for name in calls:
+        original = getattr(cv, name)
+        monkeypatch.setattr(
+            cv,
+            name,
+            lambda *args, _original=original, _name=name, **kwargs: (
+                calls.__setitem__(_name, calls[_name] + 1) or _original(*args, **kwargs)
+            ),
+        )
+    app._draw_canvas_legend()
+    assert calls == {name: 0 for name in calls}
+
+    app._extra_trees.append({"tree_id": "tree_3", "type": "joint"})
+    app._draw_canvas_legend()
+    assert first <= set(cv.find_withtag("legend"))
+    assert len(cv.find_withtag("legend")) == len(first) + 1
+    pool_ids = set(cv.find_withtag("legend"))
+
+    app._extra_trees.pop()
+    app._draw_canvas_legend()
+    assert set(cv.find_withtag("legend")) == pool_ids
+    assert sum(cv.itemcget(item, "state") != "hidden" for item in pool_ids) == 5
+
+    app._extra_trees.append({"tree_id": "tree_3", "type": "joint"})
+    app._draw_canvas_legend()
+    assert set(_visible_items(cv, "legend")) == pool_ids
+
+    app._extra_trees.clear()
+    app._draw_canvas_legend()
+    assert not _visible_items(cv, "legend")
+    assert set(cv.find_withtag("legend")) == pool_ids
+
+
+def test_legend_stays_above_focus_items_after_view_changes(mapped_canvas):
+    cv = mapped_canvas
+    app = _FakeApp(cv)
+    app._extra_trees = [{"tree_id": "shared", "type": "shared"}]
+    app._draw_canvas_legend()
+    focus = cv.create_rectangle(200, 100, 210, 110, tags="focus")
+
+    app.offset[0] += 1
+    app._draw_canvas_legend()  # unchanged rows, but new scene items came later
+
+    order = cv.find_all()
+    legend = cv.find_withtag("legend")
+    assert order.index(focus) < min(order.index(item) for item in legend)
+
+
+@pytest.mark.parametrize("marker_tree", ["main", "extra"])
+def test_same_view_frames_keep_legend_above_recreated_cfp(
+    mapped_canvas, monkeypatch, marker_tree
+):
+    cv = mapped_canvas
+    app = _FakeApp(cv)
+    app._extra_trees = [{"tree_id": "shared", "type": "shared"}]
+    cfp = {"cfp_x": 16, "cfp_y": cv.winfo_height() - 20}
+    if marker_tree == "main":
+        app._cfp_x, app._cfp_y = cfp.values()
+    else:
+        app._extra_trees[0].update(cfp)
+    monkeypatch.setattr(app, "_draw_minimap", lambda: None)
+
+    app._render_frame(RedrawChannel.VIEW)
+    legend = cv.find_withtag("legend")
+    old_markers = cv.find_withtag("cfp_marker")
+    legend_key = app._legend_key
+    stack_key = app._legend_stack_key
+    assert legend and old_markers
+
+    app._render_frame(RedrawChannel.VIEW)
+    markers = cv.find_withtag("cfp_marker")
+    assert markers and set(old_markers).isdisjoint(markers)
+    assert cv.find_withtag("legend") == legend
+    assert app._legend_key == legend_key
+    assert app._legend_stack_key == stack_key
+    order = cv.find_all()
+    assert max(order.index(item) for item in markers) < min(
+        order.index(item) for item in legend
+    )
+
+
+def test_canvas_pools_recover_after_external_delete_all(mapped_canvas):
+    cv = mapped_canvas
+    app = _FakeApp(cv)
+    app._extra_trees = [{"tree_id": "shared", "type": "shared"}]
+    app._draw_coord_labels()
+    app._draw_canvas_legend()
+
+    old_labels = set(cv.find_withtag("coord_lbl"))
+    old_legend = set(cv.find_withtag("legend"))
+    cv.delete("all")
+    app._draw_coord_labels()
+    app._draw_canvas_legend()
+
+    assert set(cv.find_withtag("coord_lbl"))
+    assert set(cv.find_withtag("legend"))
+    assert old_labels.isdisjoint(cv.find_withtag("coord_lbl"))
+    assert old_legend.isdisjoint(cv.find_withtag("legend"))
+
+
 def test_unmapped_canvas_still_gets_a_grid_over_the_whole_extent(tk_root):
     cv = tk.Canvas(tk_root, width=200, height=200)  # withdrawn root: winfo_* == 1
     app = _FakeApp(cv)
