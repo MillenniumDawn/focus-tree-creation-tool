@@ -8,7 +8,7 @@ the version by hand. See `AGENTS.md`.
 
 ## Unreleased
 
-- Keep cached Tk images alive until mod-scan completion returns to the Tk thread.
+- Release cached Tk images on the Tk thread after mod-scan completion or app close.
 - Isolate pytest's import-time user-home state from the developer's real HOME,
   preserving X11 authentication when needed.
 - Preserve unknown decision-category assignments across wizard imports and saves;

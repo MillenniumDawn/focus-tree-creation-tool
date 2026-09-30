@@ -791,18 +791,20 @@ class ModContext:
         self._img_errors.append(f"LOAD FAILED {gfx_name}: {last_err}")
         return None
 
-    def scan(self, root, progress_cb: Callable | None = None):
+    def scan(self, root, progress_cb: Callable | None = None, *, clear_images=True):
         """Scan *root* and return image refs evicted before scanning.
 
         The mod loader runs this method on a worker. Callers must keep the
         returned values alive until the completion callback runs on Tk.
+        The UI loader evicts on Tk first and passes ``clear_images=False`` so
+        shutdown cannot strand image references in a rejected worker result.
         """
         self.root = root
         self.mod_name = os.path.basename(root)
         self.sprites.clear()
-        # Scans run on a worker. Keep removed PhotoImages in the return value
-        # until the Tk-thread completion callback releases them.
-        evicted_images = self.sprite_imgs.clear()
+        # Direct callers retain removed images for Tk cleanup. UI scans skip
+        # eviction because the lifecycle already owns the old images.
+        evicted_images = self.sprite_imgs.clear() if clear_images else []
         self._img_errors.clear()
         self.decision_sprites.clear()
         self.focus_ids.clear()
