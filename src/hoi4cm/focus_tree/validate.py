@@ -1,16 +1,15 @@
-"""Pure validator for focus trees.
-
-Headless: no Tk, no MOD globals. The caller supplies sprites/loc sets.
-"""
+"""Pure focus-tree validator with caller-supplied optional lookup data."""
 
 from __future__ import annotations
 
+import os
 import re
 from collections import defaultdict
-from collections.abc import Mapping
+from collections.abc import Collection, Iterator, Mapping
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, NamedTuple
 
+from hoi4cm.core.paths import read_file
 from hoi4cm.models import Focus
 
 Severity = Literal["error", "warning", "info"]
@@ -49,8 +48,18 @@ def collect_loc_keys_from_text(text: str | None) -> set[str] | None:
     return _extract_loc_keys(text)
 
 
+def collect_loc_keys_from_file(path: str | None) -> set[str] | None:
+    """Read localisation keys, returning ``None`` when the file is unavailable."""
+    if not path or not os.path.isfile(path):
+        return None
+    try:
+        return collect_loc_keys_from_text(read_file(path))
+    except Exception:
+        return None
+
+
 def validate_document(
-    doc: Mapping[int, Focus],
+    doc: Mapping[int, Focus | _ValidationFocus],
     *,
     sprites: Mapping[str, str] | None = None,
     loc_keys: set[str] | None = None,
@@ -59,7 +68,7 @@ def validate_document(
 ) -> list[Issue]:
     """Validate a focus document.
 
-    doc: FocusDocument or plain mapping id->Focus.
+    doc: FocusDocument, ValidationSnapshot, or plain mapping id->Focus.
     sprites: MOD.sprites dict (gfx_name -> path) or None to skip GFX check.
     loc_keys: set of localisation keys present in the .yml or None to skip.
     max_issues: cap on the returned list; excess issues are dropped and
@@ -93,14 +102,14 @@ def validate_document(
             )
 
     # occupied positions
-    occupied: dict[tuple[int, int], set[int]] | None = getattr(
+    occupied: Mapping[tuple[int, int], Collection[int]] | None = getattr(
         doc, "occupied_positions", None
     )
     if occupied is None:
-        occupied = defaultdict(set)
+        positions: defaultdict[tuple[int, int], set[int]] = defaultdict(set)
         for fid, focus in doc.items():
-            occupied[(focus.x, focus.y)].add(fid)
-        occupied = dict(occupied)
+            positions[(focus.x, focus.y)].add(fid)
+        occupied = positions
 
     for (x, y), occupants in occupied.items():
         if len(occupants) <= 1:
@@ -323,11 +332,75 @@ def worst_severity_per_focus(issues: list[Issue]) -> dict[int, Severity]:
     return worst
 
 
+class _ValidationFocus(NamedTuple):
+    name: str
+    x: int
+    y: int
+    tree_idx: int
+    prereqs: tuple[tuple[int, ...], ...]
+    mutex: tuple[int, ...]
+    relative_position_id: str | None
+    effects: bool
+    gfx: str
+
+
+@dataclass(frozen=True)
+class ValidationSnapshot(Mapping[int, _ValidationFocus]):
+    """Detached focus mapping and occupied-position index for validation."""
+
+    focuses: Mapping[int, _ValidationFocus]
+    occupied_positions: Mapping[tuple[int, int], Collection[int]] | None = None
+
+    def __getitem__(self, focus_id: int) -> _ValidationFocus:
+        return self.focuses[focus_id]
+
+    def __iter__(self) -> Iterator[int]:
+        return iter(self.focuses)
+
+    def __len__(self) -> int:
+        return len(self.focuses)
+
+
+def _detached_focus(focus: Focus) -> _ValidationFocus:
+    prereqs: tuple[tuple[int, ...], ...] = ()
+    if focus.prereqs:
+        prereqs = tuple(tuple(group) for group in focus.prereqs)
+    mutex = tuple(focus.mutex) if focus.mutex else ()
+    return _ValidationFocus(
+        focus.name,
+        focus.x,
+        focus.y,
+        focus.tree_idx,
+        prereqs,
+        mutex,
+        focus.relative_position_id,
+        bool(focus.effects),
+        focus.gfx,
+    )
+
+
+def capture_validation_snapshot(document: Mapping[int, Focus]) -> ValidationSnapshot:
+    """Copy validator inputs and the document's position index."""
+    by_id = getattr(document, "by_id", document)
+    focused = {focus_id: _detached_focus(focus) for focus_id, focus in by_id.items()}
+    occupied = getattr(document, "occupied_positions", None)
+    if occupied is not None:
+        occupied = {
+            cell: frozenset(occupants)
+            for cell, occupants in occupied.items()
+            if len(occupants) > 1
+        }
+    return ValidationSnapshot(focused, occupied)
+
+
 __all__ = [
     "DEFAULT_GFX",
     "MAX_ISSUES",
     "Issue",
     "Severity",
+    "ValidationSnapshot",
+    "capture_validation_snapshot",
+    "collect_loc_keys_from_file",
     "collect_loc_keys_from_text",
     "validate_document",
     "worst_severity_per_focus",
