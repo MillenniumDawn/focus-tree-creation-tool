@@ -246,12 +246,11 @@ what's actually drawn until something else forces a rebuild.
 
 ## Threading model (phase 5)
 
-Two things run off the Tk main thread on their own bespoke plumbing: the mod
-scan (`ui/mod_loading.py`, a daemon `threading.Thread` running `MOD.scan`)
-and image loads that go through the same worker. Everything else that needs
-a background thread (batch tree loading, `.txt`/`.drawio` import parsing)
-goes through `ui/tasks.py`, which generalizes that same
-worker-thread-plus-`_safe_after` shape into `run_bg`.
+Mod scans, image loads, batch tree loading, and `.txt`/`.drawio` import
+parsing use `ui/tasks.py`'s shared `run_bg` worker pool. A mod load snapshots
+its scan settings into a separate `ModContext` on Tk, then scans that
+candidate off-thread; the `MOD` singleton is only changed by the Tk completion
+callback.
 
 ### The `run_bg` contract
 
@@ -314,21 +313,24 @@ the worker runs.
 
 Cancel is cooperative, not a kill. `make_cancel_handle` and
 `batch_load_trees` live in `focus_tree/batch_load.py` with no Tk objects.
-`cancellable=True` (Load All Trees) adds a Cancel button and routes
-window-close to that handle. Neither destroys the window nor drops the grab;
-they set `cancelled` so the worker can stop between files. The in-flight
-file finishes, `batch_load_trees` returns the results it already built, and
-`on_done` still runs on the Tk thread and applies that partial load. `run_bg`
-does not take a cancel token: `work` stays a zero-arg callable that closes over
-the event. `Future.cancel()`
-only drops queued jobs, and skipping `on_done` would throw away the partial
-result.
+`cancellable=True` (Load All Trees and mod loading) adds a Cancel button and
+routes window-close to that handle. Neither destroys the window nor drops the
+grab; they set `cancelled` so the worker can stop between files or scan steps.
+For tree batches, `batch_load_trees` returns the results it already built and
+`on_done` applies that partial load. Mod scans instead poll between scan steps
+and within each GFX inventory directory; cancellation returns no candidate,
+so the currently loaded mod remains installed. `run_bg` does not take a cancel
+token: `work` stays a zero-arg callable that closes over the event.
+`Future.cancel()` only drops queued jobs, and skipping `on_done` would throw
+away a completed result.
 
-The mod loader evicts cached PhotoImages on Tk before submitting its scan.
-The evicted list is a lifecycle resource, cleared on normal completion, scan
-failure, or app close before Tcl teardown. UI scans use `clear_images=False`;
-workers and their results never retain these images, so rejecting completion
-after `begin_close()` cannot run image finalizers on a worker.
+The mod-load candidate has a fresh empty image LRU and graphics catalog. Its
+worker never reads, receives, or mutates the live `MOD.sprite_imgs` cache, so
+cancelled, failed, or superseded scans preserve the loaded mod and its warm
+PhotoImages. A current successful completion adopts candidate scan data on
+Tk, evicts old cached images there, and retains those references until the
+completion callback finishes. A lifecycle resource clears the live image cache
+on Tk during application shutdown before Tcl teardown.
 
 ### Executor lifecycle
 

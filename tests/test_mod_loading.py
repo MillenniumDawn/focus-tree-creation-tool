@@ -24,42 +24,6 @@ def isolate_mod():
     MOD.__dict__.update(snapshot)
 
 
-class _FakeWidget:
-    def __init__(self, *args: object, **kwargs: object) -> None:
-        self.args = args
-        self.kwargs = kwargs
-
-    def title(self, value: str) -> None:
-        pass
-
-    def configure(self, **kwargs: object) -> None:
-        pass
-
-    def geometry(self, value: str) -> None:
-        pass
-
-    def resizable(self, width: bool, height: bool) -> None:
-        pass
-
-    def grab_set(self) -> None:
-        pass
-
-    def protocol(self, name: str, callback: Callable[[], None]) -> None:
-        pass
-
-    def pack(self, **kwargs: object) -> None:
-        pass
-
-    def place(self, **kwargs: object) -> None:
-        pass
-
-    def place_configure(self, **kwargs: object) -> None:
-        pass
-
-    def update_idletasks(self) -> None:
-        pass
-
-
 class _FakeApp(ModLoadingMixin):
     _lifecycle: Any
     _mod_lbl: Any
@@ -92,13 +56,35 @@ class _AcceptingLifecycle:
         return lambda: None
 
 
-def _patch_progress_window(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(mod_loading.tk, "Toplevel", _FakeWidget)
-    monkeypatch.setattr(mod_loading.tk, "Label", _FakeWidget)
-    monkeypatch.setattr(mod_loading.tk, "Frame", _FakeWidget)
+class _FakeProgress:
+    def __init__(self) -> None:
+        self.cancelled = threading.Event()
+        self.texts: list[str] = []
+        self.fractions: list[float] = []
+        self.closed = False
+
+    def set_text(self, value: str) -> None:
+        self.texts.append(value)
+
+    def set_fraction(self, value: float) -> None:
+        self.fractions.append(value)
+
+    def close(self) -> None:
+        self.closed = True
+
+
+def _patch_progress_window(monkeypatch: pytest.MonkeyPatch) -> _FakeProgress:
+    progress = _FakeProgress()
+
+    def make_modal(*_args, **kwargs):
+        assert kwargs["cancellable"] is True
+        return progress
+
+    monkeypatch.setattr(mod_loading, "progress_modal", make_modal)
     monkeypatch.setattr(
         mod_loading, "make_progress", lambda *args, **kwargs: lambda: None
     )
+    return progress
 
 
 def test_load_mod_moves_duplicate_to_front_and_caps_recent_mods(
@@ -108,7 +94,6 @@ def test_load_mod_moves_duplicate_to_front_and_caps_recent_mods(
     (tmp_path / "selected-mod").mkdir()
     old_recent = [root, *(f"/mods/mod-{index}" for index in range(1, 9))]
     MOD._recent_mods = old_recent  # type: ignore[attr-defined]
-    monkeypatch.setattr(MOD, "save_config", lambda: True)
     monkeypatch.setattr(mod_loading, "_default_hoi4_mod_dir", lambda: str(tmp_path))
 
     dialog_calls: list[dict[str, object]] = []
@@ -118,28 +103,62 @@ def test_load_mod_moves_duplicate_to_front_and_caps_recent_mods(
         return root
 
     monkeypatch.setattr(mod_loading.filedialog, "askdirectory", askdirectory)
-    _patch_progress_window(monkeypatch)
-    background_calls: list[tuple[object, object, str]] = []
+    progress = _patch_progress_window(monkeypatch)
+    background_calls: list[tuple[Any, Any, Any, dict[str, object]]] = []
+    candidate = object()
+    saved: list[bool] = []
+    loaded: list[tuple[object, str]] = []
+    scan_arguments: dict[str, object] = {}
 
-    def run_bg(widget, worker, on_done, on_error, *, scope: str) -> None:
-        background_calls.append((worker, on_done, scope))
+    def fake_scan(_mod, *_args, **kwargs):
+        scan_arguments.update(kwargs)
+        return candidate
+
+    monkeypatch.setattr(type(MOD), "scan", fake_scan)
+    monkeypatch.setattr(type(MOD), "adopt_scan", lambda _mod, _candidate: [])
+
+    def save_config(_mod) -> bool:
+        saved.append(True)
+        return True
+
+    monkeypatch.setattr(type(MOD), "save_config", save_config)
+
+    def run_bg(widget, worker, on_done, on_error, **kwargs) -> None:
+        background_calls.append((worker, on_done, on_error, kwargs))
 
     monkeypatch.setattr(mod_loading, "run_bg", run_bg)
     app = _FakeApp()
     app._lifecycle = _AcceptingLifecycle()
+    monkeypatch.setattr(
+        app, "_on_mod_loaded", lambda pw, root: loaded.append((pw, root))
+    )
+    previous_recent = MOD._recent_mods.copy()  # type: ignore[attr-defined]
 
     app._load_mod()
 
+    assert MOD._recent_mods == previous_recent  # type: ignore[attr-defined]
+    assert saved == []
+    assert dialog_calls and dialog_calls[0]["initialdir"] == str(tmp_path)
+    assert app._lifecycle.begun == ["mod"]
+    assert len(background_calls) == 1
+    worker, on_done, _on_error, options = background_calls[0]
+    assert options["scope"] == "mod"
+    assert callable(options["on_finally"])
+    assert progress.cancelled is not None
+    assert worker() is candidate
+    assert scan_arguments["cancelled"] is progress.cancelled
+    assert scan_arguments["transactional"] is True
+    on_done(candidate)
     assert MOD._recent_mods == [  # type: ignore[attr-defined]
         root,
         *(f"/mods/mod-{index}" for index in range(1, 8)),
     ]
     assert len(MOD._recent_mods) == 8  # type: ignore[attr-defined]
     assert len(set(MOD._recent_mods)) == 8  # type: ignore[attr-defined]
-    assert dialog_calls and dialog_calls[0]["initialdir"] == str(tmp_path)
-    assert app._lifecycle.begun == ["mod"]
-    assert len(background_calls) == 1
-    assert background_calls[0][2] == "mod"
+    assert saved == [True]
+    assert loaded == [(None, root)]
+    options["on_finally"]()
+    assert progress.closed
 
 
 def test_load_mod_is_rejected_when_lifecycle_is_not_accepting(
@@ -204,15 +223,15 @@ def test_on_mod_loaded_invalidates_canvas_and_wizard_images_on_ui_thread(
         mod_loading.messagebox, "showinfo", lambda *args, **kwargs: None
     )
     monkeypatch.setattr(mod_loading.os.path, "exists", lambda path: True)
-    monkeypatch.setattr(MOD, "summary", lambda: "loaded summary")
+    monkeypatch.setattr(type(MOD), "summary", lambda _mod: "loaded summary")
     MOD.is_md = False
     MOD.sprites = {"GFX_sample": "/mod/gfx/sample.dds"}
     MOD._img_errors = []
     image_loads: list[tuple[str, int]] = []
     monkeypatch.setattr(
-        MOD,
+        type(MOD),
         "get_image",
-        lambda name: image_loads.append((name, threading.get_ident())),
+        lambda _mod, name: image_loads.append((name, threading.get_ident())),
     )
 
     app = _FakeApp()

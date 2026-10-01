@@ -6,6 +6,7 @@ import json
 import os
 import re
 import stat as stat_module
+import threading
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -21,6 +22,20 @@ _LEGACY_SIDECAR_NAME = ".hoi4cm_gfx_cache.json"
 _SPRITE_BLOCK_RE = re.compile(r"spriteType\s*=\s*\{")
 _SPRITE_NAME_RE = re.compile(r'\bname\s*=\s*"([^"]+)"')
 _SPRITE_TEXTURE_RE = re.compile(r'\btexturefile\s*=\s*"([^"]+)"')
+
+
+class ScanCancelled(Exception):
+    """Raised when the graphics inventory walk observes its cancel event.
+
+    Propagates out of :meth:`GraphicsCatalog.refresh` before any committed
+    catalog state changes, so the caller can roll back and retry later.
+    """
+
+
+def _check_cancel(cancelled: threading.Event | None) -> None:
+    """Abort the walk when *cancelled* (the load's cancel event) is set."""
+    if cancelled is not None and cancelled.is_set():
+        raise ScanCancelled
 
 
 @dataclass(frozen=True)
@@ -294,7 +309,16 @@ class GraphicsCatalog:
         config: GraphicsScanConfig,
         *,
         read_text: Callable[[str], str | None],
+        cancelled: threading.Event | None = None,
     ) -> GraphicsMaps:
+        """Rebuild the catalog from *root*'s interface/gfx/extra trees.
+
+        Raises :class:`ScanCancelled` when *cancelled* is set during the
+        inventory walk; committed catalog state is left untouched in that
+        case, so a cancelled refresh cannot poison a previous mod's maps.
+        """
+        previous_metrics = self.last_metrics
+        previous_cache_dirty = self._cache_dirty
         self.last_metrics = GraphicsMetrics()
         self._flush_cache()
         root = os.path.abspath(root)
@@ -308,12 +332,22 @@ class GraphicsCatalog:
             config_fingerprint=config_fingerprint,
         )
 
-        snapshot = self._load_snapshot(cached_data, source_roots)
-        if snapshot is None:
-            snapshot = self._scan_snapshot(root, config, source_roots, read_text)
-            self._cache_dirty = True
-        else:
-            self.last_metrics.cache_status = "hit"
+        try:
+            snapshot = self._load_snapshot(
+                cached_data, source_roots, cancelled=cancelled
+            )
+            if snapshot is None:
+                snapshot = self._scan_snapshot(
+                    root, config, source_roots, read_text, cancelled=cancelled
+                )
+                self._cache_dirty = True
+            else:
+                self.last_metrics.cache_status = "hit"
+            _check_cancel(cancelled)
+        except ScanCancelled:
+            self.last_metrics = previous_metrics
+            self._cache_dirty = previous_cache_dirty
+            raise
 
         self.generation += 1
         self._install_snapshot(snapshot)
@@ -905,6 +939,8 @@ class GraphicsCatalog:
         self,
         data: Mapping[str, object] | None,
         source_roots: Mapping[str, str],
+        *,
+        cancelled: threading.Event | None = None,
     ) -> GraphicsSnapshot | None:
         if data is None:
             return None
@@ -912,16 +948,23 @@ class GraphicsCatalog:
             snapshot = GraphicsSnapshot.from_data(data)
         except KeyError, TypeError, ValueError:
             return None
-        return snapshot if self._snapshot_is_current(snapshot, source_roots) else None
+        return (
+            snapshot
+            if self._snapshot_is_current(snapshot, source_roots, cancelled=cancelled)
+            else None
+        )
 
     def _snapshot_is_current(
         self,
         snapshot: GraphicsSnapshot,
         source_roots: Mapping[str, str],
+        *,
+        cancelled: threading.Event | None = None,
     ) -> bool:
         if snapshot.unreadable_gfx:
             return False
         for record in snapshot.directories:
+            _check_cancel(cancelled)
             self.last_metrics.directory_stats += 1
             try:
                 stat = os.stat(record.path.resolve(source_roots))
@@ -935,6 +978,7 @@ class GraphicsCatalog:
                 return False
 
         for gfx_record in snapshot.gfx_files:
+            _check_cancel(cancelled)
             self.last_metrics.gfx_file_stats += 1
             try:
                 stat = os.stat(gfx_record.path.resolve(source_roots))
@@ -948,6 +992,7 @@ class GraphicsCatalog:
         # name would otherwise leave a stale FileStamp — and that stamp is the
         # thumbnail cache key. Restatting is cheaper than a full rescan.
         for image_record in snapshot.images:
+            _check_cancel(cancelled)
             self.last_metrics.image_stats += 1
             try:
                 stat = os.stat(image_record.path.resolve(source_roots))
@@ -963,6 +1008,8 @@ class GraphicsCatalog:
         config: GraphicsScanConfig,
         source_roots: Mapping[str, str],
         read_text: Callable[[str], str | None],
+        *,
+        cancelled: threading.Event | None = None,
     ) -> GraphicsSnapshot:
         directories: list[DirectoryRecord] = []
         images: list[ImageRecord] = []
@@ -982,6 +1029,7 @@ class GraphicsCatalog:
             images=images,
             gfx_files=gfx_files,
             unreadable_gfx=unreadable_gfx,
+            cancelled=cancelled,
         )
         scanned_roots.append(interface_root)
         self._scan_tree(
@@ -994,6 +1042,7 @@ class GraphicsCatalog:
             images=images,
             gfx_files=gfx_files,
             unreadable_gfx=unreadable_gfx,
+            cancelled=cancelled,
         )
         scanned_roots.append(gfx_root)
 
@@ -1024,6 +1073,7 @@ class GraphicsCatalog:
                 images=images,
                 gfx_files=gfx_files,
                 unreadable_gfx=unreadable_gfx,
+                cancelled=cancelled,
             )
             scanned_roots.append(scan_root)
 
@@ -1058,8 +1108,10 @@ class GraphicsCatalog:
         images: list[ImageRecord],
         gfx_files: list[GfxFileRecord],
         unreadable_gfx: list[PathReference],
+        cancelled: threading.Event | None = None,
     ) -> None:
         def scan(directory: str, *, top_level: bool) -> None:
+            _check_cancel(cancelled)
             path_ref = _reference_for(source_id, source_root, directory)
             self.last_metrics.directory_stats += 1
             try:
@@ -1080,6 +1132,7 @@ class GraphicsCatalog:
 
             child_directories = []
             for entry in entries:
+                _check_cancel(cancelled)
                 try:
                     is_directory = entry.is_dir(follow_symlinks=False)
                 except OSError:
@@ -1129,9 +1182,12 @@ class GraphicsCatalog:
                         declarations,
                     )
                 )
+            _check_cancel(cancelled)
             for child in child_directories:
+                _check_cancel(cancelled)
                 scan(child, top_level=False)
 
+        _check_cancel(cancelled)
         scan(scan_root, top_level=True)
 
     def _derive_references(self, root: str, config: GraphicsScanConfig) -> None:
