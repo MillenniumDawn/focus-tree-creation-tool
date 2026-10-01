@@ -108,6 +108,102 @@ def decision_save_needs_confirmation(target_path, import_source, target_exists):
     return target != source
 
 
+# Undo depth for the decision wizard: oldest snapshots are dropped past this.
+DECISION_UNDO_LIMIT = 30
+
+
+def snapshot_decision_state(cats, decs):
+    """Detached deep copy of the wizard's category and decision lists.
+
+    Undo snapshots must not alias the live lists: edits mutate the records
+    in place, so each snapshot stores its own copies.
+    """
+    return (copy.deepcopy(cats), copy.deepcopy(decs))
+
+
+def push_decision_undo(stack, cats, decs, limit=DECISION_UNDO_LIMIT):
+    """Append a snapshot to ``stack`` and keep at most ``limit`` entries."""
+    stack.append(snapshot_decision_state(cats, decs))
+    if len(stack) > limit:
+        stack.pop(0)
+
+
+def _valid_decision_state(cats, decs):
+    return (
+        isinstance(cats, list)
+        and isinstance(decs, list)
+        and all(
+            isinstance(cat, dict)
+            and isinstance(cat.get("uid"), str)
+            and bool(cat["uid"])
+            and isinstance(cat.get("cat_id"), str)
+            for cat in cats
+        )
+        and all(
+            isinstance(dec, dict)
+            and isinstance(dec.get("uid"), str)
+            and bool(dec["uid"])
+            and isinstance(dec.get("cat_uid"), str)
+            for dec in decs
+        )
+    )
+
+
+def restore_decision_state(cats, decs, snapshot):
+    """Atomically replace the live lists from a validated undo snapshot."""
+    try:
+        cats_snap, decs_snap = snapshot
+    except (TypeError, ValueError) as exc:
+        raise ValueError("invalid decision snapshot") from exc
+    if not _valid_decision_state(cats_snap, decs_snap):
+        raise ValueError("invalid decision snapshot")
+    restored_cats, restored_decs = copy.deepcopy((cats_snap, decs_snap))
+    cats[:] = restored_cats
+    decs[:] = restored_decs
+
+
+def serialize_decision_state(cats, decs):
+    """Return a detached ``{'cats': …, 'decs': …}`` autosave payload."""
+    return copy.deepcopy({"cats": cats, "decs": decs})
+
+
+def restore_decision_autosave(data):
+    """Validate and deduplicate a decoded autosave without touching live state.
+
+    Empty, malformed, or orphan-only payloads return ``None``. Unknown
+    category and decision fields are retained in the detached records.
+    """
+    if not isinstance(data, dict):
+        return None
+    cats, decs = data.get("cats"), data.get("decs")
+    if not _valid_decision_state(cats, decs) or not (cats or decs):
+        return None
+    cats, decs = dedup_decision_state(cats, decs)
+    if not (cats or decs):
+        return None
+    return copy.deepcopy((cats, decs))
+
+
+def dedup_decision_state(cats, decs):
+    """Collapse duplicate-uid categories and drop orphaned decisions.
+
+    Returns ``(unique_cats, kept_decs)``; kept records are the input objects
+    (not copies) and the inputs are left untouched. Only the same ``uid``
+    appearing more than once is treated as a duplicate — categories that
+    merely share a logical ``cat_id`` are never merged. A decision whose
+    ``cat_uid`` matches no surviving category is an orphan and is dropped.
+    """
+    seen_uids = set()
+    unique_cats = []
+    for c in cats:
+        if c["uid"] not in seen_uids:
+            seen_uids.add(c["uid"])
+            unique_cats.append(c)
+    valid_uids = {c["uid"] for c in unique_cats}
+    kept_decs = [d for d in decs if d["cat_uid"] in valid_uids]
+    return (unique_cats, kept_decs)
+
+
 def open_decision_wizard(app):
     """HOI4 Decision / Decision Category maker — matches mockup layout."""
     win = tk.Toplevel(app)
@@ -117,15 +213,14 @@ def open_decision_wizard(app):
     win.resizable(True, True)
 
     # ── Auto-save / undo infrastructure ─────────────────────────────────────
+    # Snapshot/serialize/restore/dedup live in the module-level pure helpers
+    # above; this closure only wires them to the live lists and repaints.
     _autosave_path = autosave_path("decision.json")
-    _undo_stack = []  # list of (dm_cats snapshot, dm_decs snapshot)
-    _undo_max = 30
+    _undo_stack = []  # detached (cats, decs) snapshots, bounded below
 
     def _snapshot():
         """Push current state onto undo stack."""
-        _undo_stack.append((copy.deepcopy(dm_cats), copy.deepcopy(dm_decs)))
-        if len(_undo_stack) > _undo_max:
-            _undo_stack.pop(0)
+        push_decision_undo(_undo_stack, dm_cats, dm_decs)
 
     def _do_undo():
         if not _undo_stack:
@@ -133,11 +228,7 @@ def open_decision_wizard(app):
                 text=tr("common.status.nothing_to_undo", "  !  Nothing to undo")
             )
             return
-        cats_snap, decs_snap = _undo_stack.pop()
-        dm_cats.clear()
-        dm_cats.extend(cats_snap)
-        dm_decs.clear()
-        dm_decs.extend(decs_snap)
+        restore_decision_state(dm_cats, dm_decs, _undo_stack.pop())
         _rebuild_tree()
         _rebuild_editor()
         _dm_status.config(text=tr("common.status.undo_applied", "  undo applied"))
@@ -145,28 +236,15 @@ def open_decision_wizard(app):
     def _autosave():
         """Save current state to JSON sidecar."""
         try:
-            data = {"cats": dm_cats, "decs": dm_decs}
             with open(_autosave_path, "w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
-        except (OSError, ValueError) as exc:
+                json.dump(
+                    serialize_decision_state(dm_cats, dm_decs),
+                    f,
+                    ensure_ascii=False,
+                    indent=2,
+                )
+        except (OSError, TypeError, ValueError) as exc:
             get_logger("decision").debug("autosave failed: %s", exc)
-
-    def _load_autosave():
-        """Restore from autosave JSON if it exists."""
-        if not os.path.isfile(_autosave_path):
-            return False
-        try:
-            with open(_autosave_path, encoding="utf-8") as f:
-                data = json.load(f)
-            if data.get("cats") and data.get("decs"):
-                dm_cats.clear()
-                dm_cats.extend(data["cats"])
-                dm_decs.clear()
-                dm_decs.extend(data["decs"])
-                return True
-        except (OSError, ValueError) as exc:
-            get_logger("decision").debug("autosave load failed: %s", exc)
-        return False
 
     def _on_dec_win_close():
         # _collect and other helpers may not yet be defined in the closure if the
@@ -340,19 +418,10 @@ def open_decision_wizard(app):
         return str(v).strip()
 
     def _dedup_cats():
-        """Remove truly duplicate categories (same non-empty cat_id AND same uid duplicated),
-        and remove any orphaned decisions whose cat_uid no longer exists."""
-        # Only deduplicate if the SAME uid appears more than once
-        # (don't merge different cats that happen to share a cat_id)
-        seen_uids = set()
-        unique_cats = []
-        for c in dm_cats:
-            if c["uid"] not in seen_uids:
-                seen_uids.add(c["uid"])
-                unique_cats.append(c)
-        valid_uids = {c["uid"] for c in unique_cats}
+        """Drop duplicate-uid categories and orphaned decisions in place."""
+        unique_cats, kept_decs = dedup_decision_state(dm_cats, dm_decs)
         dm_cats[:] = unique_cats
-        dm_decs[:] = [d for d in dm_decs if d["cat_uid"] in valid_uids]
+        dm_decs[:] = kept_decs
 
     # ── TITLE BAR ────────────────────────────────────────────────────────────
     titlebar = tk.Frame(win, bg="#080b10", height=42)
@@ -5127,34 +5196,31 @@ def open_decision_wizard(app):
     # ── init ─────────────────────────────────────────────────────────────────
     # ── Autosave restore prompt ──────────────────────────────────────────────
     def _try_restore():
-        if os.path.isfile(_autosave_path):
-            try:
-                import json as _j
-
-                with open(_autosave_path, encoding="utf-8") as f:
-                    data = _j.load(f)
-                n_cats = len(data.get("cats", []))
-                n_decs = len(data.get("decs", []))
-                if n_cats > 0 or n_decs > 0:
-                    if messagebox.askyesno(
-                        "Restore autosave",
-                        f"An autosave was found with {n_cats} categories and {n_decs} decisions.\nRestore it?",
-                        parent=win,
-                    ):
-                        dm_cats.clear()
-                        dm_cats.extend(data["cats"])
-                        dm_decs.clear()
-                        dm_decs.extend(data["decs"])
-                        _dedup_cats()
-                        # Select first cat and rebuild everything now that data is loaded
-                        if dm_cats:
-                            sel["uid"] = dm_cats[0]["uid"]
-                            sel["type"] = "cat"
-                        _rebuild_tree()
-                        _rebuild_editor()
-                        _rebuild_right()
-            except (OSError, ValueError) as exc:
-                get_logger("decision").debug("autosave restore failed: %s", exc)
+        if not os.path.isfile(_autosave_path):
+            return
+        try:
+            with open(_autosave_path, encoding="utf-8") as f:
+                data = json.load(f)
+        except (OSError, ValueError) as exc:
+            get_logger("decision").debug("autosave restore failed: %s", exc)
+            return
+        saved = restore_decision_autosave(data)
+        if saved is None:
+            return
+        cats, decs = saved
+        if messagebox.askyesno(
+            "Restore autosave",
+            f"An autosave was found with {len(cats)} categories and {len(decs)} decisions.\nRestore it?",
+            parent=win,
+        ):
+            restore_decision_state(dm_cats, dm_decs, saved)
+            # Select first cat and rebuild everything now that data is loaded
+            if dm_cats:
+                sel["uid"] = dm_cats[0]["uid"]
+                sel["type"] = "cat"
+            _rebuild_tree()
+            _rebuild_editor()
+            _rebuild_right()
 
     if not dm_cats:
         win.after(50, _try_restore)

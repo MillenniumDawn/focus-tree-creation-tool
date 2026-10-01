@@ -79,6 +79,15 @@ formatting, ambiguous single-letter names, loop-variable and mutable-default
 lint, late-binding closures, and non-cryptographic random use) so ruff
 still runs clean on the file without a style pass first.
 
+## Wizard complexity ratchet
+
+`tests/test_wizard_complexity.py` runs Ruff C901 over only `src/hoi4cm/wizards/`.
+The fixed function-level budgets record the 45 existing findings at the
+10-point threshold from `origin/main`; lowering a score is allowed, but growth
+past a recorded score or a newly complex function fails. Do not regenerate the
+budget to make a failure green. Ruff's normal project rule set remains
+unchanged outside this targeted wizard test.
+
 ## The generators module
 
 `_generators.py` holds the script/loc renderers that used to live inside

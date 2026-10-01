@@ -6,6 +6,7 @@
 
 """Event builder wizard."""
 
+import copy
 import json
 import os
 import re
@@ -15,6 +16,7 @@ from tkinter import filedialog, messagebox
 from hoi4cm.core import (
     append_scripted_loc,
     autosave_path,
+    get_logger,
     read_file_with_encoding,
     sanitize_component,
     tr,
@@ -67,6 +69,56 @@ def collect_event_state(events):
     if events is None:
         return []
     return list(events)
+
+
+# Fields the event wizard persists in its autosave sidecar, in saved order.
+EVENT_AUTOSAVE_FIELDS = (
+    "eid",
+    "etype",
+    "title_text",
+    "desc_text",
+    "picture",
+    "major",
+    "fire_once",
+    "triggered",
+    "hidden",
+    "mtth_days",
+    "mtth_months",
+    "trigger_code",
+    "immediate",
+    "options",
+)
+
+
+def event_autosave_records(events):
+    """Serialize known event fields while retaining nested values by copy."""
+    return [
+        {field: copy.deepcopy(getattr(ev, field)) for field in EVENT_AUTOSAVE_FIELDS}
+        for ev in events
+    ]
+
+
+def restore_event_autosave(data, make_record):
+    """Restore detached event records, or return ``None`` for empty/bad data.
+
+    All saved fields, including keys from older builds unknown to this one,
+    are retained. Records are built only after the complete payload validates.
+    """
+    if not isinstance(data, list) or not data:
+        return None
+    if not all(isinstance(record, dict) for record in data):
+        return None
+    records = []
+    try:
+        saved_records = copy.deepcopy(data)
+        for saved in saved_records:
+            event = make_record()
+            for key, value in saved.items():
+                setattr(event, key, value)
+            records.append(event)
+    except AttributeError, TypeError:
+        return None
+    return records
 
 
 def open_event_wizard(app):
@@ -230,35 +282,18 @@ def open_event_wizard(app):
     # ── Autosave ─────────────────────────────────────────────────────
     _ev_autosave_path = autosave_path("event.json")
 
+    def _ev_make_record():
+        ev = _Ev.__new__(_Ev)
+        ev.uid = str(id(ev))
+        return ev
+
     def _ev_save_state():
         """Persist current event list to autosave file."""
         try:
-            data = []
-            for ev in events:
-                data.append(
-                    {
-                        "eid": ev.eid,
-                        "etype": ev.etype,
-                        "title_text": ev.title_text,
-                        "desc_text": ev.desc_text,
-                        "picture": ev.picture,
-                        "major": ev.major,
-                        "fire_once": ev.fire_once,
-                        "triggered": ev.triggered,
-                        "hidden": ev.hidden,
-                        "mtth_days": ev.mtth_days,
-                        "mtth_months": ev.mtth_months,
-                        "trigger_code": ev.trigger_code,
-                        "immediate": ev.immediate,
-                        "options": ev.options,
-                    }
-                )
             with open(_ev_autosave_path, "w", encoding="utf-8") as fp:
-                json.dump(data, fp, indent=2)
-        except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
-            from hoi4cm.core.logger import get_logger as _get_logger
-
-            _get_logger("event").debug("autosave failed: %s", exc, exc_info=True)
+                json.dump(event_autosave_records(events), fp, indent=2)
+        except (OSError, ValueError, TypeError) as exc:
+            get_logger("event").debug("autosave failed: %s", exc, exc_info=True)
 
     def _ev_load_state():
         """Restore event list from autosave file if present."""
@@ -267,24 +302,13 @@ def open_event_wizard(app):
         try:
             with open(_ev_autosave_path, encoding="utf-8") as fp:
                 data = json.load(fp)
-            if not data:
-                return False
-            events.clear()
-            for d in data:
-                ev = _Ev.__new__(_Ev)
-                ev.uid = str(id(ev))
-                for k, v in d.items():
-                    setattr(ev, k, v)
-                events.append(ev)
-            return True
-        except (
-            OSError,
-            json.JSONDecodeError,
-            UnicodeDecodeError,
-            ValueError,
-            TypeError,
-        ):
+        except OSError, json.JSONDecodeError, UnicodeDecodeError, ValueError:
             return False
+        records = restore_event_autosave(data, _ev_make_record)
+        if records is None:
+            return False
+        events[:] = records
+        return True
 
     def _on_event_win_close():
         _ev_save_state()
