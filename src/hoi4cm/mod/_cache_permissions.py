@@ -2,18 +2,16 @@
 
 import ctypes
 import os
+import sys
 from ctypes import wintypes
 
 
 def restrict_directory(path: str) -> None:
     """Make an existing directory private, or raise before opening its cache."""
-    if os.name == "nt":
-        _restrict_windows_directory(path)
-    else:
+    # A sys.platform branch lets type checkers skip the Windows-only ctypes API.
+    if sys.platform != "win32":
         os.chmod(path, 0o700)
-
-
-def _restrict_windows_directory(path: str) -> None:
+        return
     # chmod only changes the read-only attribute on Windows. Replace the DACL,
     # protecting it from parent inheritance, and inherit our ACE to children.
     advapi = ctypes.WinDLL("advapi32", use_last_error=True)
