@@ -82,11 +82,13 @@ still runs clean on the file without a style pass first.
 ## Wizard complexity ratchet
 
 `tests/test_wizard_complexity.py` runs Ruff C901 over only `src/hoi4cm/wizards/`.
-The fixed function-level budgets record the 45 existing findings at the
-10-point threshold from `origin/main`; lowering a score is allowed, but growth
+The fixed function-level budgets record the 45 findings at the 10-point
+threshold when the ratchet was added; lowering a score is allowed, but growth
 past a recorded score or a newly complex function fails. Do not regenerate the
-budget to make a failure green. Ruff's normal project rule set remains
-unchanged outside this targeted wizard test.
+budget to make a failure green. When an extraction lowers a score, lower its
+budget in the same change so the gain cannot regrow. An empty result fails too,
+so suppressing C901 or moving the wizard path cannot bypass the check. Ruff's
+normal project rule set remains unchanged outside this targeted wizard test.
 
 ## The generators module
 

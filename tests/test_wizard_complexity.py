@@ -12,9 +12,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
-# Function-level complexity scores on origin/main. This fixed list is a cap,
-# not a generated snapshot: lowering scores is allowed, growth and new C901
-# findings fail. Keep C901 selected only for the wizard tree in this test.
+# Function-level complexity scores when the ratchet was added. This fixed list
+# is a cap, not a generated snapshot: lowering scores is allowed, growth and new
+# C901 findings fail. Keep C901 selected only for the wizard tree in this test.
 WIZARD_COMPLEXITY_BUDGETS = {
     "src/hoi4cm/wizards/_generators.py:render_event_txt": 14,
     "src/hoi4cm/wizards/_generators.py:generate_decision_block": 53,
@@ -24,7 +24,7 @@ WIZARD_COMPLEXITY_BUDGETS = {
     "src/hoi4cm/wizards/_shared.py:open_script_picker": 34,
     "src/hoi4cm/wizards/additional_income.py:open_additional_income_wizard": 26,
     "src/hoi4cm/wizards/additional_income.py:_apply": 15,
-    "src/hoi4cm/wizards/decision.py:open_decision_wizard": 569,
+    "src/hoi4cm/wizards/decision.py:open_decision_wizard": 562,
     "src/hoi4cm/wizards/decision.py:_rebuild_tree": 18,
     "src/hoi4cm/wizards/decision.py:_collect": 24,
     "src/hoi4cm/wizards/decision.py:_build_dec_editor": 47,
@@ -47,7 +47,7 @@ WIZARD_COMPLEXITY_BUDGETS = {
     "src/hoi4cm/wizards/dyn_mod.py:_save_file": 48,
     "src/hoi4cm/wizards/dyn_mod.py:_browse_mod_dynmods": 29,
     "src/hoi4cm/wizards/dyn_mod.py:_load_selected": 18,
-    "src/hoi4cm/wizards/event.py:open_event_wizard": 271,
+    "src/hoi4cm/wizards/event.py:open_event_wizard": 269,
     "src/hoi4cm/wizards/event.py:_render_preview": 27,
     "src/hoi4cm/wizards/event.py:_decode_preview_image": 12,
     "src/hoi4cm/wizards/event.py:_save_to_mod": 35,
@@ -98,6 +98,7 @@ def test_wizard_c901_has_fixed_function_budgets():
         assert key not in observed, f"duplicate C901 finding for {key}"
         observed[key] = int(match.group(2))
 
+    assert observed, "Ruff reported no C901 findings for the wizard tree"
     new_findings = sorted(observed.keys() - WIZARD_COMPLEXITY_BUDGETS.keys())
     growth = {
         key: (WIZARD_COMPLEXITY_BUDGETS[key], score)

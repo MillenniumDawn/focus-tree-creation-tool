@@ -283,15 +283,14 @@ def open_event_wizard(app):
     _ev_autosave_path = autosave_path("event.json")
 
     def _ev_make_record():
-        ev = _Ev.__new__(_Ev)
-        ev.uid = str(id(ev))
-        return ev
+        return _Ev()
 
     def _ev_save_state():
         """Persist current event list to autosave file."""
         try:
+            text = json.dumps(event_autosave_records(events), indent=2)
             with open(_ev_autosave_path, "w", encoding="utf-8") as fp:
-                json.dump(event_autosave_records(events), fp, indent=2)
+                fp.write(text)
         except (OSError, ValueError, TypeError) as exc:
             get_logger("event").debug("autosave failed: %s", exc, exc_info=True)
 

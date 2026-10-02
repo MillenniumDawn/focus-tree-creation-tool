@@ -236,13 +236,11 @@ def open_decision_wizard(app):
     def _autosave():
         """Save current state to JSON sidecar."""
         try:
+            text = json.dumps(
+                serialize_decision_state(dm_cats, dm_decs), ensure_ascii=False, indent=2
+            )
             with open(_autosave_path, "w", encoding="utf-8") as f:
-                json.dump(
-                    serialize_decision_state(dm_cats, dm_decs),
-                    f,
-                    ensure_ascii=False,
-                    indent=2,
-                )
+                f.write(text)
         except (OSError, TypeError, ValueError) as exc:
             get_logger("decision").debug("autosave failed: %s", exc)
 
