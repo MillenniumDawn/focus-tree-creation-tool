@@ -104,18 +104,25 @@ def test_load_mod_moves_duplicate_to_front_and_caps_recent_mods(
 
     monkeypatch.setattr(mod_loading.filedialog, "askdirectory", askdirectory)
     progress = _patch_progress_window(monkeypatch)
-    background_calls: list[tuple[Any, Any, Any, dict[str, object]]] = []
-    candidate = object()
+    background_calls: list[tuple[Any, Any, dict[str, object]]] = []
+    evicted: list[object] = []
     saved: list[bool] = []
-    loaded: list[tuple[object, str]] = []
+    loaded: list[str] = []
+    scanned_contexts: list[object] = []
+    adopted: list[object] = []
     scan_arguments: dict[str, object] = {}
 
-    def fake_scan(_mod, *_args, **kwargs):
+    def fake_scan(mod, *_args, **kwargs):
+        scanned_contexts.append(mod)
         scan_arguments.update(kwargs)
-        return candidate
+        return evicted
+
+    def adopt_scan(_mod, candidate) -> list[object]:
+        adopted.append(candidate)
+        return []
 
     monkeypatch.setattr(type(MOD), "scan", fake_scan)
-    monkeypatch.setattr(type(MOD), "adopt_scan", lambda _mod, _candidate: [])
+    monkeypatch.setattr(type(MOD), "adopt_scan", adopt_scan)
 
     def save_config(_mod) -> bool:
         saved.append(True)
@@ -123,15 +130,13 @@ def test_load_mod_moves_duplicate_to_front_and_caps_recent_mods(
 
     monkeypatch.setattr(type(MOD), "save_config", save_config)
 
-    def run_bg(widget, worker, on_done, on_error, **kwargs) -> None:
-        background_calls.append((worker, on_done, on_error, kwargs))
+    def run_bg(widget, worker, on_done, **kwargs) -> None:
+        background_calls.append((worker, on_done, kwargs))
 
     monkeypatch.setattr(mod_loading, "run_bg", run_bg)
     app = _FakeApp()
     app._lifecycle = _AcceptingLifecycle()
-    monkeypatch.setattr(
-        app, "_on_mod_loaded", lambda pw, root: loaded.append((pw, root))
-    )
+    monkeypatch.setattr(app, "_on_mod_loaded", loaded.append)
     previous_recent = MOD._recent_mods.copy()  # type: ignore[attr-defined]
 
     app._load_mod()
@@ -141,14 +146,14 @@ def test_load_mod_moves_duplicate_to_front_and_caps_recent_mods(
     assert dialog_calls and dialog_calls[0]["initialdir"] == str(tmp_path)
     assert app._lifecycle.begun == ["mod"]
     assert len(background_calls) == 1
-    worker, on_done, _on_error, options = background_calls[0]
+    worker, on_done, options = background_calls[0]
     assert options["scope"] == "mod"
     assert callable(options["on_finally"])
-    assert progress.cancelled is not None
-    assert worker() is candidate
+    assert worker() is evicted
+    assert scanned_contexts[0] is not MOD
     assert scan_arguments["cancelled"] is progress.cancelled
-    assert scan_arguments["transactional"] is True
-    on_done(candidate)
+    on_done(evicted)
+    assert adopted == scanned_contexts
     assert MOD._recent_mods == [  # type: ignore[attr-defined]
         root,
         *(f"/mods/mod-{index}" for index in range(1, 8)),
@@ -156,7 +161,7 @@ def test_load_mod_moves_duplicate_to_front_and_caps_recent_mods(
     assert len(MOD._recent_mods) == 8  # type: ignore[attr-defined]
     assert len(set(MOD._recent_mods)) == 8  # type: ignore[attr-defined]
     assert saved == [True]
-    assert loaded == [(None, root)]
+    assert loaded == [root]
     options["on_finally"]()
     assert progress.closed
 
@@ -198,17 +203,6 @@ def test_on_mod_loaded_invalidates_canvas_and_wizard_images_on_ui_thread(
 
         def delete(self, tag: str) -> None:
             self.deleted.append(tag)
-
-    class FakeWindow:
-        def __init__(self) -> None:
-            self.grab_released = False
-            self.destroyed = False
-
-        def grab_release(self) -> None:
-            self.grab_released = True
-
-        def destroy(self) -> None:
-            self.destroyed = True
 
     class FakeLabel:
         def __init__(self) -> None:
@@ -258,12 +252,10 @@ def test_on_mod_loaded_invalidates_canvas_and_wizard_images_on_ui_thread(
     )
     app._redraw_now = lambda: setattr(app, "redraws", app.redraws + 1)
     app.after = lambda delay, callback: app.after_calls.append((delay, callback))
-    pw = FakeWindow()
     ui_thread = threading.get_ident()
 
-    app._on_mod_loaded(pw, "/mods/sample-mod")
+    app._on_mod_loaded("/mods/sample-mod")
 
-    assert pw.grab_released and pw.destroyed
     assert app._mod_lbl.configurations[0]["text"].startswith("📂 sample-mod")
     assert app.visibility_updates == 1
     assert app.dropdown_refreshes == 1

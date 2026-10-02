@@ -1182,12 +1182,9 @@ class GraphicsCatalog:
                         declarations,
                     )
                 )
-            _check_cancel(cancelled)
             for child in child_directories:
-                _check_cancel(cancelled)
                 scan(child, top_level=False)
 
-        _check_cancel(cancelled)
         scan(scan_root, top_level=True)
 
     def _derive_references(self, root: str, config: GraphicsScanConfig) -> None:

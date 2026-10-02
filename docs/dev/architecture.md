@@ -286,8 +286,7 @@ dicts/lists.
 calling it marshals `fn(*args, **kwargs)` onto the Tk thread via
 `_safe_after`, in call order. `progress_modal(parent, title, *, determinate=True,
 cancellable=False)` opens a small `Toplevel` with a status label and a bar,
-`grab_set()`, and `WM_DELETE_WINDOW` blocked: the same shape as the inline
-dialog in `_load_mod`, factored out. The handle always exposes `cancelled`
+`grab_set()`, and `WM_DELETE_WINDOW` blocked. The handle always exposes `cancelled`
 (a `threading.Event`) and `request_cancel()`. Import, export, and Save All
 leave `cancellable` off.
 
@@ -318,19 +317,27 @@ routes window-close to that handle. Neither destroys the window nor drops the
 grab; they set `cancelled` so the worker can stop between files or scan steps.
 For tree batches, `batch_load_trees` returns the results it already built and
 `on_done` applies that partial load. Mod scans instead poll between scan steps
-and within each GFX inventory directory; cancellation returns no candidate,
-so the currently loaded mod remains installed. `run_bg` does not take a cancel
-token: `work` stays a zero-arg callable that closes over the event.
-`Future.cancel()` only drops queued jobs, and skipping `on_done` would throw
-away a completed result.
+and for every entry of the GFX inventory walk, then check once more before
+marking the candidate loaded. A cancelled scan returns `None`, and the
+completion callback checks the event again, so a cancel that
+lands during the last step or after the worker returns still leaves the loaded
+mod installed. `run_bg` does not take a cancel token: `work` stays a zero-arg
+callable that closes over the event. `Future.cancel()` only drops queued jobs,
+and skipping `on_done` would throw away a completed result.
 
 The mod-load candidate has a fresh empty image LRU and graphics catalog. Its
 worker never reads, receives, or mutates the live `MOD.sprite_imgs` cache, so
 cancelled, failed, or superseded scans preserve the loaded mod and its warm
-PhotoImages. A current successful completion adopts candidate scan data on
-Tk, evicts old cached images there, and retains those references until the
-completion callback finishes. A lifecycle resource clears the live image cache
-on Tk during application shutdown before Tcl teardown.
+PhotoImages. A scan step that raises a file or parse error is logged and
+skipped, and the remaining steps still run. A current successful completion
+adopts candidate scan data on Tk (`ModContext.adopt_scan`), evicts old cached
+images there, and retains those references until the completion callback
+finishes. The candidate catalog continues the loaded catalog's generation
+count, which image brokers compare to drop stale results. A lifecycle resource
+clears the live image cache on Tk during application shutdown before Tcl
+teardown. Adoption discards the replaced graphics catalog without persisting
+its pending cache snapshot on Tk. Mod files are already saved; only a disposable
+scan cache may need rebuilding when that mod is loaded again.
 
 ### Executor lifecycle
 

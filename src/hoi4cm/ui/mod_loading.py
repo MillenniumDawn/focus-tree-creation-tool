@@ -156,17 +156,13 @@ class ModLoadingMixin:
             remove_modal_resource()
 
         def worker():
-            return MOD.scan(
-                root,
-                progress_cb=report_progress,
-                clear_images=False,
-                cancelled=pw.cancelled,
-                transactional=True,
-                candidate=candidate,
+            return candidate.scan(
+                root, progress_cb=report_progress, cancelled=pw.cancelled
             )
 
-        def on_loaded(candidate):
-            if candidate is None:
+        def on_loaded(scanned):
+            # Cancel can land during the last step or after the worker returns.
+            if scanned is None or pw.cancelled.is_set():
                 return
             evicted_images = MOD.adopt_scan(candidate)
             remove_evicted_resource = (
@@ -183,27 +179,14 @@ class ModLoadingMixin:
                 MOD._recent_mods = MOD._recent_mods[:8]
                 if not MOD.save_config():
                     self._warn_config_write_failed()
-                self._on_mod_loaded(None, root)
+                self._on_mod_loaded(root)
             finally:
                 evicted_images.clear()
                 remove_evicted_resource()
 
-        run_bg(
-            cast(Any, self),
-            worker,
-            on_loaded,
-            lambda _exc: None,
-            scope="mod",
-            on_finally=cleanup,
-        )
+        run_bg(cast(Any, self), worker, on_loaded, scope="mod", on_finally=cleanup)
 
-    def _on_mod_loaded(self, pw, root):
-        if pw is not None:
-            if hasattr(pw, "close"):
-                pw.close()
-            else:
-                pw.grab_release()
-                pw.destroy()
+    def _on_mod_loaded(self, root):
         mod_name = os.path.basename(root)
         md_badge = "  ⚡MD" if MOD.is_md else ""
         self._mod_lbl.config(

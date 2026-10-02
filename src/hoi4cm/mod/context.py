@@ -70,10 +70,9 @@ _DECISION_KEYWORDS = frozenset(
     {"category", "target_trigger", "available", "visible", "modifier", "cost"}
 )
 
-# Fields ``scan()`` clears or rebinds while walking a mod root. Scalars are
-# rebound; containers are shallow-copied so a cancel or failure mid-scan can
-# roll each field back to its pre-scan value instead of leaving the
-# previously-loaded mod half-cleared.
+# Fields ``scan()`` rebinds (scalars) or refills (containers). A scan candidate
+# gets its own empty containers, and ``adopt_scan`` moves both groups onto the
+# loaded context.
 _SCAN_SCALARS = (
     "root",
     "mod_name",
@@ -834,31 +833,21 @@ class ModContext:
     def new_scan_candidate(self) -> ModContext:
         """Copy scan settings into an isolated context without sharing images."""
         candidate = type(self).__new__(type(self))
-        candidate.__dict__.update(
-            {
-                name: value
-                for name, value in self.__dict__.items()
-                if name not in {"sprite_imgs", "graphics_catalog", "_cache", "scan"}
-            }
-        )
+        candidate.__dict__.update(self.__dict__)
         for name in _SCAN_CONTAINERS:
-            value = getattr(candidate, name)
-            if isinstance(value, dict):
-                setattr(candidate, name, dict(value))
-            elif isinstance(value, list):
-                setattr(candidate, name, list(value))
-            else:
-                setattr(candidate, name, set(value))
+            setattr(candidate, name, type(getattr(self, name))())
         candidate.sprite_imgs = LRUCache(self.sprite_imgs.maxsize)
         candidate.graphics_catalog = GraphicsCatalog()
+        # Image brokers compare generations, so the counter must not restart.
+        candidate.graphics_catalog.generation = self.graphics_catalog.generation
         candidate._cache = None
+        candidate.loaded = False
         return candidate
 
     def adopt_scan(self, candidate: ModContext) -> list[Any]:
         """Adopt a completed candidate on Tk and return evicted old images."""
         if candidate is self or not candidate.loaded or not candidate.root:
             raise ValueError("cannot adopt an incomplete mod scan")
-        self.graphics_catalog.flush_cache()
         evicted_images = self.sprite_imgs.clear()
         for name in _SCAN_SCALARS + _SCAN_CONTAINERS:
             setattr(self, name, getattr(candidate, name))
@@ -870,44 +859,25 @@ class ModContext:
         root,
         progress_cb: Callable | None = None,
         *,
-        clear_images=True,
         cancelled: threading.Event | None = None,
-        transactional=False,
-        candidate: ModContext | None = None,
     ):
-        """Scan *root*, returning evicted images or a transactional candidate.
+        """Scan *root* in place and return image refs evicted before scanning.
 
-        Direct scans return image references evicted before scanning. With
-        ``transactional=True``, this method returns isolated plain data for
-        adoption on Tk after successful completion; neither cancellation nor
-        worker failure can mutate the loaded mod or its PhotoImage cache.
-        Direct callers retain the legacy in-place scan API.
+        Callers must keep the returned values alive until they can be released
+        on Tk. The mod loader scans a ``new_scan_candidate()`` on a worker and
+        adopts it on Tk, so a cancelled or failed load never touches the
+        loaded mod or its PhotoImage cache.
 
         ``cancelled`` is polled between scan steps and during the graphics
-        inventory walk. A cancelled transactional scan returns ``None``.
+        inventory walk. A cancelled scan returns ``None`` and leaves this
+        context partially scanned, with ``loaded`` False.
         """
-        if transactional:
-            if cancelled is not None and cancelled.is_set():
-                return None
-            scan_context = candidate or self.new_scan_candidate()
-            if scan_context is self:
-                raise ValueError("transactional scans require an isolated context")
-            result = scan_context.scan(
-                root,
-                progress_cb=progress_cb,
-                clear_images=False,
-                cancelled=cancelled,
-            )
-            return scan_context if result is not None else None
         if cancelled is not None and cancelled.is_set():
             return None
-        prior = self._snapshot_scan_state()
         self.root = root
         self.mod_name = os.path.basename(root)
         self.sprites.clear()
-        # Direct callers retain removed images for Tk cleanup. UI scans skip
-        # eviction because the lifecycle already owns the old images.
-        evicted_images = self.sprite_imgs.clear() if clear_images else []
+        evicted_images = self.sprite_imgs.clear()
         self._img_errors.clear()
         self.decision_sprites.clear()
         self.focus_ids.clear()
@@ -970,62 +940,30 @@ class ModContext:
         try:
             for i, (label, fn) in enumerate(steps):
                 if cancelled is not None and cancelled.is_set():
-                    raise ScanCancelled
+                    return None
                 if progress_cb:
                     progress_cb(i, len(steps), label)
                 t0 = time.perf_counter()
-                fn()
+                try:
+                    fn()
+                except ScanCancelled:
+                    return None
+                except (OSError, ValueError, RuntimeError, TypeError) as exc:
+                    _log.warning("scan step %s failed: %s", label, exc, exc_info=True)
                 _log.debug(
                     "scan step %s: %.1fms", label, (time.perf_counter() - t0) * 1000
                 )
-            self.loaded = True
-            if progress_cb:
-                progress_cb(len(steps), len(steps), "Done")
-            return evicted_images
-        except ScanCancelled:
-            self._restore_scan_state(prior)
-            return None
-        except Exception:
-            # The prior mod stays loaded after a failed scan too; re-raise so
-            # the completion callback still reports the real failure.
-            self._restore_scan_state(prior)
-            raise
         finally:
             if self._cache:
                 self._cache.close()
                 self._cache = None
 
-    def _snapshot_scan_state(self):
-        """Pre-scan copies of every field ``scan()`` clears or rebinds.
-
-        The keyed decode snapshot lets a cancelled scan hand the old
-        PhotoImage references back to the LRU on Tk instead of dropping them
-        on the worker; the LRU holds them until normal eviction/close.
-        """
-        prior: dict[str, object] = {name: getattr(self, name) for name in _SCAN_SCALARS}
-        for name in _SCAN_CONTAINERS:
-            value = getattr(self, name)
-            if isinstance(value, dict):
-                prior[name] = dict(value)
-            elif isinstance(value, list):
-                prior[name] = list(value)
-            else:
-                prior[name] = set(value)
-        prior["_sprite_imgs"] = dict(self.sprite_imgs._data)
-        return prior
-
-    def _restore_scan_state(self, prior):
-        """Roll every scanned field back to its ``_snapshot_scan_state`` copy.
-
-        Missing LRU keys are filled from the snapshot; keys that appeared
-        meanwhile (Tk-side ``get_image`` during the scan window) are kept.
-        """
-        prior_images = prior.pop("_sprite_imgs")
-        for name, value in prior.items():
-            setattr(self, name, value)
-        for key, image in prior_images.items():
-            if key not in self.sprite_imgs:
-                self.sprite_imgs[key] = image
+        if cancelled is not None and cancelled.is_set():
+            return None
+        self.loaded = True
+        if progress_cb:
+            progress_cb(len(steps), len(steps), "Done")
+        return evicted_images
 
     def summary(self):
         md_badge = "  [MD]" if self.is_md else ""

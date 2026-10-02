@@ -1,4 +1,4 @@
-"""Transactional mod-load cancellation and adoption regressions."""
+"""Candidate mod-scan cancellation and adoption regressions."""
 
 from __future__ import annotations
 
@@ -67,11 +67,11 @@ def test_cancel_before_scan_preserves_loaded_state_and_warm_cache(loaded_mod, tm
     cancelled = threading.Event()
     cancelled.set()
 
-    candidate = context.scan(
-        str(tmp_path / "new-mod"), cancelled=cancelled, transactional=True
-    )
+    candidate = context.new_scan_candidate()
+    result = candidate.scan(str(tmp_path / "new-mod"), cancelled=cancelled)
 
-    assert candidate is None
+    assert result is None
+    assert not candidate.loaded
     assert _unchanged_state(context) == before
     assert context.sprite_imgs["warm"] is image
     assert context.root == str(old_root)
@@ -88,10 +88,27 @@ def test_cancel_between_steps_preserves_loaded_state(loaded_mod, tmp_path, monke
         cancelled.set()
 
     monkeypatch.setattr(ModContext, "_scan_national_focus", cancel_after_gfx)
+    candidate = context.new_scan_candidate()
 
-    result = context.scan(str(root), cancelled=cancelled, transactional=True)
+    result = candidate.scan(str(root), cancelled=cancelled)
 
     assert result is None
+    assert not candidate.loaded
+    assert _unchanged_state(context) == before
+
+
+def test_cancel_during_final_step_rejects_candidate(loaded_mod, tmp_path, monkeypatch):
+    context, _old_root = loaded_mod
+    root = tmp_path / "new-mod"
+    root.mkdir()
+    before = _unchanged_state(context)
+    cancelled = threading.Event()
+    monkeypatch.setattr(ModContext, "_scan_tags", lambda _candidate: cancelled.set())
+    candidate = context.new_scan_candidate()
+
+    assert candidate.scan(str(root), cancelled=cancelled) is None
+    assert not candidate.loaded
+    assert candidate._cache is None
     assert _unchanged_state(context) == before
 
 
@@ -117,10 +134,12 @@ def test_cancel_during_gfx_inventory_preserves_loaded_state(
         return text
 
     monkeypatch.setattr(context, "_read", cancel_on_gfx)
+    candidate = context.new_scan_candidate()
 
-    result = context.scan(str(root), cancelled=cancelled, transactional=True)
+    result = candidate.scan(str(root), cancelled=cancelled)
 
     assert result is None
+    assert not candidate.loaded
     assert _unchanged_state(context) == before
     assert context.root == str(_old_root)
 
@@ -162,7 +181,30 @@ def test_cancelled_refresh_preserves_warm_catalog(loaded_mod, tmp_path):
     assert catalog._sprite_refs == old_refs
 
 
-def test_failed_candidate_scan_preserves_loaded_state(
+def test_failed_step_does_not_abort_the_remaining_steps(
+    loaded_mod, tmp_path, monkeypatch
+):
+    context, _old_root = loaded_mod
+    root = tmp_path / "new-mod"
+    events = root / "events" / "new.txt"
+    events.parent.mkdir(parents=True)
+    events.write_text("country_event = { id = new.1 }\n")
+    before = _unchanged_state(context)
+
+    def fail_focus_step(_candidate):
+        raise OSError("scan failed")
+
+    monkeypatch.setattr(ModContext, "_scan_national_focus", fail_focus_step)
+    candidate = context.new_scan_candidate()
+
+    assert candidate.scan(str(root)) is not None
+    assert candidate.loaded
+    assert candidate.focus_ids == []
+    assert candidate.event_ids == {"new": ["new.1"]}
+    assert _unchanged_state(context) == before
+
+
+def test_unexpected_scan_error_preserves_loaded_state(
     loaded_mod, tmp_path, monkeypatch
 ):
     context, _old_root = loaded_mod
@@ -171,14 +213,34 @@ def test_failed_candidate_scan_preserves_loaded_state(
     before = _unchanged_state(context)
 
     def fail_focus_step(_candidate):
-        raise OSError("scan failed")
+        raise KeyError("scan failed")
 
     monkeypatch.setattr(ModContext, "_scan_national_focus", fail_focus_step)
 
-    with pytest.raises(OSError, match="scan failed"):
-        context.scan(str(root), transactional=True)
+    with pytest.raises(KeyError, match="scan failed"):
+        context.new_scan_candidate().scan(str(root))
 
     assert _unchanged_state(context) == before
+
+
+def test_adoption_does_not_persist_replaced_catalog(loaded_mod, monkeypatch):
+    context, root = loaded_mod
+    image = root / "gfx" / "interface" / "goals" / "new.dds"
+    image.parent.mkdir(parents=True)
+    image.touch()
+    context.graphics_catalog.note_written(str(image), read_text=context._read)
+    candidate = context.new_scan_candidate()
+    assert candidate.scan(str(root)) is not None
+    assert context.graphics_catalog._cache_dirty
+
+    def fail_flush():
+        raise AssertionError("catalog persistence must not block Tk adoption")
+
+    monkeypatch.setattr(context.graphics_catalog, "flush_cache", fail_flush)
+
+    assert context.adopt_scan(candidate) == []
+    assert context.graphics_catalog is candidate.graphics_catalog
+    assert context.focus_ids == ["OLD_FOCUS"]
 
 
 def test_success_adopts_candidate_and_releases_warm_images_on_tk(loaded_mod, tmp_path):
@@ -197,16 +259,14 @@ def test_success_adopts_candidate_and_releases_warm_images_on_tk(loaded_mod, tmp
     focus_file.parent.mkdir(parents=True)
     focus_file.write_text("focus = { id = NEW_FOCUS }\n")
 
-    scan_context = context.new_scan_candidate()
+    old_generation = context.graphics_catalog.generation
+    candidate = context.new_scan_candidate()
     with ThreadPoolExecutor(max_workers=1) as executor:
-        candidate = executor.submit(
-            context.scan,
-            str(focus_file.parents[2]),
-            transactional=True,
-            candidate=scan_context,
-        ).result(timeout=5)
+        scanned = executor.submit(candidate.scan, str(focus_file.parents[2])).result(
+            timeout=5
+        )
 
-    assert candidate is not None
+    assert scanned is not None
     assert candidate.root == str(focus_file.parents[2])
     assert "NEW_FOCUS" in candidate.focus_ids
     assert context.root == str(old_root)
@@ -219,6 +279,7 @@ def test_success_adopts_candidate_and_releases_warm_images_on_tk(loaded_mod, tmp
     assert "NEW_FOCUS" in context.focus_ids
     assert context.edit_ideas_file == "old-ideas.txt"
     assert context.edit_events_file == "old-events.txt"
+    assert context.graphics_catalog.generation > old_generation
     assert context.sprite_imgs.get("warm") is None
     assert finalized_on == []
     evicted.clear()
@@ -266,12 +327,75 @@ class _FakeApp(ModLoadingMixin):
     def winfo_exists(self) -> int:
         return 1
 
-    def _on_mod_loaded(self, pw, root):
+    def _on_mod_loaded(self, root):
         self.loaded_roots.append(root)
 
     def flush(self) -> None:
         while self.callbacks:
             self.callbacks.pop(0)()
+
+
+@pytest.mark.parametrize("window", ["final_step", "after_completion"])
+def test_late_cancel_discards_a_completed_scan(monkeypatch, tmp_path, window):
+    root = str(tmp_path / "late")
+    Path(root).mkdir()
+    monkeypatch.setattr(mod_loading, "_default_hoi4_mod_dir", lambda: str(tmp_path))
+    monkeypatch.setattr(mod_loading.filedialog, "askdirectory", lambda **_kw: root)
+    progress = _FakeProgress()
+    monkeypatch.setattr(
+        mod_loading, "progress_modal", lambda *_args, **_kwargs: progress
+    )
+    monkeypatch.setattr(
+        mod_loading, "make_progress", lambda *_args, **_kwargs: lambda *_a: None
+    )
+
+    def scan(_mod, _root, **_kwargs):
+        if window == "final_step":
+            progress.cancelled.set()
+        return []
+
+    monkeypatch.setattr(type(mod_loading.MOD), "scan", scan)
+    adopted: list[object] = []
+    monkeypatch.setattr(
+        type(mod_loading.MOD),
+        "adopt_scan",
+        lambda _mod, value: adopted.append(value) or [],
+    )
+    saved: list[bool] = []
+    monkeypatch.setattr(
+        type(mod_loading.MOD), "save_config", lambda _mod: saved.append(True) or True
+    )
+    app = _FakeApp()
+    previous_recent = mod_loading.MOD._recent_mods.copy()
+    futures = []
+    original_run_bg = tasks.run_bg
+
+    def capture_run_bg(*args, **kwargs):
+        future = original_run_bg(*args, **kwargs)
+        futures.append(future)
+        return future
+
+    monkeypatch.setattr(mod_loading, "run_bg", capture_run_bg)
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        app._lifecycle = ApplicationLifecycle(
+            cast(Any, app), executor_factory=lambda: executor
+        )
+        try:
+            app._load_mod()
+            assert futures[0].result(timeout=5) is None
+            if window == "after_completion":
+                progress.cancelled.set()
+            app.flush()
+
+            assert adopted == []
+            assert app.loaded_roots == []
+            assert saved == []
+            assert mod_loading.MOD._recent_mods == previous_recent
+            assert progress.closed
+        finally:
+            assert app._lifecycle is not None
+            app._lifecycle.close()
 
 
 def test_superseded_result_is_discarded_and_modal_cleanup_runs(monkeypatch, tmp_path):
@@ -297,15 +421,20 @@ def test_superseded_result_is_discarded_and_modal_cleanup_runs(monkeypatch, tmp_
     )
     first_started = threading.Event()
     release_first = threading.Event()
-    first_candidate = object()
-    second_candidate = object()
+    candidates: list[ModContext] = []
+    new_scan_candidate = type(mod_loading.MOD).new_scan_candidate
+
+    def record_candidate(mod):
+        candidates.append(new_scan_candidate(mod))
+        return candidates[-1]
+
+    monkeypatch.setattr(type(mod_loading.MOD), "new_scan_candidate", record_candidate)
 
     def scan(_mod, root, **_kwargs):
         if root == first_root:
             first_started.set()
             assert release_first.wait(5)
-            return first_candidate
-        return second_candidate
+        return []
 
     monkeypatch.setattr(type(mod_loading.MOD), "scan", scan)
     adopted: list[object] = []
@@ -341,7 +470,7 @@ def test_superseded_result_is_discarded_and_modal_cleanup_runs(monkeypatch, tmp_
             app.flush()
 
             assert app.loaded_roots == [second_root]
-            assert adopted == [second_candidate]
+            assert adopted == [candidates[1]]
             assert [handle.closed for handle in progress_handles] == [True, True]
         finally:
             release_first.set()

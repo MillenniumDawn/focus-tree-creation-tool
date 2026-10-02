@@ -57,7 +57,7 @@ class FakeApp(ModLoadingMixin):
     def winfo_exists(self) -> int:
         return 1
 
-    def _on_mod_loaded(self, pw, root):
+    def _on_mod_loaded(self, root):
         self.loaded_roots.append(root)
 
     def flush(self):
@@ -98,18 +98,18 @@ def test_mod_load_finalizes_images_on_tk(
             finalized_on.append(threading.get_ident())
 
     mod.sprite_imgs["old"] = TrackedImage()
-    original_scan = mod.scan
+    original_scan = ModContext.scan
 
-    def blocked_scan(root, **kwargs):
+    def blocked_scan(context, root, **kwargs):
         assert threading.get_ident() != main_thread
-        result = original_scan(root, **kwargs)
+        result = original_scan(context, root, **kwargs)
         scanned.set()
         assert resume.wait(5)
         if failing:
             raise ValueError("scan failed")
         return result
 
-    monkeypatch.setattr(mod, "scan", blocked_scan)
+    monkeypatch.setattr(ModContext, "scan", blocked_scan)
     original_run_bg = tasks.run_bg
 
     def capture_job(*args, **kwargs):
