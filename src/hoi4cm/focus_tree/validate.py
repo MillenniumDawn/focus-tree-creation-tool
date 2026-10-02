@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-import os
 import re
 from collections import defaultdict
 from collections.abc import Collection, Iterator, Mapping
 from dataclasses import dataclass
 from typing import Literal, NamedTuple
 
-from hoi4cm.core.paths import read_file
+from hoi4cm.core.paths import read_file_with_encoding
 from hoi4cm.models import Focus
 
 Severity = Literal["error", "warning", "info"]
@@ -50,12 +49,10 @@ def collect_loc_keys_from_text(text: str | None) -> set[str] | None:
 
 def collect_loc_keys_from_file(path: str | None) -> set[str] | None:
     """Read localisation keys, returning ``None`` when the file is unavailable."""
-    if not path or not os.path.isfile(path):
+    if not path:
         return None
-    try:
-        return collect_loc_keys_from_text(read_file(path))
-    except Exception:
-        return None
+    text, encoding = read_file_with_encoding(path)
+    return collect_loc_keys_from_text(text) if encoding is not None else None
 
 
 def validate_document(

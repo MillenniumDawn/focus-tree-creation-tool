@@ -129,8 +129,8 @@ def test_snapshot_trusts_occupied_positions_over_raw_coords():
     a = _focus(1, name="A", x=0, y=0)
     b = _focus(2, name="B", x=0, y=0)
     doc = FocusDocument([a, b])
-    snapshot = capture_validation_snapshot(doc)
     a.x = 7
+    snapshot = capture_validation_snapshot(doc)
 
     assert not any(
         issue.code == "position_collision" for issue in validate_document({1: a, 2: b})
@@ -138,6 +138,7 @@ def test_snapshot_trusts_occupied_positions_over_raw_coords():
     assert any(
         issue.code == "position_collision" for issue in validate_document(snapshot)
     )
+    assert validate_document(snapshot) == validate_document(doc)
 
 
 def test_snapshot_accepts_plain_mapping_without_index():
@@ -176,7 +177,25 @@ def test_collect_loc_keys_from_file_existing(tmp_path):
 def test_collect_loc_keys_from_file_unreadable_skips_checks(monkeypatch, tmp_path):
     loc_file = tmp_path / "unreadable.yml"
     loc_file.write_text("l_english:", encoding="utf-8")
-    monkeypatch.setattr(validate_mod, "read_file", lambda _path: None)
+    monkeypatch.setattr(
+        validate_mod, "read_file_with_encoding", lambda _path: (None, None)
+    )
+
+    assert collect_loc_keys_from_file(str(loc_file)) is None
+
+
+def test_collect_loc_keys_from_file_disappearing_during_read_skips_checks(
+    monkeypatch, tmp_path
+):
+    loc_file = tmp_path / "removed.yml"
+    loc_file.write_text("l_english:", encoding="utf-8")
+    real_read = validate_mod.read_file_with_encoding
+
+    def disappearing_read(path):
+        loc_file.unlink()
+        return real_read(path)
+
+    monkeypatch.setattr(validate_mod, "read_file_with_encoding", disappearing_read)
 
     assert collect_loc_keys_from_file(str(loc_file)) is None
 
@@ -208,7 +227,7 @@ def test_run_validation_reads_loc_only_inside_worker(monkeypatch, tmp_path):
 
     io_calls = []
     real_isfile = os.path.isfile
-    real_read_file = validate_mod.read_file
+    real_read_file = validate_mod.read_file_with_encoding
 
     def spy_isfile(path):
         io_calls.append(f"isfile:{path}")
@@ -219,7 +238,7 @@ def test_run_validation_reads_loc_only_inside_worker(monkeypatch, tmp_path):
         return real_read_file(path, **kwargs)
 
     monkeypatch.setattr(os.path, "isfile", spy_isfile)
-    monkeypatch.setattr(validate_mod, "read_file", spy_read_file)
+    monkeypatch.setattr(validate_mod, "read_file_with_encoding", spy_read_file)
     dispatched = []
 
     def fake_run_bg(_widget, work, _on_done, **kwargs):
@@ -233,8 +252,9 @@ def test_run_validation_reads_loc_only_inside_worker(monkeypatch, tmp_path):
     doc.move(2, 5, 5)
     doc[1].name = "Renamed"
     doc[1].prereqs.append([999])
+    monkeypatch.setattr(m.MOD, "edit_loc_file", str(tmp_path / "other.yml"))
     assert dispatched[0][0]() == expected
-    assert io_calls == [f"isfile:{loc_file}", f"read:{loc_file}"]
+    assert io_calls == [f"read:{loc_file}"]
 
 
 def test_run_validation_missing_loc_file_skips_loc_checks(monkeypatch, tmp_path):
