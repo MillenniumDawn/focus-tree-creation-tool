@@ -39,6 +39,10 @@ the version by hand. See `AGENTS.md`.
 - Canvas redraws skip per-focus item probes and unchanged line updates: tests measure 14
   probes per visible full bundle reduced to one sentinel probe per frame; unchanged
   frames make zero `coords`, `itemconfig`, or `tag_lower` calls.
+- Patch the focus document's indexes in place on add, delete, link, and tree
+  changes instead of rebuilding all seven, and stop Add Focus from repairing them
+  first. On a 20,000-focus tree an add plus delete drops from about 42 ms to under
+  0.1 ms. `touch()` still rebuilds in full.
 - Skip unreadable or oversize scan files without aborting valid sibling results; failed
   reads remain retryable.
 - Route project loading through a background progress modal to keep the UI responsive

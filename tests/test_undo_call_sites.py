@@ -30,6 +30,7 @@ class _UndoCallSiteApp:
 
     def __init__(self, focuses=()):
         self.focuses = FocusDocument(focuses)
+        self._default_focus_prefix = ""
         self.selected = None
         self._multisel_mode = False
         self._multi_sel = set()
@@ -475,3 +476,32 @@ def test_rmb_on_free_cell_places():
     CanvasMixin._rmb(cast(CanvasMixin, app), SimpleNamespace(x=10, y=10))
 
     app._new_focus_at.assert_called_once_with(5, 5)
+
+
+def test_add_focus_picks_first_free_cell_without_repairing_indexes():
+    app = _UndoCallSiteApp([Focus(0, 0), Focus(2, 0)])
+    app._new_focus_at = Mock()
+    app.focuses.validate_indexes = Mock()  # type: ignore[method-assign]
+    app.focuses.rebuild_indexes = Mock()  # type: ignore[method-assign]
+
+    app_module.App._add_focus(_as_app(app))
+
+    app._new_focus_at.assert_called_once_with(4, 0)
+    app.focuses.validate_indexes.assert_not_called()
+    app.focuses.rebuild_indexes.assert_not_called()
+
+
+def test_new_focus_at_keeps_indexes_exact_without_a_rebuild():
+    existing = Focus(0, 0)
+    app = _UndoCallSiteApp([existing])
+    app._default_focus_prefix = "tag_"
+    app.focuses.rebuild_indexes = Mock()  # type: ignore[method-assign]
+
+    app_module.App._new_focus_at(_as_app(app), 2, 0)
+
+    created = app._select.call_args.args[0]
+    assert created.name == f"tag_focus_{created.id}"
+    assert app.focuses.occupied_positions[(2, 0)] == {created.id}
+    assert app.focuses.first_by_name[created.name] == created.id
+    app.focuses.rebuild_indexes.assert_not_called()
+    assert app.focuses.validate_indexes()

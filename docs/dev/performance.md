@@ -97,6 +97,7 @@ schema and workload determinism on a tiny preset (under a second). Example
 | After Load All, seven leftover O(F) walks still ran on common actions: code-tab restore, drag-start occupancy, RMB occupancy, per-tree export lookup copies, the prereq Listbox, universal GFX `query()` with no `under`, and single extra-tree parse on the Tk thread | `hoi4_content_maker.py` (`_apply_focus_code`, `_pick_prereq`, `_load_extra_tree`), `ui/canvas.py` (`_foc_pr`, `_rmb`), `focus_tree/export_plan.py`, `ui/gfx_browser.py`, `mod/graphics_catalog.py` (`directory_paths`) | Code-tab restore calls `_redraw_now` (visible set). Drag start and RMB use `occupied_positions` / `position_free`. Export plans share one lookup mapping. Prereq picker reuses `VirtualFocusList`. GFX folder list comes from catalog directory records. `_load_extra_tree` uses the same `run_bg` shape as `_import_txt` | fixed in issue #118 | not yet measured, needs a display session against the real mod |
 | Visible full focus bundles were probed item-by-item, and unchanged line frames still updated pooled items | `ui/canvas.py` (`_render_frame`, `_draw_focus`, `_draw_lines`) | Validate one sentinel canvas item per frame and skip line redraw work when zoom, offset, scene revision and viewport are unchanged | fixed in issue #157 | Same workload (4,000 focuses, 663 visible, 680 visible edges / 1,360 line items, 1600x900, zoom 0.45, 21 no-op frames): origin/main 9,283 `cv.type` calls/frame, 12.970 ms median; branch 1 call/frame, 1.578 ms median |
 | Coordinate rulers rebuilt roughly 61 canvas objects on every pan motion, and the canvas legend deleted/recreated its visible row per redraw | `ui/canvas.py` (`_draw_coord_labels`, `_draw_canvas_legend`) | Pool ruler rectangle/text/marker items and legend text rows; hide surplus, recover stale ids after `cv.delete("all")`, and key unchanged views/legend rows to skip canvas updates | fixed in issue #163 | Tk on Linux, 1600x900, 100 extra trees; isolated `_pan_mv` (bounds drawing stubbed), 750 motions: median 3.0826ms → 0.0995ms each (20,840 rectangles / 21,590 texts / 1,500 lines created, 750 deletes → zero creates/deletes); 750 unchanged legend renders: 1.8978ms → 0.0132ms each (47,250 text creates / 750 deletes → zero canvas mutations) |
+| `FocusDocument.add`, `extend`, `delete_many`, `link_*`/`unlink_*` and `set_tree(s)` each rebuilt all seven indexes (O(F+E)), and `delete_many` also rewrote every survivor's prereqs and mutex. Add Focus ran `validate_indexes(rebuild=True)` and then `add()`, so three full passes ran before a pixel moved | `models/document.py`, `hoi4_content_maker.py` (`_add_focus`) | These methods patch the indexes in place, as `move()` does. `delete_many` cleans references by reading `reverse_prerequisites`/`reverse_mutex` instead of scanning survivors. `_add_focus` no longer repairs indexes first. `touch()` and `load()` still rebuild in full. See the index maintenance note below | fixed in issue #160 | 20,000 focuses / 19,999 edges (Python 3.14.4, Linux, interleaved A/B in one process, median of 31 runs): `add()` + `delete_many()` round trip 42.2ms -> 0.015ms, Add Focus path (repair + `add()`) 44.9ms -> 0.007ms, `delete_many(clean_references=True)` of one focus with a child 24.5ms -> 0.006ms, `link_prerequisite` 17.9ms -> 0.002ms, `extend` of 100 focuses 23.2ms -> 0.12ms. Unchanged by design: `touch()` 18.4ms -> 18.0ms, `extend` of 20,000 into an empty document 20.5ms -> 20.1ms. Document level only; Tk end to end not measured |
 The `_draw_key`/state-key check in `_draw_focus` (`ui/canvas.py:486`) already
 makes an unchanged focus close to free to redraw, but every `_redraw()` call
 still iterates the full focus dict to find that out. That per-redraw
@@ -135,6 +136,36 @@ patches that one index instead of rebuilding all seven; and
 `SceneIndex.update_focus` moves just the dragged focus between cells and
 re-rasterizes only its incident edges. The resulting work is O(1 + focus
 degree), not O(F+E).
+
+### Index maintenance
+
+`FocusDocument` keeps seven derived indexes (`names`, `first_by_name`,
+`last_by_name`, `tree_membership`, `occupied_positions`,
+`reverse_prerequisites`, `reverse_mutex`). Issue #160 moved `add`, `extend`,
+`delete_many`, `link_*`, `unlink_*` and `set_tree(s)` from a full rebuild to
+in-place patches, so each costs O(the focus and its links), not O(F+E).
+
+- The patched indexes equal a full build exactly: no empty sets or tuples are
+  left behind, `names` tuples keep `_focuses` insertion order, and
+  `add(..., replace=True)` keeps the replaced focus's slot.
+  `tests/test_document.py` checks this after every step of a seeded random
+  sequence of mixed operations.
+- `delete_many(clean_references=True)` rewrites only the survivors that
+  `reverse_prerequisites`/`reverse_mutex` name. That needs fresh reverse
+  indexes. The delete actions already read them to choose the undo
+  snapshot. One difference from the old scan: an empty prerequisite group on
+  a survivor that never named a deleted id is no longer dropped as a side
+  effect.
+- Full builds remain for `touch()`, `load()`, `clear()`, an `extend` or
+  `delete_many` batch at least as large as the rest of the document (one
+  build costs less than that many patches), and replacing a focus under a new
+  name (its place in the new name's tuple follows dict order). An `extend`
+  that renames any replaced focus takes one build for the whole batch, so
+  undoing a bulk rename does not rebuild per focus.
+- `validate_indexes(rebuild=True)` is a repair tool, not a step on any hot
+  path. Direct edits to a focus's name, tree, prerequisites or mutex still
+  need `touch()` (position goes through `move()`). Patches tolerate a stale
+  entry without raising, but they do not repair it.
 
 ### Render-loop bookkeeping
 
