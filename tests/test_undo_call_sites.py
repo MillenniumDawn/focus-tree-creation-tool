@@ -2,8 +2,11 @@ from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import Mock
 
+import pytest
+
 import hoi4_content_maker as app_module
 from hoi4cm.core.undo import UndoStack
+from hoi4cm.focus_tree.codec import apply_focus_code, render_focus_block
 from hoi4cm.models import Focus
 from hoi4cm.models.document import FocusDocument
 from hoi4cm.ui.canvas import CanvasMixin
@@ -13,6 +16,7 @@ from hoi4cm.ui.theme import XGRID, YGRID
 class _UndoCallSiteApp:
     selected: Focus | None
     zoom: float
+    offset: list[int]
     mutex_mode: bool
     _multisel_mode: bool
     _multi_sel: set[int]
@@ -475,3 +479,102 @@ def test_rmb_on_free_cell_places():
     CanvasMixin._rmb(cast(CanvasMixin, app), SimpleNamespace(x=10, y=10))
 
     app._new_focus_at.assert_called_once_with(5, 5)
+
+
+def _code_app(focus: Focus) -> _UndoCallSiteApp:
+    app = _UndoCallSiteApp([focus])
+    app.selected = focus
+    app.zoom = 1.0
+    app.offset = [0, 0]
+    app._undo_stack = UndoStack()
+    return app
+
+
+def _code_of(app: _UndoCallSiteApp, focus: Focus) -> str:
+    return render_focus_block(
+        focus, focus_lookup=app.focuses, focus_name_lookup=app.focuses.by_name
+    )
+
+
+def _normalized_focus() -> Focus:
+    """A focus that already took one Code-tab round trip, which adds fields."""
+    focus = Focus()
+    doc = FocusDocument([focus])
+    code = render_focus_block(focus, focus_lookup=doc, focus_name_lookup=doc.by_name)
+    apply_focus_code(focus, code, focus_lookup=doc)
+    return focus
+
+
+@pytest.fixture
+def reported(monkeypatch):
+    errors: list[object] = []
+    monkeypatch.setattr(
+        app_module, "report_error", lambda message, ex, **_kw: errors.append(ex)
+    )
+    return errors
+
+
+def test_apply_focus_code_pushes_one_entry_and_undo_restores_the_focus():
+    focus = _normalized_focus()
+    app = _code_app(focus)
+    edited = _code_of(app, focus).replace("cost = 10", "cost = 12")
+
+    assert app_module.App._apply_focus_code(_as_app(app), focus, edited) is True
+
+    assert focus.cost == 12
+    assert len(app._undo_stack) == 1
+    assert app._undo_stack._stack[-1][0] == "edit focus code"
+
+    app_module.App._undo(_as_app(app))
+
+    assert app.focuses[focus.id].cost == 10
+
+
+def test_apply_focus_code_without_changes_pushes_nothing_and_keeps_redo():
+    focus = _normalized_focus()
+    app = _code_app(focus)
+    app._undo_stack.push("edit", app.focuses, (focus.id,))
+    focus.desc = "later"
+    app_module.App._undo(_as_app(app))
+    current = app.focuses[focus.id]
+
+    ok = app_module.App._apply_focus_code(_as_app(app), current, _code_of(app, current))
+
+    assert ok is True
+    assert len(app._undo_stack) == 0
+    app_module.App._redo(_as_app(app))
+    assert app.focuses[focus.id].desc == "later"
+
+
+def test_apply_focus_code_parse_failure_leaves_no_entry_and_keeps_redo(reported):
+    focus = _normalized_focus()
+    app = _code_app(focus)
+    app._undo_stack.push("edit", app.focuses, (focus.id,))
+    focus.desc = "later"
+    app_module.App._undo(_as_app(app))
+    before = app.focuses[focus.id].to_dict()
+
+    ok = app_module.App._apply_focus_code(
+        _as_app(app), app.focuses[focus.id], "not a focus block"
+    )
+
+    assert ok is False
+    assert len(reported) == 1
+    assert len(app._undo_stack) == 0
+    assert app.focuses[focus.id].to_dict() == before
+    app_module.App._redo(_as_app(app))
+    assert app.focuses[focus.id].desc == "later"
+
+
+def test_apply_focus_code_keeps_the_entry_when_a_later_step_fails(reported):
+    focus = _normalized_focus()
+    app = _code_app(focus)
+    app._invalidate_focus_list_structure = Mock(side_effect=RuntimeError("boom"))
+    edited = _code_of(app, focus).replace("cost = 10", "cost = 12")
+
+    assert app_module.App._apply_focus_code(_as_app(app), focus, edited) is False
+
+    assert focus.cost == 12
+    assert len(app._undo_stack) == 1
+    app._undo_stack.undo(app.focuses, Focus.from_dict)
+    assert app.focuses[focus.id].cost == 10

@@ -8,6 +8,9 @@ the version by hand. See `AGENTS.md`.
 
 ## Unreleased
 
+- Make sidebar autosave, Code-tab apply, and typing in effect fields undoable.
+  A run of keystrokes in one effect field is a single undo step. An edit that
+  changes nothing adds no entry and keeps the redo trail.
 - Scope the Windows-only cache DACL code by platform so the Linux mypy gate passes.
 - Release cached Tk images on the Tk thread after mod-scan completion or app close.
 - Point handled-error dialogs to Settings -> SESSION LOG -> Open Full Log Window

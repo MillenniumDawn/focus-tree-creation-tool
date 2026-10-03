@@ -302,3 +302,16 @@ def test_by_name_get_does_not_scan_all_focuses():
 
     assert got is selected
     assert visits["n"] == 0
+
+
+def test_empty_ai_raw_matches_the_base_line_the_form_shows():
+    """A new focus has no raw block; the form shows ``base = N`` for it."""
+    focus = _focus(ai_will_do_raw="", ai_will_do=3)
+    values = _values(focus, ai_will_do_raw="base = 3")
+    assert sidebar_values_match_focus(focus, values) is True
+
+
+def test_empty_ai_raw_still_notices_an_edited_base_line():
+    focus = _focus(ai_will_do_raw="", ai_will_do=3)
+    values = _values(focus, ai_will_do_raw="base = 4", ai_will_do=4)
+    assert sidebar_values_match_focus(focus, values) is False

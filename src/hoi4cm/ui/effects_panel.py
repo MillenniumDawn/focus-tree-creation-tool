@@ -529,6 +529,7 @@ class EffectsMixin:
         ):
             return
         self._effects_sig = sig
+        self._undo_stack.end_run()
         for w in self._eff_box.winfo_children():
             w.destroy()
         if not effects:
@@ -879,14 +880,25 @@ class EffectsMixin:
         self._invalidate_focus_list_structure()
 
     def _live_eff_field(self, idx, fname, var):
-        if self.selected and idx < len(self.selected.effects):
-            self.selected.effects[idx].setdefault("fields", {})[fname] = var.get()
+        self._write_effect_field(idx, fname, var.get())
 
     def _live_eff_text(self, idx, fname, tw):
-        if self.selected and idx < len(self.selected.effects):
-            self.selected.effects[idx].setdefault("fields", {})[fname] = tw.get(
-                "1.0", "end-1c"
-            )
+        self._write_effect_field(idx, fname, tw.get("1.0", "end-1c"))
+
+    def _write_effect_field(self, idx, fname, value):
+        """Store a typed value; one undo entry per run in the same field."""
+        focus = self.selected
+        if not focus or idx >= len(focus.effects):
+            return
+        fields = focus.effects[idx].setdefault("fields", {})
+        if fname in fields and fields[fname] == value:
+            return
+        self._push_undo(
+            "edit effect", touched_ids=(focus.id,), run=(focus.id, idx, fname)
+        )
+        fields[fname] = value
+        # The cards no longer match the signature taken when they were built.
+        self._effects_sig = None
 
     def _render_effect(self, eff):
         return render_effect(eff)
