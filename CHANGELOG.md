@@ -8,6 +8,10 @@ the version by hand. See `AGENTS.md`.
 
 ## Unreleased
 
+- Add a Cancel button to mod loading. The scan fills an isolated candidate, so a
+  cancelled, failed, or superseded load leaves the loaded mod and its cached
+  images in place. Adoption no longer writes the replaced scan cache on Tk.
+- Scope the Windows-only cache DACL code by platform so the Linux mypy gate passes.
 - Release cached Tk images on the Tk thread after mod-scan completion or app close.
 - Point handled-error dialogs to Settings -> SESSION LOG -> Open Full Log Window
   so full tracebacks remain discoverable after the dialog is dismissed.
