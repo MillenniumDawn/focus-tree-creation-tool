@@ -8,6 +8,9 @@ the version by hand. See `AGENTS.md`.
 
 ## Unreleased
 
+- Wait for the progress modal to be mapped before taking its Tk grab, so it no
+  longer fails with "grab failed: window not viewable" on a live display.
+- Scope the Windows-only cache DACL code by platform so the Linux mypy gate passes.
 - Release cached Tk images on the Tk thread after mod-scan completion or app close.
 - Point handled-error dialogs to Settings -> SESSION LOG -> Open Full Log Window
   so full tracebacks remain discoverable after the dialog is dismissed.

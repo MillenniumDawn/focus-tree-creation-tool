@@ -202,7 +202,6 @@ def progress_modal(parent, title, *, determinate=True, cancellable=False):
     win.configure(bg=BG_DARK)
     win.geometry("420x180" if cancellable else "420x140")
     win.resizable(False, False)
-    win.grab_set()
 
     cancel_btn = None
 
@@ -274,6 +273,11 @@ def progress_modal(parent, title, *, determinate=True, cancellable=False):
             win.destroy()
         except tk.TclError:
             pass
+
+    # A withdrawn window never maps, so waiting for it would block forever.
+    if win.state() == "normal":
+        win.wait_visibility()
+    win.grab_set()
 
     return SimpleNamespace(
         set_text=set_text,
