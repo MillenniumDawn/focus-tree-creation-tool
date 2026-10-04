@@ -8,6 +8,7 @@ the version by hand. See `AGENTS.md`.
 
 ## Unreleased
 
+- Scope the Windows-only cache DACL code by platform so the Linux mypy gate passes.
 - Release cached Tk images on the Tk thread after mod-scan completion or app close.
 - Point handled-error dialogs to Settings -> SESSION LOG -> Open Full Log Window
   so full tracebacks remain discoverable after the dialog is dismissed.
@@ -44,6 +45,9 @@ the version by hand. See `AGENTS.md`.
   for large projects; release its modal grab when a load is cancelled or superseded.
 - Validate focus fields while loading projects, dropping unknown values and rejecting
   out-of-range or duplicate focus IDs before data can be lost.
+- Publish a pre-release only after the commit's CI run passes. A `gate` job in
+  `pre-release.yml` waits for the run and fails unless lint, tests and build all
+  succeeded, so a failing commit no longer gets a pre-release.
 
 ### Focus-tree parser
 

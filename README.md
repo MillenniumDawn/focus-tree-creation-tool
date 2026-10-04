@@ -86,7 +86,7 @@ Just download and run — no Python installation required.
 
 ### Pre-release builds
 
-Every push to `main` is published as a GitHub prerelease
+Every push to `main` whose CI run passes is published as a GitHub prerelease
 (`.github/workflows/pre-release.yml`) carrying the same three binaries and a
 `SHA256SUMS.txt`. Pick one from the [Releases](../../releases) page if you want a fix
 before the next tagged release — they are marked *Pre-release* there.
@@ -127,8 +127,8 @@ code except the build scripts.
 
 CI runs the same checks on every pull request, then builds the three executables
 (`.github/workflows/ci.yml`). A `v*` tag runs that whole gate and publishes the binaries
-to Releases, so a release can't skip the tests. Every push to `main` additionally
-publishes a prerelease of the same binaries.
+to Releases, so a release can't skip the tests. Every push to `main` whose CI run
+passes additionally publishes a prerelease of the same binaries.
 
 Releases are cut by merging the release pull request that `release-pr.yml` keeps open,
 not by bumping the version by hand — see `AGENTS.md`.
