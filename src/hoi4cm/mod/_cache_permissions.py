@@ -2,18 +2,16 @@
 
 import ctypes
 import os
+import sys
 from ctypes import wintypes
 
 
 def restrict_directory(path: str) -> None:
     """Make an existing directory private, or raise before opening its cache."""
-    if os.name == "nt":
-        _restrict_windows_directory(path)
-    else:
+    # A sys.platform branch lets type checkers skip the Windows-only ctypes API.
+    if sys.platform != "win32":
         os.chmod(path, 0o700)
-
-
-def _restrict_windows_directory(path: str) -> None:
+        return
     # chmod only changes the read-only attribute on Windows. Replace the DACL,
     # protecting it from parent inheritance, and inherit our ACE to children.
     advapi = ctypes.WinDLL("advapi32", use_last_error=True)
@@ -80,7 +78,7 @@ def _restrict_windows_directory(path: str) -> None:
             kernel.GetCurrentProcess(), 0x0008, ctypes.byref(token)
         ):
             raise ctypes.WinError(ctypes.get_last_error())
-        size = wintypes.DWORD()
+        size = wintypes.DWORD(0)
         advapi.GetTokenInformation(token, 1, None, 0, ctypes.byref(size))
         if ctypes.get_last_error() != 122:  # ERROR_INSUFFICIENT_BUFFER
             raise ctypes.WinError(ctypes.get_last_error())
@@ -95,7 +93,7 @@ def _restrict_windows_directory(path: str) -> None:
             sddl, 1, ctypes.byref(descriptor), None
         ):
             raise ctypes.WinError(ctypes.get_last_error())
-        present, defaulted = wintypes.BOOL(), wintypes.BOOL()
+        present, defaulted = wintypes.BOOL(0), wintypes.BOOL(0)
         dacl = pointer()
         if not advapi.GetSecurityDescriptorDacl(
             descriptor,
