@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import copy
 import importlib
+import json
 import tkinter as tk
 
 import pytest
@@ -186,3 +187,50 @@ def test_effect_picker_constructs(tk_root, tmp_path, monkeypatch):
                 w.destroy()
         target.destroy()
         tk_root.update()
+
+
+@pytest.mark.parametrize(
+    ("module_name", "opener", "serializer"),
+    [
+        ("decision", "open_decision_wizard", "serialize_decision_state"),
+        ("event", "open_event_wizard", "event_autosave_records"),
+    ],
+)
+def test_wizard_serialization_failure_preserves_autosave(
+    tk_root, tmp_path, monkeypatch, module_name, opener, serializer
+):
+    module = importlib.import_module(f"hoi4cm.wizards.{module_name}")
+    path = tmp_path / "autosave.json"
+    previous = "previous autosave"
+    path.write_text(previous, encoding="utf-8")
+    monkeypatch.setattr(module, "autosave_path", lambda _name: str(path))
+    monkeypatch.setattr(module, serializer, lambda *_args: {"bad": object()})
+    before = set(tk_root.winfo_children())
+    getattr(module, opener)(_stub_app(tk_root))
+    win = _new_toplevels(before, tk_root)[0]
+    try:
+        tk_root.tk.call(win.protocol("WM_DELETE_WINDOW"))
+        assert path.read_text(encoding="utf-8") == previous
+    finally:
+        if win.winfo_exists():
+            win.destroy()
+
+
+def test_event_legacy_autosave_restores_with_defaults(tk_root, tmp_path, monkeypatch):
+    module = importlib.import_module("hoi4cm.wizards.event")
+    path = tmp_path / "event.json"
+    path.write_text(json.dumps([{"eid": "legacy.1"}]), encoding="utf-8")
+    monkeypatch.setattr(module, "autosave_path", lambda _name: str(path))
+    before = set(tk_root.winfo_children())
+    module.open_event_wizard(_stub_app(tk_root))
+    win = _new_toplevels(before, tk_root)[0]
+    try:
+        tk_root.tk.call(win.protocol("WM_DELETE_WINDOW"))
+        records = json.loads(path.read_text(encoding="utf-8"))
+        assert records[0]["eid"] == "legacy.1"
+        assert set(records[0]) == set(module.EVENT_AUTOSAVE_FIELDS)
+        assert records[0]["etype"] == "country_event"
+        assert isinstance(records[0]["options"], list)
+    finally:
+        if win.winfo_exists():
+            win.destroy()
