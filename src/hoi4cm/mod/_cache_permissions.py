@@ -78,7 +78,7 @@ def restrict_directory(path: str) -> None:
             kernel.GetCurrentProcess(), 0x0008, ctypes.byref(token)
         ):
             raise ctypes.WinError(ctypes.get_last_error())
-        size = wintypes.DWORD()
+        size = wintypes.DWORD(0)
         advapi.GetTokenInformation(token, 1, None, 0, ctypes.byref(size))
         if ctypes.get_last_error() != 122:  # ERROR_INSUFFICIENT_BUFFER
             raise ctypes.WinError(ctypes.get_last_error())
@@ -93,7 +93,7 @@ def restrict_directory(path: str) -> None:
             sddl, 1, ctypes.byref(descriptor), None
         ):
             raise ctypes.WinError(ctypes.get_last_error())
-        present, defaulted = wintypes.BOOL(), wintypes.BOOL()
+        present, defaulted = wintypes.BOOL(0), wintypes.BOOL(0)
         dacl = pointer()
         if not advapi.GetSecurityDescriptorDacl(
             descriptor,
