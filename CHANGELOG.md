@@ -10,7 +10,9 @@ the version by hand. See `AGENTS.md`.
 
 - Run Linux pytest on a private display so mapped UI tests and smoke-test children
   cannot open windows on the desktop; clean up direct test roots and display processes.
-
+- Read and scan the localisation file in the validation worker instead of on the
+  UI thread, and validate a detached snapshot that keeps the position index.
+  Treat a localisation file removed before the worker reads it as unavailable.
 - Scope the Windows-only cache DACL code by platform so the Linux mypy gate passes.
 - Release cached Tk images on the Tk thread after mod-scan completion or app close.
 - Point handled-error dialogs to Settings -> SESSION LOG -> Open Full Log Window
