@@ -28,6 +28,7 @@ I18N_LANGS = {
     "en": "English",
     "zh_CN": "简体中文",
     "de": "Deutsch",
+    "es": "Español",
 }
 I18N_LANG = None
 I18N_STRINGS: dict[str, str] = {}
