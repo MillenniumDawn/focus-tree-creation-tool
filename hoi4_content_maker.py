@@ -550,53 +550,6 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             Tooltip(b, tip)
         return b
 
-    def _mk_lbl(
-        self,
-        parent,
-        text,
-        fg=None,
-        bg=None,
-        font_size=9,
-        bold=False,
-        dim=False,
-        anchor="w",
-        padx=6,
-        pady=2,
-    ):
-        """Standard label, dim or normal."""
-        return tk.Label(
-            parent,
-            text=text,
-            bg=bg or BG_PANEL,
-            fg=fg or (TEXT_DIM if dim else TEXT),
-            font=("Helvetica", font_size, "bold" if bold else "normal"),
-            anchor=anchor,
-            padx=padx,
-            pady=pady,
-        )
-
-    def _mk_entry(self, parent, var, width=None):
-        """Standard dark entry bound to StringVar."""
-        kw = dict(
-            textvariable=var,
-            bg=BG_CARD,
-            fg=TEXT,
-            insertbackground=BLUE,
-            font=("Helvetica", 10),
-            relief="flat",
-            highlightthickness=1,
-            highlightbackground=BORDER_G,
-        )
-        if width:
-            kw["width"] = width
-        return tk.Entry(parent, **kw)
-
-    def _mk_hsep(self, parent, padx=6, pady=4):
-        """1px horizontal separator."""
-        f = tk.Frame(parent, bg=BORDER_G, height=1)
-        f.pack(fill="x", padx=padx, pady=pady)
-        return f
-
     def _build_ui(self):
         """Orchestrate full UI construction."""
         self._init_error_log()
@@ -2207,20 +2160,12 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             highlightbackground=BORDER_G,
             padx=4,
         ).pack(side="right", padx=(2, 0))
-        self._gfx_dd = None
-        self._gfx_preview = None  # no sidebar preview
         return var
 
     def _set_gfx(self, name):
         self._fv_gfx.set(name)
         if self.selected:
             self.selected.gfx = name
-            self._redraw_now()
-
-    def _update_gfx_preview(self, gfx_name):
-        """No sidebar preview — just invalidate canvas so icon redraws."""
-        if self.selected and getattr(self.selected, "gfx", "") != gfx_name:
-            self.selected.gfx = gfx_name
             self._redraw_now()
 
     def _attach_autocomplete(self, entry_widget, var, get_choices_fn):
@@ -3698,11 +3643,6 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         self.focuses.unlink_mutex(self.selected.id, mid)
         self._refresh_mutex()
         self._draw_lines()
-
-    # ── EFFECT LIVE UPDATES ─────────────────────────────────────
-    def _add_effect(self):
-        # Legacy entry point — effects are now added via the browser popup.
-        self._open_effect_browser()
 
     # ── IMPORT .TXT ─────────────────────────────────────────────
 

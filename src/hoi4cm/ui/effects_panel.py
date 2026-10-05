@@ -13,7 +13,6 @@ from typing import TYPE_CHECKING
 
 from hoi4cm.core import EFFECT_CATS, EFFECT_DEFS, tr
 from hoi4cm.mod import MOD
-from hoi4cm.script.effects import render_effect
 from hoi4cm.ui.theme import (
     BG_CARD,
     BG_DARK,
@@ -887,6 +886,3 @@ class EffectsMixin:
             self.selected.effects[idx].setdefault("fields", {})[fname] = tw.get(
                 "1.0", "end-1c"
             )
-
-    def _render_effect(self, eff):
-        return render_effect(eff)
