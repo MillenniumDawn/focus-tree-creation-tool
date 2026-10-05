@@ -8,6 +8,9 @@ the version by hand. See `AGENTS.md`.
 
 ## Unreleased
 
+- Add a Cancel button to mod loading. The scan fills an isolated candidate, so a
+  cancelled, failed, or superseded load leaves the loaded mod and its cached
+  images in place. Adoption no longer writes the replaced scan cache on Tk.
 - Move wizard undo and autosave state into headless helpers, retain prior
   autosaves on serialization failures, and add fixed wizard complexity budgets.
 - Read and scan the localisation file in the validation worker instead of on the
