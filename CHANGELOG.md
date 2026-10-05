@@ -8,6 +8,8 @@ the version by hand. See `AGENTS.md`.
 
 ## Unreleased
 
+- Wait for the progress modal to be mapped before taking its Tk grab, so it no
+  longer fails with "grab failed: window not viewable" on a live display.
 - Add Spanish (Español) as an interface language.
 - Add a Cancel button to mod loading. The scan fills an isolated candidate, so a
   cancelled, failed, or superseded load leaves the loaded mod and its cached
