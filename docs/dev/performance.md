@@ -72,6 +72,18 @@ schema and workload determinism on a tiny preset (under a second). Example
 
 ## Hot-path ledger
 
+Mod-load cancellation (#186) was compared with `origin/main` at `f3a6ce1`
+using the same warm synthetic mod: 64,000 images, 800 focus files, 20,000
+focuses, Python 3.14, and 14 interleaved pairs after warmup. Median worker
+scan time was 2087.8ms before and 2124.9ms with cancellation checks (1.8%
+higher). Both accepted warm catalog snapshots without GFX reads or directory
+listings. Tk-side candidate creation took 0.030ms median. This measures the
+cancellation cost, not a speedup; a real-mod display session remains open.
+A separate 64,000-image check with a pending graphics-cache write found
+650.1ms of Tk-side adoption work. Discarding that replaced cache instead of
+persisting it reduced the same check to 13.3ms. These are single-run timings;
+the regression test also forbids calling the old catalog's flush on adoption.
+
 | Finding | Location | Fix | Status | Measured delta |
 |---|---|---|---|---|
 | Checklist dialog for "Load All Trees" built one Tk widget row per file before it could show; on ~790 files that's ~5,500 synchronous widget constructions | `hoi4_content_maker.py` (`_load_all_trees`), formerly the inline row loop | Pooled row list over a scrolling canvas: `ui/checklist.py`'s `VirtualChecklist` reuses the `_PooledList` machinery extracted from `VirtualFocusList` (`ui/focus_list.py`), so the dialog builds only the visible rows (~2 dozen) and recycles them as it scrolls | fixed in phase 9 | not yet measured, needs a display session against the real mod |

@@ -4594,12 +4594,13 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
                 title=tr("dialog.load_error.title", "Load Error"),
             )
             return
-        tree_idx = len(self._extra_trees) + 1
-        existing_focuses = list(self.focuses.values())
-        country_tag = getattr(self, "_tree_country_tag", "")
         modal = progress_modal(
             self, tr("dialog.load_tree.title", "Load Tree"), determinate=False
         )
+        # Snapshot under the modal's grab so nothing mutates the document after it.
+        tree_idx = len(self._extra_trees) + 1
+        existing_focuses = list(self.focuses.values())
+        country_tag = getattr(self, "_tree_country_tag", "")
 
         def work():
             t0 = time.perf_counter()
@@ -4948,16 +4949,17 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             win.destroy()
             self._begin_document_generation()
 
-            # Snapshot the Tk-thread state the worker needs to resolve
-            # cross-tree relative positions/prereqs. The worker must not
-            # touch self.focuses/self._extra_trees directly (ui/tasks.py).
-            existing_seed = list(self.focuses.values())
-            extra_trees_start_idx = len(self._extra_trees)
-            country_tag = getattr(self, "_tree_country_tag", "")
-
             modal = progress_modal(
                 self, tr("load_all.title", "Load All Trees"), cancellable=True
             )
+
+            # Snapshot the Tk-thread state the worker needs to resolve
+            # cross-tree relative positions/prereqs, after the modal's grab
+            # is in place. The worker must not touch
+            # self.focuses/self._extra_trees directly (ui/tasks.py).
+            existing_seed = list(self.focuses.values())
+            extra_trees_start_idx = len(self._extra_trees)
+            country_tag = getattr(self, "_tree_country_tag", "")
 
             def _update_progress(i, total, label):
                 modal.set_text(

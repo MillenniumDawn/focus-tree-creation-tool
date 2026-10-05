@@ -177,9 +177,8 @@ def make_progress(widget, fn, *, scope="application"):
 def progress_modal(parent, title, *, determinate=True, cancellable=False):
     """Open a small modal progress dialog; return a handle to drive it.
 
-    Mirrors the Toplevel built inline in ``ui/mod_loading.py``'s
-    ``_load_mod``: dark theme, ``grab_set()``, ``WM_DELETE_WINDOW`` blocked
-    so the user can't dismiss it mid-task.
+    Dark theme, ``grab_set()``, and ``WM_DELETE_WINDOW`` blocked so the user
+    can't dismiss it mid-task.
 
     The grab is load-bearing, not cosmetic: it is what makes it safe for a
     worker to compute against a snapshot of ``self.focuses`` without the
@@ -202,7 +201,6 @@ def progress_modal(parent, title, *, determinate=True, cancellable=False):
     win.configure(bg=BG_DARK)
     win.geometry("420x180" if cancellable else "420x140")
     win.resizable(False, False)
-    win.grab_set()
 
     cancel_btn = None
 
@@ -274,6 +272,11 @@ def progress_modal(parent, title, *, determinate=True, cancellable=False):
             win.destroy()
         except tk.TclError:
             pass
+
+    # A withdrawn window never maps, so waiting for it would block forever.
+    if win.state() == "normal":
+        win.wait_visibility()
+    win.grab_set()
 
     return SimpleNamespace(
         set_text=set_text,
