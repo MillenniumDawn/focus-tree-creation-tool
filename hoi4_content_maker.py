@@ -3167,7 +3167,6 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         win.bind("<Return>", lambda e: _create())
 
     def _add_focus(self):
-        self.focuses.validate_indexes(rebuild=True)
         occ = self.focuses.occupied_positions
         gx, gy = 0, 0
         while (gx, gy) in occ:

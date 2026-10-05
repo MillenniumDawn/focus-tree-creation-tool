@@ -8,6 +8,15 @@ from typing import Any
 from .focus import Focus
 
 
+def _discard[K](index: dict[K, set[int]], key: K, focus_id: int) -> None:
+    bucket = index.get(key)
+    if bucket is None:
+        return
+    bucket.discard(focus_id)
+    if not bucket:
+        del index[key]
+
+
 class _FocusNameMap(Mapping[str, Focus]):
     """O(1) name -> Focus view over FocusDocument.first_by_name."""
 
@@ -121,10 +130,9 @@ class FocusDocument(MutableMapping[int, Focus]):
     def add(self, focus: Focus, *, replace: bool = False) -> Focus:
         if focus.id in self._focuses and not replace:
             raise KeyError(f"focus id already exists: {focus.id}")
-        self._focuses[focus.id] = focus
+        self._put(focus)
         self._id_set_cache = None
         self._changed()
-        self.rebuild_indexes()
         return focus
 
     def extend(self, focuses: Iterable[Focus], *, replace: bool = False) -> None:
@@ -138,10 +146,19 @@ class FocusDocument(MutableMapping[int, Focus]):
                 raise KeyError(f"focus id already exists: {min(existing)}")
         if not additions:
             return
-        self._focuses.update((focus.id, focus) for focus in additions)
+        if len(additions) >= len(self._focuses) or any(
+            focus.id in self._focuses and self._focuses[focus.id].name != focus.name
+            for focus in additions
+        ):
+            # One full build beats patching a batch this large, and beats the
+            # build each renamed replacement would otherwise take on its own.
+            self._focuses.update((focus.id, focus) for focus in additions)
+            self.rebuild_indexes()
+        else:
+            for focus in additions:
+                self._put(focus)
         self._id_set_cache = None
         self._changed()
-        self.rebuild_indexes()
 
     def position_free(self, x: int, y: int, *, except_id: int | None = None) -> bool:
         """True when no focus (other than except_id) occupies (x, y)."""
@@ -194,13 +211,16 @@ class FocusDocument(MutableMapping[int, Focus]):
             child.prereqs.extend([parent_id] for parent_id in parents)
         else:
             raise ValueError("mode must be 'or' or 'and'")
+        for parent_id in parents:
+            self.reverse_prerequisites.setdefault(parent_id, set()).add(child_id)
         self._changed()
-        self.rebuild_indexes()
 
     def unlink_prerequisite_group(self, child_id: int, group_index: int) -> None:
-        self._focuses[child_id].prereqs.pop(group_index)
+        child = self._focuses[child_id]
+        for parent_id in child.prereqs.pop(group_index):
+            if not any(parent_id in group for group in child.prereqs):
+                _discard(self.reverse_prerequisites, parent_id, child_id)
         self._changed()
-        self.rebuild_indexes()
 
     def link_mutex(self, left_id: int, right_id: int) -> None:
         left = self._focuses[left_id]
@@ -209,17 +229,19 @@ class FocusDocument(MutableMapping[int, Focus]):
             left.mutex.append(right_id)
         if left_id not in right.mutex:
             right.mutex.append(left_id)
+        self.reverse_mutex.setdefault(right_id, set()).add(left_id)
+        self.reverse_mutex.setdefault(left_id, set()).add(right_id)
         self._changed()
-        self.rebuild_indexes()
 
     def unlink_mutex(self, left_id: int, right_id: int) -> None:
         left = self._focuses[left_id]
         right = self._focuses.get(right_id)
         left.mutex = [focus_id for focus_id in left.mutex if focus_id != right_id]
+        _discard(self.reverse_mutex, right_id, left_id)
         if right is not None:
             right.mutex = [focus_id for focus_id in right.mutex if focus_id != left_id]
+            _discard(self.reverse_mutex, left_id, right_id)
         self._changed()
-        self.rebuild_indexes()
 
     def delete_many(
         self, focus_ids: Iterable[int], *, clean_references: bool = True
@@ -228,20 +250,15 @@ class FocusDocument(MutableMapping[int, Focus]):
         if not deleted:
             return set()
         if clean_references:
-            for focus in self._focuses.values():
-                if focus.id in deleted:
-                    continue
-                focus.prereqs = [
-                    [parent for parent in group if parent not in deleted]
-                    for group in focus.prereqs
-                ]
-                focus.prereqs = [group for group in focus.prereqs if group]
-                focus.mutex = [other for other in focus.mutex if other not in deleted]
-        for focus_id in deleted:
-            del self._focuses[focus_id]
+            self._clean_references(deleted)
+        removed = [self._focuses.pop(focus_id) for focus_id in deleted]
         self._id_set_cache = None
         self._changed()
-        self.rebuild_indexes()
+        if len(removed) >= len(self._focuses):
+            # Patching a batch this large costs more than one full build.
+            self.rebuild_indexes()
+        else:
+            self._unindex(removed)
         return deleted
 
     def replace(self, focus: Focus) -> Focus:
@@ -278,23 +295,15 @@ class FocusDocument(MutableMapping[int, Focus]):
         return renamed
 
     def set_tree(self, focus_id: int, tree_idx: int) -> None:
-        focus = self._focuses[focus_id]
-        if getattr(focus, "tree_idx", 0) == tree_idx:
-            return
-        focus.tree_idx = tree_idx
-        self._changed()
-        self.rebuild_indexes()
+        if self._assign_tree(self._focuses[focus_id], tree_idx):
+            self._changed()
 
     def set_trees(self, tree_by_focus_id: Mapping[int, int]) -> None:
         changed = False
         for focus_id, tree_idx in tree_by_focus_id.items():
-            focus = self._focuses[focus_id]
-            if getattr(focus, "tree_idx", 0) != tree_idx:
-                focus.tree_idx = tree_idx
-                changed = True
+            changed |= self._assign_tree(self._focuses[focus_id], tree_idx)
         if changed:
             self._changed()
-            self.rebuild_indexes()
 
     def find_by_name(self, name: str, *, policy: str = "first") -> Focus | None:
         index = self.first_by_name if policy == "first" else self.last_by_name
@@ -319,6 +328,87 @@ class FocusDocument(MutableMapping[int, Focus]):
         """Mark legacy direct field mutations and rebuild derived indexes."""
         self._changed()
         self.rebuild_indexes()
+
+    def _put(self, focus: Focus) -> None:
+        old = self._focuses.get(focus.id)
+        self._focuses[focus.id] = focus
+        if old is None:
+            self._set_names(focus.name, self.names.get(focus.name, ()) + (focus.id,))
+        elif old.name != focus.name:
+            # The id keeps its slot in dict order, which sets its place in the
+            # new name's tuple, so take the full build.
+            self.rebuild_indexes()
+            return
+        else:
+            self._unindex_links(old)
+        self._index_links(focus)
+
+    def _clean_references(self, deleted: set[int]) -> None:
+        """Strip deleted ids from the survivors that the reverse indexes name."""
+        referrers: set[int] = set()
+        for focus_id in deleted:
+            referrers.update(self.reverse_prerequisites.pop(focus_id, ()))
+            referrers.update(self.reverse_mutex.pop(focus_id, ()))
+        for focus_id in referrers - deleted:
+            focus = self._focuses.get(focus_id)
+            if focus is None:
+                continue
+            focus.prereqs = [
+                [parent for parent in group if parent not in deleted]
+                for group in focus.prereqs
+            ]
+            focus.prereqs = [group for group in focus.prereqs if group]
+            focus.mutex = [other for other in focus.mutex if other not in deleted]
+
+    def _unindex(self, removed: Iterable[Focus]) -> None:
+        removed_by_name: dict[str, set[int]] = defaultdict(set)
+        for focus in removed:
+            removed_by_name[focus.name].add(focus.id)
+            self._unindex_links(focus)
+        for name, ids in removed_by_name.items():
+            kept = tuple(i for i in self.names.get(name, ()) if i not in ids)
+            self._set_names(name, kept)
+
+    def _set_names(self, name: str, ids: tuple[int, ...]) -> None:
+        if ids:
+            self.names[name] = ids
+            self.first_by_name[name] = ids[0]
+            self.last_by_name[name] = ids[-1]
+        else:
+            self.names.pop(name, None)
+            self.first_by_name.pop(name, None)
+            self.last_by_name.pop(name, None)
+
+    def _index_links(self, focus: Focus) -> None:
+        focus_id = focus.id
+        self.tree_membership.setdefault(getattr(focus, "tree_idx", 0), set()).add(
+            focus_id
+        )
+        self.occupied_positions.setdefault((focus.x, focus.y), set()).add(focus_id)
+        for group in focus.prereqs:
+            for parent_id in group:
+                self.reverse_prerequisites.setdefault(parent_id, set()).add(focus_id)
+        for other_id in focus.mutex:
+            self.reverse_mutex.setdefault(other_id, set()).add(focus_id)
+
+    def _unindex_links(self, focus: Focus) -> None:
+        focus_id = focus.id
+        _discard(self.tree_membership, getattr(focus, "tree_idx", 0), focus_id)
+        _discard(self.occupied_positions, (focus.x, focus.y), focus_id)
+        for group in focus.prereqs:
+            for parent_id in group:
+                _discard(self.reverse_prerequisites, parent_id, focus_id)
+        for other_id in focus.mutex:
+            _discard(self.reverse_mutex, other_id, focus_id)
+
+    def _assign_tree(self, focus: Focus, tree_idx: int) -> bool:
+        old = getattr(focus, "tree_idx", 0)
+        if old == tree_idx:
+            return False
+        focus.tree_idx = tree_idx
+        _discard(self.tree_membership, old, focus.id)
+        self.tree_membership.setdefault(tree_idx, set()).add(focus.id)
+        return True
 
     def _build_indexes(self) -> tuple[dict[Any, Any], ...]:
         names: dict[str, list[int]] = defaultdict(list)
