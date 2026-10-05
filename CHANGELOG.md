@@ -10,6 +10,11 @@ the version by hand. See `AGENTS.md`.
 
 - Run Linux pytest on a private display so mapped UI tests and smoke-test children
   cannot open windows on the desktop; clean up direct test roots and display processes.
+- Add a Cancel button to mod loading. The scan fills an isolated candidate, so a
+  cancelled, failed, or superseded load leaves the loaded mod and its cached
+  images in place. Adoption no longer writes the replaced scan cache on Tk.
+- Move wizard undo and autosave state into headless helpers, retain prior
+  autosaves on serialization failures, and add fixed wizard complexity budgets.
 - Read and scan the localisation file in the validation worker instead of on the
   UI thread, and validate a detached snapshot that keeps the position index.
   Treat a localisation file removed before the worker reads it as unavailable.
