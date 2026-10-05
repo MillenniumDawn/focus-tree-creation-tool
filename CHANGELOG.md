@@ -8,6 +8,8 @@ the version by hand. See `AGENTS.md`.
 
 ## Unreleased
 
+- Move wizard undo and autosave state into headless helpers, retain prior
+  autosaves on serialization failures, and add fixed wizard complexity budgets.
 - Read and scan the localisation file in the validation worker instead of on the
   UI thread, and validate a detached snapshot that keeps the position index.
   Treat a localisation file removed before the worker reads it as unavailable.
