@@ -11,6 +11,17 @@ the version by hand. See `AGENTS.md`.
 - Make sidebar autosave, Code-tab apply, and typing in effect fields undoable.
   A run of keystrokes in one effect field is a single undo step. An edit that
   changes nothing adds no entry and keeps the redo trail.
+- Wait for the progress modal to be mapped before taking its Tk grab, so it no
+  longer fails with "grab failed: window not viewable" on a live display.
+- Add Spanish (Español) as an interface language.
+- Add a Cancel button to mod loading. The scan fills an isolated candidate, so a
+  cancelled, failed, or superseded load leaves the loaded mod and its cached
+  images in place. Adoption no longer writes the replaced scan cache on Tk.
+- Move wizard undo and autosave state into headless helpers, retain prior
+  autosaves on serialization failures, and add fixed wizard complexity budgets.
+- Read and scan the localisation file in the validation worker instead of on the
+  UI thread, and validate a detached snapshot that keeps the position index.
+  Treat a localisation file removed before the worker reads it as unavailable.
 - Scope the Windows-only cache DACL code by platform so the Linux mypy gate passes.
 - Release cached Tk images on the Tk thread after mod-scan completion or app close.
 - Point handled-error dialogs to Settings -> SESSION LOG -> Open Full Log Window
@@ -42,12 +53,19 @@ the version by hand. See `AGENTS.md`.
 - Canvas redraws skip per-focus item probes and unchanged line updates: tests measure 14
   probes per visible full bundle reduced to one sentinel probe per frame; unchanged
   frames make zero `coords`, `itemconfig`, or `tag_lower` calls.
+- Patch the focus document's indexes in place on add, delete, link, and tree
+  changes instead of rebuilding all seven, and stop Add Focus from repairing them
+  first. On a 20,000-focus tree an add plus delete drops from about 42 ms to under
+  0.1 ms. `touch()` still rebuilds in full.
 - Skip unreadable or oversize scan files without aborting valid sibling results; failed
   reads remain retryable.
 - Route project loading through a background progress modal to keep the UI responsive
   for large projects; release its modal grab when a load is cancelled or superseded.
 - Validate focus fields while loading projects, dropping unknown values and rejecting
   out-of-range or duplicate focus IDs before data can be lost.
+- Publish a pre-release only after the commit's CI run passes. A `gate` job in
+  `pre-release.yml` waits for the run and fails unless lint, tests and build all
+  succeeded, so a failing commit no longer gets a pre-release.
 
 ### Focus-tree parser
 

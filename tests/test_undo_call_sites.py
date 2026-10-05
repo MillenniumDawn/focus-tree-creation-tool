@@ -34,6 +34,7 @@ class _UndoCallSiteApp:
 
     def __init__(self, focuses=()):
         self.focuses = FocusDocument(focuses)
+        self._default_focus_prefix = ""
         self.selected = None
         self._multisel_mode = False
         self._multi_sel = set()
@@ -546,6 +547,24 @@ def test_apply_focus_code_without_changes_pushes_nothing_and_keeps_redo():
     assert app.focuses[focus.id].desc == "later"
 
 
+def test_apply_focus_code_unnormalized_first_round_trip_keeps_redo():
+    focus = Focus()
+    app = _code_app(focus)
+    app._undo_stack.push("edit", app.focuses, (focus.id,))
+    focus.desc = "later"
+    app_module.App._undo(_as_app(app))
+    current = app.focuses[focus.id]
+    before = current.to_dict()
+
+    ok = app_module.App._apply_focus_code(_as_app(app), current, _code_of(app, current))
+
+    assert ok is True
+    assert current.to_dict() == before
+    assert len(app._undo_stack) == 0
+    app_module.App._redo(_as_app(app))
+    assert app.focuses[focus.id].desc == "later"
+
+
 def test_apply_focus_code_parse_failure_leaves_no_entry_and_keeps_redo(reported):
     focus = _normalized_focus()
     app = _code_app(focus)
@@ -578,3 +597,32 @@ def test_apply_focus_code_keeps_the_entry_when_a_later_step_fails(reported):
     assert len(app._undo_stack) == 1
     app._undo_stack.undo(app.focuses, Focus.from_dict)
     assert app.focuses[focus.id].cost == 10
+
+
+def test_add_focus_picks_first_free_cell_without_repairing_indexes():
+    app = _UndoCallSiteApp([Focus(0, 0), Focus(2, 0)])
+    app._new_focus_at = Mock()
+    app.focuses.validate_indexes = Mock()  # type: ignore[method-assign]
+    app.focuses.rebuild_indexes = Mock()  # type: ignore[method-assign]
+
+    app_module.App._add_focus(_as_app(app))
+
+    app._new_focus_at.assert_called_once_with(4, 0)
+    app.focuses.validate_indexes.assert_not_called()
+    app.focuses.rebuild_indexes.assert_not_called()
+
+
+def test_new_focus_at_keeps_indexes_exact_without_a_rebuild():
+    existing = Focus(0, 0)
+    app = _UndoCallSiteApp([existing])
+    app._default_focus_prefix = "tag_"
+    app.focuses.rebuild_indexes = Mock()  # type: ignore[method-assign]
+
+    app_module.App._new_focus_at(_as_app(app), 2, 0)
+
+    created = app._select.call_args.args[0]
+    assert created.name == f"tag_focus_{created.id}"
+    assert app.focuses.occupied_positions[(2, 0)] == {created.id}
+    assert app.focuses.first_by_name[created.name] == created.id
+    app.focuses.rebuild_indexes.assert_not_called()
+    assert app.focuses.validate_indexes()

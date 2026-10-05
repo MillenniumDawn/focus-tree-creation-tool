@@ -22,7 +22,7 @@ from hoi4cm.core import (
 from hoi4cm.core.config import CONFIG_PATH
 from hoi4cm.mod import MOD, find_loc_files, notifying_workspace_files
 from hoi4cm.ui.error_report import report_error
-from hoi4cm.ui.tasks import make_progress, run_bg
+from hoi4cm.ui.tasks import make_progress, progress_modal, run_bg
 from hoi4cm.ui.theme import (
     BG_CARD,
     BG_DARK,
@@ -45,6 +45,7 @@ class ModLoadingMixin:
 
     _mod_lbl: Any  # type: ignore[no-redef]
     _focus_bundles: Any  # type: ignore[no-redef]
+    _mod_image_resource_registered: bool
     cv: Any  # type: ignore[no-redef]
 
     def __getattr__(self, name: str) -> Any:  # type: ignore[no-redef]
@@ -119,51 +120,26 @@ class ModLoadingMixin:
         if not root:
             return
 
-        # ── Record in recent mods ─────────────────────────────────────────────
-        if not hasattr(MOD, "_recent_mods"):
-            MOD._recent_mods = []
-        if root in MOD._recent_mods:
-            MOD._recent_mods.remove(root)
-        MOD._recent_mods.insert(0, root)
-        MOD._recent_mods = MOD._recent_mods[:8]  # keep 8 most recent
-        if not MOD.save_config():
-            self._warn_config_write_failed()
-
-        # Progress window
-        pw = tk.Toplevel(cast(Any, self))  # type: ignore[arg-type]
-        pw.title(tr("mod.loading.title", "Loading Mod..."))
-        pw.configure(bg=BG_DARK)
-        pw.geometry("420x140")
-        pw.resizable(False, False)
-        pw.grab_set()
-        pw.protocol("WM_DELETE_WINDOW", lambda: None)  # block close during load
-
-        tk.Label(
-            pw,
-            text=tr("mod.loading.scanning", "Scanning mod folder..."),
-            bg=BG_DARK,
-            fg=TEXT,
-            font=("Helvetica", 10, "bold"),
-            pady=12,
-        ).pack()
-        prog_lbl = tk.Label(pw, text="", bg=BG_DARK, fg=TEXT_DIM, font=("Helvetica", 9))
-        prog_lbl.pack()
-        bar_frame = tk.Frame(pw, bg=BORDER_G, height=6, width=380)
-        bar_frame.pack(pady=8)
-        bar_fill = tk.Frame(bar_frame, bg=BLUE, height=6, width=0)
-        bar_fill.place(x=0, y=0, height=6)
-        status_lbl = tk.Label(
-            pw, text="", bg=BG_DARK, fg=TEXT_DIM, font=("Helvetica", 8, "italic")
+        candidate = MOD.new_scan_candidate()
+        if lifecycle is not None:
+            lifecycle.begin("mod")
+        pw = progress_modal(
+            cast(Any, self),
+            tr("mod.loading.title", "Loading Mod..."),
+            cancellable=True,
         )
-        status_lbl.pack()
+        remove_modal_resource = (
+            lifecycle.add_resource(pw.close) if lifecycle is not None else lambda: None
+        )
+        if lifecycle is not None and not getattr(
+            self, "_mod_image_resource_registered", False
+        ):
+            self._mod_image_resource_registered = True
+            lifecycle.add_resource(lambda: MOD.sprite_imgs.clear())
 
         def progress(i, total, label):
-            try:
-                pct = int((i / total) * 380) if total else 380
-            except Exception:
-                pct = 0
-            prog_lbl.config(
-                text=tr(
+            pw.set_text(
+                tr(
                     "mod.loading.step",
                     "Step {step}/{total}: {label}",
                     step=i,
@@ -171,41 +147,46 @@ class ModLoadingMixin:
                     label=label,
                 )
             )
-            bar_fill.place_configure(width=pct)
-            pw.update_idletasks()
+            pw.set_fraction(i / total if total else 1.0)
 
-        if lifecycle is not None:
-            lifecycle.begin("mod")
-        report_progress = make_progress(pw, progress, scope="mod")
+        report_progress = make_progress(cast(Any, self), progress, scope="mod")
 
-        # Evict on Tk before submitting work. Neither the worker nor its result
-        # may own image references when close rejects the completion callback.
-        evicted_images = MOD.sprite_imgs.clear()
-        remove_resource = (
-            lifecycle.add_resource(evicted_images.clear)
-            if lifecycle is not None
-            else lambda: None
-        )
-
-        def release_images():
-            evicted_images.clear()
-            remove_resource()
+        def cleanup():
+            pw.close()
+            remove_modal_resource()
 
         def worker():
-            MOD.scan(root, progress_cb=report_progress, clear_images=False)
-            return root
+            return candidate.scan(
+                root, progress_cb=report_progress, cancelled=pw.cancelled
+            )
 
-        def on_loaded(loaded_root):
+        def on_loaded(scanned):
+            # Cancel can land during the last step or after the worker returns.
+            if scanned is None or pw.cancelled.is_set():
+                return
+            evicted_images = MOD.adopt_scan(candidate)
+            remove_evicted_resource = (
+                lifecycle.add_resource(evicted_images.clear)
+                if lifecycle is not None
+                else lambda: None
+            )
             try:
-                self._on_mod_loaded(pw, loaded_root)
+                if not hasattr(MOD, "_recent_mods"):
+                    MOD._recent_mods = []
+                if root in MOD._recent_mods:
+                    MOD._recent_mods.remove(root)
+                MOD._recent_mods.insert(0, root)
+                MOD._recent_mods = MOD._recent_mods[:8]
+                if not MOD.save_config():
+                    self._warn_config_write_failed()
+                self._on_mod_loaded(root)
             finally:
-                release_images()
+                evicted_images.clear()
+                remove_evicted_resource()
 
-        run_bg(pw, worker, on_loaded, lambda _exc: release_images(), scope="mod")
+        run_bg(cast(Any, self), worker, on_loaded, scope="mod", on_finally=cleanup)
 
-    def _on_mod_loaded(self, pw, root):
-        pw.grab_release()
-        pw.destroy()
+    def _on_mod_loaded(self, root):
         mod_name = os.path.basename(root)
         md_badge = "  ⚡MD" if MOD.is_md else ""
         self._mod_lbl.config(

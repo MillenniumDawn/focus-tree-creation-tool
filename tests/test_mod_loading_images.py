@@ -1,9 +1,12 @@
 """Mod load image ownership survives rejected completion during close."""
 
+from __future__ import annotations
+
 import gc
 import threading
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
-from unittest.mock import Mock
+from typing import Any, cast
 
 import pytest
 
@@ -13,25 +16,48 @@ from hoi4cm.ui.lifecycle import ApplicationLifecycle
 from hoi4cm.ui.mod_loading import ModLoadingMixin
 
 
+class FakeTcl:
+    def call(self, *_args: object) -> object:
+        return ()
+
+
+class FakeProgress:
+    def __init__(self):
+        self.cancelled = threading.Event()
+        self.closed = False
+
+    def set_text(self, _value):
+        pass
+
+    def set_fraction(self, _value):
+        pass
+
+    def close(self):
+        self.closed = True
+
+
 class FakeApp(ModLoadingMixin):
+    _lifecycle: ApplicationLifecycle | None
+
     def __init__(self):
         self._lifecycle = None
-        self.callbacks = []
-        self.loaded_roots = []
-        self.tk = Mock()
-        self.tk.call.return_value = ()
+        self.callbacks: list[Callable[[], None]] = []
+        self.loaded_roots: list[str] = []
+        self.tk = FakeTcl()
 
-    def after(self, _delay, callback):
+    def after(self, milliseconds: int, callback: Callable[[], None]) -> object:
         self.callbacks.append(callback)
         return callback
 
-    def after_cancel(self, callback):
-        self.callbacks.remove(callback)
+    def after_cancel(self, identifier: object) -> None:
+        self.callbacks = [
+            callback for callback in self.callbacks if callback is not identifier
+        ]
 
-    def winfo_exists(self):
-        return True
+    def winfo_exists(self) -> int:
+        return 1
 
-    def _on_mod_loaded(self, _pw, root):
+    def _on_mod_loaded(self, root):
         self.loaded_roots.append(root)
 
     def flush(self):
@@ -72,18 +98,18 @@ def test_mod_load_finalizes_images_on_tk(
             finalized_on.append(threading.get_ident())
 
     mod.sprite_imgs["old"] = TrackedImage()
-    original_scan = mod.scan
+    original_scan = ModContext.scan
 
-    def blocked_scan(root, **kwargs):
+    def blocked_scan(context, root, **kwargs):
         assert threading.get_ident() != main_thread
-        result = original_scan(root, **kwargs)
+        result = original_scan(context, root, **kwargs)
         scanned.set()
         assert resume.wait(5)
         if failing:
             raise ValueError("scan failed")
         return result
 
-    monkeypatch.setattr(mod, "scan", blocked_scan)
+    monkeypatch.setattr(ModContext, "scan", blocked_scan)
     original_run_bg = tasks.run_bg
 
     def capture_job(*args, **kwargs):
@@ -93,22 +119,16 @@ def test_mod_load_finalizes_images_on_tk(
 
     monkeypatch.setattr(mod_loading, "run_bg", capture_job)
     monkeypatch.setattr(tasks, "add_error", lambda _message: None)
+    progress = FakeProgress()
+    monkeypatch.setattr(mod_loading, "progress_modal", lambda *_args, **_kw: progress)
     monkeypatch.setattr(
         mod_loading, "make_progress", lambda *_args, **_kw: lambda *_a: None
     )
-    widget = Mock()
-    widget.master = app
-    widget._lifecycle = None
-    widget.after = app.after
-    widget.after_cancel = app.after_cancel
-    widget.winfo_exists = app.winfo_exists
-    for name in ("Toplevel", "Label", "Frame"):
-        monkeypatch.setattr(mod_loading.tk, name, lambda *_args, **_kw: widget)
 
     with ThreadPoolExecutor(max_workers=1) as executor:
         if managed:
             app._lifecycle = ApplicationLifecycle(
-                app, executor_factory=lambda: executor
+                cast(Any, app), executor_factory=lambda: executor
             )
         else:
             monkeypatch.setattr(tasks, "get_executor", lambda _owner: executor)
@@ -117,6 +137,7 @@ def test_mod_load_finalizes_images_on_tk(
             assert scanned.wait(5)
             assert finalized_on == []
             if closing:
+                assert app._lifecycle is not None
                 assert app._lifecycle.begin_close()
                 app._lifecycle.finish_close()
                 assert finalized_on == [main_thread]
@@ -130,8 +151,14 @@ def test_mod_load_finalizes_images_on_tk(
                 assert finalized_on == []
                 app.flush()
                 assert app.loaded_roots == ([] if failing else [str(tmp_path)])
-            assert finalized_on == [main_thread]
+                if failing:
+                    assert mod.sprite_imgs.get("old") is not None
+                    assert finalized_on == []
+                else:
+                    assert finalized_on == [main_thread]
+            assert progress.closed
         finally:
             resume.set()
             if managed:
+                assert app._lifecycle is not None
                 app._lifecycle.close()
