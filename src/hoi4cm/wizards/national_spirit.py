@@ -7,6 +7,7 @@
 """National Spirit / Idea builder wizard."""
 
 import copy
+import glob
 import json
 import os
 import re
@@ -39,7 +40,6 @@ from hoi4cm.ui import (
     BORDER_G,
     ORANGE,
     RED,
-    SEL_BG,
     TEXT,
     TEXT_DIM,
     ScrollableDropdown,
@@ -49,8 +49,11 @@ from hoi4cm.ui import (
 from hoi4cm.wizards._generators import build_national_spirit_output
 from hoi4cm.wizards._graphics import browser_folders, collect_image_pairs
 from hoi4cm.wizards._shared import (
+    format_save_summary,
+    make_scrolled_listbox,
     notifying_workspace_files,
     open_trigger_picker,
+    pack_action_footer,
     svar_get,
     text_get,
 )
@@ -1401,20 +1404,10 @@ def open_national_spirit_wizard(app):
                 require_existing=True,
             )
 
-        msg = ""
-        if saved:
-            msg += "Saved:\n" + "\n".join(saved)
-        if warnings:
-            msg += ("\n\n" if msg else "") + "Notes:\n" + "\n".join(warnings)
-        if errs:
-            msg += ("\n\n" if msg else "") + "Errors:\n" + "\n".join(errs)
-        if not msg:
-            msg = "Nothing to save."
+        msg = format_save_summary(saved, warnings, errs)
         messagebox.showinfo("Saved to Mod", msg, parent=win)
 
     def _browse_existing_spirits():
-        import glob as _glob
-
         if not MOD.loaded or not MOD.root:
             messagebox.showinfo(
                 "No Mod Loaded",
@@ -1432,7 +1425,7 @@ def open_national_spirit_wizard(app):
 
         # Scan all .txt files for spirit/idea IDs
         spirits = []  # list of (spirit_id, slot, file_path)
-        for fp in sorted(_glob.glob(os.path.join(ideas_dir, "*.txt"))):
+        for fp in sorted(glob.glob(os.path.join(ideas_dir, "*.txt"))):
             try:
                 src, encoding = read_file_with_encoding(fp)
                 if not src:
@@ -1507,22 +1500,7 @@ def open_national_spirit_wizard(app):
 
         frm_list = tk.Frame(dlg, bg=BG_DARK)
         frm_list.pack(fill="both", expand=True, padx=10)
-        lb = tk.Listbox(
-            frm_list,
-            bg=BG_CARD,
-            fg=TEXT,
-            selectbackground=SEL_BG,
-            selectforeground=TEXT,
-            font=("Courier", 9),
-            relief="flat",
-            highlightthickness=1,
-            highlightbackground=BORDER_G,
-            activestyle="none",
-        )
-        lb_sb = tk.Scrollbar(frm_list, orient="vertical", command=lb.yview)
-        lb.configure(yscrollcommand=lb_sb.set)
-        lb_sb.pack(side="right", fill="y")
-        lb.pack(side="left", fill="both", expand=True)
+        lb = make_scrolled_listbox(frm_list, font=("Courier", 9))
 
         _filtered = list(spirits)
 
@@ -1656,32 +1634,9 @@ def open_national_spirit_wizard(app):
 
         lb.bind("<Double-Button-1>", lambda e: _load_selected())
 
-        bot_dlg = tk.Frame(dlg, bg=BG_DARK, pady=6)
-        bot_dlg.pack(fill="x")
-        tk.Button(
-            bot_dlg,
-            text=tr("common.load_selected", "Load Selected"),
-            command=_load_selected,
-            bg="#14532d",
-            fg="#4ade80",
-            relief="flat",
-            font=("Helvetica", 10, "bold"),
-            padx=16,
-            pady=5,
-            cursor="hand2",
-        ).pack(side="left", padx=10)
-        tk.Button(
-            bot_dlg,
-            text=tr("common.cancel", "Cancel"),
-            command=dlg.destroy,
-            bg=BG_CARD,
-            fg=TEXT,
-            relief="flat",
-            font=("Helvetica", 10),
-            padx=12,
-            pady=5,
-            cursor="hand2",
-        ).pack(side="right", padx=10)
+        pack_action_footer(
+            dlg, tr("common.load_selected", "Load Selected"), _load_selected
+        )
 
     tk.Frame(win, bg=BORDER_G, height=1).pack(fill="x")
     bot = tk.Frame(win, bg=BG_DARK, pady=8)
