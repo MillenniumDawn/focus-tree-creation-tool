@@ -10,6 +10,7 @@ import tkinter as tk
 from copy import deepcopy
 
 import pytest
+from builders import make_focus
 
 import hoi4_content_maker as m
 import hoi4cm.core.logger as logmod
@@ -109,29 +110,6 @@ class _AutosaveHarness:
             self._offset_entries.append((x_var, y_var, trig))
 
 
-def _focus(**overrides) -> Focus:
-    focus = Focus(0, 0)
-    focus.id = overrides.pop("id", 1)
-    focus.name = "keep"
-    focus.icon = "⚔"
-    focus.gfx = "GFX_goal_generic_political_pressure"
-    focus.cost = 10
-    focus.ai_will_do = 1
-    focus.ai_will_do_raw = "base = 1"
-    focus.desc = "desc"
-    focus.search_filters = "FOCUS_FILTER_POLITICAL"
-    focus.available_cond = ""
-    focus.bypass_cond = ""
-    focus.cancel_cond = ""
-    focus.cancel_if_invalid = True
-    focus.continue_if_invalid = False
-    focus.available_if_capitulated = False
-    focus.offsets = []
-    for key, value in overrides.items():
-        setattr(focus, key, value)
-    return focus
-
-
 def _harness_with(root, *focuses: Focus) -> _AutosaveHarness:
     selected = focuses[0]
     h = _AutosaveHarness(root)
@@ -154,7 +132,7 @@ class _MessageBox:
 
 
 def test_autosave_noop_when_form_matches_focus(tk_root, log_state):
-    focus = _focus(desc="unchanged")
+    focus = make_focus(desc="unchanged")
     h = _harness_with(tk_root, focus)
     baseline = h.focuses.revision
     before = deepcopy(focus.to_dict())
@@ -167,7 +145,7 @@ def test_autosave_noop_when_form_matches_focus(tk_root, log_state):
 
 
 def test_autosave_writes_desc_edit_without_touch(tk_root, log_state):
-    focus = _focus(desc="old")
+    focus = make_focus(desc="old")
     h = _harness_with(tk_root, focus)
     baseline = h.focuses.revision
     h._fv_desc.delete("1.0", "end")
@@ -182,7 +160,7 @@ def test_autosave_writes_desc_edit_without_touch(tk_root, log_state):
 
 
 def test_autosave_writes_localized_name_without_touch(tk_root, log_state):
-    focus = _focus(loc_name="Old title")
+    focus = make_focus(loc_name="Old title")
     h = _harness_with(tk_root, focus)
     baseline = h.focuses.revision
     h._fv_loc_name.set("New title")
@@ -195,7 +173,7 @@ def test_autosave_writes_localized_name_without_touch(tk_root, log_state):
 
 
 def test_autosave_name_edit_touches_indexes(tk_root, log_state):
-    focus = _focus(name="old_name")
+    focus = make_focus(name="old_name")
     h = _harness_with(tk_root, focus)
     baseline = h.focuses.revision
     h._fv_name.set("new_name")
@@ -209,7 +187,7 @@ def test_autosave_name_edit_touches_indexes(tk_root, log_state):
 
 
 def test_autosave_position_edit_uses_move_only(tk_root, log_state):
-    focus = _focus(x=0, y=0)
+    focus = make_focus(x=0, y=0)
     h = _harness_with(tk_root, focus)
     baseline = h.focuses.revision
     h._fv_x.set("4")
@@ -224,7 +202,7 @@ def test_autosave_position_edit_uses_move_only(tk_root, log_state):
 
 
 def test_autosave_empty_name_leaves_focus_untouched(tk_root, log_state):
-    focus = _focus(name="keep", desc="stay")
+    focus = make_focus(name="keep", desc="stay")
     h = _harness_with(tk_root, focus)
     baseline = h.focuses.revision
     before = deepcopy(focus.to_dict())
@@ -241,7 +219,7 @@ def test_autosave_empty_name_leaves_focus_untouched(tk_root, log_state):
 
 def test_autosave_float_cost_matches_without_error(tk_root, log_state):
     """Imported non-integral costs must round-trip; int() used to raise."""
-    focus = _focus(cost=7.5)
+    focus = make_focus(cost=7.5)
     h = _harness_with(tk_root, focus)
     baseline = h.focuses.revision
     before = deepcopy(focus.to_dict())
@@ -255,7 +233,7 @@ def test_autosave_float_cost_matches_without_error(tk_root, log_state):
 
 
 def test_autosave_preserves_float_cost_when_other_field_edits(tk_root, log_state):
-    focus = _focus(cost=7.5, desc="old")
+    focus = make_focus(cost=7.5, desc="old")
     h = _harness_with(tk_root, focus)
     h._fv_desc.delete("1.0", "end")
     h._fv_desc.insert("1.0", "new")
@@ -269,7 +247,7 @@ def test_autosave_preserves_float_cost_when_other_field_edits(tk_root, log_state
 
 def test_autosave_applies_valid_fields_when_cost_is_invalid(tk_root, log_state):
     """Invalid cost should not drop other valid edits."""
-    focus = _focus(cost=10, desc="old")
+    focus = make_focus(cost=10, desc="old")
     h = _harness_with(tk_root, focus)
     baseline = h.focuses.revision
     h._fv_cost.set("not-a-number")
@@ -289,7 +267,7 @@ def test_autosave_applies_valid_fields_when_cost_is_invalid(tk_root, log_state):
 
 def test_autosave_applies_valid_fields_when_x_is_invalid(tk_root, log_state):
     """Invalid x should not drop other valid edits."""
-    focus = _focus(x=0, y=0, desc="old")
+    focus = make_focus(x=0, y=0, desc="old")
     h = _harness_with(tk_root, focus)
     baseline = h.focuses.revision
     h._fv_x.set("not-a-number")
@@ -309,7 +287,7 @@ def test_autosave_applies_valid_fields_when_x_is_invalid(tk_root, log_state):
 
 def test_autosave_applies_valid_fields_when_y_is_invalid(tk_root, log_state):
     """Invalid y should not drop other valid edits."""
-    focus = _focus(x=0, y=0, desc="old")
+    focus = make_focus(x=0, y=0, desc="old")
     h = _harness_with(tk_root, focus)
     baseline = h.focuses.revision
     h._fv_y.set("not-a-number")
@@ -328,7 +306,7 @@ def test_autosave_applies_valid_fields_when_y_is_invalid(tk_root, log_state):
 
 
 def test_read_sidebar_values_returns_none_for_blank_name(tk_root):
-    focus = _focus()
+    focus = make_focus()
     h = _harness_with(tk_root, focus)
     h._fv_name.set("")
 
@@ -336,7 +314,7 @@ def test_read_sidebar_values_returns_none_for_blank_name(tk_root):
 
 
 def test_read_sidebar_values_sanitizes_name_and_reads_offsets(tk_root):
-    focus = _focus(offsets=[{"x": 1, "y": 2, "trigger": "tag = A"}])
+    focus = make_focus(offsets=[{"x": 1, "y": 2, "trigger": "tag = A"}])
     h = _harness_with(tk_root, focus)
     h._fv_name.set("Bad Name!")
     h._offset_entries[0][0].set("9")
@@ -349,8 +327,8 @@ def test_read_sidebar_values_sanitizes_name_and_reads_offsets(tk_root):
 
 
 def test_autosave_keeps_position_when_target_cell_occupied(tk_root, log_state):
-    mover = _focus(id=1, name="mover", x=0, y=0, desc="old")
-    blocker = _focus(id=2, name="blocker", x=3, y=4)
+    mover = make_focus(id=1, name="mover", x=0, y=0, desc="old")
+    blocker = make_focus(id=2, name="blocker", x=3, y=4)
     h = _harness_with(tk_root, mover, blocker)
     h._fv_x.set("3")
     h._fv_y.set("4")
@@ -368,7 +346,7 @@ def test_autosave_keeps_position_when_target_cell_occupied(tk_root, log_state):
 
 def test_apply_bad_cost_applies_other_fields_uses_fallback(tk_root, monkeypatch):
     """Invalid cost should not block other valid field edits."""
-    focus = _focus(name="keep", icon="⚔", gfx="GFX_goal_generic_political_pressure")
+    focus = make_focus(name="keep", icon="⚔", gfx="GFX_goal_generic_political_pressure")
     h = _harness_with(tk_root, focus)
     h._fv_name.set("renamed")
     h._fv_icon.set("★")
@@ -386,7 +364,7 @@ def test_apply_bad_cost_applies_other_fields_uses_fallback(tk_root, monkeypatch)
 
 
 def test_apply_empty_name_does_not_push_undo(tk_root, monkeypatch):
-    focus = _focus(name="keep")
+    focus = make_focus(name="keep")
     h = _harness_with(tk_root, focus)
     before = deepcopy(focus.to_dict())
     boxes = _MessageBox()
@@ -401,8 +379,8 @@ def test_apply_empty_name_does_not_push_undo(tk_root, monkeypatch):
 
 
 def test_apply_occupied_position_refuses_all_changes(tk_root, monkeypatch):
-    mover = _focus(id=1, name="mover", x=0, y=0, desc="old")
-    blocker = _focus(id=2, name="blocker", x=5, y=5)
+    mover = make_focus(id=1, name="mover", x=0, y=0, desc="old")
+    blocker = make_focus(id=2, name="blocker", x=5, y=5)
     h = _harness_with(tk_root, mover, blocker)
     before = deepcopy(mover.to_dict())
     boxes = _MessageBox()
@@ -422,7 +400,7 @@ def test_apply_occupied_position_refuses_all_changes(tk_root, monkeypatch):
 
 
 def test_apply_writes_fields_and_moves_when_valid(tk_root, monkeypatch):
-    focus = _focus(name="old", x=0, y=0, desc="old")
+    focus = make_focus(name="old", x=0, y=0, desc="old")
     h = _harness_with(tk_root, focus)
     boxes = _MessageBox()
     monkeypatch.setattr(m, "messagebox", boxes)
