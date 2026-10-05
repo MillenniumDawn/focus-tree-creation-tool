@@ -11,8 +11,11 @@ available; without it ``get_image`` returns ``None`` and the rest of the
 app still works.
 """
 
+from __future__ import annotations
+
 import os
 import re
+import threading
 import time
 from collections.abc import Callable
 from typing import Any
@@ -22,7 +25,11 @@ from hoi4cm.core.config import cfg_load, cfg_save
 from hoi4cm.core.logger import get_logger
 from hoi4cm.core.lru import LRUCache
 from hoi4cm.core.paths import read_file
-from hoi4cm.mod.graphics_catalog import GraphicsCatalog, GraphicsScanConfig
+from hoi4cm.mod.graphics_catalog import (
+    GraphicsCatalog,
+    GraphicsScanConfig,
+    ScanCancelled,
+)
 from hoi4cm.mod.scan_cache import ScanCache
 from hoi4cm.script.syntax import parse_block, parse_script, tokenize
 
@@ -61,6 +68,37 @@ _VARIABLE_RE = re.compile(
 # Block-level keywords that are not decision IDs.
 _DECISION_KEYWORDS = frozenset(
     {"category", "target_trigger", "available", "visible", "modifier", "cost"}
+)
+
+# Fields ``scan()`` rebinds (scalars) or refills (containers). A scan candidate
+# gets its own empty containers, and ``adopt_scan`` moves both groups onto the
+# loaded context.
+_SCAN_SCALARS = (
+    "root",
+    "mod_name",
+    "loaded",
+    "is_md",
+    "md_money_system_file",
+    "md_money_scripted_loc_file",
+    "md_money_yml_file",
+)
+_SCAN_CONTAINERS = (
+    "sprites",
+    "idea_sprites",
+    "decision_sprites",
+    "focus_ids",
+    "event_ids",
+    "idea_ids",
+    "decision_ids",
+    "decision_cats",
+    "scripted_effect_ids",
+    "scripted_trigger_ids",
+    "on_action_ids",
+    "dyn_mod_ids",
+    "character_ids",
+    "country_tags",
+    "variables",
+    "_img_errors",
 )
 
 
@@ -357,7 +395,7 @@ class ModContext:
             return {}
 
     # ── Scanners ─────────────────────────────────────────────────────
-    def _scan_gfx_unified(self):
+    def _scan_gfx_unified(self, cancelled: threading.Event | None = None):
         self.decision_sprites.clear()
         self.idea_sprites.clear()
         root = self.root
@@ -372,6 +410,7 @@ class ModContext:
                 custom_gfx_dirs=tuple(self.custom_gfx_dirs),
             ),
             read_text=self._read,
+            cancelled=cancelled,
         )
         self.sprites.update(maps.sprites)
         self.idea_sprites.update(maps.idea_sprites)
@@ -791,20 +830,54 @@ class ModContext:
         self._img_errors.append(f"LOAD FAILED {gfx_name}: {last_err}")
         return None
 
-    def scan(self, root, progress_cb: Callable | None = None, *, clear_images=True):
-        """Scan *root* and return image refs evicted before scanning.
+    def new_scan_candidate(self) -> ModContext:
+        """Copy scan settings into an isolated context without sharing images."""
+        candidate = type(self).__new__(type(self))
+        candidate.__dict__.update(self.__dict__)
+        for name in _SCAN_CONTAINERS:
+            setattr(candidate, name, type(getattr(self, name))())
+        candidate.sprite_imgs = LRUCache(self.sprite_imgs.maxsize)
+        candidate.graphics_catalog = GraphicsCatalog()
+        # Image brokers compare generations, so the counter must not restart.
+        candidate.graphics_catalog.generation = self.graphics_catalog.generation
+        candidate._cache = None
+        candidate.loaded = False
+        return candidate
 
-        The mod loader runs this method on a worker. Callers must keep the
-        returned values alive until the completion callback runs on Tk.
-        The UI loader evicts on Tk first and passes ``clear_images=False`` so
-        shutdown cannot strand image references in a rejected worker result.
+    def adopt_scan(self, candidate: ModContext) -> list[Any]:
+        """Adopt a completed candidate on Tk and return evicted old images."""
+        if candidate is self or not candidate.loaded or not candidate.root:
+            raise ValueError("cannot adopt an incomplete mod scan")
+        evicted_images = self.sprite_imgs.clear()
+        for name in _SCAN_SCALARS + _SCAN_CONTAINERS:
+            setattr(self, name, getattr(candidate, name))
+        self.graphics_catalog = candidate.graphics_catalog
+        return evicted_images
+
+    def scan(
+        self,
+        root,
+        progress_cb: Callable | None = None,
+        *,
+        cancelled: threading.Event | None = None,
+    ):
+        """Scan *root* in place and return image refs evicted before scanning.
+
+        Callers must keep the returned values alive until they can be released
+        on Tk. The mod loader scans a ``new_scan_candidate()`` on a worker and
+        adopts it on Tk, so a cancelled or failed load never touches the
+        loaded mod or its PhotoImage cache.
+
+        ``cancelled`` is polled between scan steps and during the graphics
+        inventory walk. A cancelled scan returns ``None`` and leaves this
+        context partially scanned, with ``loaded`` False.
         """
+        if cancelled is not None and cancelled.is_set():
+            return None
         self.root = root
         self.mod_name = os.path.basename(root)
         self.sprites.clear()
-        # Direct callers retain removed images for Tk cleanup. UI scans skip
-        # eviction because the lifecycle already owns the old images.
-        evicted_images = self.sprite_imgs.clear() if clear_images else []
+        evicted_images = self.sprite_imgs.clear()
         self._img_errors.clear()
         self.decision_sprites.clear()
         self.focus_ids.clear()
@@ -845,8 +918,11 @@ class ModContext:
             else detected
         )
 
+        def gfx_step() -> None:
+            self._scan_gfx_unified(cancelled)
+
         steps = [
-            ("GFX (sprites/ideas/decisions)", self._scan_gfx_unified),
+            ("GFX (sprites/ideas/decisions)", gfx_step),
             ("Focus IDs", self._scan_national_focus),
             ("Events", self._scan_events),
             ("Ideas/Spirits", self._scan_ideas),
@@ -863,11 +939,15 @@ class ModContext:
         self._cache = ScanCache(root) if self.use_cache else None
         try:
             for i, (label, fn) in enumerate(steps):
+                if cancelled is not None and cancelled.is_set():
+                    return None
                 if progress_cb:
                     progress_cb(i, len(steps), label)
                 t0 = time.perf_counter()
                 try:
                     fn()
+                except ScanCancelled:
+                    return None
                 except (OSError, ValueError, RuntimeError, TypeError) as exc:
                     _log.warning("scan step %s failed: %s", label, exc, exc_info=True)
                 _log.debug(
@@ -878,6 +958,8 @@ class ModContext:
                 self._cache.close()
                 self._cache = None
 
+        if cancelled is not None and cancelled.is_set():
+            return None
         self.loaded = True
         if progress_cb:
             progress_cb(len(steps), len(steps), "Done")

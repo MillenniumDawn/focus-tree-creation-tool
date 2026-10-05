@@ -1,6 +1,8 @@
 name: Pre-release
 
-# Every push to main becomes a GitHub prerelease carrying the three binaries.
+# Every push to main becomes a GitHub prerelease carrying the three binaries,
+# once the CI run for that commit has passed (the gate job). A commit that fails
+# lint or tests publishes nothing.
 # The version is the odd minor above the current stable one, with the Actions
 # run number as the patch; see prerelease_identity in scripts/versioning.py.
 
@@ -93,8 +95,37 @@ jobs:
           name: ${{ matrix.artifact_name }}
           path: ${{ matrix.artifact_name }}
 
+  # CI starts on the same push, so its run may not exist yet: look for it for up
+  # to five minutes, then wait for it to finish. --branch main leaves out the CI
+  # run a v* tag push starts on the same commit. Anything but success (failed,
+  # cancelled, skipped) fails the job. Re-running this workflow looks up the run
+  # again, so it picks up a CI re-run that has since passed.
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      actions: read
+      # Watching a run reads its job annotations through the checks API.
+      checks: read
+    steps:
+      - name: Wait for CI to pass on this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # Nothing is checked out here, so gh needs the repository named.
+          GH_REPO: ${{ github.repository }}
+        run: |
+          for _ in $(seq 30); do
+            run_id=$(gh run list --workflow ci.yml --branch main --event push \
+              --commit "$GITHUB_SHA" --limit 1 --json databaseId \
+              --jq '.[0].databaseId // empty')
+            [ -n "$run_id" ] && break
+            sleep 10
+          done
+          [ -n "$run_id" ] || { echo "::error::No CI run for $GITHUB_SHA"; exit 1; }
+          gh run watch "$run_id" --interval 30 --exit-status
+
   publish:
-    needs: [version, build]
+    needs: [version, build, gate]
     runs-on: ubuntu-latest
     permissions:
       contents: write

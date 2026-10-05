@@ -6,6 +6,7 @@
 
 """National Spirit / Idea builder wizard."""
 
+import copy
 import json
 import os
 import re
@@ -113,6 +114,13 @@ def collect_national_spirit_state(svars, text_widgets, modifiers):
     }
 
 
+def spirit_autosave_snapshot(values, modifiers):
+    """Return a detached autosave payload from collected scalar values."""
+    data = copy.deepcopy(values)
+    data["modifiers"] = copy.deepcopy(modifiers)
+    return data
+
+
 def open_national_spirit_wizard(app):
     """Visual National Spirit / Idea builder with searchable modifier cards."""
     win = tk.Toplevel(app)
@@ -123,6 +131,8 @@ def open_national_spirit_wizard(app):
     win.grab_set()
 
     # ── Auto-save on close ─────────────────────────────────────────────
+    # Snapshot (detached copy) and the JSON write live in the module-level
+    # helpers above; this closure only schedules the worker thread.
     _sp_autosave = autosave_path("national_spirit.json")
 
     def _spirit_autosave(data):
@@ -135,8 +145,10 @@ def open_national_spirit_wizard(app):
             )
 
     def _on_spirit_close():
-        data = {k: v.get() for k, v in _spirit_svars.items() if hasattr(v, "get")}
-        data["modifiers"] = spirit_modifiers[:]
+        values = {
+            key: var.get() for key, var in _spirit_svars.items() if hasattr(var, "get")
+        }
+        data = spirit_autosave_snapshot(values, spirit_modifiers)
         threading.Thread(target=_spirit_autosave, args=(data,), daemon=True).start()
         win.destroy()
 
