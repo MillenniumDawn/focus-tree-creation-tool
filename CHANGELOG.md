@@ -8,6 +8,7 @@ the version by hand. See `AGENTS.md`.
 
 ## Unreleased
 
+- Add Spanish (Español) as an interface language.
 - Add a Cancel button to mod loading. The scan fills an isolated candidate, so a
   cancelled, failed, or superseded load leaves the loaded mod and its cached
   images in place. Adoption no longer writes the replaced scan cache on Tk.
