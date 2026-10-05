@@ -10,6 +10,9 @@ the version by hand. See `AGENTS.md`.
 
 - Wait for the progress modal to be mapped before taking its Tk grab, so it no
   longer fails with "grab failed: window not viewable" on a live display.
+- Read and scan the localisation file in the validation worker instead of on the
+  UI thread, and validate a detached snapshot that keeps the position index.
+  Treat a localisation file removed before the worker reads it as unavailable.
 - Scope the Windows-only cache DACL code by platform so the Linux mypy gate passes.
 - Release cached Tk images on the Tk thread after mod-scan completion or app close.
 - Point handled-error dialogs to Settings -> SESSION LOG -> Open Full Log Window
