@@ -62,7 +62,9 @@
   `gfx_browser.py` (the universal GFX picker, the drag-to-place GFX
   editor, and the sidebar's narrower focus-icon picker, see
   `monolith-migration.md` for why there are two GFX browsers instead of
-  one), `settings_dialog.py` (`open_settings`), `menubar.py`/`toolbar.py`
+  one; plus `open_folder_gfx_browser`, the folder-list picker behind the
+  spirit, event and dynamic-modifier wizards' picture fields),
+  `settings_dialog.py` (`open_settings`), `menubar.py`/`toolbar.py`
   (`build_menubar`/`build_toolbar_row2`, the one-shot builders behind
   `App`'s top bar), `tutorial.py` (the first-launch teaching controller
   and widget highlights; it drives preview-only dropdowns through

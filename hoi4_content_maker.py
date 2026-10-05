@@ -3563,10 +3563,6 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
 
         win.after(50, se.focus_set)
 
-    def _toggle_connect(self):
-        """Legacy stub — no longer used for drag-line connect. Kept for safety."""
-        self._pick_prereq()
-
     def _make_prereq(self, child, parent):
         for g in child.prereqs:
             if parent.id in g:

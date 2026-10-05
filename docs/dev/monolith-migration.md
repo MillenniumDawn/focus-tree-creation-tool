@@ -141,10 +141,10 @@
 What's left in `hoi4_content_maker.py` today is essentially: the `sys.path`
 shim and import block (lines ~40-166), two Windows-DPI helpers (~172-222),
 and `class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk)`
-(~223-6430, 138 methods, most bodies much smaller now), plus the
+(~223-6426, 137 methods, most bodies much smaller now), plus the
 `__main__` entry point (`--smoke-test` routes to
 `ui/startup_check.py`'s `check_tk_startup`) that calls
-`show_splash(_launch)`. Those 138 methods group into:
+`show_splash(_launch)`. Those 137 methods group into:
 
 - **Sidebar** (still deferred, see below): `_build_sidebar`,
   `_build_sidebar_props`, `_build_sidebar_conditions`, `_build_sidebar_code`,
@@ -169,7 +169,7 @@ and `class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk)`
   `_new_focus_at`, `_apply`, `_delete_focus`, `_delete_selected`,
   `_key_delete`, `_clear_all`, `_toggle_multisel`, `_select_all_focuses`,
   `_duplicate_focus`, `_on_icon_change`.
-- **Prereq/mutex picking**: `_pick_prereq`, `_toggle_connect`,
+- **Prereq/mutex picking**: `_pick_prereq`,
   `_make_prereq`, `_rm_prereq`, `_toggle_mutex`, `_end_mutex`, `_make_mutex`,
   `_rm_mutex`, `_refresh_prereqs`, `_refresh_mutex`, `_ref_name` (resolves
   row targets through `self.focuses`).

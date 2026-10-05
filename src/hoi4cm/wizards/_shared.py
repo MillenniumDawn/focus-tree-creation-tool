@@ -70,8 +70,6 @@ def text_get(widget, default=""):
 
 
 # ── Shared list-dialog helpers ────────────────────────────────────
-# The "browse mod files" dialogs share a themed listbox with a scrollbar, a
-# green action button next to Cancel, and the "Saved to Mod" message body.
 
 
 def make_scrolled_listbox(parent, **options):

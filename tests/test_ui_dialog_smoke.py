@@ -96,7 +96,7 @@ def _make_fake_app_for_chrome(tk_root: tk.Tk, monkeypatch: pytest.MonkeyPatch) -
         "_show_post_load_prompt",
         "_open_settings",
         "_add_focus",
-        "_toggle_connect",
+        "_pick_prereq",
         "_toggle_mutex",
         "_toggle_multisel",
         "_clear_all",
