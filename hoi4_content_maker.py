@@ -1,7 +1,7 @@
 # =================================================================
 #  Content Maker for Hearts of Iron 4
 #  HOI4 Content Maker
-#  Version 2.0  |  Millennium Dawn Team
+#  Millennium Dawn Team
 # =================================================================
 #
 #  COPYRIGHT NOTICE

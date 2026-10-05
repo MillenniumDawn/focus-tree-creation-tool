@@ -8,6 +8,9 @@ the version by hand. See `AGENTS.md`.
 
 ## Unreleased
 
+- Stamp pre-release build versions into the package and Windows metadata, reject
+  stable tags that differ from the project version before building, and remove
+  the stale version banner from the launcher.
 - Wait for the progress modal to be mapped before taking its Tk grab, so it no
   longer fails with "grab failed: window not viewable" on a live display.
 - Add Spanish (Español) as an interface language.

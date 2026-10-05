@@ -110,9 +110,19 @@ jobs:
         with:
           python-version: "3.14"
 
+      - name: Check the release tag
+        if: >
+          startsWith(github.ref, 'refs/tags/v')
+          && !contains(github.ref_name, '-pre.')
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: python scripts/versioning.py check-release-tag "$RELEASE_TAG"
+
       - name: Install tkinter (Linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y python3-tk xvfb xauth
+        run: >
+          sudo apt-get update &&
+          sudo apt-get install -y python3-tk xvfb xauth
 
       - name: Install build dependencies
         # Hash-pinned closure of the `build` extra (build/requirements.txt).
@@ -130,8 +140,10 @@ jobs:
       - name: Smoke-test executable
         run: >
           python -c "import os, subprocess, sys;
-          command = [os.path.abspath('${{ matrix.artifact_name }}'), '--smoke-test'];
-          command = ['xvfb-run', '-a', *command] if sys.platform == 'linux' else command;
+          command =
+          [os.path.abspath('${{ matrix.artifact_name }}'), '--smoke-test'];
+          command = ['xvfb-run', '-a', *command]
+          if sys.platform == 'linux' else command;
           subprocess.run(command, check=True, timeout=60)"
 
       - name: Upload artifact
@@ -155,19 +167,6 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
-
-      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
-        # v6.3.0
-        with:
-          python-version: "3.14"
-
-      # Releases live on the even minors; the odd minor above each one is the
-      # pre-release line. Fail rather than publish a hand-pushed tag that lands
-      # on it.
-      - name: Check the release tag
-        env:
-          RELEASE_TAG: ${{ github.ref_name }}
-        run: python scripts/versioning.py check-release-tag "$RELEASE_TAG"
 
       - name: Download all artifacts
         uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53

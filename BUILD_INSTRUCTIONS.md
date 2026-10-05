@@ -81,8 +81,8 @@ run directly instead.
 `main`. It also builds and smoke-tests executables on Windows, macOS, and Linux.
 When a stable `vX.Y.Z` tag is pushed, CI runs the same checks and builds, then
 publishes a GitHub Release with the three executables and `SHA256SUMS.txt`.
-Stable release tags must use an even minor version; CI rejects tags on the odd
-pre-release line and skips tags ending in `-pre.<attempt>`.
+Stable release tags must match `pyproject.toml` and use an even minor version.
+CI checks this before building and skips tags ending in `-pre.<attempt>`.
 
 Stable releases are prepared by the release pull request workflow, not by
 committing a tag or changing version files by hand. On pushes to `main`,
@@ -101,7 +101,11 @@ The release pull request workflow can also be run manually with a `patch`,
 prerelease with the three executables and checksums. That workflow can be run
 manually as well. Pre-release versions use the odd minor above the current
 stable version, with the GitHub Actions run number as the patch; their tags end
-in `-pre.<attempt>` and are not published by the stable release job.
+in `-pre.<attempt>` and are not published by the stable release job. Before
+compiling, `python scripts/versioning.py stamp-prerelease` writes that numeric
+version into the temporary CI checkout's version sources, including Windows
+executable metadata. Only the Git tag carries the attempt suffix; the committed
+stable version and changelog are unchanged.
 
 ## macOS notes
 
