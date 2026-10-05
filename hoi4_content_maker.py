@@ -56,6 +56,8 @@ from hoi4cm.core import (  # noqa: E402
     build_drawio_focuses,
     build_focus_name_lookup,
     build_focuses,
+    capture_validation_snapshot,
+    collect_loc_keys_from_file,
     drawio_to_focus_data,
     execute_export_plans,
     get_error_entries,
@@ -68,13 +70,14 @@ from hoi4cm.core import (  # noqa: E402
     make_main_export_plan,
     parse_drawio_graph,
     parse_focus_tree,
-    read_file,
     read_file_with_encoding,
     render_focus_block,
     safe_join,
     sanitize_component,
     set_error_callback,
     tr,
+    validate_document,
+    worst_severity_per_focus,
 )
 from hoi4cm.editor import (  # noqa: E402
     choose_project_save_path,
@@ -86,11 +89,6 @@ from hoi4cm.editor import (  # noqa: E402
     write_project,
 )
 from hoi4cm.focus_tree import FocusTreeParseBudgetExceeded  # noqa: E402
-from hoi4cm.focus_tree.validate import (  # noqa: E402
-    collect_loc_keys_from_text,
-    validate_document,
-    worst_severity_per_focus,
-)
 from hoi4cm.mod import (  # noqa: E402
     DEFAULT_FOCUS_ICON,
     MOD,
@@ -1045,15 +1043,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         return None
 
     def _validation_loc_keys(self):
-        path = getattr(MOD, "edit_loc_file", "")
-        if path and os.path.isfile(path):
-            try:
-                text = read_file(path)
-                keys = collect_loc_keys_from_text(text)
-                return keys
-            except Exception:
-                return None
-        return None
+        return collect_loc_keys_from_file(getattr(MOD, "edit_loc_file", ""))
 
     def _schedule_validation(self):
         if getattr(self, "_validation_job", None):
@@ -1064,22 +1054,23 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             self._run_validation()
 
     def _run_validation(self):
-        """Validate the document on a worker thread; apply results in on_done.
+        """Validate a dispatch-time snapshot in a worker and apply its result on Tk.
 
-        sprites/loc_keys gathering stays on the Tk thread (it only reads
-        ``MOD`` and disk, not widgets, but is captured before dispatch same
-        as ``self.focuses``) so the worker only ever sees plain snapshots.
-        ``lifecycle.begin`` invalidates any older "validation"-scoped run
-        still in flight, so a stale result never overwrites a newer one.
+        Localisation I/O runs in ``work``. Starting a new validation run
+        invalidates any older result in the ``validation`` lifecycle scope.
         """
         self._validation_job = None
         self._lifecycle.begin("validation")
         sprites = self._validation_sprites()
-        loc_keys = self._validation_loc_keys()
-        focuses = dict(self.focuses)
+        loc_path = getattr(MOD, "edit_loc_file", "")
+        snapshot = capture_validation_snapshot(self.focuses)
 
         def work():
-            return validate_document(focuses, sprites=sprites, loc_keys=loc_keys)
+            return validate_document(
+                snapshot,
+                sprites=sprites,
+                loc_keys=collect_loc_keys_from_file(loc_path),
+            )
 
         run_bg(self, work, self._apply_validation_result, scope="validation")
 

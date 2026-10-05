@@ -28,6 +28,8 @@ from hoi4cm.focus_tree import (
     build_focus_name_lookup,
     build_focuses,
     build_loc_yml,
+    capture_validation_snapshot,
+    collect_loc_keys_from_file,
     drawio_to_focus_data,
     execute_export_plans,
     export_focus_tree,
@@ -40,6 +42,8 @@ from hoi4cm.focus_tree import (
     parse_focus_tree,
     render_export_plan,
     render_focus_block,
+    validate_document,
+    worst_severity_per_focus,
 )
 from hoi4cm.models import Focus
 from hoi4cm.script import (
@@ -111,9 +115,11 @@ __all__ = [
     "build_focus_name_lookup",
     "build_focuses",
     "build_loc_yml",
+    "capture_validation_snapshot",
     "cfg_load",
     "cfg_save",
     "clear_errors",
+    "collect_loc_keys_from_file",
     "default_hoi4_mod_dir",
     "dict_to_raw",
     "drawio_to_focus_data",
@@ -149,4 +155,6 @@ __all__ = [
     "set_language",
     "tr",
     "triggers_in_cat",
+    "validate_document",
+    "worst_severity_per_focus",
 ]
