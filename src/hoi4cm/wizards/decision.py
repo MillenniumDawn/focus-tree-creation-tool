@@ -204,6 +204,90 @@ def dedup_decision_state(cats, decs):
     return (unique_cats, kept_decs)
 
 
+def new_category_record() -> dict[str, object]:
+    """Return a fresh wizard category record with default fields."""
+    return dict(
+        uid=str(uuid.uuid4()),
+        cat_id="TAG_my_category",
+        loc_name="My Category",
+        loc_desc="",
+        icon="",
+        picture="",
+        allowed="",
+        visible="",
+        priority="1",
+        visible_when_empty=False,
+        on_map_area=False,
+        map_state="123",
+        map_name="my_map_area",
+        map_zoom="850",
+        map_trigger="",
+        scripted_gui="",
+        highlight_states="",
+        _extras=[],
+    )
+
+
+def new_decision_record(cat_uid: object = "") -> dict[str, object]:
+    """Return a fresh wizard decision record linked to ``cat_uid``."""
+    if not isinstance(cat_uid, str):
+        cat_uid = ""
+    return dict(
+        uid=str(uuid.uuid4()),
+        cat_uid=cat_uid,
+        dec_id="TAG_my_decision",
+        loc_name="My Decision",
+        loc_desc="",
+        icon="",
+        allowed="",
+        visible="",
+        available="",
+        cost_type="pp",
+        cost="25",
+        custom_cost_trigger="",
+        custom_cost_text="",
+        ai_hint_pp_cost="",
+        cost_var="",
+        cost_amount="",
+        days_remove="",
+        days_re_enable="",
+        fire_only_once=False,
+        fixed_random_seed=True,
+        is_mission=False,
+        mission_timeout="100",
+        selectable_mission=True,
+        is_good=False,
+        activation="",
+        timeout_effect="",
+        war_with_on_timeout="",
+        targeted="none",
+        targets="",
+        targets_dynamic=False,
+        target_non_existing=False,
+        target_array="",
+        target_trigger="",
+        target_root_trigger="",
+        state_target_scope="yes",
+        on_map_mode="map_and_decisions_view",
+        war_complete_tag="",
+        war_remove_tag="",
+        war_target_complete=False,
+        war_target_remove=False,
+        complete_effect="",
+        remove_effect="",
+        cancel_effect="",
+        cancel_trigger="",
+        cancel_if_not_visible=False,
+        modifier="",
+        remove_trigger="",
+        ai_will_do="base = 0",
+        priority="1",
+        chain="",
+        highlight_states="",
+        _extras=[],
+    )
+
+
 def open_decision_wizard(app):
     """HOI4 Decision / Decision Category maker — matches mockup layout."""
     win = tk.Toplevel(app)
@@ -309,93 +393,8 @@ def open_decision_wizard(app):
     dm_cats = []
     dm_decs = []
     sel: dict[str, object] = {"uid": None, "type": None}
-    _uid_n = [0]
     _decision_import_source = None
     _category_import_source = None
-
-    def _uid():
-        _uid_n[0] += 1
-        return f"dm_{_uid_n[0]}"
-
-    def _new_cat():
-        return dict(
-            uid=_uid(),
-            cat_id="TAG_my_category",
-            loc_name="My Category",
-            loc_desc="",
-            icon="",
-            picture="",
-            allowed="",
-            visible="",
-            priority="1",
-            visible_when_empty=False,
-            on_map_area=False,
-            map_state="123",
-            map_name="my_map_area",
-            map_zoom="850",
-            map_trigger="",
-            scripted_gui="",
-            highlight_states="",
-            _extras=[],
-        )
-
-    def _new_dec(cat_uid: object = ""):
-        if not isinstance(cat_uid, str):
-            cat_uid = ""
-        return dict(
-            uid=_uid(),
-            cat_uid=cat_uid,
-            dec_id="TAG_my_decision",
-            loc_name="My Decision",
-            loc_desc="",
-            icon="",
-            allowed="",
-            visible="",
-            available="",
-            cost_type="pp",
-            cost="25",
-            custom_cost_trigger="",
-            custom_cost_text="",
-            ai_hint_pp_cost="",
-            cost_var="",
-            cost_amount="",
-            days_remove="",
-            days_re_enable="",
-            fire_only_once=False,
-            fixed_random_seed=True,
-            is_mission=False,
-            mission_timeout="100",
-            selectable_mission=True,
-            is_good=False,
-            activation="",
-            timeout_effect="",
-            war_with_on_timeout="",
-            targeted="none",
-            targets="",
-            targets_dynamic=False,
-            target_non_existing=False,
-            target_array="",
-            target_trigger="",
-            target_root_trigger="",
-            state_target_scope="yes",
-            on_map_mode="map_and_decisions_view",
-            war_complete_tag="",
-            war_remove_tag="",
-            war_target_complete=False,
-            war_target_remove=False,
-            complete_effect="",
-            remove_effect="",
-            cancel_effect="",
-            cancel_trigger="",
-            cancel_if_not_visible=False,
-            modifier="",
-            remove_trigger="",
-            ai_will_do="base = 0",
-            priority="1",
-            chain="",
-            highlight_states="",
-            _extras=[],
-        )
 
     # ── helpers ──────────────────────────────────────────────────────────────
     def _get_cat(uid):
@@ -912,7 +911,7 @@ def open_decision_wizard(app):
         tk.Label(f, text=text, bg=bg, fg=fg, font=("Courier", 8), padx=4, pady=0).pack()
 
     def _add_cat():
-        c = _new_cat()
+        c = new_category_record()
         dm_cats.append(c)
         sel["uid"] = c["uid"]
         sel["type"] = "cat"
@@ -929,7 +928,7 @@ def open_decision_wizard(app):
         if not cat_uid:
             messagebox.showwarning("No Category", "Add a category first.", parent=win)
             return
-        d = _new_dec(cat_uid)
+        d = new_decision_record(cat_uid)
         dm_decs.append(d)
         sel["uid"] = d["uid"]
         sel["type"] = "dec"
@@ -4133,7 +4132,7 @@ def open_decision_wizard(app):
                 dm_cats.clear()
                 dm_decs.clear()
                 for cat_name, cat_inner, _ in decision_blocks:
-                    c = _new_cat()
+                    c = new_category_record()
                     c["cat_id"] = cat_name
                     c["loc_name"] = cat_name  # preserve existing loc name if we can
                     # try to keep existing loc_name if cat already existed
@@ -4177,7 +4176,7 @@ def open_decision_wizard(app):
                     dm_cats.append(c)
 
                     for dec_name, dec_inner, _ in find_blocks(cat_inner):
-                        d = _new_dec(c["uid"])
+                        d = new_decision_record(c["uid"])
                         d["dec_id"] = dec_name
                         d["loc_name"] = dec_name
                         existing_dec = next(
@@ -4695,7 +4694,7 @@ def open_decision_wizard(app):
             for cat_name, cat_inner, _ in find_blocks(raw):
                 if cat_name in ("add_namespace", "namespace"):
                     continue
-                c = _new_cat()
+                c = new_category_record()
                 c["cat_id"] = cat_name
                 c["loc_name"] = loc.get(cat_name, cat_name)
                 c["loc_desc"] = loc.get(cat_name + "_desc", "")
@@ -4752,7 +4751,7 @@ def open_decision_wizard(app):
                 dm_cats.append(c)
 
                 for dec_name, dec_inner, _ in find_blocks(cat_inner):
-                    d = _new_dec(c["uid"])
+                    d = new_decision_record(c["uid"])
                     d["dec_id"] = dec_name
                     d["loc_name"] = loc.get(dec_name, dec_name)
                     d["loc_desc"] = loc.get(dec_name + "_desc", "")
