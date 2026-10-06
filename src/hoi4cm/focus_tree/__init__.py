@@ -29,6 +29,7 @@ from .loc import (
     LocTarget,
     build_loc_yml,
     hydrate_focus_localization,
+    parse_loc_values,
 )
 from .operations import (
     build_focus_name_lookup,
@@ -79,6 +80,7 @@ __all__ = [
     "checked_focus_names",
     "focus_identifier",
     "hydrate_focus_localization",
+    "parse_loc_values",
     "LOC_LANGUAGE_NAMES",
     "LocTarget",
     "EmptyDrawioGraphError",

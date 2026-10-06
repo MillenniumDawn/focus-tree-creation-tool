@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import json
 import tkinter as tk
 
 import pytest
@@ -74,12 +75,12 @@ def _labels(root: tk.Misc) -> list[str]:
     return found
 
 
-def _code_texts(root: tk.Misc) -> list[tk.Text]:
+def _code_texts(root: tk.Misc, bg="#080b10") -> list[tk.Text]:
     found = []
     stack: list[tk.Misc] = [root]
     while stack:
         cur = stack.pop()
-        if isinstance(cur, tk.Text) and cur.cget("bg") == "#080b10":
+        if isinstance(cur, tk.Text) and cur.cget("bg") == bg:
             found.append(cur)
         stack.extend(cur.winfo_children())  # type: ignore[union-attr]
     return found
@@ -274,6 +275,121 @@ def test_spirit_save_preserves_existing_blocks_and_localisation(
     assert "already exists" in messages[1]
     assert "Localisation keys already present" in messages[1]
     assert "Errors:" not in messages[1]
+    _cleanup(tk_root)
+
+
+@pytest.mark.parametrize("version", ["", "0"])
+@pytest.mark.parametrize(
+    ("title", "description"),
+    [
+        ("Raw title", "Raw description"),
+        ('A "quoted" name', 'A "quoted" description\\path\n§YColored§!'),
+    ],
+)
+def test_spirit_raw_save_roundtrips_localisation_and_preserves_override(
+    tk_root, tmp_path, version, title, description
+):
+    root = tmp_path / "mod"
+    ideas_path = root / "common" / "ideas" / "existing.txt"
+    loc_path = root / "localisation" / "english" / "existing_l_english.yml"
+    ideas_path.parent.mkdir(parents=True)
+    loc_path.parent.mkdir(parents=True)
+    ideas_path.write_text("ideas = {\n\tcountry = {\n\t}\n}\n", encoding="utf-8")
+    loc_before = 'l_english:\n OTHER_spirit:0 "Existing spirit"\n'
+    loc_path.write_text(loc_before, encoding="utf-8-sig")
+    MOD.loaded = True
+    MOD.root = str(root)
+    MOD.edit_ideas_file = str(ideas_path)
+    MOD.edit_loc_file = str(loc_path)
+
+    spirit_mod.open_national_spirit_wizard(tk_root)
+    previews = _code_texts(tk_root, "#0d1117")
+    assert len(previews) == 1
+    preview = previews[0]
+    raw = preview.get("1.0", "end").strip()
+    raw = raw.replace(
+        'TAG_my_spirit: "My National Spirit"',
+        f"TAG_my_spirit:{version} {json.dumps(title, ensure_ascii=False)}",
+    ).replace(
+        'TAG_my_spirit_desc: "A spirit granting special bonuses."',
+        f"TAG_my_spirit_desc:{version} {json.dumps(description, ensure_ascii=False)}",
+    )
+    raw = raw.replace(
+        "TAG_my_spirit = {", 'TAG_my_spirit = {\n\t\t\tcustom_field = "kept"'
+    )
+    edit = _button_by_text(tk_root, "Edit")
+    assert edit is not None
+    edit.invoke()
+    preview.delete("1.0", "end")
+    preview.insert("1.0", raw)
+    save_raw = _button_by_text(tk_root, "Save Raw")
+    assert save_raw is not None
+    save_raw.invoke()
+
+    assert _entries_by_value(tk_root, title)
+    assert _entries_by_value(tk_root, description)
+    assert preview.get("1.0", "end").strip() == raw
+    assert preview.cget("state") == "disabled"
+    save_mod = _button_by_text(tk_root, "Save to Mod")
+    assert save_mod is not None
+    save_mod.invoke()
+
+    localisation = loc_path.read_text(encoding="utf-8-sig")
+    assert localisation.startswith(loc_before)
+    values = {
+        key: json.loads(value)
+        for line in localisation.splitlines()[2:]
+        for key, value in [line.strip().split(": ", 1)]
+    }
+    assert values == {"TAG_my_spirit": title, "TAG_my_spirit_desc": description}
+    assert 'custom_field = "kept"' in ideas_path.read_text(encoding="utf-8")
+    assert preview.get("1.0", "end").strip() == raw
+    _cleanup(tk_root)
+
+
+@pytest.mark.parametrize("failed_target", ["ideas", "localisation"])
+def test_spirit_save_reports_directory_failure(
+    tk_root, tmp_path, monkeypatch, failed_target
+):
+    root = tmp_path / "mod"
+    ideas_path = root / "common" / "ideas" / "existing.txt"
+    loc_path = root / "localisation" / "english" / "existing_l_english.yml"
+    ideas_path.parent.mkdir(parents=True)
+    loc_path.parent.mkdir(parents=True)
+    ideas_before = b"ideas = { country = { } }\n"
+    loc_before = b"l_english:\n"
+    ideas_path.write_bytes(ideas_before)
+    loc_path.write_bytes(loc_before)
+    MOD.loaded = True
+    MOD.root = str(root)
+    MOD.edit_ideas_file = str(ideas_path)
+    MOD.edit_loc_file = str(loc_path)
+    failed_path = ideas_path if failed_target == "ideas" else loc_path
+    mkdir = spirit_mod.os.makedirs
+
+    def fail_directory(path, **kwargs):
+        if path == str(failed_path.parent):
+            raise PermissionError("read-only directory")
+        return mkdir(path, **kwargs)
+
+    monkeypatch.setattr(spirit_mod.os, "makedirs", fail_directory)
+    messages = []
+    monkeypatch.setattr(
+        "tkinter.messagebox.showinfo",
+        lambda _title, message, **_kwargs: messages.append(message),
+    )
+    spirit_mod.open_national_spirit_wizard(tk_root)
+    save_mod = _button_by_text(tk_root, "Save to Mod")
+    assert save_mod is not None
+    save_mod.invoke()
+
+    assert len(messages) == 1
+    assert "Errors:" in messages[0]
+    assert "read-only directory" in messages[0]
+    if failed_target == "ideas":
+        assert ideas_path.read_bytes() == ideas_before
+    else:
+        assert loc_path.read_bytes() == loc_before
     _cleanup(tk_root)
 
 

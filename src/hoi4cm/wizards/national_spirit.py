@@ -25,6 +25,7 @@ from hoi4cm.core import (
     get_logger,
     modifiers_in_cat,
     newline_style,
+    parse_loc_values,
     read_file_with_encoding,
     sanitize_component,
     tr,
@@ -223,9 +224,7 @@ def open_national_spirit_wizard(app):
         anchor="w",
     ).pack(side="left")
     _edit_mode = [False]  # True while preview text box is editable
-    _raw_override = [
-        None
-    ]  # if not None, Copy/Save use this raw string instead of _build_output
+    _raw_override: list[str | None] = [None]
 
     _edit_btn = tk.Button(
         prev_hdr,
@@ -458,7 +457,11 @@ def open_national_spirit_wizard(app):
 
     # ── Idea GFX picker row  (identical UX to focus GFX picker) ──
     def _open_idea_gfx_browser():
-        ideas_root = os.path.join(MOD.root, MOD.path_ideas_gfx) if MOD.loaded else None
+        ideas_root = (
+            os.path.join(MOD.root, MOD.path_ideas_gfx)
+            if MOD.loaded and MOD.root
+            else None
+        )
         catalog = (
             MOD.graphics_catalog if ideas_root and os.path.isdir(ideas_root) else None
         )
@@ -735,7 +738,7 @@ def open_national_spirit_wizard(app):
 
         def _decode_image(item):
             idx, path = item
-            if not PIL_OK or not os.path.exists(path):
+            if not PIL_OK or PILImage is None or not os.path.exists(path):
                 return None
             with PILImage.open(path) as source:
                 pil = source.convert("RGBA")
@@ -767,12 +770,12 @@ def open_national_spirit_wizard(app):
                 for i in (visible + ahead)
                 if _st["pairs"][i][1] not in _st["img_cache"]
             ]
-            if to_load:
+            if to_load and PILImageTk is not None:
                 snap = list(_st["pairs"])
                 image_loader.submit_many(
                     ((i, snap[i][1]) for i in to_load if i < len(snap)),
                     _decode_image,
-                    realizer=lambda pil: PILImageTk.PhotoImage(pil),
+                    realizer=PILImageTk.PhotoImage,
                     apply=_apply_image,
                 )
 
@@ -1351,18 +1354,15 @@ def open_national_spirit_wizard(app):
         loc_lines = txt.splitlines()[loc_idx:] if loc_idx else []
 
         # Localisation scalars
-        for ln in loc_lines:
-            m = re.match(r'^\s+(\S+?)(?::\d+)?\s+"(.*)"', ln)
-            if m:
-                key, val = m.group(1), m.group(2)
-                if key.endswith("_desc"):
-                    if val != v_loc_desc.get():
-                        v_loc_desc.set(val)
-                        changes.append(f"Description → {val!r}")
-                else:
-                    if val != v_loc_name.get():
-                        v_loc_name.set(val)
-                        changes.append(f"Display name → {val!r}")
+        for key, val in parse_loc_values("\n".join(loc_lines)).items():
+            if key.endswith("_desc"):
+                if val != v_loc_desc.get():
+                    v_loc_desc.set(val)
+                    changes.append(f"Description → {val!r}")
+            else:
+                if val != v_loc_name.get():
+                    v_loc_name.set(val)
+                    changes.append(f"Display name → {val!r}")
 
         # Walk the ideas block with a state machine
         state = "top"
@@ -1606,11 +1606,11 @@ def open_national_spirit_wizard(app):
                 return
             ideas_path = os.path.join(mod_root, "common", "ideas", f"{sid}.txt")
 
-        os.makedirs(os.path.dirname(ideas_path), exist_ok=True)
         wf = notifying_workspace_files(MOD, mod_root)
 
         # ── SAFE APPEND to ideas file ─────────────────────────────────────
         try:
+            os.makedirs(os.path.dirname(ideas_path), exist_ok=True)
             selected_ideas = bool(MOD.edit_ideas_file)
             file_exists = os.path.isfile(ideas_path)
             if selected_ideas and not file_exists:
@@ -1699,8 +1699,8 @@ def open_national_spirit_wizard(app):
                 loc_target.dirname(),
                 loc_target.filename(sid),
             )
-        os.makedirs(os.path.dirname(loc_path), exist_ok=True)
         try:
+            os.makedirs(os.path.dirname(loc_path), exist_ok=True)
             new_entries = {sid: loc_n, f"{sid}_desc": loc_d}
             existing_keys = set()
             loc_encoding = "utf-8-sig"
@@ -1935,7 +1935,7 @@ def open_national_spirit_wizard(app):
                     raise OSError("ideas file could not be read")
                 parsed = parse_script(src)
                 ideas = parsed.get("ideas", {})
-                slot_data = ideas.get(slot_key, {})
+                slot_data = ideas.get(slot_key, {}) if isinstance(ideas, dict) else {}
                 spirit = (
                     slot_data.get(spirit_id, {}) if isinstance(slot_data, dict) else {}
                 )

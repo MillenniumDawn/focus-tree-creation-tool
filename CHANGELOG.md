@@ -8,6 +8,11 @@ the version by hand. See `AGENTS.md`.
 
 ## Unreleased
 
+- Preserve national-spirit raw-edit titles and descriptions, including escaped
+  quotes and versioned localisation keys, when saving to a mod.
+- Stop decision-preview text sizing from growing without bound in withdrawn
+  windows and crashing Xwayland.
+- Run native Windows cache-permission tests before executable builds.
 - Wait for the progress modal to be mapped before taking its Tk grab, so it no
   longer fails with "grab failed: window not viewable" on a live display.
 - Add Spanish (Español) as an interface language.

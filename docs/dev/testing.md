@@ -199,7 +199,12 @@ CI's `test` job (`.github/workflows/ci.yml`) runs the suite under
 imports fine on `actions/setup-python`'s CPython; the display was the only
 thing missing, and Xvfb supplies it.
 
-The job also sets `HOI4CM_REQUIRE_TK=1`, which turns `tk_root`'s "no
+The separate `windows-permissions` job runs `tests/test_cache_permissions.py`
+on native Windows. Both new-cache and existing-cache cases inspect real directory
+and database DACLs. Executable builds depend on this job as well as lint and the
+Linux test job, so a cache-permission failure blocks release artifacts.
+
+The Linux job also sets `HOI4CM_REQUIRE_TK=1`, which turns `tk_root`'s "no
 display" skip into a failure. Without that, a broken Xvfb would take every
 widget test out of the run and still report green: before Xvfb landed, 18
 tests skipped in CI and nobody saw it. Locally the variable is unset, so a
