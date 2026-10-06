@@ -227,6 +227,12 @@ grabs on the private display; they are not skipped or converted to mocked UI.
 Grab errors are suppressed only for unviewable windows. `HOI4CM_SHOW_TK=1`
 opts out of display isolation and withdrawal for desktop debugging.
 
+Each Tk test ends with one `gc.collect()`, so Tk objects are finalized on the Tk
+thread (#149). Pure tests do not collect. `pytest_collection_finish` freezes
+everything imported and collected up to that point, which keeps the remaining
+collections short. Collecting after every test instead took the suite from
+about 12 seconds to 46.
+
 Native Windows/macOS do not have Xvfb. Ordinary roots/dialogs are withdrawn,
 but explicit mapped UI tests can still appear there. For a completely quiet
 full suite, run it on Linux/Xvfb (including CI or a Linux VM). Linux automated

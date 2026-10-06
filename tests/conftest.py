@@ -116,6 +116,12 @@ def pytest_configure(config):
             raise pytest.UsageError(str(exc)) from exc
 
 
+def pytest_collection_finish(session):
+    # Keep the imported app and the collected tests out of per-test collections.
+    gc.collect()
+    gc.freeze()
+
+
 @pytest.fixture(autouse=True)
 def _reset_focus_counter():
     """Give every test an isolated, deterministic focus ID sequence."""
@@ -179,12 +185,16 @@ def hide_tk_windows(request, monkeypatch):
     try:
         yield
     finally:
+        leftover = False
         for root in reversed(roots):
             try:
                 root.destroy()
             except TclError:
-                pass  # Explicit fixture/test cleanup may already have destroyed it.
-        gc.collect()
+                continue  # Explicit fixture/test cleanup already destroyed it.
+            leftover = True
+        # A full collection per test more than doubled the suite's runtime.
+        if leftover:
+            gc.collect()
 
 
 @pytest.fixture
