@@ -8,6 +8,8 @@ the version by hand. See `AGENTS.md`.
 
 ## Unreleased
 
+- Clear undo and redo history on New Tree, Load Project, and autosave restore.
+  Ctrl+Z no longer applies an entry from the previous document to the new one.
 - Wait for the progress modal to be mapped before taking its Tk grab, so it no
   longer fails with "grab failed: window not viewable" on a live display.
 - Add Spanish (Español) as an interface language.
