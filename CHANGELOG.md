@@ -8,6 +8,12 @@ the version by hand. See `AGENTS.md`.
 
 ## Unreleased
 
+- Record autosave, restore-prompt, load-guard, export-flush and edit-target
+  failures in the error log instead of dropping them. A failed autosave
+  schedule now retries once, and a load is blocked if its discard guard raises.
+- Name failed scan steps and files that could not be parsed in the Mod Loaded
+  dialog and the error log. A file that cannot be parsed is not cached, so the
+  next scan reports it again.
 - Wait for the progress modal to be mapped before taking its Tk grab, so it no
   longer fails with "grab failed: window not viewable" on a live display.
 - Add Spanish (Español) as an interface language.

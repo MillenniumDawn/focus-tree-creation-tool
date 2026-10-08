@@ -18,6 +18,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+import hoi4cm.core.logger as logmod
 from hoi4cm.mod import MOD
 from hoi4cm.mod import scan_cache as scan_cache_mod
 from hoi4cm.ui.theme import YELLOW
@@ -632,3 +633,60 @@ def test_load_mod_path_removes_stale_recent_entry_and_saves_config(
     assert missing in str(report_calls[0])
     assert MOD._recent_mods == [str(tmp_path / "still-valid")]  # type: ignore[attr-defined]
     save_config.assert_called_once_with()
+
+
+@pytest.fixture
+def error_buffer(monkeypatch):
+    """Isolate the shared error buffer from callbacks left by earlier Tk tests."""
+    monkeypatch.setattr(logmod, "_error_callback", None)
+    logmod.clear_errors()
+    yield logmod.get_error_entries()
+    logmod.clear_errors()
+
+
+def test_confirm_edit_targets_records_an_unreadable_events_file(
+    tk_root, tmp_path, monkeypatch, error_buffer
+):
+    _stub_mod_app(tk_root, monkeypatch)
+    events_file = tmp_path / "events" / "b.txt"
+    events_file.parent.mkdir(parents=True)
+    events_file.write_text("add_namespace = foo")
+    MOD.loaded = True
+    MOD.root = str(tmp_path)
+    MOD.edit_ideas_file = ""
+    MOD.edit_events_file = str(events_file)
+    MOD.edit_events_ns = "stale"
+    MOD.edit_focus_file = ""
+    MOD.edit_loc_file = ""
+    MOD.edit_scripted_loc_file = ""
+    monkeypatch.setattr(
+        "hoi4cm.ui.mod_loading.read_file_with_encoding", lambda _path: (None, None)
+    )
+    tk_root._mod_lbl = tk.Label(tk_root, text="mod")  # type: ignore[attr-defined]
+    tk_root._mod_lbl.pack()
+    tk_root.update()
+
+    from hoi4cm.ui.mod_loading import ModLoadingMixin
+
+    before: set[tk.Misc] = set(tk_root.winfo_children())
+    ModLoadingMixin._show_post_load_prompt(tk_root)  # type: ignore[arg-type]
+    tk_root.update()
+    wins = [
+        w
+        for w in tk_root.winfo_children()
+        if w not in before and isinstance(w, tk.Toplevel)
+    ]
+    assert wins, "_show_post_load_prompt did not create a Toplevel"
+    try:
+        confirm_button = _find_button(wins[0], "Confirm")
+        assert confirm_button is not None
+        confirm_button.invoke()
+        tk_root.update()
+        assert MOD.edit_events_ns == ""
+        assert len(error_buffer) == 1
+        assert str(events_file) in error_buffer[0][1]
+    finally:
+        for win in wins:
+            if win.winfo_exists():
+                win.grab_release()
+                win.destroy()
