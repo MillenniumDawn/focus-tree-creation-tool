@@ -16,6 +16,7 @@ import pytest
 import hoi4_content_maker as m
 import hoi4cm.core.logger as logmod
 import hoi4cm.ui.error_report as error_report
+from hoi4cm.core.undo import UndoStack
 from hoi4cm.editor import decode_project
 from hoi4cm.models import Focus, FocusDocument
 from hoi4cm.models.focus import MAX_FOCUS_ID
@@ -71,7 +72,9 @@ def test_load_reports_a_corrupt_project(shown, monkeypatch):
         raise ValueError(f"invalid JSON in {path}")
 
     monkeypatch.setattr(m, "read_project", boom)
-    shell = SimpleNamespace(_begin_document_generation=lambda: None)
+    shell = SimpleNamespace(
+        _begin_document_generation=lambda: None, _confirm_discard=lambda **_kw: True
+    )
 
     m.App._load(cast(m.App, shell))
 
@@ -105,15 +108,16 @@ def test_load_reports_out_of_range_ids_before_touching_live_state(
     )
     monkeypatch.setattr(m.filedialog, "askopenfilename", lambda **_kw: str(path))
     _patch_load_background(monkeypatch)
-    existing = Focus()
+    existing = Focus(id=1)
     shell = SimpleNamespace(
-        focuses=FocusDocument([existing]), _begin_document_generation=lambda: None
+        focuses=FocusDocument([existing]),
+        _begin_document_generation=lambda: None,
+        _confirm_discard=lambda **_kw: True,
     )
 
     m.App._load(cast(m.App, shell))
 
     assert list(shell.focuses.values()) == [existing]
-    assert Focus._next == existing.id
     assert len(shown) == 1
     assert shown[0][0] == "Load Project Error"
     assert "focus id must be between" in shown[0][1]
@@ -122,14 +126,14 @@ def test_load_reports_out_of_range_ids_before_touching_live_state(
 @pytest.mark.parametrize("duplicate", [False, True])
 def test_exhausted_allocator_reports_before_mutating_widgets_or_undo(shown, duplicate):
     selected = Focus.from_dict({"id": MAX_FOCUS_ID})
-    shell = SimpleNamespace(selected=selected)
+    focuses = FocusDocument([selected])
+    shell = SimpleNamespace(selected=selected, focuses=focuses)
 
     if duplicate:
         m.App._duplicate_focus(cast(m.App, shell))
     else:
         m.App._new_focus_at(cast(m.App, shell), 0, 0)
 
-    assert Focus._next == MAX_FOCUS_ID
     assert len(shown) == 1
     assert "focus id allocator exhausted" in shown[0][1]
 
@@ -160,6 +164,7 @@ def test_load_warns_when_stored_export_paths_are_dropped(shown, monkeypatch):
         (),
         {
             "_begin_document_generation": lambda self: None,
+            "_confirm_discard": lambda self, **_kw: True,
             "cv": type("Canvas", (), {"delete": lambda self, *_args: None})(),
             "selected": None,
             "_lines": set(),
@@ -196,6 +201,7 @@ def test_load_parses_on_worker_before_installing_workspace(monkeypatch):
     parse_threads = []
     shell = SimpleNamespace(
         _begin_document_generation=lambda: events.append("begin"),
+        _confirm_discard=lambda **_kw: True,
         cv=SimpleNamespace(delete=lambda *_args: events.append("delete")),
         selected=None,
         _lines=set(),
@@ -278,7 +284,7 @@ def test_load_parses_on_worker_before_installing_workspace(monkeypatch):
 def test_load_cancel_shows_nothing(shown, monkeypatch):
     monkeypatch.setattr(m.filedialog, "askopenfilename", lambda **_kw: "")
 
-    m.App._load(cast(m.App, object()))
+    m.App._load(cast(m.App, SimpleNamespace(_confirm_discard=lambda **_kw: True)))
 
     assert shown == []
     assert logmod.get_error_entries() == []
@@ -305,13 +311,16 @@ def test_save_reports_a_write_failure(shown, monkeypatch):
 
 
 def test_apply_focus_code_reports_a_parse_failure(shown):
-    shell = type("Shell", (), {"focuses": FocusDocument()})()
-    focus = Focus()
+    shell = type(
+        "Shell", (), {"focuses": FocusDocument(), "_undo_stack": UndoStack()}
+    )()
+    focus = Focus(id=2)
 
     assert (
         m.App._apply_focus_code(cast(m.App, shell), focus, "not a focus block") is False
     )
 
+    assert len(shell._undo_stack) == 0
     assert len(shown) == 1
     title, message, _options = shown[0]
     assert title == "Parse Error"
@@ -324,10 +333,11 @@ def test_apply_focus_code_restore_uses_redraw_now(monkeypatch):
     monkeypatch.setattr(m, "apply_focus_code", lambda *_a, **_k: None)
     draws = []
     redraw_now = []
-    focus = Focus()
-    extra = Focus(2, 2)
+    focus = Focus(id=3)
+    extra = Focus(id=4, x=2, y=2)
     shell = SimpleNamespace(
         focuses=FocusDocument([focus, extra]),
+        _undo_stack=UndoStack(),
         selected=focus,
         zoom=1.25,
         offset=[10, 20],

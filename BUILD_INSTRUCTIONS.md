@@ -69,8 +69,6 @@ run directly instead.
 | --- | --- |
 | `build/build.py` | Current cross-platform PyInstaller build script |
 | `build/requirements.txt` | Hash-pinned build dependencies used by CI |
-| `build/build.bat` | Legacy Windows script with a machine-specific Python path |
-| `build/hoi4_content_maker.spec` | Static spec used by the legacy Windows script; `build.py` generates its own temporary spec |
 | `build/generate_icon.py` | Generates the application icon files |
 | `build/version_info.txt` | Windows executable version metadata |
 | `pyproject.toml` | Project metadata and optional dependency groups |
@@ -78,7 +76,9 @@ run directly instead.
 ## Automated builds and releases
 
 `.github/workflows/ci.yml` runs linting and tests for pull requests and pushes to
-`main`. It also builds and smoke-tests executables on Windows, macOS, and Linux.
+`main`. For pull requests it also builds and smoke-tests executables on Windows,
+macOS, and Linux. A push to `main` skips that build, because the pre-release
+workflow below builds the same executables.
 When a stable `vX.Y.Z` tag is pushed, CI runs the same checks and builds, then
 publishes a GitHub Release with the three executables and `SHA256SUMS.txt`.
 Stable release tags must match `pyproject.toml` and use an even minor version.

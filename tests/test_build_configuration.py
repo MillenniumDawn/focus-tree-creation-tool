@@ -1,4 +1,4 @@
-"""Regression coverage for the standard and legacy PyInstaller specs."""
+"""Regression coverage for the generated PyInstaller spec and build pins."""
 
 import importlib.util
 import re
@@ -43,10 +43,6 @@ def test_build_fallbacks_match_hashed_requirements():
     assert build_script.PILLOW_REQUIREMENT == f"Pillow=={pillow}"
     assert build_script.PYINSTALLER_REQUIREMENT == f"pyinstaller=={pyinstaller}"
 
-    batch = (ROOT / "build" / "build.bat").read_text(encoding="utf-8")
-    assert f'pip install "Pillow=={pillow}"' in batch
-    assert f'pip install "pyinstaller=={pyinstaller}"' in batch
-
 
 def test_generated_spec_is_windowless_and_bundles_runtime_assets(tmp_path, monkeypatch):
     build_script = _load_build_script()
@@ -64,15 +60,6 @@ def test_generated_spec_is_windowless_and_bundles_runtime_assets(tmp_path, monke
     assert "    console=True," not in content
     locales_path = str(tmp_path / "locales").replace("\\", "/")
     assert f"datas=[({locales_path!r}, 'locales')]," in content
-    assert all(f"'hoi4cm.wizards.{name}'" in content for name in WIZARD_MODULES)
-
-
-def test_legacy_spec_is_windowless_and_bundles_runtime_assets():
-    content = (ROOT / "build" / "hoi4_content_maker.spec").read_text(encoding="utf-8")
-
-    assert "    console=False," in content
-    assert "    console=True," not in content
-    assert "    datas=[('..\\\\locales', 'locales')]," in content
     assert all(f"'hoi4cm.wizards.{name}'" in content for name in WIZARD_MODULES)
 
 
@@ -110,4 +97,13 @@ def test_stable_build_checks_tag_against_project_before_compiling():
     assert "RELEASE_TAG: ${{ github.ref_name }}" in build
     assert "startsWith(github.ref, 'refs/tags/v')" in build
     assert "!contains(github.ref_name, '-pre.')" in build
+    assert (
+        "if: github.event_name == 'pull_request' || "
+        "startsWith(github.ref, 'refs/tags/v')" in build
+    )
+    check_step = build.split("      - name: Check the release tag\n", 1)[1].split(
+        "      - name:", 1
+    )[0]
+    assert "shell: bash" in check_step
+    assert '"$RELEASE_TAG"' in check_step
     assert build.index(check) < build.index("python build/build.py")

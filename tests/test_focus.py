@@ -1,21 +1,12 @@
-"""Tests for hoi4cm.models.focus."""
+"""Tests for hoi4cm.models.focus and document-scoped ID allocation."""
 
 import pytest
 
-from hoi4cm.models import Focus
+from hoi4cm.models import Focus, FocusDocument
 
 
-@pytest.fixture(autouse=True)
-def reset_counter():
-    """Isolate the module-level auto-increment counter."""
-    old = Focus._next
-    Focus._next = 0
-    yield
-    Focus._next = old
-
-
-def test_new_focus_has_defaults():
-    f = Focus(2, 3)
+def test_new_focus_has_explicit_id_and_defaults():
+    f = Focus(id=1, x=2, y=3)
     assert f.id == 1
     assert f.x == 2
     assert f.y == 3
@@ -27,74 +18,64 @@ def test_new_focus_has_defaults():
     assert f.mutex == []
 
 
-def test_counter_increments():
-    a = Focus()
-    b = Focus()
-    assert a.id == 1
-    assert b.id == 2
+def test_documents_allocate_independent_ids():
+    left, right = FocusDocument(), FocusDocument()
+    assert left.new_focus().id == right.new_focus().id == 1
+    assert left.new_focus().id == 2
+    assert right.new_focus().id == 2
+
+
+def test_explicit_focus_ids_advance_only_the_owning_document():
+    left, right = FocusDocument(), FocusDocument()
+    left.add(Focus(id=42))
+    assert left.new_focus().id == 43
+    assert right.new_focus().id == 1
+
+
+def test_document_allocation_accounts_for_loaded_ids_and_exhaustion():
+    document = FocusDocument([Focus(id=MAX_ID)])
+    with pytest.raises(ValueError, match="allocator exhausted"):
+        document.allocate_id()
 
 
 def test_to_dict_roundtrips():
-    f = Focus(1, 2)
+    f = Focus(id=7, x=1, y=2)
     f.name = "my_focus"
     f.loc_name = "My Focus"
     f.gfx = "GFX_goal_test"
     f.effects = [{"type": "add_political_power", "fields": {"amount": "100"}}]
     d = f.to_dict()
     restored = Focus.from_dict(d)
-
     assert restored.to_dict() == d
     assert restored.id == f.id
 
 
 def test_from_dict_migrates_pixel_coords_when_legacy():
     f = Focus.from_dict({"id": 5, "x": 192, "y": 384}, legacy=True)
-    assert f.x == 2
-    assert f.y == 4
+    assert (f.x, f.y) == (2, 4)
 
 
 def test_from_dict_leaves_grid_coords_alone_by_default():
     f = Focus.from_dict({"id": 5, "x": 96, "y": 192})
-    assert f.x == 96
-    assert f.y == 192
+    assert (f.x, f.y) == (96, 192)
 
 
-def test_from_dict_applies_defaults_for_missing_attrs():
-    f = Focus.from_dict({"id": 1, "x": 0, "y": 0})
+def test_from_dict_applies_defaults_and_filters_unknown_fields():
+    f = Focus.from_dict({"__dict__": 1, "id": 7, "evil": "x"})
     assert f.loc_name == ""
     assert f.gfx == "GFX_goal_generic_political_pressure"
     assert f.search_filters == "FOCUS_FILTER_POLITICAL"
     assert f.offsets == []
     assert f.ai_will_do_raw == ""
     assert f.tree_idx == 0
-
-
-def test_from_dict_filters_unknown_fields():
-    Focus._next = 0
-    f = Focus.from_dict({"__dict__": 1, "id": 7, "evil": "x"})
-
-    assert f.id == 7
     assert "__dict__" not in f.__dict__
     assert not hasattr(f, "evil")
-    assert Focus._next == 7
 
 
 @pytest.mark.parametrize("focus_id", [-1, 1_000_001, 10**18])
-def test_from_dict_rejects_out_of_range_id_without_changing_allocator(focus_id):
-    Focus._next = 12
+def test_from_dict_rejects_out_of_range_id(focus_id):
     with pytest.raises(ValueError, match="focus id must be between"):
         Focus.from_dict({"id": focus_id})
-    assert Focus._next == 12
-
-
-@pytest.mark.parametrize("counter", [1_000_000, 1_000_001])
-def test_from_dict_loads_valid_existing_id_when_allocator_is_exhausted(counter):
-    Focus._next = counter
-
-    restored = Focus.from_dict({"id": 7, "name": "existing"})
-
-    assert (restored.id, restored.name) == (7, "existing")
-    assert Focus._next == counter
 
 
 def test_from_dict_coerces_known_field_types():
@@ -109,21 +90,14 @@ def test_from_dict_coerces_known_field_types():
             "unknown": {"ignored": True},
         }
     )
-
     assert (f.id, f.x, f.y, f.cost) == (7, 192, 3, 7.5)
     assert f.cancel_if_invalid is False
     assert f.mutex == [4, 5]
     assert "unknown" not in f.to_dict()
 
 
-def test_from_dict_bumps_counter():
-    Focus._next = 0
-    Focus.from_dict({"id": 42, "x": 0, "y": 0})
-    assert Focus._next == 42
-
-
 def test_to_dict_excludes_dynamic_private_attrs():
-    f = Focus()
+    f = Focus(id=1)
     f.__dict__.update(_items=["a"])
     f._draw_key = "key"  # type: ignore[assignment]
     restored = Focus.from_dict(f.to_dict())
@@ -131,42 +105,29 @@ def test_to_dict_excludes_dynamic_private_attrs():
     assert not hasattr(restored, "_draw_key")
 
 
-def test_duplicate_assigns_id_from_counter():
-    f = Focus()
-    nf = f.duplicate()
-    assert nf.id != f.id
-    assert nf.id == Focus._next
-
-
-def test_duplicate_after_load_stays_small_and_unique():
-    base = Focus._next + 100
-    Focus.from_dict({"id": base, "x": 0, "y": 0})
-    f = Focus.from_dict({"id": base + 1, "x": 0, "y": 0})
-    nf = f.duplicate()
-    assert nf.id == base + 2
-    assert nf.id != f.id
-
-
-def test_duplicate_drops_raw_import_coords():
-    f = Focus()
+def test_duplicate_requires_an_explicit_document_id_and_drops_raw_coords():
+    f = Focus(id=1)
     f._raw_gx = 10
     f._raw_gy = 20
     f._rel_dx = 1
     f._rel_dy = 2
-    nf = f.duplicate()
-    assert not hasattr(nf, "_raw_gx")
-    assert not hasattr(nf, "_raw_gy")
-    assert not hasattr(nf, "_rel_dx")
-    assert not hasattr(nf, "_rel_dy")
-    # original is untouched
+    duplicate = f.duplicate(2)
+    assert duplicate.id == 2
+    assert not hasattr(duplicate, "_raw_gx")
+    assert not hasattr(duplicate, "_raw_gy")
+    assert not hasattr(duplicate, "_rel_dx")
+    assert not hasattr(duplicate, "_rel_dy")
     assert f._raw_gx == 10 and f._raw_gy == 20
 
 
 def test_duplicate_copies_public_fields():
-    f = Focus(3, 4)
+    f = Focus(id=1, x=3, y=4)
     f.name = "my_focus"
     f.cost = 5
-    nf = f.duplicate()
-    assert nf.name == f.name
-    assert nf.x == f.x and nf.y == f.y
-    assert nf.cost == f.cost
+    duplicate = f.duplicate(2)
+    assert duplicate.name == f.name
+    assert (duplicate.x, duplicate.y) == (f.x, f.y)
+    assert duplicate.cost == f.cost
+
+
+MAX_ID = 1_000_000

@@ -77,15 +77,31 @@ jobs:
         # script/loc extractions tested (see docs/dev/wizards.md). No Xvfb
         # here on purpose: these tests must stay headless.
         run: >
-          pytest tests/test_wizard_generators_*.py
+          pytest --no-tk tests/test_wizard_generators_*.py
           --cov=hoi4cm.wizards._generators
           --cov-fail-under=95
           --cov-report=term-missing
 
-  # Runs on every push and PR, not just tags, so a PyInstaller break shows up
-  # in the PR that caused it instead of at tag time.
+  windows-permissions:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        # v6.3.0
+        with:
+          python-version: "3.14"
+      - name: Install dev dependencies
+        run: pip install --require-hashes -r dev-requirements.txt
+      - name: Check native cache permissions
+        run: pytest tests/test_cache_permissions.py -v
+
+  # Runs on PRs and v* tags, not on pushes to main (pre-release.yml builds and
+  # smoke-tests those), so a PyInstaller break shows up in the PR that caused it.
   build:
-    needs: [lint, test]
+    needs: [lint, test, windows-permissions]
+    if: github.event_name == 'pull_request' || startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: read
     strategy:
@@ -114,6 +130,7 @@ jobs:
         if: >
           startsWith(github.ref, 'refs/tags/v')
           && !contains(github.ref_name, '-pre.')
+        shell: bash
         env:
           RELEASE_TAG: ${{ github.ref_name }}
         run: python scripts/versioning.py check-release-tag "$RELEASE_TAG"
@@ -140,10 +157,10 @@ jobs:
       - name: Smoke-test executable
         run: >
           python -c "import os, subprocess, sys;
-          command =
-          [os.path.abspath('${{ matrix.artifact_name }}'), '--smoke-test'];
-          command = ['xvfb-run', '-a', *command]
-          if sys.platform == 'linux' else command;
+          command = [os.path.abspath('${{ matrix.artifact_name }}'),
+          '--smoke-test'];
+          command = (['xvfb-run', '-a', *command]
+          if sys.platform == 'linux' else command);
           subprocess.run(command, check=True, timeout=60)"
 
       - name: Upload artifact

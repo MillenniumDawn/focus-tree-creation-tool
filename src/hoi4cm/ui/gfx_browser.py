@@ -1,10 +1,12 @@
 """Universal GFX browser and drag-to-place GFX editor.
 
-Three dialogs, two shared across wizards and one owned by the main app:
+Four dialogs, three shared across wizards and one owned by the main app:
 
 * :func:`open_universal_gfx_browser` — pick any sprite from any mod GFX
   folder (decisions, ideas, goals, events, flags, interface, custom). Used
   by the decision / event / dyn-mod / spirit wizards.
+* :func:`open_folder_gfx_browser` picks one sprite key from a caller-supplied
+  folder list. Used by the spirit / event / dyn-mod wizards' picture fields.
 * :func:`open_gfx_placement_editor` — drag-drop a few sprites on a mock
   decision panel and emit the matching ``interface/*.gfx`` code.
 * :func:`open_focus_icon_browser` — the sidebar's Focus icon picker.
@@ -20,6 +22,7 @@ and the rest of the dialog still works.
 
 import os
 import tkinter as tk
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from tkinter import filedialog, messagebox
 
@@ -1355,8 +1358,194 @@ def open_focus_icon_browser(win, on_select, current_gfx="", mod=None):
         _load_folder(folders[0][1])
 
 
+# ─────────────────────────────────────────────────────────────────
+# Folder-list picker (wizard picture / icon fields)
+# ─────────────────────────────────────────────────────────────────
+def open_folder_gfx_browser(
+    win: tk.Misc,
+    *,
+    title: str,
+    folders: Sequence[tuple[str, str]],
+    collect_pairs: Callable[[str, str], Sequence[tuple[str, str]]],
+    on_select: Callable[[str], None],
+    label_prefixes: Sequence[str],
+    image_size: tuple[int, int] = (72, 72),
+    preserve_aspect: bool = False,
+) -> None:
+    """Open a folder-list GFX picker that hands back one key.
+
+    ``folders`` is ``(display, abs_path)`` rows for the left list.
+    ``collect_pairs(folder_path, search_text)`` returns ``(gfx_key, path)``
+    pairs for a folder and the filter box text. ``on_select(gfx_key)`` is
+    called once on Select or double-click, then the dialog closes.
+    ``label_prefixes`` are stripped from the tile labels.
+    """
+    bwin = tk.Toplevel(win)
+    bwin.title(title)
+    bwin.configure(bg=BG_DARK)
+    bwin.geometry("900x580")
+    bwin.resizable(True, True)
+    bwin.grab_set()
+
+    panes = tk.Frame(bwin, bg=BG_DARK)
+    panes.pack(fill="both", expand=True, padx=8, pady=8)
+
+    lf = tk.Frame(panes, bg=BG_PANEL, width=200)
+    lf.pack(side="left", fill="y", padx=(0, 6))
+    lf.pack_propagate(False)
+    tk.Label(
+        lf,
+        text=tr("gfx.folders", "  FOLDERS"),
+        bg=BG_PANEL,
+        fg=TEXT_DIM,
+        font=("Helvetica", 9, "bold"),
+        anchor="w",
+        pady=6,
+    ).pack(fill="x")
+    tk.Frame(lf, bg=BORDER_G, height=1).pack(fill="x")
+    folder_lb = tk.Listbox(
+        lf,
+        bg=BG_CARD,
+        fg=TEXT,
+        selectbackground=BLUE,
+        selectforeground=TEXT,
+        font=("Courier", 9),
+        relief="flat",
+        bd=0,
+        activestyle="none",
+        highlightthickness=0,
+    )
+    fsb = tk.Scrollbar(lf, orient="vertical", command=folder_lb.yview)
+    folder_lb.configure(yscrollcommand=fsb.set)
+    fsb.pack(side="right", fill="y")
+    folder_lb.pack(fill="both", expand=True, padx=2, pady=4)
+    for display, _ in folders:
+        folder_lb.insert("end", "  " + display)
+
+    rf = tk.Frame(panes, bg=BG_DARK)
+    rf.pack(side="left", fill="both", expand=True)
+
+    top_r = tk.Frame(rf, bg=BG_DARK)
+    top_r.pack(fill="x", pady=(0, 6))
+    tk.Label(
+        top_r,
+        text=tr("common.filter", "Filter:"),
+        bg=BG_DARK,
+        fg=TEXT_DIM,
+        font=("Helvetica", 9),
+    ).pack(side="left")
+    search_var = tk.StringVar()
+    tk.Entry(
+        top_r,
+        textvariable=search_var,
+        bg=BG_CARD,
+        fg=TEXT,
+        insertbackground=BLUE,
+        font=("Helvetica", 10),
+        relief="flat",
+        highlightthickness=1,
+        highlightbackground=BORDER_G,
+    ).pack(side="left", padx=6, fill="x", expand=True, ipady=3)
+    status_lbl = tk.Label(
+        top_r,
+        text=tr("gfx.select_folder_status", "select a folder"),
+        bg=BG_DARK,
+        fg=TEXT_DIM,
+        font=("Helvetica", 9),
+    )
+    status_lbl.pack(side="right", padx=6)
+
+    bot = tk.Frame(bwin, bg=BG_DARK)
+    bot.pack(fill="x", padx=10, pady=6)
+    selected_var = tk.StringVar(value="")
+    tk.Label(
+        bot, textvariable=selected_var, bg=BG_DARK, fg=BLUE, font=("Helvetica", 9)
+    ).pack(side="left", padx=4)
+    tk.Button(
+        bot,
+        text=tr("common.cancel", "Cancel"),
+        command=bwin.destroy,
+        bg=BG_CARD,
+        fg=TEXT,
+        relief="flat",
+        font=("Helvetica", 9),
+        padx=10,
+        pady=4,
+        cursor="hand2",
+    ).pack(side="right", padx=4)
+
+    def _apply():
+        on_select(selected_var.get())
+        bwin.destroy()
+
+    sel_btn = tk.Button(
+        bot,
+        text=tr("common.select_arrow", "Select ->"),
+        command=_apply,
+        bg="#1a3322",
+        fg="#4b7a5e",
+        relief="flat",
+        font=("Helvetica", 10, "bold"),
+        padx=14,
+        pady=5,
+        cursor="arrow",
+        state="disabled",
+    )
+    sel_btn.pack(side="right")
+
+    def _on_sel_change(*_):
+        if selected_var.get():
+            sel_btn.config(bg="#14532d", fg="#0a0a0a", cursor="hand2", state="normal")
+        else:
+            sel_btn.config(bg="#1a3322", fg="#4b7a5e", cursor="arrow", state="disabled")
+
+    selected_var.trace_add("write", _on_sel_change)
+
+    def _label(item: ThumbnailItem) -> str:
+        short = item.key
+        for prefix in label_prefixes:
+            short = short.replace(prefix, "")
+        return short[:16] + "..." if len(short) > 16 else short
+
+    grid = VirtualThumbnailGrid(
+        rf,
+        image_size=image_size,
+        preserve_aspect=preserve_aspect,
+        label_text=_label,
+        on_select=lambda item: selected_var.set(item.key),
+        on_activate=lambda _item: _apply(),
+    )
+    grid.pack(fill="both", expand=True)
+
+    def _load_folder(folder_path: str) -> None:
+        status_lbl.config(text=tr("gfx.scanning", "scanning..."))
+        bwin.update_idletasks()
+        pairs = collect_pairs(folder_path, search_var.get())
+        grid.set_items(
+            [ThumbnailItem(key, path) for key, path in pairs],
+            selected_key=selected_var.get(),
+        )
+        if pairs:
+            status_lbl.config(text=f"{len(pairs)} icons")
+        else:
+            status_lbl.config(text=tr("gfx.icons_count", "{count} icons", count=0))
+
+    def _on_folder_select(_event=None) -> None:
+        selection = folder_lb.curselection()
+        if selection:
+            _load_folder(folders[selection[0]][1])
+
+    folder_lb.bind("<<ListboxSelect>>", _on_folder_select)
+    search_var.trace_add("write", lambda *_: _safe_after(bwin, 300, _on_folder_select))
+
+    if folders:
+        folder_lb.selection_set(0)
+        _load_folder(folders[0][1])
+
+
 __all__ = [
     "open_universal_gfx_browser",
     "open_gfx_placement_editor",
     "open_focus_icon_browser",
+    "open_folder_gfx_browser",
 ]

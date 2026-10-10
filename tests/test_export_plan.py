@@ -1,7 +1,5 @@
 """Tests for the Tk-free focus-tree export planning pipeline."""
 
-import pytest
-
 from hoi4cm.focus_tree.export_plan import (
     execute_export_plans,
     make_extra_export_plan,
@@ -12,16 +10,8 @@ from hoi4cm.mod.workspace_files import WorkspaceFiles
 from hoi4cm.models import Focus
 
 
-@pytest.fixture(autouse=True)
-def reset_focus_counter():
-    old = Focus._next
-    Focus._next = 0
-    yield
-    Focus._next = old
-
-
 def _focus(name, tree_idx=0):
-    focus = Focus(0, 0)
+    focus = Focus(id=1, x=0, y=0)
     focus.name = name
     focus.tree_idx = tree_idx
     return focus

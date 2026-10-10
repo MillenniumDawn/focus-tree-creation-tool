@@ -1118,3 +1118,101 @@ def test_scan_skips_oversize_file_beside_valid_event_file(tmp_path, monkeypatch)
     MOD.scan(str(tmp_path))
 
     assert MOD.event_ids == {"valid": ["valid.1"]}
+
+
+# ── Scan failures are recorded, not swallowed ──────────────────────────────
+
+
+def _ideas_tree(tmp_path):
+    """Two valid idea files and one nested too deeply for the parser."""
+    ideas = tmp_path / "common" / "ideas"
+    ideas.mkdir(parents=True)
+    (ideas / "a_good.txt").write_text("ideas = { USA = { USA_one = { } } }")
+    (ideas / "b_deep.txt").write_text("ideas = { " + "x = { " * 3000)
+    (ideas / "c_good.txt").write_text("ideas = { USA = { USA_two = { } } }")
+    return ideas
+
+
+def _raises(exc):
+    def fail():
+        raise exc
+
+    return fail
+
+
+def test_scan_records_failed_step_label(tmp_path, monkeypatch):
+    candidate = MOD.new_scan_candidate()
+    candidate.use_cache = False
+    monkeypatch.setattr(candidate, "_scan_events", _raises(OSError("unreadable")))
+    candidate.scan(str(tmp_path))
+
+    assert candidate.loaded
+    assert candidate.failed_steps == ["Events"]
+    assert candidate.unparsable_files == []
+
+
+def test_scan_records_unparsable_file_and_keeps_its_siblings(tmp_path):
+    ideas = _ideas_tree(tmp_path)
+    candidate = MOD.new_scan_candidate()
+    candidate.scan(str(tmp_path))
+
+    assert candidate.failed_steps == []
+    assert candidate.unparsable_files == [str(ideas / "b_deep.txt")]
+    assert candidate.idea_ids == ["USA_one", "USA_two"]
+
+
+def test_unparsable_file_is_not_cached_and_is_reported_again(tmp_path):
+    ideas = _ideas_tree(tmp_path)
+    candidate = MOD.new_scan_candidate()
+    candidate.scan(str(tmp_path))
+    candidate.scan(str(tmp_path))
+
+    assert candidate.unparsable_files == [str(ideas / "b_deep.txt")]
+    cache = scan_cache_mod.ScanCache(str(tmp_path))
+    try:
+        for name, cached in (("a_good", True), ("b_deep", False), ("c_good", True)):
+            path = ideas / f"{name}.txt"
+            stat = path.stat()
+            row = cache.get("ideas", str(path), stat.st_mtime, stat.st_size)
+            assert (row is not None) is cached
+    finally:
+        cache.close()
+
+
+def test_single_unparsable_file_is_reported_and_not_cached(tmp_path):
+    path = tmp_path / "only.txt"
+    path.write_text("content")
+    candidate = MOD.new_scan_candidate()
+    cache = scan_cache_mod.ScanCache(str(tmp_path))
+    candidate._cache = cache
+
+    def extract(text):
+        if text:
+            raise ValueError("bad syntax")
+        return []
+
+    try:
+        result = candidate._scan_files_cached("single", [str(path)], extract)
+        stat = path.stat()
+        assert result == {str(path): []}
+        assert candidate.unparsable_files == [str(path)]
+        assert cache.get("single", str(path), stat.st_mtime, stat.st_size) is None
+    finally:
+        cache.close()
+
+
+def test_adopt_scan_carries_failed_steps_and_unparsable_files(tmp_path, monkeypatch):
+    ideas = _ideas_tree(tmp_path)
+    candidate = MOD.new_scan_candidate()
+    candidate.use_cache = False
+    monkeypatch.setattr(candidate, "_scan_events", _raises(OSError("denied")))
+    monkeypatch.setattr(candidate, "_scan_tags", _raises(ValueError("bad tag")))
+    candidate.scan(str(tmp_path))
+    target = MOD.new_scan_candidate()
+
+    target.adopt_scan(candidate)
+
+    assert target.failed_steps == ["Events", "Country Tags"]
+    assert target.unparsable_files == [str(ideas / "b_deep.txt")]
+    assert MOD.failed_steps is not candidate.failed_steps
+    assert MOD.unparsable_files is not candidate.unparsable_files

@@ -10,15 +10,7 @@ import hoi4_content_maker as m
 import hoi4cm.core.logger as logmod
 from hoi4cm.focus_tree.export_plan import execute_export_plans
 from hoi4cm.mod.workspace_files import WorkspaceFiles
-from hoi4cm.models import Focus
-
-
-@pytest.fixture(autouse=True)
-def reset_focus_counter():
-    old = Focus._next
-    Focus._next = 0
-    yield
-    Focus._next = old
+from hoi4cm.models import FocusDocument
 
 
 @pytest.fixture
@@ -93,8 +85,11 @@ class _Catalog:
         self.written.append(path)
 
 
+_focus_document = FocusDocument()
+
+
 def _focus(name, x=0, y=0):
-    focus = Focus(x, y)
+    focus = _focus_document.new_focus(x, y)
     focus.name = name
     focus.tree_idx = 0
     return focus
