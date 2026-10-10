@@ -7,6 +7,7 @@ from hoi4cm.ui.gfx_browser import (
     open_gfx_placement_editor,
     open_universal_gfx_browser,
 )
+from hoi4cm.ui.keyboard import nudge_selection
 from hoi4cm.ui.lifecycle import ApplicationLifecycle
 from hoi4cm.ui.menubar import build_menubar
 from hoi4cm.ui.settings_dialog import open_settings
@@ -102,6 +103,7 @@ __all__ = [
     "build_tree_badges",
     "get_executor",
     "make_progress",
+    "nudge_selection",
     "open_focus_icon_browser",
     "open_gfx_placement_editor",
     "open_settings",
