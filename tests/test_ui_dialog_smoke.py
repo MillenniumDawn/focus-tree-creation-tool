@@ -161,7 +161,7 @@ def test_build_menubar_constructs(tk_root, monkeypatch):
     )
     tk_root.update()
     assert len(preview_rows) == 3
-    assert "Character Editor" in _collect_texts(preview_rows[1])
+    assert "Character Editor" in collect_texts(preview_rows[1])
     assert controller.preview_active
     preview_menu = preview_rows[0].master
     assert int(preview_menu.cget("highlightthickness")) == 3
