@@ -8,6 +8,10 @@ the version by hand. See `AGENTS.md`.
 
 ## Unreleased
 
+---
+
+## [0.4.4] — 2026-10-10
+
 - Confirm before unloading an extra focus tree, and make extra-tree loads and
   unloads undoable with Ctrl+Z, including their loaded-tree metadata.
 - Give each focus document its own ID allocator so separate workspaces and
