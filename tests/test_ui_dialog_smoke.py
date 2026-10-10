@@ -565,6 +565,7 @@ def test_show_splash_wrapper_logs_on_failure(monkeypatch):
 # ── mod_loading ──────────────────────────────────────────────────────────
 
 
+@pytest.mark.visible_tk
 def test_show_post_load_prompt_constructs(tk_root, tmp_path, monkeypatch):
     _stub_mod_app(tk_root, monkeypatch)
     ideas_dir = tmp_path / "common" / "ideas"
@@ -605,6 +606,15 @@ def test_show_post_load_prompt_constructs(tk_root, tmp_path, monkeypatch):
         assert "Edit Targets" in wins[0].title()
         texts = _collect_texts(wins[0])
         assert any("Quick-pick" in t for t in texts)
+        child = tk.Entry(wins[0])
+        child.pack()
+        wins[0].update()
+        assert child.winfo_viewable()
+        child.focus_force()
+        wins[0].update()
+        child.event_generate("<Escape>")
+        wins[0].update()
+        assert not wins[0].winfo_exists()
     finally:
         _destroy_toplevels(wins, tk_root)
 
