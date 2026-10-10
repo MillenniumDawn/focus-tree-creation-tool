@@ -780,7 +780,7 @@ def _linked_chain(count, *, spacing=1):
     return focuses
 
 
-def test_unload_extra_tree_deletes_pooled_connection_items(tk_root):
+def test_unload_extra_tree_deletes_pooled_connection_items(tk_root, monkeypatch):
     cv = tk.Canvas(tk_root, width=200, height=200)
     app = _FakeApp(cv)
     focuses = _linked_chain(12)
@@ -799,6 +799,8 @@ def test_unload_extra_tree_deletes_pooled_connection_items(tk_root):
     app._refresh_loaded_trees_panel = lambda: None
     app._redraw = lambda *args, **kwargs: None
     app._invalidate_focus_list_structure = lambda: None
+    app._push_undo = lambda *args, **kwargs: None
+    monkeypatch.setattr(app_module.messagebox, "askyesno", lambda *a, **k: True)
     app._draw_lines((-1.0, -1.0, 100.0, 1.0))
     assert len(cv.find_withtag("line")) == 22
 

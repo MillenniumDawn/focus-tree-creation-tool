@@ -79,7 +79,7 @@ def test_clear_all_pushes_full_snapshot_after_confirmation(monkeypatch):
 
     app_module.App._clear_all(_as_app(app))
 
-    app._push_undo.assert_called_once_with("clear all")
+    app._push_undo.assert_called_once_with("clear all", tree_state=True)
     assert not app.focuses
 
 
@@ -99,8 +99,10 @@ def test_clear_all_round_trips_through_real_undo_stack(monkeypatch):
     app = _UndoCallSiteApp([focus])
     app._undo_stack = UndoStack()
 
-    def push_undo(label="action", touched_ids=None):
-        app_module.App._push_undo(_as_app(app), label, touched_ids)
+    def push_undo(label="action", touched_ids=None, *, tree_state=False):
+        app_module.App._push_undo(
+            _as_app(app), label, touched_ids, tree_state=tree_state
+        )
 
     app._push_undo = push_undo
     monkeypatch.setattr(app_module.messagebox, "askyesno", lambda *args: True)

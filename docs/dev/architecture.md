@@ -91,6 +91,10 @@
   instead of joining the rest of `ui/`'s manual-only surface (see
   `testing.md`).
 - **`editor/`**: project save/load and autosave plumbing, no tkinter:
+  `extra_tree_undo.py` pairs shallow extra-tree registry snapshots with the
+  App's bounded focus undo history without copying tree metadata for ordinary
+  edits. It tracks actual committed entries for coalesced pushes and conditional
+  code-edit records, including partial edits that raise and bounded eviction,
   `project_codec.py` (`write_project`/`read_project`/`encode_project`/
   `decode_project`, plus project-file-path validation) and
   `workspace_autosave.py` (the `~/.hoi4cm/autosave/workspace.json` primary

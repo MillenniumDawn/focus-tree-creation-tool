@@ -8,6 +8,8 @@ the version by hand. See `AGENTS.md`.
 
 ## Unreleased
 
+- Confirm before unloading an extra focus tree, and make extra-tree loads and
+  unloads undoable with Ctrl+Z, including their loaded-tree metadata.
 - Give each focus document its own ID allocator so separate workspaces and
   imports can allocate focus IDs independently.
 - Record autosave, restore-prompt, load-guard, export-flush and edit-target

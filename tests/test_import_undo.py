@@ -71,8 +71,8 @@ def test_import_txt_pushes_undo_before_replacing_document(monkeypatch, tmp_path)
         _invalidate_focus_list_structure=Mock(),
         _fit_all=Mock(),
     )
-    app._push_undo = lambda label="action", touched_ids=None: m.App._push_undo(
-        cast(m.App, app), label, touched_ids
+    app._push_undo = lambda label="action", touched_ids=None, *, tree_state=False: (
+        m.App._push_undo(cast(m.App, app), label, touched_ids, tree_state=tree_state)
     )
     parsed = SimpleNamespace(
         tree_id="imported_tree",
