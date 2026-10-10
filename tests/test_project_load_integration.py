@@ -46,7 +46,7 @@ class ProjectApp(_DocumentApp):
 @pytest.fixture
 def project_case(monkeypatch, tmp_path):
     monkeypatch.setattr(app_module.MOD, "root", None)
-    old = Focus()
+    old = Focus(id=1)
     old.name = "OLD_existing"
     executor = ControlledExecutor()
     app = ProjectApp(executor, [old])
@@ -55,7 +55,7 @@ def project_case(monkeypatch, tmp_path):
     app._lines = [123]
     app._grid_item = app._grid_key = app._grid_img = object()
 
-    new = Focus()
+    new = Focus(id=3)
     new.name = "NEW_loaded"
     new.x, new.y = 2, 3
     source = _workspace(focuses=[new])

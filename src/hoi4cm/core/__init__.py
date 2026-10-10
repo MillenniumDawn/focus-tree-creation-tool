@@ -46,7 +46,7 @@ from hoi4cm.focus_tree import (
     validate_document,
     worst_severity_per_focus,
 )
-from hoi4cm.models import Focus
+from hoi4cm.models import Focus, FocusDocument
 from hoi4cm.script import (
     append_scripted_loc,
     dict_to_raw,
@@ -94,6 +94,7 @@ __all__ = [
     "ExportPlan",
     "ExportResult",
     "Focus",
+    "FocusDocument",
     "I18N_LANG",
     "I18N_LANGS",
     "I18N_STRINGS",

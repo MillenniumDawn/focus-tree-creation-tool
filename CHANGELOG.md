@@ -8,6 +8,8 @@ the version by hand. See `AGENTS.md`.
 
 ## Unreleased
 
+- Give each focus document its own ID allocator so separate workspaces and
+  imports can allocate focus IDs independently.
 - Record autosave, restore-prompt, load-guard, export-flush and edit-target
   failures in the error log instead of dropping them. A failed autosave
   schedule now retries once, and a load is blocked if its discard guard raises.

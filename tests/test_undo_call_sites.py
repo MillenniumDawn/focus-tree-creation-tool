@@ -74,7 +74,7 @@ def _as_app(app: _UndoCallSiteApp) -> app_module.App:
 
 
 def test_clear_all_pushes_full_snapshot_after_confirmation(monkeypatch):
-    app = _UndoCallSiteApp([Focus()])
+    app = _UndoCallSiteApp([Focus(id=33)])
     monkeypatch.setattr(app_module.messagebox, "askyesno", lambda *args: True)
 
     app_module.App._clear_all(_as_app(app))
@@ -84,7 +84,7 @@ def test_clear_all_pushes_full_snapshot_after_confirmation(monkeypatch):
 
 
 def test_clear_all_cancel_keeps_document_without_undo(monkeypatch):
-    focus = Focus()
+    focus = Focus(id=1)
     app = _UndoCallSiteApp([focus])
     monkeypatch.setattr(app_module.messagebox, "askyesno", lambda *args: False)
 
@@ -95,7 +95,7 @@ def test_clear_all_cancel_keeps_document_without_undo(monkeypatch):
 
 
 def test_clear_all_round_trips_through_real_undo_stack(monkeypatch):
-    focus = Focus()
+    focus = Focus(id=2)
     app = _UndoCallSiteApp([focus])
     app._undo_stack = UndoStack()
 
@@ -114,7 +114,7 @@ def test_clear_all_round_trips_through_real_undo_stack(monkeypatch):
 
 
 def test_undo_and_redo_refresh_selected_focus():
-    focus = Focus()
+    focus = Focus(id=3)
     original_name = focus.name
     app = _UndoCallSiteApp([focus])
     app.selected = focus
@@ -144,7 +144,7 @@ def test_undo_clears_selected_focus_after_removal():
     app = _UndoCallSiteApp()
     app._undo_stack = UndoStack()
     app_module.App._push_undo(_as_app(app), "add focus", touched_ids=())
-    focus = Focus()
+    focus = Focus(id=4)
     app.focuses.add(focus)
     app.selected = focus
 
@@ -156,8 +156,8 @@ def test_undo_clears_selected_focus_after_removal():
 
 
 def test_make_prereq_pushes_child_id():
-    child = Focus()
-    parent = Focus()
+    child = Focus(id=5)
+    parent = Focus(id=6)
     app = _UndoCallSiteApp([child, parent])
 
     app_module.App._make_prereq(_as_app(app), child, parent)
@@ -167,8 +167,8 @@ def test_make_prereq_pushes_child_id():
 
 
 def test_duplicate_prereq_does_not_push_undo():
-    child = Focus()
-    parent = Focus()
+    child = Focus(id=7)
+    parent = Focus(id=8)
     child.prereqs = [[parent.id]]
     app = _UndoCallSiteApp([child, parent])
 
@@ -179,7 +179,7 @@ def test_duplicate_prereq_does_not_push_undo():
 
 
 def test_remove_prereq_without_selection_does_not_push_undo():
-    app = _UndoCallSiteApp([Focus()])
+    app = _UndoCallSiteApp([Focus(id=34)])
 
     app_module.App._rm_prereq(_as_app(app), 0)
 
@@ -187,8 +187,8 @@ def test_remove_prereq_without_selection_does_not_push_undo():
 
 
 def test_remove_prereq_group_pushes_child_id():
-    child = Focus()
-    parent = Focus()
+    child = Focus(id=9)
+    parent = Focus(id=10)
     child.prereqs = [[parent.id]]
     app = _UndoCallSiteApp([child, parent])
     app.selected = child
@@ -202,7 +202,7 @@ def test_remove_prereq_group_pushes_child_id():
 
 
 def test_remove_mutex_without_selection_does_not_push_undo():
-    app = _UndoCallSiteApp([Focus()])
+    app = _UndoCallSiteApp([Focus(id=35)])
 
     app_module.App._rm_mutex(_as_app(app), 0)
 
@@ -210,8 +210,8 @@ def test_remove_mutex_without_selection_does_not_push_undo():
 
 
 def test_make_mutex_pushes_both_focus_ids():
-    first = Focus()
-    second = Focus()
+    first = Focus(id=11)
+    second = Focus(id=12)
     app = _UndoCallSiteApp([first, second])
 
     app_module.App._make_mutex(_as_app(app), first, second)
@@ -224,8 +224,8 @@ def test_make_mutex_pushes_both_focus_ids():
 
 
 def test_remove_mutex_pushes_selected_and_partner_ids():
-    selected = Focus()
-    partner = Focus()
+    selected = Focus(id=13)
+    partner = Focus(id=14)
     selected.mutex = [partner.id]
     partner.mutex = [selected.id]
     app = _UndoCallSiteApp([selected, partner])
@@ -241,7 +241,7 @@ def test_remove_mutex_pushes_selected_and_partner_ids():
 
 
 def test_rm_effect_pushes_focus_id():
-    focus = Focus()
+    focus = Focus(id=15)
     focus.effects = [{"type": "add_ideas", "fields": {}}]
     app = _UndoCallSiteApp([focus])
     app.selected = focus
@@ -253,7 +253,7 @@ def test_rm_effect_pushes_focus_id():
 
 
 def test_rm_effect_round_trip_through_real_undo_stack():
-    focus = Focus()
+    focus = Focus(id=16)
     focus.effects = [{"type": "add_ideas", "fields": {}}]
     app = _UndoCallSiteApp([focus])
     app.selected = focus
@@ -273,7 +273,7 @@ def test_rm_effect_round_trip_through_real_undo_stack():
 
 
 def test_add_offset_pushes_focus_id_and_appends_offset():
-    focus = Focus()
+    focus = Focus(id=17)
     focus.offsets = [{"x": 1, "y": 2, "trigger": "has_war = yes"}]
     app = _UndoCallSiteApp([focus])
     app.selected = focus
@@ -288,7 +288,7 @@ def test_add_offset_pushes_focus_id_and_appends_offset():
 
 
 def test_add_offset_round_trip_through_real_undo_stack():
-    focus = Focus()
+    focus = Focus(id=18)
     focus.offsets = [{"x": 1, "y": 2, "trigger": ""}]
     app = _UndoCallSiteApp([focus])
     app.selected = focus
@@ -308,7 +308,7 @@ def test_add_offset_round_trip_through_real_undo_stack():
 
 
 def test_del_offset_pushes_focus_id_and_removes_offset():
-    focus = Focus()
+    focus = Focus(id=19)
     focus.offsets = [{"x": 1, "y": 2, "trigger": ""}, {"x": 3, "y": 4, "trigger": ""}]
     app = _UndoCallSiteApp([focus])
     app.selected = focus
@@ -320,7 +320,7 @@ def test_del_offset_pushes_focus_id_and_removes_offset():
 
 
 def test_del_offset_round_trip_through_real_undo_stack():
-    focus = Focus()
+    focus = Focus(id=20)
     focus.offsets = [{"x": 1, "y": 2, "trigger": ""}, {"x": 3, "y": 4, "trigger": ""}]
     app = _UndoCallSiteApp([focus])
     app.selected = focus
@@ -343,7 +343,7 @@ def test_del_offset_round_trip_through_real_undo_stack():
 
 
 def test_drag_click_without_grid_move_does_not_push_undo():
-    focus = Focus()
+    focus = Focus(id=21)
     app = _UndoCallSiteApp([focus])
     app.zoom = 1.0
     app.mutex_mode = False
@@ -358,8 +358,8 @@ def test_drag_click_without_grid_move_does_not_push_undo():
 
 
 def test_drag_into_occupied_cell_does_not_push_undo():
-    focus = Focus()
-    occupied = Focus(1, 1)
+    focus = Focus(id=22)
+    occupied = Focus(id=23, x=1, y=1)
     app = _UndoCallSiteApp([focus, occupied])
     app.zoom = 1.0
     app.mutex_mode = False
@@ -376,8 +376,8 @@ def test_drag_into_occupied_cell_does_not_push_undo():
 
 
 def test_drag_event_for_other_focus_does_not_push_undo():
-    focus = Focus()
-    other = Focus(1, 1)
+    focus = Focus(id=24)
+    other = Focus(id=25, x=1, y=1)
     app = _UndoCallSiteApp([focus, other])
     app.zoom = 1.0
     app.mutex_mode = False
@@ -394,7 +394,7 @@ def test_drag_event_for_other_focus_does_not_push_undo():
 
 
 def test_drag_in_mutex_mode_does_not_push_undo():
-    focus = Focus()
+    focus = Focus(id=26)
     app = _UndoCallSiteApp([focus])
     app.zoom = 1.0
     app.mutex_mode = False
@@ -412,7 +412,7 @@ def test_drag_in_mutex_mode_does_not_push_undo():
 
 
 def test_drag_move_pushes_once_with_moved_focus_id():
-    focus = Focus()
+    focus = Focus(id=27)
     app = _UndoCallSiteApp([focus])
     app.zoom = 1.0
     app.mutex_mode = False
@@ -445,8 +445,8 @@ def test_drag_move_pushes_once_with_moved_focus_id():
 
 
 def test_drag_start_snapshots_occupied_positions():
-    focus = Focus()
-    other = Focus(3, 4)
+    focus = Focus(id=28)
+    other = Focus(id=29, x=3, y=4)
     app = _UndoCallSiteApp([focus, other])
     app.zoom = 1.0
     app.mutex_mode = False
@@ -459,7 +459,7 @@ def test_drag_start_snapshots_occupied_positions():
 
 
 def test_rmb_on_occupied_cell_does_not_place():
-    focus = Focus(2, 3)
+    focus = Focus(id=30, x=2, y=3)
     app = _UndoCallSiteApp([focus])
     app._new_focus_at = Mock()
     app.c2w = lambda _x, _y: (2, 3)
@@ -471,7 +471,7 @@ def test_rmb_on_occupied_cell_does_not_place():
 
 
 def test_rmb_on_free_cell_places():
-    focus = Focus(2, 3)
+    focus = Focus(id=31, x=2, y=3)
     app = _UndoCallSiteApp([focus])
     app._new_focus_at = Mock()
     app.c2w = lambda _x, _y: (5, 5)
@@ -499,7 +499,7 @@ def _code_of(app: _UndoCallSiteApp, focus: Focus) -> str:
 
 def _normalized_focus() -> Focus:
     """A focus that already took one Code-tab round trip, which adds fields."""
-    focus = Focus()
+    focus = Focus(id=1)
     doc = FocusDocument([focus])
     code = render_focus_block(focus, focus_lookup=doc, focus_name_lookup=doc.by_name)
     apply_focus_code(focus, code, focus_lookup=doc)
@@ -548,7 +548,7 @@ def test_apply_focus_code_without_changes_pushes_nothing_and_keeps_redo():
 
 
 def test_apply_focus_code_unnormalized_first_round_trip_keeps_redo():
-    focus = Focus()
+    focus = Focus(id=1)
     app = _code_app(focus)
     app._undo_stack.push("edit", app.focuses, (focus.id,))
     focus.desc = "later"
@@ -600,7 +600,7 @@ def test_apply_focus_code_keeps_the_entry_when_a_later_step_fails(reported):
 
 
 def test_add_focus_picks_first_free_cell_without_repairing_indexes():
-    app = _UndoCallSiteApp([Focus(0, 0), Focus(2, 0)])
+    app = _UndoCallSiteApp([Focus(id=36, x=0, y=0), Focus(id=37, x=2, y=0)])
     app._new_focus_at = Mock()
     app.focuses.validate_indexes = Mock()  # type: ignore[method-assign]
     app.focuses.rebuild_indexes = Mock()  # type: ignore[method-assign]
@@ -613,7 +613,7 @@ def test_add_focus_picks_first_free_cell_without_repairing_indexes():
 
 
 def test_new_focus_at_keeps_indexes_exact_without_a_rebuild():
-    existing = Focus(0, 0)
+    existing = Focus(id=32, x=0, y=0)
     app = _UndoCallSiteApp([existing])
     app._default_focus_prefix = "tag_"
     app.focuses.rebuild_indexes = Mock()  # type: ignore[method-assign]

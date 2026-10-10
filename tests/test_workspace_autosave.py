@@ -90,7 +90,7 @@ def test_clear_workspace_autosave_explicit_path(tmp_path):
 
 
 def _one_focus_workspace():
-    focus = Focus(1, 2)
+    focus = Focus(id=1, x=1, y=2)
     focus.name = "TAG_start"
     return EditorWorkspace(
         focuses=FocusDocument([focus]),

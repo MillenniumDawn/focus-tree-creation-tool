@@ -17,15 +17,6 @@ from hoi4cm.focus_tree.export import export_focus_tree
 from hoi4cm.models import Focus, FocusDocument
 
 
-@pytest.fixture(autouse=True)
-def reset_counter():
-    """Isolate the module-level auto-increment counter."""
-    old = Focus._next
-    Focus._next = 0
-    yield
-    Focus._next = old
-
-
 def _mk_focus(fid, name, x=0, y=0, cost=10, desc="", prereqs=None, mutex=None):
     return Focus.from_dict(
         {

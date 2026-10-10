@@ -332,11 +332,16 @@ def apply_focus_code(
         if isinstance(value, str):
             setattr(candidate, field, value.strip())
     for effect in candidate.effects:
-        raw = effect.get("fields", {}).get("raw")
+        fields = effect.get("fields")
+        if not isinstance(fields, dict):
+            continue
+        raw = fields.get("raw")
         if isinstance(raw, str):
-            effect["fields"]["raw"] = raw.strip()
+            fields["raw"] = raw.strip()
     for offset in candidate.offsets:
-        offset["trigger"] = offset.get("trigger", "").strip()
+        trigger = offset.get("trigger", "")
+        if isinstance(trigger, str):
+            offset["trigger"] = trigger.strip()
 
     _preserve_raw_coordinates(focus, candidate, focus_lookup)
 

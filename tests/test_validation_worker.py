@@ -24,7 +24,7 @@ def _mod_loc_file_reset(monkeypatch):
 def _focus(
     sid, name=None, x=0, y=0, gfx="GFX_test", effects=(), prereqs=(), tree_idx=0
 ):
-    focus = Focus(x, y)
+    focus = Focus(id=1, x=x, y=y)
     focus.id = sid
     focus.name = name or f"focus_{sid}"
     focus.gfx = gfx

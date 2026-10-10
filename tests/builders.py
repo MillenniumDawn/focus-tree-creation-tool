@@ -8,8 +8,7 @@ from hoi4cm.models import Focus
 
 
 def make_focus(**overrides: Any) -> Focus:
-    focus = Focus(0, 0)
-    focus.id = overrides.pop("id", 1)
+    focus = Focus(id=overrides.pop("id", 1), x=0, y=0)
     focus.name = "keep"
     focus.icon = "⚔"
     focus.gfx = "GFX_goal_generic_political_pressure"

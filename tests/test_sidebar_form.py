@@ -205,10 +205,10 @@ def test_by_name_missing_key_raises_key_error():
 
 
 def test_render_focus_block_accepts_document_by_name():
-    parent = Focus(0, 0)
+    parent = Focus(id=2, x=0, y=0)
     parent.id = 1
     parent.name = "PARENT"
-    child = Focus(3, 4)
+    child = Focus(id=3, x=3, y=4)
     child.id = 2
     child.name = "CHILD"
     child.relative_position_id = "PARENT"
@@ -236,7 +236,7 @@ def _large_document(
 ) -> tuple[FocusDocument, Focus, FocusSidebarValues]:
     focuses = []
     for index in range(1, size + 1):
-        focus = Focus(index % 64, index // 64)
+        focus = Focus(id=4, x=index % 64, y=index // 64)
         focus.id = index
         focus.name = f"F_{index}"
         focus.ai_will_do_raw = "base = 1"

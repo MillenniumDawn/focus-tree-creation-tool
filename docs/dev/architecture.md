@@ -226,15 +226,17 @@ or state leaks across tests:
   registered error callback, and whether the excepthook is installed are
   all module globals. `test_logger.py`'s `log_state` fixture snapshots and
   restores all three around each test.
-- **`Focus._next`** (`hoi4cm.models.focus.Focus`): a class-level counter
-  used to assign IDs. `Focus.from_dict` raises it to any larger ID it loads;
-  allocation increments it before use, so freshly created focuses never collide
-  with imported ones. Loaded IDs outside `0..MAX_FOCUS_ID` are rejected rather
-  than clamped; fresh/duplicate allocation fails at the cap without changing the
-  counter. `FocusDocument.load` rejects duplicate IDs before replacing its data,
-  preserving existing focuses and references on failure. Project decoding restores
-  the allocator counter on rejection, before the UI installs the workspace. Tests that
-  create focuses reset it in a fixture (see `test_focus_tree_roundtrip.py`).
+- **Focus IDs** (`hoi4cm.models.FocusDocument`): each document tracks its own
+  allocation watermark and creates focuses through `new_focus()` or
+  `allocate_id()`. `Focus` itself takes an explicit ID, so independent documents
+  can safely reuse IDs. `Focus.from_dict` validates IDs without changing any
+  allocator; `FocusDocument.load` rejects duplicate IDs before replacing its
+  data, preserving existing focuses and references on failure. Allocation fails
+  at `MAX_FOCUS_ID` without changing the watermark. `BuildContext` keeps an
+  allocator across related `build_focuses()` calls, and batch imports pass one
+  shared document allocator through all trees. UI workers seed that detached
+  allocator with the live document's high-water mark, so undoing a focus does
+  not make its id available to a later import.
 
 ## Revision discipline
 
@@ -308,11 +310,9 @@ objects) without the user mutating the live dict concurrently on the Tk
 thread. Every `run_bg` call site that reads or builds against `self.focuses`
 holds a `progress_modal` (or an equivalent grab) for the duration.
 
-That grab is also why building `Focus` objects on a worker thread is safe
-despite `Focus.__init__` bumping the shared `Focus._next` class counter:
-there's only ever one thread creating focuses at a time, because the modal
-grab blocks the user from triggering focus creation on the Tk thread while
-the worker runs.
+That grab also keeps the workspace snapshot stable while a worker builds
+focuses with IDs from a detached `FocusDocument`. The live document is updated
+only after the worker returns.
 
 Cancel is cooperative, not a kill. `make_cancel_handle` and
 `batch_load_trees` live in `focus_tree/batch_load.py` with no Tk objects.

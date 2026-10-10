@@ -95,8 +95,8 @@ state leaks between tests. Six patterns cover what's here today:
   parse -> build -> export -> reparse stability: the exporter normalizes
   whitespace, so the guarantee it checks is that a second export equals the
   first, plus that structural fields and known content survive. Its
-  `reset_counter` fixture saves and restores `Focus._next` around each test
-  so ID assignment doesn't depend on test order.
+  related builds reuse a `BuildContext` allocator, while standalone builds use
+  their own context, so IDs stay local and independent of test order.
 - **The shared Tk fixtures.** `tests/conftest.py` provides the autouse
   `hide_tk_windows` fixture and builds a `tk.Tk()` in `tk_root`, destroying it
   after the test and skipping when no display is reachable (see "The headless
@@ -132,7 +132,7 @@ each one and compares the result against a committed golden JSON under
 `tests/fixtures/focus_trees/golden/`.
 
 The comparison normalizes before asserting: focuses are keyed by name
-instead of numeric id (ids depend on `Focus._next`, a global counter), and
+instead of numeric id (IDs belong to the document), and
 `prereqs`/`mutex` id-lists are remapped to names for the same reason. Group
 structure and ordering are left alone since OR-group membership and AND
 ordering are semantically meaningful.

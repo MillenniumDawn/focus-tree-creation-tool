@@ -92,6 +92,12 @@ def _encode_full(focuses) -> bytes:
     )
 
 
+def _encode_snapshot(snapshot) -> bytes:
+    return zlib.compress(
+        json.dumps({str(fid): data for fid, data in snapshot.items()}).encode("utf-8")
+    )
+
+
 def _id_set(focuses) -> frozenset:
     """Cached id-set for a document, or a fresh frozenset for a plain dict."""
     cached = getattr(focuses, "id_set", None)
@@ -131,6 +137,27 @@ class UndoStack:
         self._stack.clear()
         self._redo.clear()
         self._run = None
+
+    def preserve_on_redo(self, focuses):
+        """Keep imported focuses when an earlier edit is redone."""
+        if not self._redo:
+            return
+        additions = {
+            focus_id: _snapshot_focus_for_encoding(focus)
+            for focus_id, focus in focuses.items()
+        }
+        if not additions:
+            return
+        addition_ids = set(additions)
+        for index, entry in enumerate(self._redo):
+            label, kind, payload, id_set = entry
+            if kind == _FULL:
+                snapshot = _decode_full(payload)
+                if snapshot is None:
+                    continue
+                snapshot.update(additions)
+                payload = _encode_snapshot(snapshot)
+            self._redo[index] = (label, kind, payload, id_set | addition_ids)
 
     def end_run(self) -> None:
         """Make the next keyed ``push`` start a new entry."""

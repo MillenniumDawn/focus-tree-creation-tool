@@ -153,7 +153,7 @@ def _workspace(tree_id="NEW_tree", focuses=()):
 def _seed_history(app, *, with_redo=False):
     """Push two sparse undo entries; ``with_redo`` moves one to the redo stack."""
     app_module.App._push_undo(cast(app_module.App, app), "add focus", touched_ids=())
-    created = Focus()
+    created = app.focuses.new_focus()
     created.name = "seed_created"
     app.focuses.add(created)
     app_module.App._push_undo(
@@ -182,11 +182,11 @@ def _assert_new_focus_survives_undo_and_redo(app, new_focus):
 
 
 def test_install_workspace_clears_undo_and_redo_history(monkeypatch):
-    old = Focus()
+    old = Focus(id=1)
     old.name = "OLD_focus"
     app = _headless_app(monkeypatch, [old])
     _seed_history(app, with_redo=True)
-    new_ws = _workspace(focuses=[Focus()])
+    new_ws = _workspace(focuses=[Focus(id=1)])
     new_focus = next(iter(new_ws.focuses.values()))
 
     app_module.App._install_workspace(cast(app_module.App, app), new_ws)
@@ -200,7 +200,7 @@ def test_install_workspace_clears_undo_and_redo_history(monkeypatch):
 def test_undo_tracks_edits_again_after_install(monkeypatch):
     app = _headless_app(monkeypatch)
     app_module.App._install_workspace(
-        cast(app_module.App, app), _workspace(focuses=[Focus()])
+        cast(app_module.App, app), _workspace(focuses=[Focus(id=1)])
     )
     new_focus = next(iter(app.focuses.values()))
     original_name = new_focus.name
@@ -234,9 +234,9 @@ def run_bg_fails(_app, _work, _on_done, on_error, **_kw):
 
 
 def test_successful_load_clears_undo_and_redo_history(monkeypatch):
-    app = _headless_app(monkeypatch, [Focus()])
+    app = _headless_app(monkeypatch, [Focus(id=1)])
     _seed_history(app, with_redo=True)
-    new_ws = _workspace(focuses=[Focus()])
+    new_ws = _workspace(focuses=[Focus(id=1)])
     new_focus = next(iter(new_ws.focuses.values()))
     _patch_load_infrastructure(monkeypatch)
     monkeypatch.setattr(
@@ -254,7 +254,7 @@ def test_successful_load_clears_undo_and_redo_history(monkeypatch):
 
 
 def test_cancelled_load_file_picker_preserves_history(monkeypatch):
-    app = _headless_app(monkeypatch, [Focus()])
+    app = _headless_app(monkeypatch, [Focus(id=1)])
     created = _seed_history(app)
     ask_open = Mock(return_value="")
     monkeypatch.setattr(app_module.filedialog, "askopenfilename", ask_open)
@@ -273,7 +273,7 @@ def test_cancelled_load_file_picker_preserves_history(monkeypatch):
 
 
 def test_declined_discard_preserves_history(monkeypatch):
-    app = _headless_app(monkeypatch, [Focus()])
+    app = _headless_app(monkeypatch, [Focus(id=1)])
     _seed_history(app)
     app._confirm_discard = Mock(return_value=False)
     ask_open = Mock(side_effect=AssertionError("picker should not open"))
@@ -288,7 +288,7 @@ def test_declined_discard_preserves_history(monkeypatch):
 
 
 def test_failed_load_preserves_history_and_old_document(monkeypatch):
-    app = _headless_app(monkeypatch, [Focus()])
+    app = _headless_app(monkeypatch, [Focus(id=1)])
     original_ids = set(app.focuses)
     created = _seed_history(app)
     old_workspace = app.workspace
@@ -332,9 +332,9 @@ def _patch_autosave_offer(monkeypatch, tmp_path, workspace, *, answer):
 
 
 def test_autosave_restore_clears_undo_and_redo_history(monkeypatch, tmp_path):
-    app = _headless_app(monkeypatch, [Focus()])
+    app = _headless_app(monkeypatch, [Focus(id=1)])
     _seed_history(app, with_redo=True)
-    saved_ws = _workspace(focuses=[Focus()])
+    saved_ws = _workspace(focuses=[Focus(id=1)])
     new_focus = next(iter(saved_ws.focuses.values()))
     _patch_autosave_offer(monkeypatch, tmp_path, saved_ws, answer=True)
 
@@ -347,7 +347,7 @@ def test_autosave_restore_clears_undo_and_redo_history(monkeypatch, tmp_path):
 
 
 def test_autosave_restore_declined_preserves_history(monkeypatch, tmp_path):
-    app = _headless_app(monkeypatch, [Focus()])
+    app = _headless_app(monkeypatch, [Focus(id=1)])
     _seed_history(app)
     old_workspace = app.workspace
     _patch_autosave_offer(monkeypatch, tmp_path, _workspace(), answer=False)
@@ -360,7 +360,7 @@ def test_autosave_restore_declined_preserves_history(monkeypatch, tmp_path):
 
 
 def test_autosave_restore_cancelled_preserves_history(monkeypatch, tmp_path):
-    app = _headless_app(monkeypatch, [Focus()])
+    app = _headless_app(monkeypatch, [Focus(id=1)])
     _seed_history(app)
     old_workspace = app.workspace
     _patch_autosave_offer(monkeypatch, tmp_path, _workspace(), answer=None)
@@ -378,7 +378,7 @@ def test_autosave_restore_cancelled_preserves_history(monkeypatch, tmp_path):
 def _dialog_app(root, monkeypatch):
     """Tk root dressed as an App for the New Tree dialog callback."""
     app = cast(Any, root)
-    old = Focus()
+    old = Focus(id=1)
     old.name = "OLD_focus"
     app.focuses = FocusDocument([old])
     app.selected = None
