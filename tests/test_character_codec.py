@@ -123,17 +123,17 @@ def test_saving_imported_character_keeps_original_encoding_across_saves(
     [
         (
             "# Keep this header comment\n"
-            "# Disabled legacy = { name = \"Not active\" }\n"
-            "characters = { X = { name = \"Ada\" } }\n",
+            '# Disabled legacy = { name = "Not active" }\n'
+            'characters = { X = { name = "Ada" } }\n',
             None,
         ),
         (
             "# Keep this header comment\n"
-            "# Disabled legacy = { name = \"Not active\" }\n"
-            "characters = { X = { name = \"Ada\" } }\n",
+            '# Disabled legacy = { name = "Not active" }\n'
+            'characters = { X = { name = "Ada" } }\n',
             "# Keep this header comment\n"
-            "# Disabled legacy = { name = \"Not active\" }\n"
-            "characters = { X = { name = \"Ada Lovelace\" } }\n",
+            '# Disabled legacy = { name = "Not active" }\n'
+            'characters = { X = { name = "Ada Lovelace" } }\n',
         ),
     ],
     ids=["no-change", "edited"],
