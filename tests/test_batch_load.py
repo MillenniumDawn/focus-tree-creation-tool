@@ -49,6 +49,9 @@ def test_batch_load_allocates_unique_ids_across_trees_and_existing_seed(tmp_path
     second = _write_tree(tmp_path / "b.txt", "b")
     seed = Focus(id=41)
     document = FocusDocument([seed])
+    undone = document.new_focus()
+    document.add(undone)
+    document.delete_many((undone.id,))
 
     results, stopped = batch_load_trees(
         [(first, "shared"), (second, "joint")],
@@ -56,13 +59,14 @@ def test_batch_load_allocates_unique_ids_across_trees_and_existing_seed(tmp_path
         0,
         "TST",
         lambda *_args: None,
+        allocator_floor=document.last_allocated_id,
     )
     added = [focus for result in results for focus in result["new_focuses"]]
 
     assert stopped is False
-    assert [focus.id for focus in added] == [42, 43]
+    assert [focus.id for focus in added] == [43, 44]
     document.extend(added)
-    assert list(document) == [41, 42, 43]
+    assert list(document) == [41, 43, 44]
 
 
 def test_batch_load_worker_stops_before_any_file_when_already_cancelled(tmp_path):

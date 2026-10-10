@@ -52,8 +52,11 @@ _KNOWN_FOCUS_FIELDS = frozenset(
 class BuildContext:
     """Cross-tree name/position indexes and the allocator shared by tree builds."""
 
-    def __init__(self, existing_focuses: Iterable[Focus] = ()) -> None:
+    def __init__(
+        self, existing_focuses: Iterable[Focus] = (), *, id_floor: int = 0
+    ) -> None:
         self.id_document = FocusDocument()
+        self.id_document.reserve_id(id_floor)
         self._position_by_name: dict[str, Focus] = {}
         self._link_id_by_name: dict[str, int] = {}
         self.add_focuses(existing_focuses)
@@ -119,6 +122,7 @@ def build_focuses(
     existing_focuses: Iterable[Focus] = (),
     context: BuildContext | None = None,
     document: FocusDocument | None = None,
+    id_floor: int = 0,
 ) -> list[Focus]:
     """Return the list of :class:`Focus` objects for one parsed tree.
 
@@ -131,15 +135,19 @@ def build_focuses(
     Pass ``document`` to allocate IDs from a specific workspace. Without it,
     IDs come from ``context``'s allocator, which is seeded with
     ``existing_focuses`` and remains monotonic across calls sharing that context.
+    ``id_floor`` carries a document allocator's watermark into a detached
+    worker context when some previously allocated IDs are no longer live.
     """
     existing_focuses = list(existing_focuses)
     if context is None:
-        context = BuildContext(existing_focuses)
+        context = BuildContext(existing_focuses, id_floor=id_floor)
     else:
         context.add_focuses(existing_focuses)
+        context.id_document.reserve_id(id_floor)
     if document is None:
         document = context.id_document
     else:
+        document.reserve_id(id_floor)
         for focus in existing_focuses:
             document.reserve_id(focus.id)
 

@@ -230,7 +230,9 @@ or state leaks across tests:
   data, preserving existing focuses and references on failure. Allocation fails
   at `MAX_FOCUS_ID` without changing the watermark. `BuildContext` keeps an
   allocator across related `build_focuses()` calls, and batch imports pass one
-  shared document allocator through all trees.
+  shared document allocator through all trees. UI workers seed that detached
+  allocator with the live document's high-water mark, so undoing a focus does
+  not make its id available to a later import.
 
 ## Revision discipline
 

@@ -82,6 +82,11 @@ class FocusDocument(MutableMapping[int, Focus]):
         return self.geometry_revision
 
     @property
+    def last_allocated_id(self) -> int:
+        """Highest id ever allocated or reserved by this document."""
+        return self._last_allocated_id
+
+    @property
     def by_name(self) -> Mapping[str, Focus]:
         """First-match-wins name lookup backed by first_by_name (no rebuild)."""
         return _FocusNameMap(self)

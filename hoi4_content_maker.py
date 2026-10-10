@@ -4543,6 +4543,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             self._joint_focuses.append(parsed.tree_id)
         self._refresh_tree_meta_panel()
         self.focuses.extend(new_focuses)
+        self._undo_stack.preserve_on_redo({f.id: f for f in new_focuses})
         for f in new_focuses:
             tree_info["focus_ids"].add(f.id)
         self._refresh_loaded_trees_panel()
@@ -4601,6 +4602,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         # Snapshot under the modal's grab so nothing mutates the document after it.
         tree_idx = len(self._extra_trees) + 1
         existing_focuses = list(self.focuses.values())
+        allocator_floor = self.focuses.last_allocated_id
         country_tag = getattr(self, "_tree_country_tag", "")
 
         def work():
@@ -4612,6 +4614,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
                 tree_idx,
                 country_tag=country_tag,
                 existing_focuses=existing_focuses,
+                id_floor=allocator_floor,
             )
             t2 = time.perf_counter()
             log.debug(
@@ -4774,6 +4777,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         country_tag,
         progress,
         cancelled=None,
+        allocator_floor=0,
     ):
         """Parse and build selected trees sequentially on a worker thread."""
         return batch_load_trees(
@@ -4783,6 +4787,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             country_tag,
             progress,
             cancelled=cancelled,
+            allocator_floor=allocator_floor,
         )
 
     def _load_all_trees(self):
@@ -4959,6 +4964,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             # is in place. The worker must not touch
             # self.focuses/self._extra_trees directly (ui/tasks.py).
             existing_seed = list(self.focuses.values())
+            allocator_floor = self.focuses.last_allocated_id
             extra_trees_start_idx = len(self._extra_trees)
             country_tag = getattr(self, "_tree_country_tag", "")
 
@@ -4984,6 +4990,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
                     country_tag,
                     progress,
                     cancelled=modal.cancelled,
+                    allocator_floor=allocator_floor,
                 )
 
             def on_done(payload):
@@ -5029,6 +5036,9 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
                         tree_info["focus_ids"].add(f.id)
 
                 self.focuses.extend(pending_focuses)
+                self._undo_stack.preserve_on_redo(
+                    {focus.id: focus for focus in pending_focuses}
+                )
 
                 if ok:
                     self._refresh_tree_meta_panel()

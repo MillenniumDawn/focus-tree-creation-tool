@@ -9,7 +9,6 @@ from types import SimpleNamespace
 
 from hoi4cm.core.logger import get_logger
 from hoi4cm.core.paths import read_file
-from hoi4cm.models import FocusDocument
 
 from .build import BuildContext, build_focuses
 from .parse import FocusTreeParseCancelled, parse_focus_tree
@@ -38,12 +37,12 @@ def batch_load_trees(
     country_tag,
     progress,
     cancelled=None,
+    allocator_floor=0,
 ):
     """Parse and build selected trees sequentially, stopping if cancelled."""
     total = len(to_load)
     existing = list(existing_seed)
-    build_context = BuildContext(existing)
-    id_document = FocusDocument(existing)
+    build_context = BuildContext(existing, id_floor=allocator_floor)
     tree_idx = extra_trees_start_idx
     results = []
     stopped_early = False
@@ -65,7 +64,6 @@ def batch_load_trees(
                 tree_idx + 1,
                 country_tag=country_tag,
                 context=build_context,
-                document=id_document,
             )
             if cancelled is not None and cancelled.is_set():
                 stopped_early = True
