@@ -31,7 +31,7 @@ from hoi4cm.mod.graphics_catalog import (
     ScanCancelled,
 )
 from hoi4cm.mod.scan_cache import ScanCache
-from hoi4cm.script.syntax import parse_block, parse_script, tokenize
+from hoi4cm.script.syntax import parse_script
 
 _log = get_logger("mod")
 
@@ -298,15 +298,6 @@ class ModContext:
         self.graphics_catalog.flush_cache()
         return result
 
-    # ── HOI4 script tokeniser (same as main parser) ─────────────────
-    @staticmethod
-    def _tokenize(s):
-        return tokenize(s)
-
-    @staticmethod
-    def _parse_block(tokens, pos):
-        return parse_block(tokens, pos)
-
     def _read(self, path):
         return read_file(path)
 
@@ -395,13 +386,6 @@ class ModContext:
     def _parse_text(src):
         """Parse a HOI4 script string into a dict tree."""
         return parse_script(src)
-
-    def _parse_file(self, path):
-        """Parse a HOI4 script file into a dict tree."""
-        try:
-            return self._parse_text(self._read(path))
-        except OSError, ValueError, TypeError, RuntimeError:
-            return {}
 
     # ── Scanners ─────────────────────────────────────────────────────
     def _scan_gfx_unified(self, cancelled: threading.Event | None = None):
@@ -519,8 +503,7 @@ class ModContext:
         return [m.group(1) for m in _BLOCK_RE.finditer(src)]
 
     @staticmethod
-    def _extract_scripted_names(src):
-        parsed = ModContext._parse_text(src)
+    def _block_names(parsed):
         return [
             name
             for name, value in parsed.items()
@@ -530,31 +513,22 @@ class ModContext:
         ]
 
     @staticmethod
+    def _extract_scripted_names(src):
+        return ModContext._block_names(ModContext._parse_text(src))
+
+    @staticmethod
     def _extract_on_actions(src):
         parsed = ModContext._parse_text(src)
-        if "on_actions" in parsed:
-            blocks = parsed["on_actions"]
-            if isinstance(blocks, dict):
-                blocks = (blocks,)
-            elif isinstance(blocks, list):
-                blocks = tuple(block for block in blocks if isinstance(block, dict))
-            else:
-                blocks = ()
-            return [
-                name
-                for block in blocks
-                for name, value in block.items()
-                if isinstance(name, str)
-                and name != "_values"
-                and isinstance(value, (dict, list))
-            ]
-        return [
-            name
-            for name, value in parsed.items()
-            if isinstance(name, str)
-            and name != "_values"
-            and isinstance(value, (dict, list))
-        ]
+        if "on_actions" not in parsed:
+            return ModContext._block_names(parsed)
+        blocks = parsed["on_actions"]
+        if isinstance(blocks, dict):
+            blocks = (blocks,)
+        elif isinstance(blocks, list):
+            blocks = tuple(block for block in blocks if isinstance(block, dict))
+        else:
+            blocks = ()
+        return [name for block in blocks for name in ModContext._block_names(block)]
 
     @staticmethod
     def _extract_tags(src):
@@ -596,35 +570,33 @@ class ModContext:
             if ids:
                 self.event_ids[os.path.basename(p)[:-4]] = ids
 
-    def _scan_ideas(self):
+    def _scan_id_list(self, attr, domain, extract_fn, *subdir):
+        """Fill list *attr* with de-duplicated IDs from ``root/<subdir>/*.txt``.
+
+        ``scan()`` empties every target list first, so this replaces rather
+        than merges.
+        """
         root = self.root
         if not root:
             return
-        d = os.path.join(root, "common", "ideas")
+        d = os.path.join(root, *subdir)
         if not os.path.isdir(d):
             return
         paths = self._txt_paths(d)
-        results = self._scan_files_cached("ideas", paths, self._extract_ideas)
-        seen = dict.fromkeys(self.idea_ids)
-        for p in paths:
-            for idea_id in results[p]:
-                seen[idea_id] = None
-        self.idea_ids = list(seen)
+        results = self._scan_files_cached(domain, paths, extract_fn)
+        setattr(self, attr, list(dict.fromkeys(i for p in paths for i in results[p])))
+
+    def _scan_ideas(self):
+        self._scan_id_list("idea_ids", "ideas", self._extract_ideas, "common", "ideas")
 
     def _scan_characters(self):
-        root = self.root
-        if not root:
-            return
-        d = os.path.join(root, "common", "characters")
-        if not os.path.isdir(d):
-            return
-        paths = self._txt_paths(d)
-        results = self._scan_files_cached("characters", paths, self._extract_characters)
-        seen = dict.fromkeys(self.character_ids)
-        for p in paths:
-            for character_id in results[p]:
-                seen[character_id] = None
-        self.character_ids = list(seen)
+        self._scan_id_list(
+            "character_ids",
+            "characters",
+            self._extract_characters,
+            "common",
+            "characters",
+        )
 
     def _scan_decisions(self):
         root = self.root
@@ -660,86 +632,45 @@ class ModContext:
         self.decision_cats = list(cats_seen)
 
     def _scan_scripted_effects(self):
-        self.scripted_effect_ids.clear()
-        root = self.root
-        if not root:
-            return
-        d = os.path.join(root, "common", "scripted_effects")
-        if not os.path.isdir(d):
-            return
-        paths = self._txt_paths(d)
-        results = self._scan_files_cached(
-            "scripted_effects", paths, self._extract_scripted_names
+        self._scan_id_list(
+            "scripted_effect_ids",
+            "scripted_effects",
+            self._extract_scripted_names,
+            "common",
+            "scripted_effects",
         )
-        seen = {}
-        for p in paths:
-            for effect_id in results[p]:
-                seen[effect_id] = None
-        self.scripted_effect_ids = list(seen)
 
     def _scan_scripted_triggers(self):
-        self.scripted_trigger_ids.clear()
-        root = self.root
-        if not root:
-            return
-        d = os.path.join(root, "common", "scripted_triggers")
-        if not os.path.isdir(d):
-            return
-        paths = self._txt_paths(d)
-        results = self._scan_files_cached(
-            "scripted_triggers", paths, self._extract_scripted_names
+        self._scan_id_list(
+            "scripted_trigger_ids",
+            "scripted_triggers",
+            self._extract_scripted_names,
+            "common",
+            "scripted_triggers",
         )
-        seen = {}
-        for p in paths:
-            for trigger_id in results[p]:
-                seen[trigger_id] = None
-        self.scripted_trigger_ids = list(seen)
 
     def _scan_on_actions(self):
-        self.on_action_ids.clear()
-        root = self.root
-        if not root:
-            return
-        d = os.path.join(root, "common", "on_actions")
-        if not os.path.isdir(d):
-            return
-        paths = self._txt_paths(d)
-        results = self._scan_files_cached("on_actions", paths, self._extract_on_actions)
-        seen = {}
-        for p in paths:
-            for hook_name in results[p]:
-                seen[hook_name] = None
-        self.on_action_ids = list(seen)
+        self._scan_id_list(
+            "on_action_ids",
+            "on_actions",
+            self._extract_on_actions,
+            "common",
+            "on_actions",
+        )
 
     def _scan_dyn_mods(self):
-        root = self.root
-        if not root:
-            return
-        d = os.path.join(root, "common", "dynamic_modifiers")
-        if not os.path.isdir(d):
-            return
-        paths = self._txt_paths(d)
-        results = self._scan_files_cached("dyn_mods", paths, self._extract_block_names)
-        seen = dict.fromkeys(self.dyn_mod_ids)
-        for p in paths:
-            for mid in results[p]:
-                seen[mid] = None
-        self.dyn_mod_ids = list(seen)
+        self._scan_id_list(
+            "dyn_mod_ids",
+            "dyn_mods",
+            self._extract_block_names,
+            "common",
+            "dynamic_modifiers",
+        )
 
     def _scan_tags(self):
-        root = self.root
-        if not root:
-            return
-        d = os.path.join(root, "common", "country_tags")
-        if not os.path.isdir(d):
-            return
-        paths = self._txt_paths(d)
-        results = self._scan_files_cached("tags", paths, self._extract_tags)
-        seen = dict.fromkeys(self.country_tags)
-        for p in paths:
-            for tag in results[p]:
-                seen[tag] = None
-        self.country_tags = list(seen)
+        self._scan_id_list(
+            "country_tags", "tags", self._extract_tags, "common", "country_tags"
+        )
 
     def _scan_md_money_files(self):
         """Auto-discover the three MD additional income system files."""

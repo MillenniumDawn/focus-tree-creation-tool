@@ -8,34 +8,15 @@ behavior lives in ``test_wizard_generators_decision.py``.
 
 import tkinter as tk
 
+from tk_helpers import cleanup_toplevels, find_text, release_grab
+
 import hoi4cm.core.logger as logmod
 import hoi4cm.wizards._generators as gen_mod
 from hoi4cm.wizards.decision import open_decision_wizard
 
 
-def _find_text(root, bg=None):
-    found = []
-
-    def walk(w):
-        if isinstance(w, tk.Text):
-            if bg is None:
-                found.append(w)
-            else:
-                try:
-                    cur = w.cget("bg")
-                except tk.TclError:
-                    cur = ""
-                if cur == bg:
-                    found.append(w)
-        for child in w.winfo_children():
-            walk(child)
-
-    walk(root)
-    return found[0] if found else None
-
-
 def _find_code_text(root):
-    return _find_text(root, "#080b10")
+    return find_text(root, "#080b10")
 
 
 def _button_by_text(root, needle):
@@ -80,27 +61,10 @@ def _ensure_decision_has_text(root):
         root.update_idletasks()
 
 
-def _cleanup_toplevels(root):
-    for w in list(root.winfo_children()):
-        if isinstance(w, tk.Toplevel):
-            try:
-                w.destroy()
-            except tk.TclError:
-                pass
-    try:
-        root.grab_release()
-    except tk.TclError:
-        pass
-    root.update_idletasks()
-
-
 def test_decision_export_failure_preserves_code_tab_and_logs(
     tk_root, tmp_path, monkeypatch
 ):
-    try:
-        tk_root.grab_release()
-    except tk.TclError:
-        pass
+    release_grab(tk_root)
     orig_cb = logmod._error_callback
     logmod.clear_errors()
     logmod.set_error_callback(None)
@@ -143,4 +107,4 @@ def test_decision_export_failure_preserves_code_tab_and_logs(
     finally:
         logmod.clear_errors()
         logmod.set_error_callback(orig_cb)
-        _cleanup_toplevels(tk_root)
+        cleanup_toplevels(tk_root)

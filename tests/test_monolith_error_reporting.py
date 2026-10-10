@@ -16,6 +16,7 @@ import pytest
 import hoi4_content_maker as m
 import hoi4cm.core.logger as logmod
 import hoi4cm.ui.error_report as error_report
+from hoi4cm.core.undo import UndoStack
 from hoi4cm.editor import decode_project
 from hoi4cm.models import Focus, FocusDocument
 from hoi4cm.models.focus import MAX_FOCUS_ID
@@ -311,13 +312,16 @@ def test_save_reports_a_write_failure(shown, monkeypatch):
 
 
 def test_apply_focus_code_reports_a_parse_failure(shown):
-    shell = type("Shell", (), {"focuses": FocusDocument()})()
+    shell = type(
+        "Shell", (), {"focuses": FocusDocument(), "_undo_stack": UndoStack()}
+    )()
     focus = Focus()
 
     assert (
         m.App._apply_focus_code(cast(m.App, shell), focus, "not a focus block") is False
     )
 
+    assert len(shell._undo_stack) == 0
     assert len(shown) == 1
     title, message, _options = shown[0]
     assert title == "Parse Error"
@@ -334,6 +338,7 @@ def test_apply_focus_code_restore_uses_redraw_now(monkeypatch):
     extra = Focus(2, 2)
     shell = SimpleNamespace(
         focuses=FocusDocument([focus, extra]),
+        _undo_stack=UndoStack(),
         selected=focus,
         zoom=1.25,
         offset=[10, 20],

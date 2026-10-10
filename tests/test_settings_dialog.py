@@ -8,6 +8,7 @@ from tkinter import ttk
 from unittest.mock import MagicMock
 
 import pytest
+from tk_helpers import destroy_toplevels, new_toplevels
 
 import hoi4cm.ui.settings_dialog as settings_dialog
 from hoi4cm.core.i18n import I18N_LANGS
@@ -90,30 +91,6 @@ def _stub_mod_app(root: tk.Tk, monkeypatch: pytest.MonkeyPatch) -> tk.Tk:
     return root
 
 
-def _new_toplevels(before: set[tk.Misc], root: tk.Misc) -> list[tk.Toplevel]:
-    return [
-        w
-        for w in root.winfo_children()  # type: ignore[union-attr]
-        if w not in before and isinstance(w, tk.Toplevel)
-    ]
-
-
-def _destroy_toplevels(wins: list[tk.Toplevel], root: tk.Misc) -> None:
-    for w in wins:
-        try:
-            w.grab_release()
-        except Exception:
-            pass
-        try:
-            w.destroy()
-        except Exception:
-            pass
-    try:
-        root.update()  # type: ignore[union-attr]
-    except Exception:
-        pass
-
-
 def _find_profile_delete_button(win: tk.Misc, profile_name: str) -> tk.Button | None:
     stack: list[tk.Misc] = [win]
     while stack:
@@ -171,7 +148,7 @@ def _open_settings_with_profile(tk_root, monkeypatch):
     before: set[tk.Misc] = set(tk_root.winfo_children())
     settings_dialog.open_settings(tk_root)
     tk_root.update()
-    wins = _new_toplevels(before, tk_root)
+    wins = new_toplevels(before, tk_root)
     assert wins, "open_settings did not create a Toplevel"
     save_config.reset_mock()
     return wins, save_config
@@ -201,7 +178,7 @@ def test_delete_event_dim_profile_cancel_leaves_profile_and_skips_save(
         assert MOD.event_dim_active_profile == _PROFILE
         save_config.assert_not_called()
     finally:
-        _destroy_toplevels(wins, tk_root)
+        destroy_toplevels(wins, tk_root)
 
 
 def test_delete_event_dim_profile_confirm_removes_profile_and_saves(
@@ -228,7 +205,7 @@ def test_delete_event_dim_profile_confirm_removes_profile_and_saves(
         assert MOD.event_dim_active_profile == "vanilla"
         save_config.assert_called_once_with()
     finally:
-        _destroy_toplevels(wins, tk_root)
+        destroy_toplevels(wins, tk_root)
 
 
 def test_config_save_failure_warns_once_per_settings_dialog(
@@ -255,7 +232,7 @@ def test_config_save_failure_warns_once_per_settings_dialog(
         assert "save settings" in warnings[0][0][1].lower()
         assert save_config.call_count == 2
     finally:
-        _destroy_toplevels(wins, tk_root)
+        destroy_toplevels(wins, tk_root)
 
 
 def test_language_change_failed_save_warns_without_success_dialog(
@@ -280,4 +257,4 @@ def test_language_change_failed_save_warns_without_success_dialog(
         assert len(warnings) == 1
         assert infos == []
     finally:
-        _destroy_toplevels(wins, tk_root)
+        destroy_toplevels(wins, tk_root)
