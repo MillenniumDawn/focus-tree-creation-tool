@@ -8,6 +8,8 @@ the version by hand. See `AGENTS.md`.
 
 ## Unreleased
 
+- Run Linux pytest on a private display so mapped UI tests and smoke-test children
+  cannot open windows on the desktop; clean up direct test roots and display processes.
 - Make sidebar autosave, Code-tab apply, and typing in effect fields undoable.
   A run of keystrokes in one effect field is a single undo step. An edit that
   changes nothing adds no entry and keeps the redo trail.
