@@ -8,6 +8,9 @@ the version by hand. See `AGENTS.md`.
 
 ## Unreleased
 
+- Make sidebar autosave, Code-tab apply, and typing in effect fields undoable.
+  A run of keystrokes in one effect field is a single undo step. An edit that
+  changes nothing adds no entry and keeps the redo trail.
 - Wait for the progress modal to be mapped before taking its Tk grab, so it no
   longer fails with "grab failed: window not viewable" on a live display.
 - Add Spanish (Español) as an interface language.
