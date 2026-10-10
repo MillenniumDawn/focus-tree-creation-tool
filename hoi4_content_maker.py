@@ -3391,7 +3391,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             tr("dialog.clear_all.body", "Delete ALL focuses?"),
         ):
             return
-        self._push_undo("clear all")
+        self._push_undo("clear all", tree_state=True)
         self._begin_document_generation()
         self.cv.delete("all")
         self._focus_bundles.clear()
@@ -4450,7 +4450,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
 
             # clear existing
             # Clear canvas; _items refs are gone since we cv.delete('all')
-            self._push_undo("import tree")
+            self._push_undo("import tree", tree_state=True)
             self.cv.delete("all")
             self.focuses.clear()
             self._reset_canvas_bounds()

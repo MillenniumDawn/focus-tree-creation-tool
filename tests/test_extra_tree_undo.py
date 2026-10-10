@@ -109,6 +109,37 @@ def test_unload_extra_tree_cancel_does_not_change_state_or_push_undo(monkeypatch
     assert app._extra_trees[0]["tree_id"] == "shared_tree"
 
 
+def test_clear_all_undo_restores_extra_tree_registry_and_focuses(monkeypatch):
+    focus = Focus()
+    focus.tree_idx = 1
+    app = _app([focus])
+    app._extra_trees = [
+        {
+            "tree_id": "shared_tree",
+            "type": "shared",
+            "focus_ids": {focus.id},
+        }
+    ]
+    app._shared_focuses = ["shared_tree"]
+    app._focus_bundles = {}
+    app._reset_canvas_bounds = Mock()
+    app._draw_grid = Mock()
+    monkeypatch.setattr(m.messagebox, "askyesno", Mock(return_value=True))
+
+    m.App._clear_all(cast(m.App, app))
+    assert not app.focuses
+    assert app._extra_trees == []
+    assert app._shared_focuses == []
+
+    app._undo()
+
+    assert focus.id in app.focuses
+    assert app.focuses[focus.id].tree_idx == 1
+    assert app._extra_trees[0]["tree_id"] == "shared_tree"
+    assert app._extra_trees[0]["focus_ids"] == {focus.id}
+    assert app._shared_focuses == ["shared_tree"]
+
+
 def test_unload_first_of_two_restores_save_all_tree_assignments(monkeypatch):
     shared_focus = Focus()
     shared_focus.tree_idx = 1
