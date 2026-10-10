@@ -53,6 +53,16 @@ Tk-handling block, plus the picker popups shared across wizards:
   graphics catalog (see `architecture.md`'s "Writing mod files").
 - `svar_get(var, default)`: safe variable read — coerces to `str` and
   returns `default` when the variable is missing or its read raises.
+- `make_scrolled_listbox(parent, **options)` and
+  `pack_action_footer(dlg, action_text, action_command)`: the themed listbox
+  and the action-plus-Cancel footer every "browse mod files" dialog uses.
+- `format_save_summary(saved, warnings, errs)`: the "Saved to Mod" message
+  body, no Tk.
+
+The spirit, event and dynamic-modifier wizards' picture and icon browse
+buttons open `ui/gfx_browser.py`'s `open_folder_gfx_browser`, each passing
+its own folder list and key prefix. The decision wizard uses
+`open_universal_gfx_browser`.
 
 Pulling these into one module keeps the wizards free of cross-wizard
 coupling (no wizard imports another wizard's globals directly) while still
@@ -82,8 +92,8 @@ still runs clean on the file without a style pass first.
 ## Wizard complexity ratchet
 
 `tests/test_wizard_complexity.py` runs Ruff C901 over only `src/hoi4cm/wizards/`.
-The fixed function-level budgets record the 45 findings at the 10-point
-threshold when the ratchet was added; lowering a score is allowed, but growth
+The fixed function-level budgets record the 41 findings at the 10-point
+threshold (45 when the ratchet was added); lowering a score is allowed, but growth
 past a recorded score or a newly complex function fails. Do not regenerate the
 budget to make a failure green. When an extraction lowers a score, lower its
 budget in the same change so the gain cannot regrow. An empty result fails too,

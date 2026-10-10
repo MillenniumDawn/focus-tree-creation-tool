@@ -7,10 +7,12 @@
 """Decision / Decision Category builder wizard."""
 
 import copy
+import glob
 import json
 import os
 import re
 import tkinter as tk
+import traceback
 import uuid
 from tkinter import filedialog, messagebox
 
@@ -39,7 +41,6 @@ from hoi4cm.ui import (
     ORANGE,
     PURPLE,
     RED,
-    SEL_BG,
     TEAL,
     TEXT,
     TEXT_DIM,
@@ -53,9 +54,12 @@ from hoi4cm.wizards._graphics import find_catalog_image
 from hoi4cm.wizards._image_loader import TkImageLoader
 from hoi4cm.wizards._shared import (
     _app_img_caches,
+    format_save_summary,
+    make_scrolled_listbox,
     notifying_workspace_files,
     open_effect_picker,
     open_trigger_picker,
+    pack_action_footer,
 )
 
 
@@ -204,6 +208,90 @@ def dedup_decision_state(cats, decs):
     return (unique_cats, kept_decs)
 
 
+def new_category_record() -> dict[str, object]:
+    """Return a fresh wizard category record with default fields."""
+    return dict(
+        uid=str(uuid.uuid4()),
+        cat_id="TAG_my_category",
+        loc_name="My Category",
+        loc_desc="",
+        icon="",
+        picture="",
+        allowed="",
+        visible="",
+        priority="1",
+        visible_when_empty=False,
+        on_map_area=False,
+        map_state="123",
+        map_name="my_map_area",
+        map_zoom="850",
+        map_trigger="",
+        scripted_gui="",
+        highlight_states="",
+        _extras=[],
+    )
+
+
+def new_decision_record(cat_uid: object = "") -> dict[str, object]:
+    """Return a fresh wizard decision record linked to ``cat_uid``."""
+    if not isinstance(cat_uid, str):
+        cat_uid = ""
+    return dict(
+        uid=str(uuid.uuid4()),
+        cat_uid=cat_uid,
+        dec_id="TAG_my_decision",
+        loc_name="My Decision",
+        loc_desc="",
+        icon="",
+        allowed="",
+        visible="",
+        available="",
+        cost_type="pp",
+        cost="25",
+        custom_cost_trigger="",
+        custom_cost_text="",
+        ai_hint_pp_cost="",
+        cost_var="",
+        cost_amount="",
+        days_remove="",
+        days_re_enable="",
+        fire_only_once=False,
+        fixed_random_seed=True,
+        is_mission=False,
+        mission_timeout="100",
+        selectable_mission=True,
+        is_good=False,
+        activation="",
+        timeout_effect="",
+        war_with_on_timeout="",
+        targeted="none",
+        targets="",
+        targets_dynamic=False,
+        target_non_existing=False,
+        target_array="",
+        target_trigger="",
+        target_root_trigger="",
+        state_target_scope="yes",
+        on_map_mode="map_and_decisions_view",
+        war_complete_tag="",
+        war_remove_tag="",
+        war_target_complete=False,
+        war_target_remove=False,
+        complete_effect="",
+        remove_effect="",
+        cancel_effect="",
+        cancel_trigger="",
+        cancel_if_not_visible=False,
+        modifier="",
+        remove_trigger="",
+        ai_will_do="base = 0",
+        priority="1",
+        chain="",
+        highlight_states="",
+        _extras=[],
+    )
+
+
 def open_decision_wizard(app):
     """HOI4 Decision / Decision Category maker — matches mockup layout."""
     win = tk.Toplevel(app)
@@ -273,22 +361,6 @@ def open_decision_wizard(app):
 
     win.protocol("WM_DELETE_WINDOW", _on_dec_win_close)
 
-    # ── colour aliases matching mockup exactly ───────────────────────────────
-    C_DARK = BG_DARK  # "#0d1117"
-    C_PANEL = BG_PANEL  # "#161b27"
-    C_CARD = BG_CARD  # "#1e2435"
-    C_TEXT = TEXT  # "#e2e8f0"
-    C_DIM = TEXT_DIM  # "#6b7280"
-    C_BORDER = BORDER  # "#2d3748"
-    C_BORDG = BORDER_G  # "#374151"
-    C_BLUE = BLUE  # "#3b82f6"
-    C_GREEN = GREEN  # "#22c55e"
-    C_GOLD = GOLD  # "#f0c040"
-    C_RED = RED  # "#ef4444"
-    C_ORANGE = ORANGE  # "#f97316"
-    C_TEAL = TEAL  # "#2dd4bf"
-    C_PURPLE = PURPLE  # "#a78bfa"
-
     # ── safe blended colours (pre-computed, no alpha appending) ─────────────
     # blend(fg, alpha, bg=#161b27):  used for tag bg, section hr, etc.
     GOLD_TAG_BG = "#2a2415"  # gold 22% on panel
@@ -309,93 +381,8 @@ def open_decision_wizard(app):
     dm_cats = []
     dm_decs = []
     sel: dict[str, object] = {"uid": None, "type": None}
-    _uid_n = [0]
     _decision_import_source = None
     _category_import_source = None
-
-    def _uid():
-        _uid_n[0] += 1
-        return f"dm_{_uid_n[0]}"
-
-    def _new_cat():
-        return dict(
-            uid=_uid(),
-            cat_id="TAG_my_category",
-            loc_name="My Category",
-            loc_desc="",
-            icon="",
-            picture="",
-            allowed="",
-            visible="",
-            priority="1",
-            visible_when_empty=False,
-            on_map_area=False,
-            map_state="123",
-            map_name="my_map_area",
-            map_zoom="850",
-            map_trigger="",
-            scripted_gui="",
-            highlight_states="",
-            _extras=[],
-        )
-
-    def _new_dec(cat_uid: object = ""):
-        if not isinstance(cat_uid, str):
-            cat_uid = ""
-        return dict(
-            uid=_uid(),
-            cat_uid=cat_uid,
-            dec_id="TAG_my_decision",
-            loc_name="My Decision",
-            loc_desc="",
-            icon="",
-            allowed="",
-            visible="",
-            available="",
-            cost_type="pp",
-            cost="25",
-            custom_cost_trigger="",
-            custom_cost_text="",
-            ai_hint_pp_cost="",
-            cost_var="",
-            cost_amount="",
-            days_remove="",
-            days_re_enable="",
-            fire_only_once=False,
-            fixed_random_seed=True,
-            is_mission=False,
-            mission_timeout="100",
-            selectable_mission=True,
-            is_good=False,
-            activation="",
-            timeout_effect="",
-            war_with_on_timeout="",
-            targeted="none",
-            targets="",
-            targets_dynamic=False,
-            target_non_existing=False,
-            target_array="",
-            target_trigger="",
-            target_root_trigger="",
-            state_target_scope="yes",
-            on_map_mode="map_and_decisions_view",
-            war_complete_tag="",
-            war_remove_tag="",
-            war_target_complete=False,
-            war_target_remove=False,
-            complete_effect="",
-            remove_effect="",
-            cancel_effect="",
-            cancel_trigger="",
-            cancel_if_not_visible=False,
-            modifier="",
-            remove_trigger="",
-            ai_will_do="base = 0",
-            priority="1",
-            chain="",
-            highlight_states="",
-            _extras=[],
-        )
 
     # ── helpers ──────────────────────────────────────────────────────────────
     def _get_cat(uid):
@@ -406,14 +393,6 @@ def open_decision_wizard(app):
 
     def _decs_for(cat_uid):
         return [d for d in dm_decs if d["cat_uid"] == cat_uid]
-
-    def _s(v):
-        """Safely coerce any field value to a stripped string (guards against bool/int/None)."""
-        if v is None:
-            return ""
-        if isinstance(v, bool):
-            return ""
-        return str(v).strip()
 
     def _dedup_cats():
         """Drop duplicate-uid categories and orphaned decisions in place."""
@@ -429,20 +408,20 @@ def open_decision_wizard(app):
         titlebar,
         text=tr("wizard.decision.header", "DECISION MAKER"),
         bg="#080b10",
-        fg=C_GOLD,
+        fg=GOLD,
         font=("Courier", 13, "bold"),
     ).pack(side="left", padx=14)
     _dm_status = tk.Label(
-        titlebar, text="", bg="#080b10", fg=C_DIM, font=("Helvetica", 9, "italic")
+        titlebar, text="", bg="#080b10", fg=TEXT_DIM, font=("Helvetica", 9, "italic")
     )
     _dm_status.pack(side="right", padx=10)
 
-    def _tbtn(text, cmd, color=C_BLUE):
+    def _tbtn(text, cmd, color=BLUE):
         b = tk.Button(
             titlebar,
             text=text,
             command=cmd,
-            bg=C_CARD,
+            bg=BG_CARD,
             fg=color,
             relief="flat",
             font=("Courier", 9),
@@ -458,27 +437,27 @@ def open_decision_wizard(app):
     _tbtn(
         tr("decision.new_category", "+ New Category"),
         lambda: (_collect(), _snapshot(), _add_cat()),
-        C_GREEN,
+        GREEN,
     )
     _tbtn(
         tr("decision.new_decision", "+ New Decision"),
         lambda: (_collect(), _snapshot(), _add_dec()),
-        C_BLUE,
+        BLUE,
     )
     _tbtn(
         tr("common.import_txt", "Import .txt"),
         lambda: (_snapshot(), _import_txt()),
-        C_TEAL,
+        TEAL,
     )
     _tbtn(
         tr("common.import_yml_loc", "Import .yml loc"),
         lambda: _import_yml_loc(),
-        C_TEAL,
+        TEAL,
     )
     _tbtn(
         tr("common.import_scripted_loc", "Import scripted_loc"),
         lambda: _import_scripted_loc(),
-        C_TEAL,
+        TEAL,
     )
     if MOD.loaded:
         # Lazy lambda: _browse_mod_decisions is defined later in this function,
@@ -487,12 +466,12 @@ def open_decision_wizard(app):
         _tbtn(
             tr("common.browse_mod", "Browse Mod"),
             lambda: _browse_mod_decisions(),
-            C_TEAL,
+            TEAL,
         )
-    _tbtn(tr("common.export_txt", "Export .txt"), lambda: _export_txt(), C_GOLD)
-    _tbtn(tr("common.copy_yml", "Copy .yml"), lambda: _copy_yml(), C_GOLD)
-    _tbtn(tr("common.save_to_mod", "Save to Mod"), lambda: _save_to_mod(), C_GREEN)
-    _tbtn(tr("common.undo", "↩ Undo"), lambda: _do_undo(), C_DIM)
+    _tbtn(tr("common.export_txt", "Export .txt"), lambda: _export_txt(), GOLD)
+    _tbtn(tr("common.copy_yml", "Copy .yml"), lambda: _copy_yml(), GOLD)
+    _tbtn(tr("common.save_to_mod", "Save to Mod"), lambda: _save_to_mod(), GREEN)
+    _tbtn(tr("common.undo", "↩ Undo"), lambda: _do_undo(), TEXT_DIM)
 
     win.bind_all("<Control-z>", lambda e: _do_undo())
     win.bind_all("<Control-Z>", lambda e: _do_undo())
@@ -528,15 +507,15 @@ def open_decision_wizard(app):
 
     win.after(60000, _periodic_autosave)
 
-    tk.Frame(win, bg=C_BORDG, height=1).pack(fill="x")
+    tk.Frame(win, bg=BORDER_G, height=1).pack(fill="x")
 
     # ── BODY (3 panes) ───────────────────────────────────────────────────────
-    body = tk.Frame(win, bg=C_DARK)
+    body = tk.Frame(win, bg=BG_DARK)
     body.pack(fill="both", expand=True)
     paned = tk.PanedWindow(
         body,
         orient="horizontal",
-        bg=C_BORDG,
+        bg=BORDER_G,
         sashwidth=4,
         sashrelief="flat",
         handlesize=0,
@@ -546,39 +525,39 @@ def open_decision_wizard(app):
     # ════════════════════════════════════════════════════════════════════════
     # LEFT  ─ tree  (220 px)
     # ════════════════════════════════════════════════════════════════════════
-    left_f = tk.Frame(paned, bg=C_PANEL)
+    left_f = tk.Frame(paned, bg=BG_PANEL)
     paned.add(left_f, minsize=180, width=230, stretch="never")
 
-    hdr_row = tk.Frame(left_f, bg=C_DARK)
+    hdr_row = tk.Frame(left_f, bg=BG_DARK)
     hdr_row.pack(fill="x")
     tk.Label(
         hdr_row,
         text=tr("decision.tree_header", "  CATEGORIES & DECISIONS"),
-        bg=C_DARK,
-        fg=C_DIM,
+        bg=BG_DARK,
+        fg=TEXT_DIM,
         font=("Courier", 8),
         anchor="w",
         pady=6,
     ).pack(side="left", fill="x", expand=True)
-    tk.Frame(left_f, bg=C_BORDG, height=1).pack(fill="x")
+    tk.Frame(left_f, bg=BORDER_G, height=1).pack(fill="x")
 
     # ── Search bar ──────────────────────────────────────────────────────────
     _tree_filter = tk.StringVar()
-    search_row = tk.Frame(left_f, bg=C_PANEL)
+    search_row = tk.Frame(left_f, bg=BG_PANEL)
     search_row.pack(fill="x", padx=4, pady=3)
-    tk.Label(search_row, text="🔍", bg=C_PANEL, fg=C_DIM, font=("Helvetica", 9)).pack(
-        side="left", padx=(2, 0)
-    )
+    tk.Label(
+        search_row, text="🔍", bg=BG_PANEL, fg=TEXT_DIM, font=("Helvetica", 9)
+    ).pack(side="left", padx=(2, 0))
     filter_entry = tk.Entry(
         search_row,
         textvariable=_tree_filter,
-        bg=C_CARD,
-        fg=C_TEXT,
-        insertbackground=C_BLUE,
+        bg=BG_CARD,
+        fg=TEXT,
+        insertbackground=BLUE,
         relief="flat",
         font=("Helvetica", 9),
         highlightthickness=1,
-        highlightbackground=C_BORDG,
+        highlightbackground=BORDER_G,
     )
     filter_entry.pack(side="left", fill="x", expand=True, ipady=3, padx=4)
 
@@ -586,21 +565,21 @@ def open_decision_wizard(app):
         search_row,
         text="✕",
         command=lambda: _tree_filter.set(""),
-        bg=C_PANEL,
-        fg=C_DIM,
+        bg=BG_PANEL,
+        fg=TEXT_DIM,
         relief="flat",
         font=("Helvetica", 8),
         cursor="hand2",
         padx=2,
     ).pack(side="left")
     # Show All / Hide All quick buttons
-    vis_row = tk.Frame(left_f, bg=C_PANEL)
+    vis_row = tk.Frame(left_f, bg=BG_PANEL)
     vis_row.pack(fill="x", padx=4, pady=2)
     tk.Label(
         vis_row,
         text=tr("common.preview", "Preview:"),
-        bg=C_PANEL,
-        fg=C_DIM,
+        bg=BG_PANEL,
+        fg=TEXT_DIM,
         font=("Helvetica", 8),
     ).pack(side="left", padx=(2, 4))
 
@@ -630,8 +609,8 @@ def open_decision_wizard(app):
         vis_row,
         text=tr("decision.show_all", "Show All"),
         command=lambda: _set_all_cats_visible(True),
-        bg=C_CARD,
-        fg=C_TEAL,
+        bg=BG_CARD,
+        fg=TEAL,
         relief="flat",
         font=("Helvetica", 8),
         cursor="hand2",
@@ -642,8 +621,8 @@ def open_decision_wizard(app):
         vis_row,
         text=tr("decision.hide_all", "Hide All"),
         command=lambda: _set_all_cats_visible(False),
-        bg=C_CARD,
-        fg=C_DIM,
+        bg=BG_CARD,
+        fg=TEXT_DIM,
         relief="flat",
         font=("Helvetica", 8),
         cursor="hand2",
@@ -654,8 +633,8 @@ def open_decision_wizard(app):
         vis_row,
         text=tr("decision.solo", "Solo"),
         command=_show_only_selected,
-        bg=C_CARD,
-        fg=C_GOLD,
+        bg=BG_CARD,
+        fg=GOLD,
         relief="flat",
         font=("Helvetica", 8),
         cursor="hand2",
@@ -664,11 +643,11 @@ def open_decision_wizard(app):
         highlightthickness=1,
         highlightbackground=GOLD_TAG_BD,
     ).pack(side="left", padx=1)
-    tk.Frame(left_f, bg=C_BORDG, height=1).pack(fill="x")
+    tk.Frame(left_f, bg=BORDER_G, height=1).pack(fill="x")
 
-    tree_cv = tk.Canvas(left_f, bg=C_PANEL, highlightthickness=0)
+    tree_cv = tk.Canvas(left_f, bg=BG_PANEL, highlightthickness=0)
     tree_sb = tk.Scrollbar(left_f, orient="vertical", command=tree_cv.yview)
-    tree_inner = tk.Frame(tree_cv, bg=C_PANEL)
+    tree_inner = tk.Frame(tree_cv, bg=BG_PANEL)
     _tree_win = tree_cv.create_window((0, 0), window=tree_inner, anchor="nw")
     tree_cv.configure(yscrollcommand=tree_sb.set)
     tree_inner.bind(
@@ -687,10 +666,16 @@ def open_decision_wizard(app):
     tree_cv.pack(fill="both", expand=True)
 
     tree_status = tk.Label(
-        left_f, text="", bg=C_DARK, fg=C_DIM, font=("Helvetica", 8), anchor="w", pady=3
+        left_f,
+        text="",
+        bg=BG_DARK,
+        fg=TEXT_DIM,
+        font=("Helvetica", 8),
+        anchor="w",
+        pady=3,
     )
     tree_status.pack(fill="x")
-    tk.Frame(left_f, bg=C_BORDG, height=1).pack(fill="x")
+    tk.Frame(left_f, bg=BORDER_G, height=1).pack(fill="x")
 
     cat_expanded = {}
     cat_visible = {}  # uid -> bool; True=shown in preview & code, False=hidden
@@ -707,7 +692,7 @@ def open_decision_wizard(app):
             try:
                 crow.config(bg=bg_sel if is_sel else bg_norm)
                 inn.config(bg=bg_sel if is_sel else bg_norm)
-                lbar.config(bg=C_GOLD if is_sel else bg_norm)
+                lbar.config(bg=GOLD if is_sel else bg_norm)
             except tk.TclError:
                 pass
 
@@ -741,10 +726,10 @@ def open_decision_wizard(app):
             is_sel = sel["uid"] == cat["uid"] and sel["type"] == "cat"
 
             # category row
-            crow = tk.Frame(tree_inner, bg=C_PANEL, cursor="hand2")
+            crow = tk.Frame(tree_inner, bg=BG_PANEL, cursor="hand2")
             crow.pack(fill="x")
-            bg_c = SEL_BG_TREE if is_sel else C_PANEL
-            lbar = tk.Frame(crow, bg=C_GOLD if is_sel else C_PANEL, width=2)
+            bg_c = SEL_BG_TREE if is_sel else BG_PANEL
+            lbar = tk.Frame(crow, bg=GOLD if is_sel else BG_PANEL, width=2)
             lbar.pack(side="left", fill="y")
             inn = tk.Frame(crow, bg=bg_c)
             inn.pack(fill="x", expand=True)
@@ -752,7 +737,7 @@ def open_decision_wizard(app):
                 inn,
                 text="▼" if exp else "▶",
                 bg=bg_c,
-                fg=C_DIM,
+                fg=TEXT_DIM,
                 font=("Helvetica", 8),
                 width=2,
             ).pack(side="left", padx=(6, 2), pady=6)
@@ -769,7 +754,7 @@ def open_decision_wizard(app):
                 )
             info = tk.Frame(inn, bg=bg_c)
             info.pack(side="left", fill="x", expand=True, padx=6, pady=4)
-            _vis_fg = C_GOLD if cat_visible.get(cat["uid"], True) else C_DIM
+            _vis_fg = GOLD if cat_visible.get(cat["uid"], True) else TEXT_DIM
             _cat_disp = _strip_loc_codes(cat["loc_name"] or cat["cat_id"])
             tk.Label(
                 info,
@@ -784,7 +769,7 @@ def open_decision_wizard(app):
                 info,
                 text=cat["cat_id"],
                 bg=bg_c,
-                fg=C_DIM,
+                fg=TEXT_DIM,
                 font=("Courier", 8),
                 anchor="w",
             ).pack(fill="x")
@@ -795,7 +780,7 @@ def open_decision_wizard(app):
                 inn,
                 text="👁" if vis else "🚫",
                 bg=bg_c,
-                fg=C_TEAL if vis else C_RED,
+                fg=TEAL if vis else RED,
                 relief="flat",
                 font=("Helvetica", 10),
                 cursor="hand2",
@@ -816,23 +801,23 @@ def open_decision_wizard(app):
             # count tag
             tag_f = tk.Frame(
                 inn,
-                bg=GOLD_TAG_BG if vis else C_CARD,
+                bg=GOLD_TAG_BG if vis else BG_CARD,
                 highlightthickness=1,
-                highlightbackground=GOLD_TAG_BD if vis else C_BORDG,
+                highlightbackground=GOLD_TAG_BD if vis else BORDER_G,
             )
             tag_f.pack(side="right", padx=2, pady=6)
             tk.Label(
                 tag_f,
                 text=str(len(decs)),
-                bg=GOLD_TAG_BG if vis else C_CARD,
-                fg=C_GOLD if vis else C_DIM,
+                bg=GOLD_TAG_BG if vis else BG_CARD,
+                fg=GOLD if vis else TEXT_DIM,
                 font=("Courier", 9),
                 padx=5,
                 pady=1,
             ).pack()
-            tk.Frame(tree_inner, bg=C_BORDER, height=1).pack(fill="x")
+            tk.Frame(tree_inner, bg=BORDER, height=1).pack(fill="x")
 
-            _tree_rows[cat["uid"]] = (crow, lbar, inn, SEL_BG_TREE, C_PANEL)
+            _tree_rows[cat["uid"]] = (crow, lbar, inn, SEL_BG_TREE, BG_PANEL)
 
             def _on_cat(e, uid=cat["uid"]):
                 cat_expanded[uid] = not cat_expanded.get(uid, True)
@@ -848,10 +833,10 @@ def open_decision_wizard(app):
             if exp:
                 for dec in decs:
                     is_dsel = sel["uid"] == dec["uid"] and sel["type"] == "dec"
-                    drow = tk.Frame(tree_inner, bg=C_PANEL, cursor="hand2")
+                    drow = tk.Frame(tree_inner, bg=BG_PANEL, cursor="hand2")
                     drow.pack(fill="x")
-                    bg_d = SEL_BG_TREE if is_dsel else C_PANEL
-                    dlbar = tk.Frame(drow, bg=C_BLUE if is_dsel else C_PANEL, width=2)
+                    bg_d = SEL_BG_TREE if is_dsel else BG_PANEL
+                    dlbar = tk.Frame(drow, bg=BLUE if is_dsel else BG_PANEL, width=2)
                     dlbar.pack(side="left", fill="y")
                     dinn = tk.Frame(drow, bg=bg_d)
                     dinn.pack(fill="x", expand=True)
@@ -873,7 +858,7 @@ def open_decision_wizard(app):
                         dinfo,
                         text=_dec_disp,
                         bg=bg_d,
-                        fg=C_TEXT,
+                        fg=TEXT,
                         font=("Helvetica", 10),
                         anchor="w",
                     ).pack(fill="x")
@@ -881,17 +866,13 @@ def open_decision_wizard(app):
                     tagrow = tk.Frame(dinfo, bg=bg_d)
                     tagrow.pack(fill="x")
                     if dec["targeted"] != "none":
-                        _tag(tagrow, "T", C_TEAL, TEAL_TAG_BG, TEAL_TAG_BD)
+                        _tag(tagrow, "T", TEAL, TEAL_TAG_BG, TEAL_TAG_BD)
                     if dec["cost_type"] == "pp" and dec.get("cost", "").strip():
-                        _tag(
-                            tagrow, f"{dec['cost']}PP", C_GOLD, GOLD_TAG_BG, GOLD_TAG_BD
-                        )
+                        _tag(tagrow, f"{dec['cost']}PP", GOLD, GOLD_TAG_BG, GOLD_TAG_BD)
                     if dec["chain"]:
-                        _tag(
-                            tagrow, dec["chain"][:8], C_PURPLE, PURP_TAG_BG, PURP_TAG_BD
-                        )
-                    tk.Frame(tree_inner, bg=C_BORDER, height=1).pack(fill="x")
-                    _tree_rows[dec["uid"]] = (drow, dlbar, dinn, SEL_BG_TREE, C_PANEL)
+                        _tag(tagrow, dec["chain"][:8], PURPLE, PURP_TAG_BG, PURP_TAG_BD)
+                    tk.Frame(tree_inner, bg=BORDER, height=1).pack(fill="x")
+                    _tree_rows[dec["uid"]] = (drow, dlbar, dinn, SEL_BG_TREE, BG_PANEL)
 
                     def _on_dec(e, uid=dec["uid"]):
                         sel["uid"] = uid
@@ -912,7 +893,7 @@ def open_decision_wizard(app):
         tk.Label(f, text=text, bg=bg, fg=fg, font=("Courier", 8), padx=4, pady=0).pack()
 
     def _add_cat():
-        c = _new_cat()
+        c = new_category_record()
         dm_cats.append(c)
         sel["uid"] = c["uid"]
         sel["type"] = "cat"
@@ -929,7 +910,7 @@ def open_decision_wizard(app):
         if not cat_uid:
             messagebox.showwarning("No Category", "Add a category first.", parent=win)
             return
-        d = _new_dec(cat_uid)
+        d = new_decision_record(cat_uid)
         dm_decs.append(d)
         sel["uid"] = d["uid"]
         sel["type"] = "dec"
@@ -939,24 +920,24 @@ def open_decision_wizard(app):
     # ════════════════════════════════════════════════════════════════════════
     # MIDDLE  ─ editor  (420 px)
     # ════════════════════════════════════════════════════════════════════════
-    mid_f = tk.Frame(paned, bg=C_PANEL)
+    mid_f = tk.Frame(paned, bg=BG_PANEL)
     paned.add(mid_f, minsize=340, width=440, stretch="never")
 
     mid_hdr = tk.Label(
         mid_f,
         text=tr("decision.properties_header", "  DECISION PROPERTIES"),
-        bg=C_DARK,
-        fg=C_DIM,
+        bg=BG_DARK,
+        fg=TEXT_DIM,
         font=("Courier", 8),
         anchor="w",
         pady=6,
     )
     mid_hdr.pack(fill="x")
-    tk.Frame(mid_f, bg=C_BORDG, height=1).pack(fill="x")
+    tk.Frame(mid_f, bg=BORDER_G, height=1).pack(fill="x")
 
-    mid_cv = tk.Canvas(mid_f, bg=C_PANEL, highlightthickness=0)
+    mid_cv = tk.Canvas(mid_f, bg=BG_PANEL, highlightthickness=0)
     mid_sb = tk.Scrollbar(mid_f, orient="vertical", command=mid_cv.yview)
-    mid_frm = tk.Frame(mid_cv, bg=C_PANEL)
+    mid_frm = tk.Frame(mid_cv, bg=BG_PANEL)
     _mid_w = mid_cv.create_window((0, 0), window=mid_frm, anchor="nw")
     mid_cv.configure(yscrollcommand=mid_sb.set)
     mid_frm.bind(
@@ -976,9 +957,6 @@ def open_decision_wizard(app):
 
     # ── editor widget helpers (all target mid_frm) ───────────────────────────
     _evars = {}  # key -> tk var or Text widget
-    _editor_hooks = (
-        {}
-    )  # name -> callable, called after _populate_editor to refresh dynamic sections
 
     def _sv(key, val):
         if key in _evars and isinstance(_evars[key], tk.StringVar):
@@ -1005,14 +983,14 @@ def open_decision_wizard(app):
         )
         return widget
 
-    def _sec(label, color=C_GOLD):
+    def _sec(label, color=GOLD):
         """Section header with coloured underline — matches SectionHeader in mockup."""
-        f = tk.Frame(mid_frm, bg=C_PANEL)
+        f = tk.Frame(mid_frm, bg=BG_PANEL)
         f.pack(fill="x", padx=14, pady=(12, 4))
         tk.Label(
             f,
             text=label.upper(),
-            bg=C_PANEL,
+            bg=BG_PANEL,
             fg=color,
             font=("Courier", 9, "bold"),
             anchor="w",
@@ -1021,53 +999,53 @@ def open_decision_wizard(app):
 
     def _field(label, var, mono=False, hint=""):
         """Labelled entry — matches Field component."""
-        f = tk.Frame(mid_frm, bg=C_PANEL)
+        f = tk.Frame(mid_frm, bg=BG_PANEL)
         f.pack(fill="x", padx=14, pady=2)
         lbl_text = label.upper()
         tk.Label(
-            f, text=lbl_text, bg=C_PANEL, fg=C_DIM, font=("Courier", 8), anchor="w"
+            f, text=lbl_text, bg=BG_PANEL, fg=TEXT_DIM, font=("Courier", 8), anchor="w"
         ).pack(fill="x")
         ent = tk.Entry(
             f,
             textvariable=var,
-            bg=C_CARD,
-            fg=C_TEXT,
-            insertbackground=C_BLUE,
+            bg=BG_CARD,
+            fg=TEXT,
+            insertbackground=BLUE,
             font=("Courier" if mono else "Helvetica", 10),
             relief="flat",
             highlightthickness=1,
-            highlightbackground=C_BORDG,
+            highlightbackground=BORDER_G,
         )
         ent.pack(fill="x", ipady=4, pady=(2, 0))
         if hint:
             tk.Label(
-                f, text=hint, bg=C_PANEL, fg=C_DIM, font=("Helvetica", 8, "italic")
+                f, text=hint, bg=BG_PANEL, fg=TEXT_DIM, font=("Helvetica", 8, "italic")
             ).pack(fill="x")
         return ent
 
     def _toggle(label, var, hint_tag=None):
         """Toggle switch — matches Toggle component."""
-        row = tk.Frame(mid_frm, bg=C_PANEL)
+        row = tk.Frame(mid_frm, bg=BG_PANEL)
         row.pack(fill="x", padx=14, pady=3)
         # small checkbox styled as toggle
         chk = tk.Checkbutton(
             row,
             variable=var,
-            bg=C_PANEL,
-            activebackground=C_PANEL,
-            selectcolor=C_GREEN,
-            fg=C_DIM,
+            bg=BG_PANEL,
+            activebackground=BG_PANEL,
+            selectcolor=GREEN,
+            fg=TEXT_DIM,
             font=("Helvetica", 9),
             cursor="hand2",
             relief="flat",
             bd=0,
         )
         chk.pack(side="left")
-        tk.Label(row, text=label, bg=C_PANEL, fg=C_DIM, font=("Helvetica", 9)).pack(
+        tk.Label(row, text=label, bg=BG_PANEL, fg=TEXT_DIM, font=("Helvetica", 9)).pack(
             side="left"
         )
         if hint_tag:
-            _inline_tag(row, hint_tag, C_ORANGE, ORAN_TAG_BG, ORAN_TAG_BD)
+            _inline_tag(row, hint_tag, ORANGE, ORAN_TAG_BG, ORAN_TAG_BD)
         var.trace_add("write", lambda *_: (_collect(), _rebuild_right()))
 
     def _inline_tag(parent, text, fg, bg, bd):
@@ -1077,29 +1055,29 @@ def open_decision_wizard(app):
 
     def _triggerblock(label, key, initial="", hint=None, rows=2):
         """Trigger / code textarea — matches TriggerBlock."""
-        f = tk.Frame(mid_frm, bg=C_PANEL)
+        f = tk.Frame(mid_frm, bg=BG_PANEL)
         f.pack(fill="x", padx=14, pady=2)
-        hrow = tk.Frame(f, bg=C_PANEL)
+        hrow = tk.Frame(f, bg=BG_PANEL)
         hrow.pack(fill="x")
         tk.Label(
             hrow,
             text=label.upper(),
-            bg=C_PANEL,
-            fg=C_DIM,
+            bg=BG_PANEL,
+            fg=TEXT_DIM,
             font=("Courier", 8),
             anchor="w",
         ).pack(side="left")
         if hint:
-            _inline_tag(hrow, hint, C_TEAL, TEAL_TAG_BG, TEAL_TAG_BD)
+            _inline_tag(hrow, hint, TEAL, TEAL_TAG_BG, TEAL_TAG_BD)
         t = tk.Text(
             f,
-            bg=C_CARD,
-            fg=C_GREEN,
-            insertbackground=C_BLUE,
+            bg=BG_CARD,
+            fg=GREEN,
+            insertbackground=BLUE,
             font=("Courier", 9),
             relief="flat",
             highlightthickness=1,
-            highlightbackground=C_BORDG,
+            highlightbackground=BORDER_G,
             height=rows,
             wrap="none",
             undo=True,
@@ -1111,8 +1089,8 @@ def open_decision_wizard(app):
             command=lambda tw=t: open_trigger_picker(
                 win, tw, on_insert=lambda: (_collect(), _rebuild_right())
             ),
-            bg=C_CARD,
-            fg=C_BLUE,
+            bg=BG_CARD,
+            fg=BLUE,
             relief="flat",
             font=("Courier", 8),
             cursor="hand2",
@@ -1125,33 +1103,38 @@ def open_decision_wizard(app):
 
     def _effectblock(label, key, initial="", rows=4):
         """Effect textarea + Effect Picker button - matches TextArea with extra button."""
-        f = tk.Frame(mid_frm, bg=C_PANEL)
+        f = tk.Frame(mid_frm, bg=BG_PANEL)
         f.pack(fill="x", padx=14, pady=2)
         tk.Label(
-            f, text=label.upper(), bg=C_PANEL, fg=C_DIM, font=("Courier", 8), anchor="w"
+            f,
+            text=label.upper(),
+            bg=BG_PANEL,
+            fg=TEXT_DIM,
+            font=("Courier", 8),
+            anchor="w",
         ).pack(fill="x")
         t = tk.Text(
             f,
-            bg=C_CARD,
-            fg=C_GREEN,
-            insertbackground=C_BLUE,
+            bg=BG_CARD,
+            fg=GREEN,
+            insertbackground=BLUE,
             font=("Courier", 9),
             relief="flat",
             highlightthickness=1,
-            highlightbackground=C_BORDG,
+            highlightbackground=BORDER_G,
             height=rows,
             wrap="none",
             undo=True,
         )
         t.pack(fill="x", pady=(2, 0))
-        brow = tk.Frame(f, bg=C_PANEL)
+        brow = tk.Frame(f, bg=BG_PANEL)
         brow.pack(fill="x", pady=(2, 0))
         tk.Button(
             brow,
             text=tr("effect_picker.button", "+ Effect Picker"),
             command=lambda tw=t: open_effect_picker(win, tw),
-            bg=C_CARD,
-            fg=C_BLUE,
+            bg=BG_CARD,
+            fg=BLUE,
             relief="flat",
             font=("Courier", 8),
             cursor="hand2",
@@ -1164,26 +1147,31 @@ def open_decision_wizard(app):
 
     def _gfx_field(label, key, initial="", prefix_note="", warn=""):
         """GFX drop zone - matches GfxDropZone component."""
-        f = tk.Frame(mid_frm, bg=C_PANEL)
+        f = tk.Frame(mid_frm, bg=BG_PANEL)
         f.pack(fill="x", padx=14, pady=2)
         tk.Label(
-            f, text=label.upper(), bg=C_PANEL, fg=C_DIM, font=("Courier", 8), anchor="w"
+            f,
+            text=label.upper(),
+            bg=BG_PANEL,
+            fg=TEXT_DIM,
+            font=("Courier", 8),
+            anchor="w",
         ).pack(fill="x", pady=(0, 2))
         drop_outer = tk.Frame(
-            f, bg=C_CARD, highlightthickness=1, highlightbackground=C_BORDG
+            f, bg=BG_CARD, highlightthickness=1, highlightbackground=BORDER_G
         )
         drop_outer.pack(fill="x")
         icon_lbl = tk.Label(
-            drop_outer, text="🖼", bg=C_CARD, fg=C_DIM, font=("Helvetica", 14)
+            drop_outer, text="🖼", bg=BG_CARD, fg=TEXT_DIM, font=("Helvetica", 14)
         )
         icon_lbl.pack(side="left", padx=6, pady=5)
         sv = _sv(key, initial)
         ent = tk.Entry(
             drop_outer,
             textvariable=sv,
-            bg=C_CARD,
-            fg=C_TEXT,
-            insertbackground=C_BLUE,
+            bg=BG_CARD,
+            fg=TEXT,
+            insertbackground=BLUE,
             font=("Courier", 10),
             relief="flat",
             highlightthickness=0,
@@ -1192,8 +1180,8 @@ def open_decision_wizard(app):
         tk.Label(
             drop_outer,
             text=tr("gfx.drag_drop_hint", "<- drag .dds/.png/.tga"),
-            bg=C_CARD,
-            fg=C_DIM,
+            bg=BG_CARD,
+            fg=TEXT_DIM,
             font=("Helvetica", 7),
         ).pack(side="left", padx=3)
 
@@ -1212,8 +1200,8 @@ def open_decision_wizard(app):
             drop_outer,
             text=tr("common.browse", "Browse"),
             command=_browse,
-            bg=C_CARD,
-            fg=C_PURPLE,
+            bg=BG_CARD,
+            fg=PURPLE,
             relief="flat",
             font=("Courier", 8),
             cursor="hand2",
@@ -1229,7 +1217,7 @@ def open_decision_wizard(app):
                 if files:
                     stem = os.path.splitext(os.path.basename(files[0]))[0]
                     sv.set("GFX_decision_" + stem)
-                    drop_outer.configure(highlightbackground=C_BORDG)
+                    drop_outer.configure(highlightbackground=BORDER_G)
             except (OSError, ValueError, tk.TclError) as exc:
                 get_logger("decision").debug("drop handling failed: %s", exc)
 
@@ -1246,8 +1234,8 @@ def open_decision_wizard(app):
             tk.Label(
                 f,
                 text="ℹ  " + prefix_note,
-                bg=C_PANEL,
-                fg=C_TEAL,
+                bg=BG_PANEL,
+                fg=TEAL,
                 font=("Helvetica", 8),
                 anchor="w",
                 wraplength=380,
@@ -1256,39 +1244,12 @@ def open_decision_wizard(app):
             tk.Label(
                 f,
                 text="⚠  " + warn,
-                bg=C_PANEL,
-                fg=C_ORANGE,
+                bg=BG_PANEL,
+                fg=ORANGE,
                 font=("Helvetica", 8),
                 anchor="w",
                 wraplength=380,
             ).pack(fill="x")
-
-    def _warn_box(text, color=C_ORANGE, bg_override=None, bd_override=None):
-        """Orange/red warning banner — matches orange/red info boxes in mockup."""
-        bg = bg_override or ORAN_TAG_BG
-        bd = bd_override or ORAN_TAG_BD
-        f = tk.Frame(mid_frm, bg=bg, highlightthickness=1, highlightbackground=bd)
-        f.pack(fill="x", padx=14, pady=3)
-        tk.Label(
-            f,
-            text=text,
-            bg=bg,
-            fg=color,
-            font=("Helvetica", 9),
-            anchor="w",
-            justify="left",
-            wraplength=380,
-            padx=8,
-            pady=5,
-        ).pack(fill="x")
-
-    def _card_frame():
-        """Indented card frame for sub-options — matches card border style."""
-        f = tk.Frame(
-            mid_frm, bg=C_CARD, highlightthickness=1, highlightbackground=C_BORDG
-        )
-        f.pack(fill="x", padx=14, pady=4)
-        return f
 
     def _type_badge(parent, text, fg, bg, bd):
         f = tk.Frame(parent, bg=bg, highlightthickness=1, highlightbackground=bd)
@@ -1516,21 +1477,21 @@ def open_decision_wizard(app):
         mid_hdr.config(
             text=tr("decision.category_properties_header", "  CATEGORY PROPERTIES")
         )
-        tk.Label(mid_frm, text="", bg=C_PANEL, height=1).pack()
+        tk.Label(mid_frm, text="", bg=BG_PANEL, height=1).pack()
         # type badge + id + action buttons
-        top = tk.Frame(mid_frm, bg=C_PANEL)
+        top = tk.Frame(mid_frm, bg=BG_PANEL)
         top.pack(fill="x", padx=14, pady=(4, 8))
-        _type_badge(top, "CATEGORY", C_GOLD, GOLD_TAG_BG, GOLD_TAG_BD)
+        _type_badge(top, "CATEGORY", GOLD, GOLD_TAG_BG, GOLD_TAG_BD)
         tk.Label(
-            top, text=cat["cat_id"], bg=C_PANEL, fg=C_TEXT, font=("Courier", 11)
+            top, text=cat["cat_id"], bg=BG_PANEL, fg=TEXT, font=("Courier", 11)
         ).pack(side="left")
         # Delete + Duplicate buttons (right-aligned)
         tk.Button(
             top,
             text=tr("common.duplicate", "Duplicate"),
             command=lambda: _duplicate_cat(cat["uid"]),
-            bg=C_CARD,
-            fg=C_TEAL,
+            bg=BG_CARD,
+            fg=TEAL,
             relief="flat",
             font=("Helvetica", 8),
             cursor="hand2",
@@ -1541,7 +1502,7 @@ def open_decision_wizard(app):
             top,
             text=tr("common.delete", "Delete"),
             command=lambda: _delete_cat(cat["uid"]),
-            bg=C_CARD,
+            bg=BG_CARD,
             fg="#ef4444",
             relief="flat",
             font=("Helvetica", 8),
@@ -1550,7 +1511,7 @@ def open_decision_wizard(app):
             pady=2,
         ).pack(side="right", padx=(4, 0))
 
-        _sec(tr("decision.section.identity", "Identity"), C_GOLD)
+        _sec(tr("decision.section.identity", "Identity"), GOLD)
         _field(
             tr("decision.field.category_id", "Category ID"),
             _sv("cat_id", cat["cat_id"]),
@@ -1568,7 +1529,7 @@ def open_decision_wizard(app):
             hint="Tooltip text shown when hovering the category.",
         )
 
-        _sec(tr("decision.section.gfx_icon_picture", "GFX - Icon + Picture"), C_PURPLE)
+        _sec(tr("decision.section.gfx_icon_picture", "GFX - Icon + Picture"), PURPLE)
         _gfx_field(
             tr("common.icon", "Icon"),
             "icon",
@@ -1585,14 +1546,14 @@ def open_decision_wizard(app):
             warn="Picture only renders if a localisation description is set above",
         )
         # Visual placement button
-        prow = tk.Frame(mid_frm, bg=C_PANEL)
+        prow = tk.Frame(mid_frm, bg=BG_PANEL)
         prow.pack(fill="x", padx=14, pady=(4, 2))
         tk.Button(
             prow,
             text=tr("gfx_placement.open_visual_editor", "Visual Placement Editor ->"),
             command=lambda c=cat: _open_placement_cat(c),
             bg=GOLD_TAG_BG,
-            fg=C_GOLD,
+            fg=GOLD,
             relief="flat",
             font=("Courier", 9),
             cursor="hand2",
@@ -1602,7 +1563,7 @@ def open_decision_wizard(app):
             highlightbackground=GOLD_TAG_BD,
         ).pack(side="left")
 
-        _sec(tr("decision.section.triggers", "Triggers"), C_TEAL)
+        _sec(tr("decision.section.triggers", "Triggers"), TEAL)
         _triggerblock(
             "allowed  (checked ONCE at game start)",
             "allowed",
@@ -1616,7 +1577,7 @@ def open_decision_wizard(app):
             hint="per-frame",
         )
 
-        _sec(tr("decision.section.options", "Options"), C_BLUE)
+        _sec(tr("decision.section.options", "Options"), BLUE)
         _field(
             tr("decision.field.priority", "Priority"),
             _sv("priority", cat["priority"]),
@@ -1634,7 +1595,7 @@ def open_decision_wizard(app):
             _bv("scripted_gui", False),
         )
 
-        map_host = tk.Frame(mid_frm, bg=C_PANEL)
+        map_host = tk.Frame(mid_frm, bg=BG_PANEL)
         map_host.pack(fill="x")
 
         def _toggle_map(*_):
@@ -1643,14 +1604,14 @@ def open_decision_wizard(app):
             if not on_map_v.get():
                 return
             cf = tk.Frame(
-                map_host, bg=C_CARD, highlightthickness=1, highlightbackground=C_BORDG
+                map_host, bg=BG_CARD, highlightthickness=1, highlightbackground=BORDER_G
             )
             cf.pack(fill="x", padx=14, pady=4)
             tk.Label(
                 cf,
                 text="  ON MAP AREA CONFIG",
-                bg=C_CARD,
-                fg=C_TEAL,
+                bg=BG_CARD,
+                fg=TEAL,
                 font=("Courier", 9, "bold"),
                 pady=4,
                 anchor="w",
@@ -1665,13 +1626,13 @@ def open_decision_wizard(app):
                     "50–3000  (lower = more zoomed in)",
                 ),
             ]:
-                r2 = tk.Frame(cf, bg=C_CARD)
+                r2 = tk.Frame(cf, bg=BG_CARD)
                 r2.pack(fill="x", padx=8, pady=1)
                 tk.Label(
                     r2,
                     text=lbl2.upper(),
-                    bg=C_CARD,
-                    fg=C_DIM,
+                    bg=BG_CARD,
+                    fg=TEXT_DIM,
                     font=("Courier", 8),
                     anchor="w",
                 ).pack(fill="x")
@@ -1679,26 +1640,26 @@ def open_decision_wizard(app):
                     r2,
                     textvariable=_sv(k2, dflt2),
                     bg=BG_DARK,
-                    fg=C_TEXT,
-                    insertbackground=C_BLUE,
+                    fg=TEXT,
+                    insertbackground=BLUE,
                     font=("Courier", 9),
                     relief="flat",
                     highlightthickness=1,
-                    highlightbackground=C_BORDG,
+                    highlightbackground=BORDER_G,
                 ).pack(fill="x", ipady=3, pady=(2, 4))
                 if ht2:
                     tk.Label(
                         r2,
                         text=ht2,
-                        bg=C_CARD,
-                        fg=C_DIM,
+                        bg=BG_CARD,
+                        fg=TEXT_DIM,
                         font=("Helvetica", 8, "italic"),
                     ).pack(fill="x")
             tk.Label(
                 cf,
                 text="  TARGET_ROOT_TRIGGER",
-                bg=C_CARD,
-                fg=C_DIM,
+                bg=BG_CARD,
+                fg=TEXT_DIM,
                 font=("Courier", 8),
                 anchor="w",
                 padx=8,
@@ -1706,12 +1667,12 @@ def open_decision_wizard(app):
             mt = tk.Text(
                 cf,
                 bg=BG_DARK,
-                fg=C_GREEN,
-                insertbackground=C_BLUE,
+                fg=GREEN,
+                insertbackground=BLUE,
                 font=("Courier", 9),
                 relief="flat",
                 highlightthickness=1,
-                highlightbackground=C_BORDG,
+                highlightbackground=BORDER_G,
                 height=2,
                 wrap="none",
             )
@@ -1724,26 +1685,26 @@ def open_decision_wizard(app):
     # ── BUILD DECISION EDITOR ────────────────────────────────────────────────
     def _build_dec_editor(dec):
         mid_hdr.config(text=tr("decision.properties_header", "  DECISION PROPERTIES"))
-        tk.Label(mid_frm, text="", bg=C_PANEL, height=1).pack()
+        tk.Label(mid_frm, text="", bg=BG_PANEL, height=1).pack()
         # type badge row — DECISION + tags
-        top = tk.Frame(mid_frm, bg=C_PANEL)
+        top = tk.Frame(mid_frm, bg=BG_PANEL)
         top.pack(fill="x", padx=14, pady=(4, 8))
-        _type_badge(top, "DECISION", C_BLUE, BLUE_TAG_BG, BLUE_TAG_BD)
+        _type_badge(top, "DECISION", BLUE, BLUE_TAG_BG, BLUE_TAG_BD)
         if dec["targeted"] != "none":
-            _type_badge(top, "TARGETED", C_TEAL, TEAL_TAG_BG, TEAL_TAG_BD)
+            _type_badge(top, "TARGETED", TEAL, TEAL_TAG_BG, TEAL_TAG_BD)
         if dec["is_mission"]:
-            _type_badge(top, "MISSION", C_PURPLE, PURP_TAG_BG, PURP_TAG_BD)
+            _type_badge(top, "MISSION", PURPLE, PURP_TAG_BG, PURP_TAG_BD)
         if dec["fire_only_once"]:
-            _type_badge(top, "ONCE", C_ORANGE, ORAN_TAG_BG, ORAN_TAG_BD)
+            _type_badge(top, "ONCE", ORANGE, ORAN_TAG_BG, ORAN_TAG_BD)
         tk.Label(
-            top, text=dec["dec_id"], bg=C_PANEL, fg=C_TEXT, font=("Courier", 11)
+            top, text=dec["dec_id"], bg=BG_PANEL, fg=TEXT, font=("Courier", 11)
         ).pack(side="left")
         tk.Button(
             top,
             text=tr("common.duplicate", "Duplicate"),
             command=lambda: _duplicate_dec(dec["uid"]),
-            bg=C_CARD,
-            fg=C_TEAL,
+            bg=BG_CARD,
+            fg=TEAL,
             relief="flat",
             font=("Helvetica", 8),
             cursor="hand2",
@@ -1754,7 +1715,7 @@ def open_decision_wizard(app):
             top,
             text=tr("common.delete", "Delete"),
             command=lambda: _delete_dec(dec["uid"]),
-            bg=C_CARD,
+            bg=BG_CARD,
             fg="#ef4444",
             relief="flat",
             font=("Helvetica", 8),
@@ -1763,7 +1724,7 @@ def open_decision_wizard(app):
             pady=2,
         ).pack(side="right", padx=(4, 0))
 
-        _sec(tr("decision.section.identity", "Identity"), C_GOLD)
+        _sec(tr("decision.section.identity", "Identity"), GOLD)
         _field(
             tr("decision.field.decision_id", "Decision ID"),
             _sv("dec_id", dec["dec_id"]),
@@ -1794,7 +1755,7 @@ def open_decision_wizard(app):
             mono=True,
         )
 
-        _sec(tr("decision.section.triggers", "Triggers"), C_TEAL)
+        _sec(tr("decision.section.triggers", "Triggers"), TEAL)
         _triggerblock(
             "allowed  (once-only at game start)",
             "allowed",
@@ -1814,12 +1775,12 @@ def open_decision_wizard(app):
             hint="per-frame",
         )
 
-        _sec(tr("decision.section.cost", "Cost"), C_BLUE)
+        _sec(tr("decision.section.cost", "Cost"), BLUE)
         use_custom_v = tk.BooleanVar(value=(dec["cost_type"] != "pp"))
         _evars["_use_custom"] = use_custom_v
         _toggle("Use custom cost (non-PP cost)", use_custom_v, hint_tag="visual only")
 
-        cost_host = tk.Frame(mid_frm, bg=C_PANEL)
+        cost_host = tk.Frame(mid_frm, bg=BG_PANEL)
         cost_host.pack(fill="x")
 
         def _rebuild_cost(*_):
@@ -1830,61 +1791,61 @@ def open_decision_wizard(app):
             if not use_custom_v.get():
                 _evars["cost_type"] = tk.StringVar(value="pp")
                 # inline field inside cost_host
-                cf = tk.Frame(cost_host, bg=C_PANEL)
+                cf = tk.Frame(cost_host, bg=BG_PANEL)
                 cf.pack(fill="x", padx=14, pady=2)
                 tk.Label(
                     cf,
                     text=tr("decision.cost_pp", "COST (POLITICAL POWER)"),
-                    bg=C_PANEL,
-                    fg=C_DIM,
+                    bg=BG_PANEL,
+                    fg=TEXT_DIM,
                     font=("Courier", 8),
                 ).pack(fill="x")
                 sv2 = _sv("cost", dec["cost"])
                 tk.Entry(
                     cf,
                     textvariable=sv2,
-                    bg=C_CARD,
-                    fg=C_TEXT,
-                    insertbackground=C_BLUE,
+                    bg=BG_CARD,
+                    fg=TEXT,
+                    insertbackground=BLUE,
                     font=("Courier", 10),
                     relief="flat",
                     highlightthickness=1,
-                    highlightbackground=C_BORDG,
+                    highlightbackground=BORDER_G,
                 ).pack(fill="x", ipady=4, pady=(2, 0))
                 tk.Label(
                     cf,
                     text=tr("decision.cost_hint", "Can be a variable.  Default = 0"),
-                    bg=C_PANEL,
-                    fg=C_DIM,
+                    bg=BG_PANEL,
+                    fg=TEXT_DIM,
                     font=("Helvetica", 8, "italic"),
                 ).pack(fill="x")
             else:
                 _evars["cost_type"] = tk.StringVar(value="custom")
                 cf = tk.Frame(
                     cost_host,
-                    bg=C_CARD,
+                    bg=BG_CARD,
                     highlightthickness=1,
-                    highlightbackground=C_BORDG,
+                    highlightbackground=BORDER_G,
                 )
                 cf.pack(fill="x", padx=14, pady=4)
                 # build trigger block inside card
                 tk.Label(
                     cf,
                     text="CUSTOM_COST_TRIGGER",
-                    bg=C_CARD,
-                    fg=C_DIM,
+                    bg=BG_CARD,
+                    fg=TEXT_DIM,
                     font=("Courier", 8),
                     padx=4,
                 ).pack(fill="x", pady=(4, 0))
                 ct = tk.Text(
                     cf,
                     bg=BG_DARK,
-                    fg=C_GREEN,
-                    insertbackground=C_BLUE,
+                    fg=GREEN,
+                    insertbackground=BLUE,
                     font=("Courier", 9),
                     relief="flat",
                     highlightthickness=1,
-                    highlightbackground=C_BORDG,
+                    highlightbackground=BORDER_G,
                     height=2,
                     wrap="none",
                 )
@@ -1904,28 +1865,32 @@ def open_decision_wizard(app):
                         "Tell AI how much PP to save (optional)",
                     ),
                 ]:
-                    r2 = tk.Frame(cf, bg=C_CARD)
+                    r2 = tk.Frame(cf, bg=BG_CARD)
                     r2.pack(fill="x", padx=4, pady=1)
                     tk.Label(
-                        r2, text=lbl2.upper(), bg=C_CARD, fg=C_DIM, font=("Courier", 8)
+                        r2,
+                        text=lbl2.upper(),
+                        bg=BG_CARD,
+                        fg=TEXT_DIM,
+                        font=("Courier", 8),
                     ).pack(fill="x")
                     tk.Entry(
                         r2,
                         textvariable=_sv(k2, dflt2),
                         bg=BG_DARK,
-                        fg=C_TEXT,
-                        insertbackground=C_BLUE,
+                        fg=TEXT,
+                        insertbackground=BLUE,
                         font=("Courier", 9),
                         relief="flat",
                         highlightthickness=1,
-                        highlightbackground=C_BORDG,
+                        highlightbackground=BORDER_G,
                     ).pack(fill="x", ipady=3, pady=(2, 4))
                     if ht2:
                         tk.Label(
                             r2,
                             text=ht2,
-                            bg=C_CARD,
-                            fg=C_DIM,
+                            bg=BG_CARD,
+                            fg=TEXT_DIM,
                             font=("Helvetica", 8, "italic"),
                         ).pack(fill="x")
                 # warning banner inside card
@@ -1940,7 +1905,7 @@ def open_decision_wizard(app):
                     wb,
                     text="⚠ Custom cost does NOT deduct anything automatically —\nadd hidden_effect in complete_effect to subtract manually",
                     bg=ORAN_TAG_BG,
-                    fg=C_ORANGE,
+                    fg=ORANGE,
                     font=("Helvetica", 8),
                     justify="left",
                     padx=6,
@@ -1950,7 +1915,7 @@ def open_decision_wizard(app):
         use_custom_v.trace_add("write", _rebuild_cost)
         _rebuild_cost()
 
-        _sec(tr("decision.section.timer", "Timer"), C_PURPLE)
+        _sec(tr("decision.section.timer", "Timer"), PURPLE)
         _field(
             tr(
                 "decision.field.days_remove",
@@ -1976,7 +1941,7 @@ def open_decision_wizard(app):
             _bv("fixed_random_seed", dec["fixed_random_seed"]),
         )
 
-        _sec(tr("decision.section.mission_mode", "Mission Mode"), C_PURPLE)
+        _sec(tr("decision.section.mission_mode", "Mission Mode"), PURPLE)
         miss_v = _bv("is_mission", dec["is_mission"])
         _evars["_is_mission"] = miss_v
         _toggle(
@@ -1986,7 +1951,7 @@ def open_decision_wizard(app):
             ),
             miss_v,
         )
-        miss_host = tk.Frame(mid_frm, bg=C_PANEL)
+        miss_host = tk.Frame(mid_frm, bg=BG_PANEL)
         miss_host.pack(fill="x")
 
         def _rebuild_mission(*_):
@@ -1997,45 +1962,48 @@ def open_decision_wizard(app):
             if not miss_v.get():
                 return
             cf = tk.Frame(
-                miss_host, bg=C_CARD, highlightthickness=1, highlightbackground=C_BORDG
+                miss_host,
+                bg=BG_CARD,
+                highlightthickness=1,
+                highlightbackground=BORDER_G,
             )
             cf.pack(fill="x", padx=14, pady=4)
             # fields inside card
             for lbl2, k2, dflt2 in [
                 ("days_mission_timeout", "mission_timeout", dec["mission_timeout"]),
             ]:
-                r2 = tk.Frame(cf, bg=C_CARD)
+                r2 = tk.Frame(cf, bg=BG_CARD)
                 r2.pack(fill="x", padx=6, pady=2)
                 tk.Label(
-                    r2, text=lbl2.upper(), bg=C_CARD, fg=C_DIM, font=("Courier", 8)
+                    r2, text=lbl2.upper(), bg=BG_CARD, fg=TEXT_DIM, font=("Courier", 8)
                 ).pack(fill="x")
                 tk.Entry(
                     r2,
                     textvariable=_sv(k2, dflt2),
                     bg=BG_DARK,
-                    fg=C_TEXT,
-                    insertbackground=C_BLUE,
+                    fg=TEXT,
+                    insertbackground=BLUE,
                     font=("Courier", 9),
                     relief="flat",
                     highlightthickness=1,
-                    highlightbackground=C_BORDG,
+                    highlightbackground=BORDER_G,
                 ).pack(fill="x", ipady=3, pady=(2, 4))
 
             def _mtoggle(lbl3, k3, v3):
-                rr = tk.Frame(cf, bg=C_CARD)
+                rr = tk.Frame(cf, bg=BG_CARD)
                 rr.pack(fill="x", padx=6, pady=1)
                 bv2 = _bv(k3, v3)
                 tk.Checkbutton(
                     rr,
                     variable=bv2,
-                    bg=C_CARD,
-                    activebackground=C_CARD,
-                    selectcolor=C_GREEN,
+                    bg=BG_CARD,
+                    activebackground=BG_CARD,
+                    selectcolor=GREEN,
                     font=("Helvetica", 9),
                     cursor="hand2",
                 ).pack(side="left")
                 tk.Label(
-                    rr, text=lbl3, bg=C_CARD, fg=C_DIM, font=("Helvetica", 9)
+                    rr, text=lbl3, bg=BG_CARD, fg=TEXT_DIM, font=("Helvetica", 9)
                 ).pack(side="left")
 
             _mtoggle(
@@ -2061,20 +2029,20 @@ def open_decision_wizard(app):
                     "decision.field.activation",
                     "ACTIVATION  (REPLACES VISIBLE - CHECKED DAILY)",
                 ),
-                bg=C_CARD,
-                fg=C_DIM,
+                bg=BG_CARD,
+                fg=TEXT_DIM,
                 font=("Courier", 8),
                 padx=6,
             ).pack(fill="x", pady=(4, 0))
             at = tk.Text(
                 cf,
                 bg=BG_DARK,
-                fg=C_GREEN,
-                insertbackground=C_BLUE,
+                fg=GREEN,
+                insertbackground=BLUE,
                 font=("Courier", 9),
                 relief="flat",
                 highlightthickness=1,
-                highlightbackground=C_BORDG,
+                highlightbackground=BORDER_G,
                 height=2,
                 wrap="none",
             )
@@ -2092,7 +2060,7 @@ def open_decision_wizard(app):
                 wb2,
                 text="⚠ visible = {} does NOTHING in missions — use activation instead",
                 bg=ORAN_TAG_BG,
-                fg=C_ORANGE,
+                fg=ORANGE,
                 font=("Helvetica", 8),
                 padx=4,
                 pady=3,
@@ -2104,20 +2072,20 @@ def open_decision_wizard(app):
                     "decision.field.timeout_effect",
                     "TIMEOUT_EFFECT  (FIRES IF TIMER RUNS OUT)",
                 ),
-                bg=C_CARD,
-                fg=C_DIM,
+                bg=BG_CARD,
+                fg=TEXT_DIM,
                 font=("Courier", 8),
                 padx=6,
             ).pack(fill="x", pady=(4, 0))
             te = tk.Text(
                 cf,
                 bg=BG_DARK,
-                fg=C_GREEN,
-                insertbackground=C_BLUE,
+                fg=GREEN,
+                insertbackground=BLUE,
                 font=("Courier", 9),
                 relief="flat",
                 highlightthickness=1,
-                highlightbackground=C_BORDG,
+                highlightbackground=BORDER_G,
                 height=2,
                 wrap="none",
             )
@@ -2127,7 +2095,7 @@ def open_decision_wizard(app):
         miss_v.trace_add("write", _rebuild_mission)
         _rebuild_mission()
 
-        _sec(tr("decision.section.targeting", "Targeting"), C_TEAL)
+        _sec(tr("decision.section.targeting", "Targeting"), TEAL)
         tgt_country_v = tk.BooleanVar(value=(dec["targeted"] == "country"))
         tgt_state_v = tk.BooleanVar(value=(dec["targeted"] == "state"))
         _evars["_tgt_country"] = tgt_country_v
@@ -2152,14 +2120,14 @@ def open_decision_wizard(app):
                 _evars["targeted"] = tk.StringVar(value="none")
             _rebuild_tgt()
 
-        row_tgt = tk.Frame(mid_frm, bg=C_PANEL)
+        row_tgt = tk.Frame(mid_frm, bg=BG_PANEL)
         row_tgt.pack(fill="x", padx=14, pady=3)
         tk.Checkbutton(
             row_tgt,
             variable=tgt_country_v,
-            bg=C_PANEL,
-            activebackground=C_PANEL,
-            selectcolor=C_GREEN,
+            bg=BG_PANEL,
+            activebackground=BG_PANEL,
+            selectcolor=GREEN,
             font=("Helvetica", 9),
             cursor="hand2",
         ).pack(side="left")
@@ -2168,32 +2136,32 @@ def open_decision_wizard(app):
             text=tr(
                 "decision.targeted_country", "Targeted decision (FROM = target country)"
             ),
-            bg=C_PANEL,
-            fg=C_DIM,
+            bg=BG_PANEL,
+            fg=TEXT_DIM,
             font=("Helvetica", 9),
         ).pack(side="left")
         tgt_country_v.trace_add("write", _on_tgt_country)
-        row_tst = tk.Frame(mid_frm, bg=C_PANEL)
+        row_tst = tk.Frame(mid_frm, bg=BG_PANEL)
         row_tst.pack(fill="x", padx=14, pady=3)
         tk.Checkbutton(
             row_tst,
             variable=tgt_state_v,
-            bg=C_PANEL,
-            activebackground=C_PANEL,
-            selectcolor=C_GREEN,
+            bg=BG_PANEL,
+            activebackground=BG_PANEL,
+            selectcolor=GREEN,
             font=("Helvetica", 9),
             cursor="hand2",
         ).pack(side="left")
         tk.Label(
             row_tst,
             text=tr("decision.targeted_state", "State targeted (FROM = target state)"),
-            bg=C_PANEL,
-            fg=C_DIM,
+            bg=BG_PANEL,
+            fg=TEXT_DIM,
             font=("Helvetica", 9),
         ).pack(side="left")
         tgt_state_v.trace_add("write", _on_tgt_state)
 
-        tgt_host = tk.Frame(mid_frm, bg=C_PANEL)
+        tgt_host = tk.Frame(mid_frm, bg=BG_PANEL)
         tgt_host.pack(fill="x")
         tgt_sub_tab = tk.StringVar(value="countries")
 
@@ -2212,33 +2180,33 @@ def open_decision_wizard(app):
                 # standard war warnings card
                 cf = tk.Frame(
                     tgt_host,
-                    bg=C_CARD,
+                    bg=BG_CARD,
                     highlightthickness=1,
-                    highlightbackground=C_BORDG,
+                    highlightbackground=BORDER_G,
                 )
                 cf.pack(fill="x", padx=14, pady=4)
                 war_c_v = _bv("war_target_complete", dec["war_complete_tag"] != "")
                 war_r_v = _bv("war_target_remove", dec["war_remove_tag"] != "")
 
                 def _mtog2(lbl3, bv2, parent=cf):
-                    rr = tk.Frame(parent, bg=C_CARD)
+                    rr = tk.Frame(parent, bg=BG_CARD)
                     rr.pack(fill="x", padx=6, pady=1)
                     tk.Checkbutton(
                         rr,
                         variable=bv2,
-                        bg=C_CARD,
-                        activebackground=C_CARD,
-                        selectcolor=C_GREEN,
+                        bg=BG_CARD,
+                        activebackground=BG_CARD,
+                        selectcolor=GREEN,
                         font=("Helvetica", 9),
                         cursor="hand2",
                     ).pack(side="left")
                     tk.Label(
-                        rr, text=lbl3, bg=C_CARD, fg=C_DIM, font=("Helvetica", 9)
+                        rr, text=lbl3, bg=BG_CARD, fg=TEXT_DIM, font=("Helvetica", 9)
                     ).pack(side="left")
 
                 _mtog2("war_with_on_complete = TAG", war_c_v)
                 _mtog2("war_with_on_remove = TAG", war_r_v)
-                war_host = tk.Frame(cf, bg=C_CARD)
+                war_host = tk.Frame(cf, bg=BG_CARD)
                 war_host.pack(fill="x", padx=6, pady=(0, 4))
 
                 def _rebuild_war_tag(*_):
@@ -2247,13 +2215,13 @@ def open_decision_wizard(app):
                     for w in war_host.winfo_children():
                         w.destroy()
                     if war_c_v.get() or war_r_v.get():
-                        rr2 = tk.Frame(war_host, bg=C_CARD)
+                        rr2 = tk.Frame(war_host, bg=BG_CARD)
                         rr2.pack(fill="x", pady=1)
                         tk.Label(
                             rr2,
                             text="TARGET TAG",
-                            bg=C_CARD,
-                            fg=C_DIM,
+                            bg=BG_CARD,
+                            fg=TEXT_DIM,
                             font=("Courier", 8),
                         ).pack(fill="x")
                         tk.Entry(
@@ -2262,12 +2230,12 @@ def open_decision_wizard(app):
                                 "war_complete_tag", dec["war_complete_tag"]
                             ),
                             bg=BG_DARK,
-                            fg=C_TEXT,
-                            insertbackground=C_BLUE,
+                            fg=TEXT,
+                            insertbackground=BLUE,
                             font=("Courier", 9),
                             relief="flat",
                             highlightthickness=1,
-                            highlightbackground=C_BORDG,
+                            highlightbackground=BORDER_G,
                         ).pack(fill="x", ipady=3, pady=(2, 4))
 
                 war_c_v.trace_add("write", _rebuild_war_tag)
@@ -2276,11 +2244,11 @@ def open_decision_wizard(app):
                 return
             # targeted card
             cf = tk.Frame(
-                tgt_host, bg=C_CARD, highlightthickness=1, highlightbackground=C_BORDG
+                tgt_host, bg=BG_CARD, highlightthickness=1, highlightbackground=BORDER_G
             )
             cf.pack(fill="x", padx=14, pady=4)
             # sub-tab row: targets={} | target_array | target_trigger
-            tab_row = tk.Frame(cf, bg=C_CARD)
+            tab_row = tk.Frame(cf, bg=BG_CARD)
             tab_row.pack(fill="x", padx=6, pady=6)
             TABS = [
                 ("countries", "targets = {}"),
@@ -2291,9 +2259,9 @@ def open_decision_wizard(app):
                 is_active = tgt_sub_tab.get() == tid2
                 fb = tk.Frame(
                     tab_row,
-                    bg=BLUE_TAG_BG if is_active else C_CARD,
+                    bg=BLUE_TAG_BG if is_active else BG_CARD,
                     highlightthickness=1,
-                    highlightbackground=BLUE_TAG_BD if is_active else C_BORDG,
+                    highlightbackground=BLUE_TAG_BD if is_active else BORDER_G,
                 )
                 fb.pack(side="left", padx=(0, 4))
 
@@ -2305,8 +2273,8 @@ def open_decision_wizard(app):
                     fb,
                     text=tlbl2,
                     command=_mktab2,
-                    bg=BLUE_TAG_BG if is_active else C_CARD,
-                    fg=C_BLUE if is_active else C_DIM,
+                    bg=BLUE_TAG_BG if is_active else BG_CARD,
+                    fg=BLUE if is_active else TEXT_DIM,
                     relief="flat",
                     font=("Courier", 9),
                     cursor="hand2",
@@ -2316,42 +2284,42 @@ def open_decision_wizard(app):
             # sub-tab content
             sub = tgt_sub_tab.get()
             if sub == "countries":
-                r2 = tk.Frame(cf, bg=C_CARD)
+                r2 = tk.Frame(cf, bg=BG_CARD)
                 r2.pack(fill="x", padx=6, pady=2)
                 tk.Label(
                     r2,
                     text="TARGETS = { TAG TAG TAG ... }",
-                    bg=C_CARD,
-                    fg=C_DIM,
+                    bg=BG_CARD,
+                    fg=TEXT_DIM,
                     font=("Courier", 8),
                 ).pack(fill="x")
                 tk.Entry(
                     r2,
                     textvariable=_sv("targets", dec["targets"]),
                     bg=BG_DARK,
-                    fg=C_TEXT,
-                    insertbackground=C_BLUE,
+                    fg=TEXT,
+                    insertbackground=BLUE,
                     font=("Courier", 9),
                     relief="flat",
                     highlightthickness=1,
-                    highlightbackground=C_BORDG,
+                    highlightbackground=BORDER_G,
                 ).pack(fill="x", ipady=3, pady=(2, 4))
 
                 def _mtog3(lbl3, k3, v3):
-                    rr = tk.Frame(cf, bg=C_CARD)
+                    rr = tk.Frame(cf, bg=BG_CARD)
                     rr.pack(fill="x", padx=6, pady=1)
                     bv2 = _bv(k3, v3)
                     tk.Checkbutton(
                         rr,
                         variable=bv2,
-                        bg=C_CARD,
-                        activebackground=C_CARD,
-                        selectcolor=C_GREEN,
+                        bg=BG_CARD,
+                        activebackground=BG_CARD,
+                        selectcolor=GREEN,
                         font=("Helvetica", 9),
                         cursor="hand2",
                     ).pack(side="left")
                     tk.Label(
-                        rr, text=lbl3, bg=C_CARD, fg=C_DIM, font=("Helvetica", 9)
+                        rr, text=lbl3, bg=BG_CARD, fg=TEXT_DIM, font=("Helvetica", 9)
                     ).pack(side="left")
 
                 _mtog3(
@@ -2365,51 +2333,51 @@ def open_decision_wizard(app):
                     dec["target_non_existing"],
                 )
             elif sub == "array":
-                r2 = tk.Frame(cf, bg=C_CARD)
+                r2 = tk.Frame(cf, bg=BG_CARD)
                 r2.pack(fill="x", padx=6, pady=2)
                 tk.Label(
                     r2,
                     text="TARGET_ARRAY (GAME ARRAY NAME)",
-                    bg=C_CARD,
-                    fg=C_DIM,
+                    bg=BG_CARD,
+                    fg=TEXT_DIM,
                     font=("Courier", 8),
                 ).pack(fill="x")
                 tk.Entry(
                     r2,
                     textvariable=_sv("target_array", dec["target_array"]),
                     bg=BG_DARK,
-                    fg=C_TEXT,
-                    insertbackground=C_BLUE,
+                    fg=TEXT,
+                    insertbackground=BLUE,
                     font=("Courier", 9),
                     relief="flat",
                     highlightthickness=1,
-                    highlightbackground=C_BORDG,
+                    highlightbackground=BORDER_G,
                 ).pack(fill="x", ipady=3, pady=(2, 4))
                 tk.Label(
                     r2,
                     text="e.g. enemies, allies, controlled_states",
-                    bg=C_CARD,
-                    fg=C_DIM,
+                    bg=BG_CARD,
+                    fg=TEXT_DIM,
                     font=("Helvetica", 8, "italic"),
                 ).pack(fill="x")
             else:  # trigger
                 tk.Label(
                     cf,
                     text="TARGET_TRIGGER  (ROOT = DECIDER, FROM = TARGET)",
-                    bg=C_CARD,
-                    fg=C_DIM,
+                    bg=BG_CARD,
+                    fg=TEXT_DIM,
                     font=("Courier", 8),
                     padx=6,
                 ).pack(fill="x", pady=(4, 0))
                 tt = tk.Text(
                     cf,
                     bg=BG_DARK,
-                    fg=C_GREEN,
-                    insertbackground=C_BLUE,
+                    fg=GREEN,
+                    insertbackground=BLUE,
                     font=("Courier", 9),
                     relief="flat",
                     highlightthickness=1,
-                    highlightbackground=C_BORDG,
+                    highlightbackground=BORDER_G,
                     height=3,
                     wrap="none",
                 )
@@ -2419,8 +2387,8 @@ def open_decision_wizard(app):
             tk.Label(
                 cf,
                 text="TARGET_ROOT_TRIGGER  (ROOT ONLY — RUNS BEFORE TARGET_TRIGGER FOR PERFORMANCE)",
-                bg=C_CARD,
-                fg=C_DIM,
+                bg=BG_CARD,
+                fg=TEXT_DIM,
                 font=("Courier", 7),
                 padx=6,
                 wraplength=380,
@@ -2428,25 +2396,25 @@ def open_decision_wizard(app):
             rt = tk.Text(
                 cf,
                 bg=BG_DARK,
-                fg=C_GREEN,
-                insertbackground=C_BLUE,
+                fg=GREEN,
+                insertbackground=BLUE,
                 font=("Courier", 9),
                 relief="flat",
                 highlightthickness=1,
-                highlightbackground=C_BORDG,
+                highlightbackground=BORDER_G,
                 height=2,
                 wrap="none",
             )
             rt.pack(fill="x", padx=6, pady=(2, 4))
             _reg_text("target_root_trigger", rt, dec["target_root_trigger"])
             if targeted == "state":
-                r3 = tk.Frame(cf, bg=C_CARD)
+                r3 = tk.Frame(cf, bg=BG_CARD)
                 r3.pack(fill="x", padx=6, pady=2)
                 tk.Label(
                     r3,
                     text="STATE_TARGET SCOPE",
-                    bg=C_CARD,
-                    fg=C_DIM,
+                    bg=BG_CARD,
+                    fg=TEXT_DIM,
                     font=("Courier", 8),
                 ).pack(fill="x")
                 scope_opts = [
@@ -2466,40 +2434,40 @@ def open_decision_wizard(app):
                 om = tk.OptionMenu(r3, sv_scope, *scope_opts)
                 om.config(
                     bg=BG_DARK,
-                    fg=C_TEXT,
-                    activebackground=C_BORDG,
+                    fg=TEXT,
+                    activebackground=BORDER_G,
                     relief="flat",
                     highlightthickness=1,
-                    highlightbackground=C_BORDG,
+                    highlightbackground=BORDER_G,
                     font=("Courier", 9),
                 )
-                om["menu"].config(bg=BG_DARK, fg=C_TEXT)
+                om["menu"].config(bg=BG_DARK, fg=TEXT)
                 om.pack(fill="x", pady=2)
                 tk.Label(
                     r3,
                     text="any / any_owned_state / any_controlled_state / europe / africa ...",
-                    bg=C_CARD,
-                    fg=C_DIM,
+                    bg=BG_CARD,
+                    fg=TEXT_DIM,
                     font=("Helvetica", 8, "italic"),
                 ).pack(fill="x")
-                r4 = tk.Frame(cf, bg=C_CARD)
+                r4 = tk.Frame(cf, bg=BG_CARD)
                 r4.pack(fill="x", padx=6, pady=2)
                 tk.Label(
-                    r4, text="ON_MAP_MODE", bg=C_CARD, fg=C_DIM, font=("Courier", 8)
+                    r4, text="ON_MAP_MODE", bg=BG_CARD, fg=TEXT_DIM, font=("Courier", 8)
                 ).pack(fill="x")
                 mode_opts = ["map_only", "decision_view_only", "map_and_decisions_view"]
                 sv_mode = _sv("on_map_mode", dec["on_map_mode"])
                 om2 = tk.OptionMenu(r4, sv_mode, *mode_opts)
                 om2.config(
                     bg=BG_DARK,
-                    fg=C_TEXT,
-                    activebackground=C_BORDG,
+                    fg=TEXT,
+                    activebackground=BORDER_G,
                     relief="flat",
                     highlightthickness=1,
-                    highlightbackground=C_BORDG,
+                    highlightbackground=BORDER_G,
                     font=("Courier", 9),
                 )
-                om2["menu"].config(bg=BG_DARK, fg=C_TEXT)
+                om2["menu"].config(bg=BG_DARK, fg=TEXT)
                 om2.pack(fill="x", pady=2)
             # war warnings (targeted)
             tk.Label(
@@ -2507,28 +2475,28 @@ def open_decision_wizard(app):
                 text=tr(
                     "decision.field.war_warnings_targeted", "WAR WARNINGS (TARGETED)"
                 ),
-                bg=C_CARD,
-                fg=C_RED,
+                bg=BG_CARD,
+                fg=RED,
                 font=("Courier", 9, "bold"),
                 padx=6,
                 pady="8 2",
             ).pack(fill="x")
 
             def _wt(lbl3, k3, v3):
-                rr = tk.Frame(cf, bg=C_CARD)
+                rr = tk.Frame(cf, bg=BG_CARD)
                 rr.pack(fill="x", padx=6, pady=1)
                 bv2 = _bv(k3, v3)
                 tk.Checkbutton(
                     rr,
                     variable=bv2,
-                    bg=C_CARD,
-                    activebackground=C_CARD,
-                    selectcolor=C_GREEN,
+                    bg=BG_CARD,
+                    activebackground=BG_CARD,
+                    selectcolor=GREEN,
                     font=("Helvetica", 9),
                     cursor="hand2",
                 ).pack(side="left")
                 tk.Label(
-                    rr, text=lbl3, bg=C_CARD, fg=C_DIM, font=("Helvetica", 9)
+                    rr, text=lbl3, bg=BG_CARD, fg=TEXT_DIM, font=("Helvetica", 9)
                 ).pack(side="left")
 
             _wt(
@@ -2542,21 +2510,19 @@ def open_decision_wizard(app):
                 dec["war_target_remove"],
             )
             # small bottom pad
-            tk.Label(cf, text="", bg=C_CARD, pady=3).pack()
+            tk.Label(cf, text="", bg=BG_CARD, pady=3).pack()
 
         _rebuild_tgt()
 
-        _sec(
-            tr("decision.section.highlight_map", "Highlight States & Map Mode"), C_TEAL
-        )
+        _sec(tr("decision.section.highlight_map", "Highlight States & Map Mode"), TEAL)
         tk.Label(
             mid_frm,
             text=tr(
                 "decision.hint.highlight_map",
                 "  Paste raw highlight_states block. For non-targeted decisions that show on map, also set on_map_mode.",
             ),
-            bg=C_PANEL,
-            fg=C_DIM,
+            bg=BG_PANEL,
+            fg=TEXT_DIM,
             font=("Helvetica", 8, "italic"),
             wraplength=380,
         ).pack(fill="x", padx=14)
@@ -2579,7 +2545,7 @@ def open_decision_wizard(app):
             mono=True,
         )
 
-        _sec(tr("decision.section.effects", "Effects"), C_GREEN)
+        _sec(tr("decision.section.effects", "Effects"), GREEN)
         _effectblock(
             tr(
                 "decision.field.complete_effect",
@@ -2591,7 +2557,7 @@ def open_decision_wizard(app):
         )
 
         # timer effects — shown only when days_remove is set
-        timer_host = tk.Frame(mid_frm, bg=C_PANEL)
+        timer_host = tk.Frame(mid_frm, bg=BG_PANEL)
         timer_host.pack(fill="x")
 
         def _rebuild_timer_fx(*_):
@@ -2607,33 +2573,33 @@ def open_decision_wizard(app):
             # these are rendered directly into mid_frm via helpers but we need a
             # sub-frame approach — inline build:
             def _sub_effectblock(lbl3, k3, v3, rows2=3):
-                sf = tk.Frame(timer_host, bg=C_PANEL)
+                sf = tk.Frame(timer_host, bg=BG_PANEL)
                 sf.pack(fill="x", padx=14, pady=2)
                 tk.Label(
-                    sf, text=lbl3.upper(), bg=C_PANEL, fg=C_DIM, font=("Courier", 8)
+                    sf, text=lbl3.upper(), bg=BG_PANEL, fg=TEXT_DIM, font=("Courier", 8)
                 ).pack(fill="x")
                 t2 = tk.Text(
                     sf,
-                    bg=C_CARD,
-                    fg=C_GREEN,
-                    insertbackground=C_BLUE,
+                    bg=BG_CARD,
+                    fg=GREEN,
+                    insertbackground=BLUE,
                     font=("Courier", 9),
                     relief="flat",
                     highlightthickness=1,
-                    highlightbackground=C_BORDG,
+                    highlightbackground=BORDER_G,
                     height=rows2,
                     wrap="none",
                     undo=True,
                 )
                 t2.pack(fill="x", pady=(2, 0))
-                br2 = tk.Frame(sf, bg=C_PANEL)
+                br2 = tk.Frame(sf, bg=BG_PANEL)
                 br2.pack(fill="x", pady=(2, 0))
                 tk.Button(
                     br2,
                     text=tr("effect_picker.button", "+ Effect Picker"),
                     command=lambda tw=t2: open_effect_picker(win, tw),
-                    bg=C_CARD,
-                    fg=C_BLUE,
+                    bg=BG_CARD,
+                    fg=BLUE,
                     relief="flat",
                     font=("Courier", 8),
                     cursor="hand2",
@@ -2645,20 +2611,20 @@ def open_decision_wizard(app):
                 _reg_text(k3, t2, v3)
 
             def _sub_trigblock(lbl3, k3, v3):
-                sf = tk.Frame(timer_host, bg=C_PANEL)
+                sf = tk.Frame(timer_host, bg=BG_PANEL)
                 sf.pack(fill="x", padx=14, pady=2)
                 tk.Label(
-                    sf, text=lbl3.upper(), bg=C_PANEL, fg=C_DIM, font=("Courier", 8)
+                    sf, text=lbl3.upper(), bg=BG_PANEL, fg=TEXT_DIM, font=("Courier", 8)
                 ).pack(fill="x")
                 t2 = tk.Text(
                     sf,
-                    bg=C_CARD,
-                    fg=C_GREEN,
-                    insertbackground=C_BLUE,
+                    bg=BG_CARD,
+                    fg=GREEN,
+                    insertbackground=BLUE,
                     font=("Courier", 9),
                     relief="flat",
                     highlightthickness=1,
-                    highlightbackground=C_BORDG,
+                    highlightbackground=BORDER_G,
                     height=2,
                     wrap="none",
                     undo=True,
@@ -2667,20 +2633,20 @@ def open_decision_wizard(app):
                 _reg_text(k3, t2, v3)
 
             def _sub_toggle2(lbl3, k3, v3):
-                rr = tk.Frame(timer_host, bg=C_PANEL)
+                rr = tk.Frame(timer_host, bg=BG_PANEL)
                 rr.pack(fill="x", padx=14, pady=3)
                 bv2 = _bv(k3, v3)
                 tk.Checkbutton(
                     rr,
                     variable=bv2,
-                    bg=C_PANEL,
-                    activebackground=C_PANEL,
-                    selectcolor=C_GREEN,
+                    bg=BG_PANEL,
+                    activebackground=BG_PANEL,
+                    selectcolor=GREEN,
                     font=("Helvetica", 9),
                     cursor="hand2",
                 ).pack(side="left")
                 tk.Label(
-                    rr, text=lbl3, bg=C_PANEL, fg=C_DIM, font=("Helvetica", 9)
+                    rr, text=lbl3, bg=BG_PANEL, fg=TEXT_DIM, font=("Helvetica", 9)
                 ).pack(side="left")
 
             _sub_effectblock(
@@ -2735,13 +2701,7 @@ def open_decision_wizard(app):
             _evars["days_remove"].trace_add("write", _rebuild_timer_fx)
         _rebuild_timer_fx()
 
-        # Register hooks for post-populate refresh
-        _editor_hooks["rebuild_tgt"] = _rebuild_tgt
-        _editor_hooks["rebuild_timer_fx"] = _rebuild_timer_fx
-        _editor_hooks["rebuild_cost"] = _rebuild_cost
-        _editor_hooks["rebuild_mission"] = _rebuild_mission
-
-        _sec(tr("decision.section.ai", "AI"), C_ORANGE)
+        _sec(tr("decision.section.ai", "AI"), ORANGE)
         # red warning banner
         rb = tk.Frame(
             mid_frm, bg=RED_TAG_BG, highlightthickness=1, highlightbackground=RED_TAG_BD
@@ -2754,7 +2714,7 @@ def open_decision_wizard(app):
                 "AI will NEVER take this decision by default - ai_will_do is required",
             ),
             bg=RED_TAG_BG,
-            fg=C_RED,
+            fg=RED,
             font=("Helvetica", 9),
             padx=6,
             pady=4,
@@ -2779,180 +2739,6 @@ def open_decision_wizard(app):
     # Track what type is currently built so we know when to do a full rebuild
     _editor_state: dict[str, object] = {"type": None, "uid": None}
 
-    def _set_var_silent(key, value):
-        """Set a tkinter var without firing its write traces."""
-        v = _evars.get(key)
-        if v is None:
-            return
-        try:
-            cbs = [(m, cb) for m, cb in v.trace_info() if "write" in m]
-            for _m, cb in cbs:
-                try:
-                    v.trace_remove("write", cb)
-                except tk.TclError:
-                    pass
-            if isinstance(v, tk.BooleanVar):
-                v.set(bool(value))
-            else:
-                v.set(str(value) if value is not None else "")
-            for _m, cb in cbs:
-                try:
-                    v.trace_add("write", lambda *a, _cb=cb, _v=v: None)
-                except tk.TclError:
-                    pass
-        except tk.TclError:
-            try:
-                if isinstance(v, tk.BooleanVar):
-                    v.set(bool(value))
-                else:
-                    v.set(str(value) if value is not None else "")
-            except tk.TclError:
-                pass
-
-    def _set_text_silent(key, value):
-        """Update a tk.Text widget in-place."""
-        v = _evars.get(key)
-        if not isinstance(v, tk.Text):
-            return
-        try:
-            v.delete("1.0", "end")
-            if value:
-                v.insert("1.0", str(value))
-        except tk.TclError:
-            pass
-
-    def _populate_dec_editor(d):
-        """Fast-path: populate existing dec editor without rebuilding any widgets."""
-        # Simple string / text fields
-        for k in (
-            "dec_id",
-            "loc_name",
-            "loc_desc",
-            "icon",
-            "chain",
-            "priority",
-            "allowed",
-            "visible",
-            "available",
-            "cost",
-            "days_remove",
-            "days_re_enable",
-            "custom_cost_trigger",
-            "custom_cost_text",
-            "ai_hint_pp_cost",
-            "mission_timeout",
-            "activation",
-            "targets",
-            "target_array",
-            "target_trigger",
-            "target_root_trigger",
-            "state_target_scope",
-            "on_map_mode",
-            "war_with_on_timeout",
-            "war_complete_tag",
-            "war_remove_tag",
-            "cancel_trigger",
-            "modifier",
-            "remove_trigger",
-            "highlight_states",
-            "ai_will_do",
-            "complete_effect",
-            "remove_effect",
-            "cancel_effect",
-            "timeout_effect",
-        ):
-            val = d.get(k, "") or ""
-            if k in _evars:
-                v = _evars[k]
-                if isinstance(v, tk.Text):
-                    _set_text_silent(k, val)
-                else:
-                    _set_var_silent(k, val)
-        # Bool flags (not structural — don't drive sub-section rebuilds)
-        for k in (
-            "fire_only_once",
-            "fixed_random_seed",
-            "selectable_mission",
-            "is_good",
-            "targets_dynamic",
-            "target_non_existing",
-            "cancel_if_not_visible",
-            "war_target_complete",
-            "war_target_remove",
-        ):
-            _set_var_silent(k, bool(d.get(k, False)))
-        # Structural vars — set silently then fire hooks once
-        _set_var_silent("_use_custom", d.get("cost_type", "pp") != "pp")
-        targeted = d.get("targeted", "none")
-        _set_var_silent("_tgt_country", targeted == "country")
-        _set_var_silent("_tgt_state", targeted == "state")
-        _set_var_silent("_is_mission", bool(d.get("is_mission", False)))
-        # Fire sub-section rebuilds once cleanly
-        for hook in (
-            "rebuild_cost",
-            "rebuild_mission",
-            "rebuild_tgt",
-            "rebuild_timer_fx",
-        ):
-            fn = _editor_hooks.get(hook)
-            if fn:
-                try:
-                    fn()
-                except tk.TclError:
-                    pass
-        # Update badge row
-        try:
-            children = mid_frm.winfo_children()
-            if len(children) > 1:
-                top_frame = children[1]
-                for w in top_frame.winfo_children():
-                    w.destroy()
-                _type_badge(top_frame, "DECISION", C_BLUE, BLUE_TAG_BG, BLUE_TAG_BD)
-                if targeted != "none":
-                    _type_badge(top_frame, "TARGETED", C_TEAL, TEAL_TAG_BG, TEAL_TAG_BD)
-                if d.get("is_mission"):
-                    _type_badge(
-                        top_frame, "MISSION", C_PURPLE, PURP_TAG_BG, PURP_TAG_BD
-                    )
-                if d.get("fire_only_once"):
-                    _type_badge(top_frame, "ONCE", C_ORANGE, ORAN_TAG_BG, ORAN_TAG_BD)
-                tk.Label(
-                    top_frame,
-                    text=d["dec_id"],
-                    bg=C_PANEL,
-                    fg=C_TEXT,
-                    font=("Courier", 11),
-                ).pack(side="left")
-        except tk.TclError:
-            pass
-
-    def _populate_cat_editor(c):
-        """Fast-path: populate existing cat editor widgets without rebuilding."""
-        for k in (
-            "cat_id",
-            "loc_name",
-            "loc_desc",
-            "icon",
-            "picture",
-            "priority",
-            "map_state",
-            "map_name",
-            "map_zoom",
-            "scripted_gui",
-            "highlight_states",
-        ):
-            val = c.get(k, "") or ""
-            if k in _evars:
-                v = _evars[k]
-                if isinstance(v, tk.Text):
-                    _set_text_silent(k, val)
-                else:
-                    _set_var_silent(k, val)
-        for k in ("allowed", "visible", "map_trigger"):
-            _set_text_silent(k, c.get(k, "") or "")
-        _set_var_silent("visible_when_empty", bool(c.get("visible_when_empty", False)))
-        _set_var_silent("on_map_area", bool(c.get("on_map_area", False)))
-
     def _rebuild_editor():
         # _collect() here saves the PREVIOUSLY shown object: _editor_state still
         # holds the old uid because we don't update it until the end of this
@@ -2970,7 +2756,6 @@ def open_decision_wizard(app):
         for w in mid_frm.winfo_children():
             w.destroy()
         _evars.clear()
-        _editor_hooks.clear()
         if new_type == "cat" and obj:
             _build_cat_editor(obj)
         elif new_type == "dec" and obj:
@@ -2982,8 +2767,8 @@ def open_decision_wizard(app):
                     "decision.empty_selection",
                     "\n  Select a category or decision\n  from the tree on the left.",
                 ),
-                bg=C_PANEL,
-                fg=C_DIM,
+                bg=BG_PANEL,
+                fg=TEXT_DIM,
                 font=("Helvetica", 10),
                 justify="center",
             ).pack(pady=40)
@@ -2998,11 +2783,11 @@ def open_decision_wizard(app):
     # ════════════════════════════════════════════════════════════════════════
     # RIGHT  ─ Preview / Chain / Code
     # ════════════════════════════════════════════════════════════════════════
-    right_f = tk.Frame(paned, bg=C_DARK)
+    right_f = tk.Frame(paned, bg=BG_DARK)
     paned.add(right_f, minsize=280, width=420, stretch="always")
 
     # tab bar
-    tab_bar = tk.Frame(right_f, bg=C_PANEL)
+    tab_bar = tk.Frame(right_f, bg=BG_PANEL)
     tab_bar.pack(fill="x")
     _rtab = tk.StringVar(value="preview")
     _tab_btns = {}
@@ -3021,8 +2806,8 @@ def open_decision_wizard(app):
             tab_bar,
             text=tlbl,
             command=_mktab,
-            bg=C_DARK,
-            fg=C_TEXT,
+            bg=BG_DARK,
+            fg=TEXT,
             relief="flat",
             font=("Courier", 10),
             cursor="hand2",
@@ -3036,31 +2821,33 @@ def open_decision_wizard(app):
         tab_bar,
         text=tr("common.refresh", "Refresh"),
         command=lambda: _rebuild_right(),
-        bg=C_CARD,
-        fg=C_TEAL,
+        bg=BG_CARD,
+        fg=TEAL,
         relief="flat",
         font=("Courier", 8),
         cursor="hand2",
         padx=8,
         pady=2,
         highlightthickness=1,
-        highlightbackground=C_TEAL,
+        highlightbackground=TEAL,
     ).pack(side="right", padx=(0, 6), pady=4)
     tk.Label(
         tab_bar,
         text=tr("decision.preview.approximate_hint", "approximate in-game appearance"),
-        bg=C_PANEL,
-        fg=C_DIM,
+        bg=BG_PANEL,
+        fg=TEXT_DIM,
         font=("Helvetica", 8, "italic"),
     ).pack(side="right", padx=10)
-    tk.Frame(tab_bar, bg=C_BORDG, height=1).pack(side="bottom", fill="x")
+    tk.Frame(tab_bar, bg=BORDER_G, height=1).pack(side="bottom", fill="x")
 
     def _update_tab_styles():
         for tid2, b2 in _tab_btns.items():
             active = _rtab.get() == tid2
-            b2.config(fg=C_TEXT if active else C_DIM, bg=C_DARK if active else C_PANEL)
+            b2.config(
+                fg=TEXT if active else TEXT_DIM, bg=BG_DARK if active else BG_PANEL
+            )
 
-    right_body = tk.Frame(right_f, bg=C_DARK)
+    right_body = tk.Frame(right_f, bg=BG_DARK)
     right_body.pack(fill="both", expand=True)
 
     _rr_job: list[str | None] = [None]
@@ -3270,22 +3057,20 @@ def open_decision_wizard(app):
 
     def _strip_loc_codes(text):
         """Strip all HOI4 loc codes from a string for plain tree display."""
-        import re as _re_s
-
         text = text.replace("\\n", " ").replace("\n", " ")
-        text = _re_s.sub(r"§[A-Za-z0-9!]", "", text)  # §Y §2 §! etc
-        text = _re_s.sub(
+        text = re.sub(r"§[A-Za-z0-9!]", "", text)  # §Y §2 §! etc
+        text = re.sub(
             r"\$([^$]{1,40})\$",  # $2The Gas$ → The Gas
-            lambda m: _re_s.sub(r"^\d+", "", m.group(1)),
+            lambda m: re.sub(r"^\d+", "", m.group(1)),
             text,
         )
-        text = _re_s.sub(r"\[([A-Z]{2,5})\](\S+)", r"\2", text)  # [TAG]Word → Word
-        text = _re_s.sub(
+        text = re.sub(r"\[([A-Z]{2,5})\](\S+)", r"\2", text)  # [TAG]Word → Word
+        text = re.sub(
             r"\[([A-Z]{2,5}):[^\]]+\]",
             lambda m: m.group(1),
             text,  # [TAG:X] → TAG
         )
-        text = _re_s.sub(r"\[[^\]]{1,80}\]", "", text)  # remaining [tokens]
+        text = re.sub(r"\[[^\]]{1,80}\]", "", text)  # remaining [tokens]
         return text.strip()
 
     def _hoi4_loc_widget(
@@ -3298,8 +3083,6 @@ def open_decision_wizard(app):
     ):
         """Render a HOI4 localisation string with colour codes and scripted loc
         tokens into a read-only tk.Text widget that matches the parent bg."""
-        import re as _re
-
         # Convert literal \n escape sequences to real newlines
         text = text.replace("\\n", "\n").replace("\\\\n", "\n")
         text = text.rstrip("\\").strip()
@@ -3344,7 +3127,7 @@ def open_decision_wizard(app):
         # ── Single-pass tokeniser ───────────────────────────────────────
         # Handles: §Y colour  §2 number-colour  §!  [TAG:X]  [TAG]Word  $var$
 
-        TOKEN = _re.compile(
+        TOKEN = re.compile(
             r"(§[A-Za-z0-9!]"  # §Y §2 §!
             r"|\[([A-Z]{2,5})\](\S*)"  # [TAG] optionally followed by a word
             r"|\[([^\]]{1,80})\]"  # [any:token]
@@ -3356,9 +3139,6 @@ def open_decision_wizard(app):
 
         def _cur_clr():
             return colour_stack[-1] if colour_stack else "base"
-
-        def _resolve_tag(tag):
-            return MOD.country_tag_names.get(tag, tag)
 
         pos = 0
         for m in TOKEN.finditer(text):
@@ -3396,7 +3176,7 @@ def open_decision_wizard(app):
             if bracket_inner is not None:
                 inner = bracket_inner
                 # Match TAG:Func  OR  TAG·Func  (·  = middle-dot from old renderer)
-                mc = _re.match(r"([A-Z]{2,5})[:·\.](\w+)", inner)
+                mc = re.match(r"([A-Z]{2,5})[:·\.](\w+)", inner)
                 if mc:
                     tag = mc.group(1)
                     name = MOD.country_tag_names.get(tag, None)
@@ -3408,7 +3188,7 @@ def open_decision_wizard(app):
 
             if var_inner is not None:
                 # $2The Gas Pipeline$ → strip leading digits
-                clean = _re.sub(r"^\d+", "", var_inner)
+                clean = re.sub(r"^\d+", "", var_inner)
                 txt.insert("end", clean, ("var",))
                 continue
 
@@ -3455,9 +3235,9 @@ def open_decision_wizard(app):
                 ).pack(anchor="w")
 
         # ── scrollable container ──────────────────────────────────────────────
-        cv = tk.Canvas(right_body, bg=C_DARK, highlightthickness=0)
+        cv = tk.Canvas(right_body, bg=BG_DARK, highlightthickness=0)
         sb = tk.Scrollbar(right_body, orient="vertical", command=cv.yview)
-        frm = tk.Frame(cv, bg=C_DARK)
+        frm = tk.Frame(cv, bg=BG_DARK)
         wid = cv.create_window((0, 0), window=frm, anchor="nw")
         cv.configure(yscrollcommand=sb.set)
         frm.bind("<Configure>", lambda e: cv.configure(scrollregion=cv.bbox("all")))
@@ -3509,9 +3289,9 @@ def open_decision_wizard(app):
                     m = tk.Menu(
                         win,
                         tearoff=0,
-                        bg=C_CARD,
-                        fg=C_TEXT,
-                        activebackground=C_BLUE,
+                        bg=BG_CARD,
+                        fg=TEXT,
+                        activebackground=BLUE,
                         font=("Helvetica", 9),
                     )
                     m.add_command(
@@ -3628,9 +3408,9 @@ def open_decision_wizard(app):
                         m = tk.Menu(
                             win,
                             tearoff=0,
-                            bg=C_CARD,
-                            fg=C_TEXT,
-                            activebackground=C_BLUE,
+                            bg=BG_CARD,
+                            fg=TEXT,
+                            activebackground=BLUE,
                             font=("Helvetica", 9),
                         )
                         m.add_command(
@@ -3739,9 +3519,9 @@ def open_decision_wizard(app):
     # ── CHAIN VIEW ────────────────────────────────────────────────────────────
     def _build_chain():
         _collect()
-        cv = tk.Canvas(right_body, bg=C_DARK, highlightthickness=0)
+        cv = tk.Canvas(right_body, bg=BG_DARK, highlightthickness=0)
         sb = tk.Scrollbar(right_body, orient="vertical", command=cv.yview)
-        frm = tk.Frame(cv, bg=C_DARK)
+        frm = tk.Frame(cv, bg=BG_DARK)
         wid = cv.create_window((0, 0), window=frm, anchor="nw")
         cv.configure(yscrollcommand=sb.set)
         frm.bind("<Configure>", lambda e: cv.configure(scrollregion=cv.bbox("all")))
@@ -3763,8 +3543,8 @@ def open_decision_wizard(app):
                 "decision.chain.description",
                 "  Decision chains - decisions sharing a chain tag are visualised as a group",
             ),
-            bg=C_DARK,
-            fg=C_DIM,
+            bg=BG_DARK,
+            fg=TEXT_DIM,
             font=("Helvetica", 8, "italic"),
             pady=8,
         ).pack(fill="x")
@@ -3778,73 +3558,71 @@ def open_decision_wizard(app):
             chains[c].append(d)
 
         CCOLORS = {
-            "hacking": C_BLUE,
-            "drugs": C_ORANGE,
-            "currency": C_GOLD,
-            "misc": C_DIM,
+            "hacking": BLUE,
+            "drugs": ORANGE,
+            "currency": GOLD,
+            "misc": TEXT_DIM,
         }
         clist = list(chains.items())
         for ci, (chain, decs) in enumerate(clist):
-            cc = CCOLORS.get(
-                chain, [C_BLUE, C_TEAL, C_ORANGE, C_PURPLE, C_GREEN][ci % 5]
-            )
+            cc = CCOLORS.get(chain, [BLUE, TEAL, ORANGE, PURPLE, GREEN][ci % 5])
             tk.Label(
                 frm,
                 text=f"  ── {chain.upper()} CHAIN  ({len(decs)} decisions)",
-                bg=C_DARK,
+                bg=BG_DARK,
                 fg=cc,
                 font=("Courier", 9, "bold"),
                 anchor="w",
             ).pack(fill="x", padx=10, pady=(10, 4))
 
             for _i, dec in enumerate(decs):
-                row = tk.Frame(frm, bg=C_DARK)
+                row = tk.Frame(frm, bg=BG_DARK)
                 row.pack(fill="x", padx=16, pady=1)
                 # connector dot
-                dot_f = tk.Frame(row, bg=C_DARK, width=20)
+                dot_f = tk.Frame(row, bg=BG_DARK, width=20)
                 dot_f.pack(side="left", fill="y")
                 dot_f.pack_propagate(False)
                 tk.Canvas(
-                    dot_f, bg=C_DARK, highlightthickness=0, width=20, height=30
+                    dot_f, bg=BG_DARK, highlightthickness=0, width=20, height=30
                 ).pack(fill="y", expand=True)
                 # card
                 card = tk.Frame(
-                    row, bg=C_CARD, highlightthickness=1, highlightbackground=cc
+                    row, bg=BG_CARD, highlightthickness=1, highlightbackground=cc
                 )
                 card.pack(side="left", fill="x", expand=True, pady=1)
                 tk.Label(
                     card,
                     text=dec["loc_name"] or dec["dec_id"],
-                    bg=C_CARD,
-                    fg=C_TEXT,
+                    bg=BG_CARD,
+                    fg=TEXT,
                     font=("Courier", 10),
                     anchor="w",
                     padx=10,
                     pady=5,
                 ).pack(fill="x")
-                tag_row = tk.Frame(card, bg=C_CARD)
+                tag_row = tk.Frame(card, bg=BG_CARD)
                 tag_row.pack(fill="x", padx=10, pady=(0, 5))
                 _tag(
                     tag_row,
                     "targeted" if dec["targeted"] != "none" else "standard",
-                    C_TEAL if dec["targeted"] != "none" else C_DIM,
-                    TEAL_TAG_BG if dec["targeted"] != "none" else C_CARD,
-                    TEAL_TAG_BD if dec["targeted"] != "none" else C_BORDG,
+                    TEAL if dec["targeted"] != "none" else TEXT_DIM,
+                    TEAL_TAG_BG if dec["targeted"] != "none" else BG_CARD,
+                    TEAL_TAG_BD if dec["targeted"] != "none" else BORDER_G,
                 )
                 if dec["cost_type"] == "pp" and dec.get("cost", "").strip():
-                    _tag(tag_row, f"PP {dec['cost']}", C_GOLD, GOLD_TAG_BG, GOLD_TAG_BD)
-                _tag(tag_row, dec["dec_id"], C_DIM, C_DARK, C_BORDG)
+                    _tag(tag_row, f"PP {dec['cost']}", GOLD, GOLD_TAG_BG, GOLD_TAG_BD)
+                _tag(tag_row, dec["dec_id"], TEXT_DIM, BG_DARK, BORDER_G)
 
         # Chain assignment card
         asgn = tk.Frame(
-            frm, bg=C_CARD, highlightthickness=1, highlightbackground=C_BORDG
+            frm, bg=BG_CARD, highlightthickness=1, highlightbackground=BORDER_G
         )
         asgn.pack(fill="x", padx=10, pady=14)
         tk.Label(
             asgn,
             text=tr("decision.chain.assignment", "  CHAIN ASSIGNMENT"),
-            bg=C_CARD,
-            fg=C_GOLD,
+            bg=BG_CARD,
+            fg=GOLD,
             font=("Courier", 9, "bold"),
             pady=4,
         ).pack(anchor="w")
@@ -3854,23 +3632,23 @@ def open_decision_wizard(app):
                 "decision.chain.assignment_hint",
                 "  Assign decisions to chains to track sequences. Chains are stored as comments - no engine impact.",
             ),
-            bg=C_CARD,
-            fg=C_DIM,
+            bg=BG_CARD,
+            fg=TEXT_DIM,
             font=("Helvetica", 9),
             wraplength=360,
             justify="left",
         ).pack(fill="x", padx=6)
-        inp_row = tk.Frame(asgn, bg=C_CARD)
+        inp_row = tk.Frame(asgn, bg=BG_CARD)
         inp_row.pack(fill="x", padx=6, pady=8)
         chain_inp = tk.Entry(
             inp_row,
-            bg=C_DARK,
-            fg=C_TEXT,
-            insertbackground=C_BLUE,
+            bg=BG_DARK,
+            fg=TEXT,
+            insertbackground=BLUE,
             font=("Courier", 10),
             relief="flat",
             highlightthickness=1,
-            highlightbackground=C_BORDG,
+            highlightbackground=BORDER_G,
         )
         chain_inp.insert(0, "chain name...")
         chain_inp.pack(side="left", fill="x", expand=True, ipady=4)
@@ -3878,7 +3656,7 @@ def open_decision_wizard(app):
             inp_row,
             text=tr("decision.chain.new", "+ New Chain"),
             bg=TEAL_TAG_BG,
-            fg=C_TEAL,
+            fg=TEAL,
             relief="flat",
             font=("Courier", 9),
             cursor="hand2",
@@ -3892,17 +3670,17 @@ def open_decision_wizard(app):
     def _build_code():
         _collect()
         # sub-tabs
-        sub_f = tk.Frame(right_body, bg=C_PANEL)
+        sub_f = tk.Frame(right_body, bg=BG_PANEL)
         sub_f.pack(fill="x")
         ctab_v = tk.StringVar(value="decisions")
-        cv = tk.Canvas(right_body, bg=C_DARK, highlightthickness=0)
+        cv = tk.Canvas(right_body, bg=BG_DARK, highlightthickness=0)
         sb = tk.Scrollbar(right_body, orient="vertical", command=cv.yview)
         sb_h = tk.Scrollbar(right_body, orient="horizontal")
         code_t = tk.Text(
             cv,
             bg="#080b10",
             fg="#a8b4c0",
-            insertbackground=C_BLUE,
+            insertbackground=BLUE,
             font=("Courier", 9),
             relief="flat",
             wrap="none",
@@ -4022,14 +3800,14 @@ def open_decision_wizard(app):
                 _load(t)
                 for b2 in sub_f.winfo_children():
                     if isinstance(b2, tk.Button):
-                        b2.config(fg=C_TEXT if b2.cget("text") == tlbl2 else C_DIM)
+                        b2.config(fg=TEXT if b2.cget("text") == tlbl2 else TEXT_DIM)
 
             b3 = tk.Button(
                 sub_f,
                 text=tlbl2,
                 command=_mksub,
-                bg=C_PANEL,
-                fg=C_DIM,
+                bg=BG_PANEL,
+                fg=TEXT_DIM,
                 relief="flat",
                 font=("Courier", 9),
                 cursor="hand2",
@@ -4037,13 +3815,11 @@ def open_decision_wizard(app):
                 pady=5,
             )
             b3.pack(side="left")
-        bot = tk.Frame(right_body, bg=C_DARK)
+        bot = tk.Frame(right_body, bg=BG_DARK)
         bot.pack(fill="x", before=cv)
 
         def _apply_code_edits():
             """Re-import whatever is in the code editor back into dm_cats/dm_decs."""
-            import re as _re2
-
             raw = code_t.get("1.0", "end-1c").strip()
             if not raw:
                 _dm_status.config(
@@ -4098,7 +3874,7 @@ def open_decision_wizard(app):
                 return inner.strip() if inner is not None else None
 
             def _get_value2(text, key):
-                m = _re2.search(rf"\b{_re2.escape(key)}\s*=\s*([^\s{{}}#\n]+)", text)
+                m = re.search(rf"\b{re.escape(key)}\s*=\s*([^\s{{}}#\n]+)", text)
                 return m.group(1).strip() if m else None
 
             def _get_yn2(text, key):
@@ -4123,7 +3899,7 @@ def open_decision_wizard(app):
                 dm_cats.clear()
                 dm_decs.clear()
                 for cat_name, cat_inner, _ in decision_blocks:
-                    c = _new_cat()
+                    c = new_category_record()
                     c["cat_id"] = cat_name
                     c["loc_name"] = cat_name  # preserve existing loc name if we can
                     # try to keep existing loc_name if cat already existed
@@ -4167,7 +3943,7 @@ def open_decision_wizard(app):
                     dm_cats.append(c)
 
                     for dec_name, dec_inner, _ in find_blocks(cat_inner):
-                        d = _new_dec(c["uid"])
+                        d = new_decision_record(c["uid"])
                         d["dec_id"] = dec_name
                         d["loc_name"] = dec_name
                         existing_dec = next(
@@ -4249,28 +4025,26 @@ def open_decision_wizard(app):
                     text=f"  ✓  Applied — {len(dm_cats)} categories, {imported} decisions parsed from code"
                 )
             except Exception as _ex:  # noqa: BLE001
-                import traceback as _tb
-
                 dm_cats[:] = old_cats
                 dm_decs[:] = old_decs
                 report_error(
                     f"Parse error: {_ex}", _ex, parent=win, title="Parse Error"
                 )
-                _tb.print_exc()
+                traceback.print_exc()
 
         tk.Button(
             bot,
             text=tr("decision.code.apply_edits", "Apply edits"),
             command=_apply_code_edits,
-            bg=C_CARD,
-            fg=C_GREEN,
+            bg=BG_CARD,
+            fg=GREEN,
             relief="flat",
             font=("Courier", 9, "bold"),
             cursor="hand2",
             padx=10,
             pady=3,
             highlightthickness=1,
-            highlightbackground=C_GREEN,
+            highlightbackground=GREEN,
         ).pack(side="left", padx=6, pady=3)
         tk.Label(
             bot,
@@ -4278,8 +4052,8 @@ def open_decision_wizard(app):
                 "decision.code.edit_hint",
                 "Edit code directly then click Apply to save changes",
             ),
-            bg=C_DARK,
-            fg=C_DIM,
+            bg=BG_DARK,
+            fg=TEXT_DIM,
             font=("Helvetica", 8, "italic"),
         ).pack(side="left")
         tk.Button(
@@ -4290,8 +4064,8 @@ def open_decision_wizard(app):
                 win.clipboard_append(code_t.get("1.0", "end-1c")),
                 _dm_status.config(text=tr("common.status.copied", "  ok  Copied")),
             ],
-            bg=C_CARD,
-            fg=C_DIM,
+            bg=BG_CARD,
+            fg=TEXT_DIM,
             relief="flat",
             font=("Courier", 9),
             cursor="hand2",
@@ -4302,8 +4076,8 @@ def open_decision_wizard(app):
             bot,
             text=tr("common.wrap", "Wrap"),
             command=_toggle_wrap,
-            bg=C_CARD,
-            fg=C_DIM,
+            bg=BG_CARD,
+            fg=TEXT_DIM,
             relief="flat",
             font=("Courier", 9),
             cursor="hand2",
@@ -4313,7 +4087,7 @@ def open_decision_wizard(app):
         wrap_btn.pack(side="right", padx=2, pady=3)
         # Line/char count label
         _line_lbl = tk.Label(
-            bot, text="", bg=C_DARK, fg=C_DIM, font=("Helvetica", 8), anchor="e"
+            bot, text="", bg=BG_DARK, fg=TEXT_DIM, font=("Helvetica", 8), anchor="e"
         )
         _line_lbl.pack(side="right", padx=8)
 
@@ -4382,18 +4156,6 @@ def open_decision_wizard(app):
         """Generate scripted_localisation defined_text blocks (in _generators.py)."""
         return _generators.generate_decision_scripted_loc(dm_cats, dm_decs)
 
-    def _gen_decision_txt(dec):
-        """Generate a single decision block at 1-tab indent.
-
-        The renderer itself lives in `_generators.py` (headless-testable);
-        this closure only resolves the two widget-only knobs (targeted /
-        cost_type) from the Tk StringVars, then delegates.
-        """
-        state = collect_decision_state(_evars, dec)
-        return _generators.generate_decision_block(
-            dec, targeted=state["targeted"], cost_type=state["cost_type"]
-        )
-
     def _gen_decisions_file():
         _collect()
         state = collect_decision_state(_evars)
@@ -4416,8 +4178,6 @@ def open_decision_wizard(app):
 
     # ── import / export ───────────────────────────────────────────────────────
     def _browse_mod_decisions():
-        import glob as _glob
-
         if not MOD.loaded or not MOD.root:
             messagebox.showinfo(
                 tr("dialog.no_mod_loaded.title", "No Mod Loaded"),
@@ -4439,7 +4199,7 @@ def open_decision_wizard(app):
                 parent=win,
             )
             return
-        files = sorted(_glob.glob(os.path.join(dec_dir, "*.txt")))
+        files = sorted(glob.glob(os.path.join(dec_dir, "*.txt")))
         if not files:
             messagebox.showinfo(
                 tr("dialog.no_files_found.title", "No Files Found"),
@@ -4479,23 +4239,7 @@ def open_decision_wizard(app):
 
         frm = tk.Frame(dlg, bg=BG_DARK)
         frm.pack(fill="both", expand=True, padx=10, pady=6)
-        lb = tk.Listbox(
-            frm,
-            bg=BG_CARD,
-            fg=TEXT,
-            selectbackground=SEL_BG,
-            selectforeground=TEXT,
-            font=("Courier", 10),
-            relief="flat",
-            highlightthickness=1,
-            highlightbackground=BORDER_G,
-            activestyle="none",
-            selectmode="extended",
-        )
-        sb = tk.Scrollbar(frm, orient="vertical", command=lb.yview)
-        lb.configure(yscrollcommand=sb.set)
-        sb.pack(side="right", fill="y")
-        lb.pack(side="left", fill="both", expand=True)
+        lb = make_scrolled_listbox(frm, selectmode="extended")
         for fp in files:
             lb.insert("end", f"  {os.path.basename(fp)}")
 
@@ -4505,8 +4249,6 @@ def open_decision_wizard(app):
                 return
             selected = [files[i] for i in sel]
             # Check for duplicate category IDs before importing
-            import re as _re2
-
             existing_cat_ids = {c["cat_id"] for c in dm_cats}
             new_cats = []
             for fp in selected:
@@ -4514,7 +4256,7 @@ def open_decision_wizard(app):
                     raw, encoding = read_file_with_encoding(fp)
                     if raw is None or encoding is None:
                         raise OSError("decision category file could not be read")
-                    for m in _re2.finditer(r"\b([A-Za-z_][A-Za-z0-9_]*)\s*=\s*\{", raw):
+                    for m in re.finditer(r"\b([A-Za-z_][A-Za-z0-9_]*)\s*=\s*\{", raw):
                         cid = m.group(1)
                         if (
                             cid not in ("add_namespace", "namespace")
@@ -4545,42 +4287,17 @@ def open_decision_wizard(app):
             _import_txt(_paths=selected)
 
         lb.bind("<Double-Button-1>", lambda e: _do_import())
-        bot_dlg = tk.Frame(dlg, bg=BG_DARK, pady=6)
-        bot_dlg.pack(fill="x")
-        tk.Button(
-            bot_dlg,
-            text=tr("common.import_selected", "Import Selected"),
-            command=_do_import,
-            bg="#14532d",
-            fg="#4ade80",
-            relief="flat",
-            font=("Helvetica", 10, "bold"),
-            padx=16,
-            pady=5,
-            cursor="hand2",
-        ).pack(side="left", padx=10)
-        tk.Button(
-            bot_dlg,
-            text=tr("common.cancel", "Cancel"),
-            command=dlg.destroy,
-            bg=BG_CARD,
-            fg=TEXT,
-            relief="flat",
-            font=("Helvetica", 10),
-            padx=12,
-            pady=5,
-            cursor="hand2",
-        ).pack(side="right", padx=10)
+        pack_action_footer(
+            dlg, tr("common.import_selected", "Import Selected"), _do_import
+        )
 
     def _import_txt(_paths=None):
         nonlocal _decision_import_source, _category_import_source
-        import os as _os
-        import re as _re
 
         def _is_category_path(path):
-            normalized = _os.path.normpath(path)
-            parent = _os.path.basename(_os.path.dirname(normalized)).casefold()
-            filename = _os.path.basename(normalized).casefold()
+            normalized = os.path.normpath(path)
+            parent = os.path.basename(os.path.dirname(normalized)).casefold()
+            filename = os.path.basename(normalized).casefold()
             return parent == "categories" or filename.endswith("_categories.txt")
 
         paths = _paths or filedialog.askopenfilenames(
@@ -4604,10 +4321,10 @@ def open_decision_wizard(app):
         _first_decision = next(iter(decision_paths), None)
         if _first_decision:
             MOD.edit_decisions_file = _first_decision
-            _base = _os.path.basename(_first_decision)
-            _folder = _os.path.dirname(_first_decision)
-            _cat_path = _os.path.join(_folder, "categories", _base)
-            if _os.path.isfile(_cat_path):
+            _base = os.path.basename(_first_decision)
+            _folder = os.path.dirname(_first_decision)
+            _cat_path = os.path.join(_folder, "categories", _base)
+            if os.path.isfile(_cat_path):
                 MOD.edit_decisions_cat_file = _cat_path
         _first_category = next(iter(category_paths), None)
         if _first_category:
@@ -4620,7 +4337,7 @@ def open_decision_wizard(app):
 
         def _get_value(text, key):
             """Get scalar value: key = value (not a block)."""
-            m = _re.search(rf"\b{_re.escape(key)}\s*=\s*([^\s{{}}#\n]+)", text)
+            m = re.search(rf"\b{re.escape(key)}\s*=\s*([^\s{{}}#\n]+)", text)
             return m.group(1).strip() if m else None
 
         def _get_yes_no(text, key):
@@ -4636,7 +4353,7 @@ def open_decision_wizard(app):
                     if content is None or encoding is None:
                         raise OSError("localisation file could not be read")
                     for line in content.splitlines():
-                        lm = _re.match(r'\s+([\w]+):(?:\d+)?\s+"(.*?)"', line)
+                        lm = re.match(r'\s+([\w]+):(?:\d+)?\s+"(.*?)"', line)
                         if lm:
                             loc[lm.group(1)] = lm.group(2)
                 except (OSError, ValueError) as exc:
@@ -4655,7 +4372,7 @@ def open_decision_wizard(app):
                             if content is None:
                                 continue
                             for line in content.splitlines():
-                                lm = _re.match(r'\s+([\w]+):(?:\d+)?\s+"(.*?)"', line)
+                                lm = re.match(r'\s+([\w]+):(?:\d+)?\s+"(.*?)"', line)
                                 if lm:
                                     loc[lm.group(1)] = lm.group(2)
                         except (OSError, ValueError) as exc:
@@ -4685,7 +4402,7 @@ def open_decision_wizard(app):
             for cat_name, cat_inner, _ in find_blocks(raw):
                 if cat_name in ("add_namespace", "namespace"):
                     continue
-                c = _new_cat()
+                c = new_category_record()
                 c["cat_id"] = cat_name
                 c["loc_name"] = loc.get(cat_name, cat_name)
                 c["loc_desc"] = loc.get(cat_name + "_desc", "")
@@ -4742,7 +4459,7 @@ def open_decision_wizard(app):
                 dm_cats.append(c)
 
                 for dec_name, dec_inner, _ in find_blocks(cat_inner):
-                    d = _new_dec(c["uid"])
+                    d = new_decision_record(c["uid"])
                     d["dec_id"] = dec_name
                     d["loc_name"] = loc.get(dec_name, dec_name)
                     d["loc_desc"] = loc.get(dec_name + "_desc", "")
@@ -4773,7 +4490,7 @@ def open_decision_wizard(app):
                     # ── boolean flags ──
                     if _get_yes_no(dec_inner, "fire_only_once"):
                         d["fire_only_once"] = True
-                    if _re.search(r"\bfire_only_once\b", dec_inner):
+                    if re.search(r"\bfire_only_once\b", dec_inner):
                         d["fire_only_once"] = True
                     if _get_yes_no(dec_inner, "fixed_random_seed") in (False,):
                         d["fixed_random_seed"] = False
@@ -4795,7 +4512,7 @@ def open_decision_wizard(app):
                         d["war_target_remove"] = True
 
                     # ── cost type detection ──
-                    if _re.search(r"\bcustom_cost_trigger\b", dec_inner):
+                    if re.search(r"\bcustom_cost_trigger\b", dec_inner):
                         d["cost_type"] = "custom"
                         ccb = _get_block(dec_inner, "custom_cost_trigger")
                         if ccb:
@@ -4837,12 +4554,12 @@ def open_decision_wizard(app):
                             d[dkey] = v
 
                     # ── targeting detection ──
-                    if _re.search(r"\btarget_array\b|\btargets\b", dec_inner):
+                    if re.search(r"\btarget_array\b|\btargets\b", dec_inner):
                         d["targeted"] = "country"
                         tv = _get_value(dec_inner, "targets")
                         if tv:
                             d["targets"] = tv
-                    if _re.search(r"\bstate_target\b", dec_inner):
+                    if re.search(r"\bstate_target\b", dec_inner):
                         d["targeted"] = "state"
                     d["_extras"] = _generators.capture_decision_extras(dec_inner)
 
@@ -4879,8 +4596,6 @@ def open_decision_wizard(app):
 
     def _import_scripted_loc():
         """Load a scripted_localisation .txt and apply loc keys to existing decisions/cats."""
-        import re as _rsl
-
         paths = filedialog.askopenfilenames(
             parent=win,
             title="Import scripted_localisation .txt files",
@@ -4895,11 +4610,11 @@ def open_decision_wizard(app):
                 raw, encoding = read_file_with_encoding(path)
                 if raw is None or encoding is None:
                     raise OSError("scripted localisation file could not be read")
-                for m in _rsl.finditer(
+                for m in re.finditer(
                     r"defined_text\s*=\s*\{[^}]*?name\s*=\s*(\S+)[^}]*?"
                     r"localization_key\s*=\s*(\S+)",
                     raw,
-                    _rsl.DOTALL,
+                    re.DOTALL,
                 ):
                     sloc_map[m.group(1)] = m.group(2)
             except (OSError, ValueError) as exc:
@@ -4934,8 +4649,6 @@ def open_decision_wizard(app):
 
     def _import_yml_loc():
         """Load a localisation .yml and apply names/descs to existing decisions/cats."""
-        import re as _re2
-
         paths = filedialog.askopenfilenames(
             parent=win,
             title="Import localisation .yml files",
@@ -4950,7 +4663,7 @@ def open_decision_wizard(app):
                 if raw is None or encoding is None:
                     raise OSError("localisation file could not be read")
                 for line in raw.splitlines():
-                    lm = _re2.match(r'\s+([\w]+):(?:\d+)?\s+"(.*?)"', line)
+                    lm = re.match(r'\s+([\w]+):(?:\d+)?\s+"(.*?)"', line)
                     if lm:
                         loc2[lm.group(1)] = lm.group(2)
             except OSError as e:
@@ -5109,8 +4822,6 @@ def open_decision_wizard(app):
             )
         )
         try:
-            import re as _re_loc2
-
             # Read existing keys
             existing_loc_keys = set()
             yml_exists = os.path.isfile(yml_path)
@@ -5122,7 +4833,7 @@ def open_decision_wizard(app):
                 if yml_text is None or yml_encoding is None:
                     raise OSError("localisation file could not be read")
                 for line in yml_text.splitlines():
-                    m = _re_loc2.match(r'\s+(\S+?)(?::\d+)?\s*[=:]?\s*"', line)
+                    m = re.match(r'\s+(\S+?)(?::\d+)?\s*[=:]?\s*"', line)
                     if m:
                         existing_loc_keys.add(m.group(1))
             else:
@@ -5137,7 +4848,7 @@ def open_decision_wizard(app):
             # Only add lines whose key isn't already in the file
             to_write = []
             for ln in new_lines:
-                m = _re_loc2.match(r'\s+(\S+?)(?::\d+)?\s*[=:]?\s*"', ln)
+                m = re.match(r'\s+(\S+?)(?::\d+)?\s*[=:]?\s*"', ln)
                 if m and m.group(1) in existing_loc_keys:
                     continue
                 to_write.append(ln)
@@ -5175,9 +4886,7 @@ def open_decision_wizard(app):
                 require_existing=True,
             )
 
-        msg = "Saved:\n" + "\n".join(saved)
-        if errs:
-            msg += "\n\nErrors:\n" + "\n".join(errs)
+        msg = format_save_summary(saved, (), errs)
         messagebox.showinfo("Saved to Mod", msg, parent=win)
         _dm_status.config(text=tr("common.status.saved_to_mod", "  ok  Saved to mod"))
 

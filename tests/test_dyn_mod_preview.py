@@ -11,27 +11,21 @@ import pathlib
 import re
 import tkinter as tk
 
+from tk_helpers import (
+    cleanup_toplevels,
+    find_text,
+    key_release_on_other_texts,
+    release_grab,
+    trigger_preview_refresh,
+)
+
 import hoi4cm.core.logger as logmod
 import hoi4cm.wizards.dyn_mod as dm_mod
 from hoi4cm.wizards.dyn_mod import open_dyn_mod_wizard
 
 
 def _find_preview_text(root):
-    found = []
-
-    def walk(w):
-        if isinstance(w, tk.Text):
-            try:
-                bg = w.cget("bg")
-            except tk.TclError:
-                bg = ""
-            if bg == "#0d1117":
-                found.append(w)
-        for child in w.winfo_children():
-            walk(child)
-
-    walk(root)
-    return found[0] if found else None
+    return find_text(root, "#0d1117")
 
 
 def test_dyn_mod_preview_source_contains_expected_error_handling():
@@ -52,10 +46,7 @@ def test_dyn_mod_preview_source_contains_expected_error_handling():
 def test_dyn_mod_preview_preserves_text_and_logs_on_builder_failure(
     tk_root, monkeypatch
 ):
-    try:
-        tk_root.grab_release()
-    except tk.TclError:
-        pass
+    release_grab(tk_root)
     orig_cb = logmod._error_callback
     logmod.clear_errors()
     logmod.set_error_callback(None)
@@ -73,37 +64,7 @@ def test_dyn_mod_preview_preserves_text_and_logs_on_builder_failure(
 
         monkeypatch.setattr(dm_mod, "build_dyn_mod_output", boom)
 
-        triggered = False
-        for w in tk_root.winfo_children():
-            stack = [w]
-            while stack:
-                cur = stack.pop()
-                if isinstance(cur, tk.Entry):
-                    try:
-                        var_name = cur.cget("textvariable")
-                    except tk.TclError:
-                        var_name = ""
-                    if var_name:
-                        try:
-                            cur.tk.call("set", var_name, "TRIGGER_VAL")
-                            triggered = True
-                            break
-                        except tk.TclError:
-                            pass
-                stack.extend(cur.winfo_children())
-            if triggered:
-                break
-        if not triggered:
-            for w in tk_root.winfo_children():
-                stack = [w]
-                while stack:
-                    cur = stack.pop()
-                    if isinstance(cur, tk.Text) and cur is not preview:
-                        try:
-                            cur.event_generate("<KeyRelease>")
-                        except tk.TclError:
-                            pass
-                    stack.extend(cur.winfo_children())
+        trigger_preview_refresh(tk_root, preview)
         tk_root.update_idletasks()
 
         preview.configure(state="normal")
@@ -117,24 +78,11 @@ def test_dyn_mod_preview_preserves_text_and_logs_on_builder_failure(
     finally:
         logmod.clear_errors()
         logmod.set_error_callback(orig_cb)
-        try:
-            tk_root.grab_release()
-        except tk.TclError:
-            pass
-        for w in list(tk_root.winfo_children()):
-            if isinstance(w, tk.Toplevel):
-                try:
-                    w.destroy()
-                except tk.TclError:
-                    pass
-        tk_root.update_idletasks()
+        cleanup_toplevels(tk_root)
 
 
 def test_dyn_mod_preview_tclerror_does_not_log(tk_root, monkeypatch):
-    try:
-        tk_root.grab_release()
-    except tk.TclError:
-        pass
+    release_grab(tk_root)
     orig_cb = logmod._error_callback
     logmod.clear_errors()
     logmod.set_error_callback(None)
@@ -154,16 +102,7 @@ def test_dyn_mod_preview_tclerror_does_not_log(tk_root, monkeypatch):
             dm_mod, "build_dyn_mod_output", lambda **_kw: "dummy preview text"
         )
 
-        for w in tk_root.winfo_children():
-            stack = [w]
-            while stack:
-                cur = stack.pop()
-                if isinstance(cur, tk.Text) and cur is not preview:
-                    try:
-                        cur.event_generate("<KeyRelease>")
-                    except tk.TclError:
-                        pass
-                stack.extend(cur.winfo_children())
+        key_release_on_other_texts(tk_root, preview)
         tk_root.update_idletasks()
 
         entries = logmod.get_error_entries()
@@ -172,14 +111,4 @@ def test_dyn_mod_preview_tclerror_does_not_log(tk_root, monkeypatch):
     finally:
         logmod.clear_errors()
         logmod.set_error_callback(orig_cb)
-        try:
-            tk_root.grab_release()
-        except tk.TclError:
-            pass
-        for w in list(tk_root.winfo_children()):
-            if isinstance(w, tk.Toplevel):
-                try:
-                    w.destroy()
-                except tk.TclError:
-                    pass
-        tk_root.update_idletasks()
+        cleanup_toplevels(tk_root)

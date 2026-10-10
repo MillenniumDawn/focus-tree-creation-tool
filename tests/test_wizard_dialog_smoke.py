@@ -8,6 +8,8 @@ skipped when no display is available (``tests/conftest.py:tk_root``).
 
 import tkinter as tk
 
+from builders import default_decision
+
 from hoi4cm.wizards._generators import generate_decision_block
 from hoi4cm.wizards.additional_income import collect_additional_income_state
 from hoi4cm.wizards.decision import collect_decision_state
@@ -28,56 +30,7 @@ def test_collect_decision_state_with_real_stringvar(tk_root):
 def test_collect_decision_state_tk_mutation_changes_generator_output(tk_root):
     parent = tk.Frame(tk_root)
     v = tk.StringVar(parent, value="none")
-    base = {
-        "uid": "dec-1",
-        "cat_uid": "cat-1",
-        "dec_id": "TAG_decision",
-        "loc_name": "My Decision",
-        "loc_desc": "",
-        "icon": "",
-        "allowed": "",
-        "visible": "",
-        "available": "",
-        "cost_type": "pp",
-        "cost": "25",
-        "custom_cost_trigger": "",
-        "custom_cost_text": "",
-        "ai_hint_pp_cost": "",
-        "cost_var": "",
-        "cost_amount": "",
-        "days_remove": "",
-        "days_re_enable": "",
-        "fire_only_once": False,
-        "fixed_random_seed": True,
-        "is_mission": False,
-        "mission_timeout": "100",
-        "selectable_mission": False,
-        "is_good": False,
-        "activation": "",
-        "highlight_states": "",
-        "on_map_mode": "map_and_decisions_view",
-        "state_target_scope": "any",
-        "target_root_trigger": "",
-        "target_trigger": "",
-        "targets": "",
-        "targets_dynamic": False,
-        "target_non_existing": False,
-        "target_array": "",
-        "modifier": "",
-        "complete_effect": "",
-        "timeout_effect": "",
-        "remove_effect": "",
-        "cancel_trigger": "",
-        "cancel_effect": "",
-        "cancel_if_not_visible": False,
-        "remove_trigger": "",
-        "ai_will_do": "",
-        "priority": "1",
-        "war_target_complete": False,
-        "war_target_remove": False,
-        "war_complete_tag": "",
-        "war_remove_tag": "",
-    }
+    base = default_decision()
     untargeted = generate_decision_block(
         base, **collect_decision_state({"targeted": v})
     )

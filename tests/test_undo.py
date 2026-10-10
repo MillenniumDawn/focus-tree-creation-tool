@@ -883,3 +883,232 @@ def test_decode_full_non_dict_payload_returns_none():
     must return None, not raise."""
     for payload in (b"null", b"42", b"[1,2]", b'"a string"'):
         assert _decode_full(zlib.compress(payload)) is None
+
+
+def _type_into(focuses, stack, fid, texts, *, run, label="edit effect"):
+    """Mimic the live effect handlers: push (keyed), then mutate, per keystroke."""
+    for text in texts:
+        stack.push(label, focuses, touched_ids=(fid,), run=run)
+        focuses[fid].desc = text
+
+
+def test_run_of_pushes_is_one_undo_entry():
+    focuses = {1: _mk_focus(1, "focus_1", desc="start")}
+    stack = UndoStack()
+
+    _type_into(focuses, stack, 1, ["a", "ab", "abc"], run=(1, 0, "amount"))
+
+    assert len(stack) == 1
+    result = stack.undo(focuses, Focus.from_dict)
+    assert result is not None
+    assert focuses[1].desc == "start"
+    assert len(stack) == 0
+    stack.redo(focuses, Focus.from_dict)
+    assert focuses[1].desc == "abc"
+
+
+def test_run_takes_one_snapshot_however_many_keystrokes(monkeypatch):
+    calls = []
+    real = undo_module._snapshot_focus
+    monkeypatch.setattr(
+        undo_module, "_snapshot_focus", lambda f: calls.append(f.id) or real(f)
+    )
+    focuses = {1: _mk_focus(1, "focus_1")}
+    stack = UndoStack()
+
+    _type_into(focuses, stack, 1, [str(i) for i in range(50)], run=(1, 0, "amount"))
+
+    assert calls == [1]
+
+
+@pytest.mark.parametrize(
+    "other_run", [(1, 0, "other"), (1, 1, "amount"), (2, 0, "amount"), None]
+)
+def test_run_with_a_different_key_starts_a_new_entry(other_run):
+    focuses = {1: _mk_focus(1, "focus_1"), 2: _mk_focus(2, "focus_2")}
+    stack = UndoStack()
+    stack.push("edit", focuses, touched_ids=(1,), run=(1, 0, "amount"))
+
+    stack.push("edit", focuses, touched_ids=(1,), run=other_run)
+
+    assert len(stack) == 2
+
+
+def test_push_without_run_never_coalesces():
+    focuses = {1: _mk_focus(1, "focus_1")}
+    stack = UndoStack()
+
+    stack.push("a", focuses, touched_ids=(1,))
+    stack.push("b", focuses, touched_ids=(1,))
+
+    assert len(stack) == 2
+
+
+def test_unrelated_push_ends_the_run():
+    focuses = {1: _mk_focus(1, "focus_1")}
+    stack = UndoStack()
+    key = (1, 0, "amount")
+
+    stack.push("edit", focuses, touched_ids=(1,), run=key)
+    stack.push("add effect", focuses, touched_ids=(1,))
+    stack.push("edit", focuses, touched_ids=(1,), run=key)
+
+    assert len(stack) == 3
+
+
+def test_a_run_that_follows_an_unkeyed_push_does_not_coalesce_into_it():
+    focuses = {1: _mk_focus(1, "focus_1")}
+    stack = UndoStack()
+    key = (1, 0, "amount")
+
+    stack.push("edit", focuses, touched_ids=(1,), run=key)
+    stack.push("other", focuses, touched_ids=(1,), run=(1, 0, "other"))
+    stack.push("edit", focuses, touched_ids=(1,), run=key)
+
+    assert len(stack) == 3
+
+
+def test_end_run_clear_undo_and_redo_each_end_the_run():
+    key = (1, 0, "amount")
+
+    def fresh():
+        focuses = {1: _mk_focus(1, "focus_1")}
+        stack = UndoStack()
+        stack.push("edit", focuses, touched_ids=(1,), run=key)
+        return focuses, stack
+
+    focuses, stack = fresh()
+    stack.end_run()
+    stack.push("edit", focuses, touched_ids=(1,), run=key)
+    assert len(stack) == 2
+
+    focuses, stack = fresh()
+    stack.clear()
+    stack.push("edit", focuses, touched_ids=(1,), run=key)
+    assert len(stack) == 1
+
+    focuses, stack = fresh()
+    stack.undo(focuses, Focus.from_dict)
+    stack.push("edit", focuses, touched_ids=(1,), run=key)
+    assert len(stack) == 1
+    assert stack.redo(focuses, Focus.from_dict) is None
+
+    focuses, stack = fresh()
+    stack.undo(focuses, Focus.from_dict)
+    stack.redo(focuses, Focus.from_dict)
+    stack.push("edit", focuses, touched_ids=(1,), run=key)
+    assert len(stack) == 2
+
+
+def test_dropped_run_push_keeps_the_stack_and_redo_untouched():
+    focuses = {1: _mk_focus(1, "focus_1")}
+    stack = UndoStack()
+    key = (1, 0, "amount")
+    stack.push("edit", focuses, touched_ids=(1,), run=key)
+    before = list(stack._stack)
+
+    stack.push("edit", focuses, touched_ids=(1,), run=key)
+
+    assert list(stack._stack) == before
+    assert not stack._redo
+
+
+def test_record_pushes_when_the_block_changes_a_touched_focus():
+    focuses = {1: _mk_focus(1, "focus_1", cost=10)}
+    stack = UndoStack()
+
+    with stack.record("edit code", focuses, (1,)):
+        focuses[1].cost = 99
+
+    assert len(stack) == 1
+    result = stack.undo(focuses, Focus.from_dict)
+    assert result == ("edit code", {1}, set())
+    assert focuses[1].cost == 10
+
+
+def test_record_pushes_nothing_and_keeps_redo_when_nothing_changed():
+    focuses = {1: _mk_focus(1, "focus_1", cost=10)}
+    stack = UndoStack()
+    stack.push("edit", focuses, touched_ids=(1,))
+    focuses[1].cost = 20
+    stack.undo(focuses, Focus.from_dict)
+
+    with stack.record("edit code", focuses, (1,)):
+        focuses[1].cost = focuses[1].cost
+
+    assert len(stack) == 0
+    assert stack.redo(focuses, Focus.from_dict) is not None
+    assert focuses[1].cost == 20
+
+
+def test_record_pushes_nothing_when_the_block_raises_before_mutating():
+    focuses = {1: _mk_focus(1, "focus_1")}
+    stack = UndoStack()
+    stack.push("edit", focuses, touched_ids=(1,))
+    stack.undo(focuses, Focus.from_dict)
+
+    with pytest.raises(ValueError, match="bad input"):
+        with stack.record("edit code", focuses, (1,)):
+            raise ValueError("bad input")
+
+    assert len(stack) == 0
+    assert stack.redo(focuses, Focus.from_dict) is not None
+
+
+def test_record_keeps_a_partial_edit_when_the_block_raises_after_mutating():
+    focuses = {1: _mk_focus(1, "focus_1", cost=10)}
+    stack = UndoStack()
+
+    with pytest.raises(ValueError, match="halfway"):
+        with stack.record("edit code", focuses, (1,)):
+            focuses[1].cost = 99
+            raise ValueError("halfway")
+
+    assert len(stack) == 1
+    stack.undo(focuses, Focus.from_dict)
+    assert focuses[1].cost == 10
+
+
+def test_record_sees_a_deleted_metadata_attribute_as_a_change():
+    focus = _mk_focus(1, "focus_1")
+    focus._raw_gx = 4
+    focuses = {1: focus}
+    stack = UndoStack()
+
+    with stack.record("edit code", focuses, (1,)):
+        del focus._raw_gx
+
+    assert len(stack) == 1
+    stack.undo(focuses, Focus.from_dict)
+    assert focuses[1]._raw_gx == 4
+
+
+def test_record_sees_a_created_focus_as_a_change():
+    focuses = {1: _mk_focus(1, "focus_1")}
+    stack = UndoStack()
+
+    with stack.record("edit code", focuses, (1,)):
+        focuses[2] = _mk_focus(2, "focus_2")
+
+    assert len(stack) == 1
+    result = stack.undo(focuses, Focus.from_dict)
+    assert result is not None
+    assert result[2] == {2}
+    assert set(focuses) == {1}
+
+
+def test_record_ends_the_run_only_when_it_pushes():
+    focuses = {1: _mk_focus(1, "focus_1")}
+    stack = UndoStack()
+    key = (1, 0, "amount")
+    stack.push("edit", focuses, touched_ids=(1,), run=key)
+
+    with stack.record("edit code", focuses, (1,)):
+        pass
+    stack.push("edit", focuses, touched_ids=(1,), run=key)
+    assert len(stack) == 1
+
+    with stack.record("edit code", focuses, (1,)):
+        focuses[1].cost = 77
+    stack.push("edit", focuses, touched_ids=(1,), run=key)
+    assert len(stack) == 3
