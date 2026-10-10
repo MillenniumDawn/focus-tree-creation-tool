@@ -193,6 +193,45 @@ shared_focus = {
     assert_coordinates_and_offsets((10 + dx, 20 + dy), (11 + dx, 22 + dy))
 
 
+@pytest.mark.parametrize(("dx", "dy"), [(1, 0), (0, -1)])
+def test_group_nudge_keeps_missing_import_metadata_absent_for_extra_export(dx, dy):
+    parent = Focus(id=next(_focus_ids), x=10, y=20)
+    parent.name = "TST_parent"
+    parent.tree_idx = 1
+    child = Focus(id=next(_focus_ids), x=11, y=22)
+    child.name = "TST_child"
+    child.tree_idx = 1
+    child.relative_position_id = parent.name
+    app = _NudgeHarness([parent, child], multi_sel=(parent.id, child.id))
+
+    app._nudge_selection(dx, dy)
+
+    moved_child = app.focuses[child.id]
+    assert not hasattr(moved_child, "_raw_gx")
+    assert not hasattr(moved_child, "_raw_gy")
+    assert not hasattr(moved_child, "_rel_dx")
+    assert not hasattr(moved_child, "_rel_dy")
+    info = {
+        "tree_id": "TST_focus_tree",
+        "country_tag": "TST",
+        "type": "shared",
+        "had_wrapper": False,
+        "shared_focuses": [],
+        "joint_focuses": [],
+    }
+    exported = export_focus_tree(
+        list(app.focuses.values()), info, focus_lookup=dict(app.focuses.items())
+    )
+    reimported = build_focuses(
+        parse_focus_tree(exported, "project-created.txt"), tree_idx=1
+    )
+    assert [(focus.x, focus.y) for focus in reimported] == [
+        (10 + dx, 20 + dy),
+        (11 + dx, 22 + dy),
+    ]
+    assert (reimported[1]._rel_dx, reimported[1]._rel_dy) == (1, 2)
+
+
 def test_arrow_shortcuts_do_nothing_if_the_move_hits_an_unselected_focus():
     focus, blocker = _focus(1, 2), _focus(2, 2)
     app = _NudgeHarness([focus, blocker], selected=focus)

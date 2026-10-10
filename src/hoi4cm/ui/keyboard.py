@@ -75,19 +75,16 @@ def nudge_selection(app: KeyboardNudgeHost, dx: int, dy: int) -> None:
     for focus_id in app.focuses.keys():
         name_to_id.setdefault(app.focuses[focus_id].name, focus_id)
     moving_ids = set(targets)
-    relative_metadata: dict[
-        int, tuple[int | None, int | None, int | None, int | None]
-    ] = {}
+    relative_metadata: dict[int, dict[str, int | None]] = {}
     for focus_id in moving_ids:
         focus = app.focuses[focus_id]
         parent_id = name_to_id.get(focus.relative_position_id or "")
         if parent_id is not None and parent_id in moving_ids:
-            relative_metadata[focus_id] = (
-                getattr(focus, "_raw_gx", None),
-                getattr(focus, "_raw_gy", None),
-                getattr(focus, "_rel_dx", None),
-                getattr(focus, "_rel_dy", None),
-            )
+            relative_metadata[focus_id] = {
+                attribute: getattr(focus, attribute)
+                for attribute in ("_raw_gx", "_raw_gy", "_rel_dx", "_rel_dy")
+                if hasattr(focus, attribute)
+            }
     for x, y in targets.values():
         blockers = app.focuses.occupied_positions.get((x, y), set()) - moving_ids
         if blockers:
@@ -101,9 +98,7 @@ def nudge_selection(app: KeyboardNudgeHost, dx: int, dy: int) -> None:
         app.focuses.move(focus_id, x, y, allow_occupied=True)
     for focus_id, values in relative_metadata.items():
         focus = app.focuses[focus_id]
-        for attribute, value in zip(
-            ("_raw_gx", "_raw_gy", "_rel_dx", "_rel_dy"), values, strict=True
-        ):
+        for attribute, value in values.items():
             setattr(focus, attribute, value)
     app._redraw()
     if app.selected and app.selected.id in moving_ids:
