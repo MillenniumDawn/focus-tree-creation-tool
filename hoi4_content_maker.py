@@ -220,6 +220,9 @@ def _apply_tk_dpi_scaling(root):
         log.warning(f"Tk DPI scaling setup skipped: {e}")
 
 
+_AUTOSAVE_INTERVAL_MS = 60000
+
+
 class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[misc]
     CANVAS_MIN_SIZE = 10
     CANVAS_EXPAND_STEP = 5
@@ -274,7 +277,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         self._saved_revision = self.focuses.revision
         self._saved_fingerprint = self._workspace_fingerprint()
         self._autosave_job = None
-        self._autosave_interval_ms = 60000
+        self._autosave_interval_ms = _AUTOSAVE_INTERVAL_MS
         self._last_project_path = None
         self.protocol("WM_DELETE_WINDOW", self._on_app_close)
         self._build_ui()
@@ -405,8 +408,25 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             self._autosave_job = self.after(
                 self._autosave_interval_ms, self._autosave_tick
             )
-        except Exception:
+            return
+        except Exception as ex:
             self._autosave_job = None
+            try:
+                alive = self.winfo_exists()
+            except AttributeError, tk.TclError:
+                alive = False
+            if not alive:
+                return
+            log.exception("autosave scheduling failed")
+            self._log_error(f"Autosave could not be scheduled, retrying once: {ex}")
+        try:
+            self._autosave_job = self.after(_AUTOSAVE_INTERVAL_MS, self._autosave_tick)
+        except Exception as ex:
+            self._autosave_job = None
+            log.exception("autosave retry failed")
+            self._log_error(f"Autosave is off for this session: {ex}")
+        else:
+            self._autosave_interval_ms = _AUTOSAVE_INTERVAL_MS
 
     def _cancel_autosave(self) -> None:
         job = getattr(self, "_autosave_job", None)
@@ -430,8 +450,12 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
                         write_project(sibling_autosave_path(sibling), self.workspace)
                     except Exception:
                         log.exception("sibling autosave failed")
-        except Exception:
+            self._autosave_failing = False
+        except Exception as ex:
             log.exception("workspace autosave failed")
+            if not getattr(self, "_autosave_failing", False):
+                self._autosave_failing = True
+                self._log_error(f"Workspace autosave failed: {ex}")
         finally:
             self._schedule_autosave()
 
@@ -443,7 +467,9 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             return
         try:
             autosaved = read_project(path)
-        except Exception:
+        except Exception as ex:
+            log.exception("autosave restore read failed")
+            self._log_error(f"Could not read autosave {path}: {ex}")
             return
         if not autosaved.focuses and autosaved.main_tree.metadata.tree_id in (
             "",
@@ -5600,11 +5626,8 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             self._default_focus_prefix = ""
 
     def _load(self):
-        try:
-            if not self._confirm_discard(action="loading"):
-                return
-        except AttributeError:
-            pass
+        if not self._confirm_discard(action="loading"):
+            return
         path = filedialog.askopenfilename(
             filetypes=[
                 (tr("filetype.json_project", "JSON Project"), "*.json"),
@@ -6373,8 +6396,9 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         try:
             if self.selected:
                 self._autosave()
-        except Exception:
-            pass
+        except Exception as ex:
+            log.exception("autosave before export failed")
+            self._log_error(f"Autosave before export failed: {ex}")
         main_focuses = focuses_in_tree
         if main_focuses is None:
             main_focuses = [

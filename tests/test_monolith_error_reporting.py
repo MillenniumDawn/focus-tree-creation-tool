@@ -72,7 +72,9 @@ def test_load_reports_a_corrupt_project(shown, monkeypatch):
         raise ValueError(f"invalid JSON in {path}")
 
     monkeypatch.setattr(m, "read_project", boom)
-    shell = SimpleNamespace(_begin_document_generation=lambda: None)
+    shell = SimpleNamespace(
+        _begin_document_generation=lambda: None, _confirm_discard=lambda **_kw: True
+    )
 
     m.App._load(cast(m.App, shell))
 
@@ -108,7 +110,9 @@ def test_load_reports_out_of_range_ids_before_touching_live_state(
     _patch_load_background(monkeypatch)
     existing = Focus()
     shell = SimpleNamespace(
-        focuses=FocusDocument([existing]), _begin_document_generation=lambda: None
+        focuses=FocusDocument([existing]),
+        _begin_document_generation=lambda: None,
+        _confirm_discard=lambda **_kw: True,
     )
 
     m.App._load(cast(m.App, shell))
@@ -161,6 +165,7 @@ def test_load_warns_when_stored_export_paths_are_dropped(shown, monkeypatch):
         (),
         {
             "_begin_document_generation": lambda self: None,
+            "_confirm_discard": lambda self, **_kw: True,
             "cv": type("Canvas", (), {"delete": lambda self, *_args: None})(),
             "selected": None,
             "_lines": set(),
@@ -197,6 +202,7 @@ def test_load_parses_on_worker_before_installing_workspace(monkeypatch):
     parse_threads = []
     shell = SimpleNamespace(
         _begin_document_generation=lambda: events.append("begin"),
+        _confirm_discard=lambda **_kw: True,
         cv=SimpleNamespace(delete=lambda *_args: events.append("delete")),
         selected=None,
         _lines=set(),
@@ -279,7 +285,7 @@ def test_load_parses_on_worker_before_installing_workspace(monkeypatch):
 def test_load_cancel_shows_nothing(shown, monkeypatch):
     monkeypatch.setattr(m.filedialog, "askopenfilename", lambda **_kw: "")
 
-    m.App._load(cast(m.App, object()))
+    m.App._load(cast(m.App, SimpleNamespace(_confirm_discard=lambda **_kw: True)))
 
     assert shown == []
     assert logmod.get_error_entries() == []

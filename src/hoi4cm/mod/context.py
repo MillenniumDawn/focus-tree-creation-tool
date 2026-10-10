@@ -99,6 +99,8 @@ _SCAN_CONTAINERS = (
     "country_tags",
     "variables",
     "_img_errors",
+    "failed_steps",
+    "unparsable_files",
 )
 
 
@@ -195,6 +197,8 @@ class ModContext:
         self.mod_name = ""  # basename of mod root
         self._status = ""
         self._img_errors = []  # list of error strings for debugging
+        self.failed_steps = []  # scan step labels that raised
+        self.unparsable_files = []  # files an extractor could not parse
 
         # Extra asset stores
         self.idea_sprites = {}  # gfx_name -> abs_path  (ideas GFX)
@@ -333,12 +337,19 @@ class ModContext:
             contrib.update(self._cache.get_many(domain, sigs))
         to_read = [p for p in paths if p not in contrib]
 
+        unparsable = []
+
         def read_and_extract(p):
             src = self._read(p)
             if src is None:
                 # Keep failed reads retryable; don't cache empty contributions.
                 return False, extract_fn("")
-            return True, extract_fn(src)
+            try:
+                return True, extract_fn(src)
+            except (ValueError, TypeError, RuntimeError, OSError) as exc:
+                _log.warning("could not parse %s: %s", p, exc)
+                unparsable.append(p)
+                return False, extract_fn("")
 
         successful_reads = []
 
@@ -360,6 +371,7 @@ class ModContext:
                     if readable:
                         successful_reads.append(p)
 
+        self.unparsable_files.extend(sorted(unparsable))
         if self._cache:
             self._cache.put_many(
                 domain,
@@ -373,10 +385,7 @@ class ModContext:
     @staticmethod
     def _parse_text(src):
         """Parse a HOI4 script string into a dict tree."""
-        try:
-            return parse_script(src)
-        except ValueError, TypeError, RuntimeError, OSError:
-            return {}
+        return parse_script(src)
 
     # ── Scanners ─────────────────────────────────────────────────────
     def _scan_gfx_unified(self, cancelled: threading.Event | None = None):
@@ -810,6 +819,8 @@ class ModContext:
         self.sprites.clear()
         evicted_images = self.sprite_imgs.clear()
         self._img_errors.clear()
+        self.failed_steps.clear()
+        self.unparsable_files.clear()
         self.decision_sprites.clear()
         self.focus_ids.clear()
         self.event_ids.clear()
@@ -881,6 +892,7 @@ class ModContext:
                     return None
                 except (OSError, ValueError, RuntimeError, TypeError) as exc:
                     _log.warning("scan step %s failed: %s", label, exc, exc_info=True)
+                    self.failed_steps.append(label)
                 _log.debug(
                     "scan step %s: %.1fms", label, (time.perf_counter() - t0) * 1000
                 )
