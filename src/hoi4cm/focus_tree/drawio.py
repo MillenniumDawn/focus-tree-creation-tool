@@ -7,9 +7,8 @@ shows the user a setup dialog to collect the country tag/prefix, calls
 :func:`drawio_to_focus_data` to snap the shapes onto the HOI4 grid for
 preview, and only once the user confirms the import calls
 :func:`build_drawio_focuses` to turn that into real
-:class:`~hoi4cm.models.Focus` objects (deferred that far because Focus IDs
-come from a process-global counter that shouldn't advance on a cancelled
-import).
+:class:`~hoi4cm.models.Focus` objects (deferred that far so a cancelled
+import does not consume IDs from the active document).
 """
 
 from __future__ import annotations
@@ -22,7 +21,7 @@ import zlib
 from dataclasses import dataclass
 
 from hoi4cm.core.safe_xml import bounded_inflate, safe_fromstring
-from hoi4cm.models import Focus
+from hoi4cm.models import FocusDocument
 
 
 class EmptyDrawioGraphError(ValueError):
@@ -312,17 +311,18 @@ def drawio_to_focus_data(graph, prefix):
     )
 
 
-def build_drawio_focuses(result):
+def build_drawio_focuses(result, document: FocusDocument | None = None):
     """Turn a :class:`DrawioResult` into real :class:`Focus` objects.
 
-    Only call this once the user has confirmed the import — ``Focus`` IDs
-    come from a process-global counter, so building them speculatively for a
-    preview would burn IDs on a cancelled import.
+    Only call this once the user has confirmed the import, so a cancelled
+    preview does not consume IDs from the active document.
     """
+    if document is None:
+        document = FocusDocument()
     cid_to_fid = {}
     new_focuses = []
     for df in result.focuses:
-        f = Focus(df.x, df.y)
+        f = document.new_focus(df.x, df.y)
         f.name = df.label
         new_focuses.append(f)
         cid_to_fid[df.cid] = f.id

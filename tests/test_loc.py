@@ -2,11 +2,14 @@
 
 from types import SimpleNamespace
 
+import pytest
+
 from hoi4cm.focus_tree.loc import (
     LOC_LANGUAGE_NAMES,
     LocTarget,
     build_loc_yml,
     hydrate_focus_localization,
+    parse_loc_values,
 )
 
 
@@ -275,6 +278,25 @@ def test_values_are_escaped():
     text, _count = build_loc_yml(None, [_focus("TST_alpha", 'Say "hello"\\now')], "TST")
     assert text is not None
     assert ' TST_alpha_desc: "Say \\"hello\\"\\\\now"\n' in text
+
+
+@pytest.mark.parametrize("version", ["", "0"])
+def test_parse_loc_values_decodes_keys_and_escapes(version):
+    text = (
+        "l_english:\n"
+        f' TST_title:{version} "A \\"quoted\\" title" # kept comment\n'
+        f' TST_desc:{version} "Line one\\nLine two\\\\path §Ycolor§!"\n'
+    )
+    assert parse_loc_values(text) == {
+        "TST_title": 'A "quoted" title',
+        "TST_desc": "Line one\nLine two\\path §Ycolor§!",
+    }
+
+
+def test_parse_loc_values_skips_malformed_values_and_accepts_empty_input():
+    assert parse_loc_values(None) == {}
+    assert parse_loc_values("") == {}
+    assert parse_loc_values(' bad: "invalid\\q"\n good: "valid"\n') == {"good": "valid"}
 
 
 def test_hydrate_focus_localization_decodes_exported_escapes():

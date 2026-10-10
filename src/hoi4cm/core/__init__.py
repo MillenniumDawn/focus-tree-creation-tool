@@ -40,12 +40,13 @@ from hoi4cm.focus_tree import (
     make_main_export_plan,
     parse_drawio_graph,
     parse_focus_tree,
+    parse_loc_values,
     render_export_plan,
     render_focus_block,
     validate_document,
     worst_severity_per_focus,
 )
-from hoi4cm.models import Focus
+from hoi4cm.models import Focus, FocusDocument
 from hoi4cm.script import (
     append_scripted_loc,
     dict_to_raw,
@@ -93,6 +94,7 @@ __all__ = [
     "ExportPlan",
     "ExportResult",
     "Focus",
+    "FocusDocument",
     "I18N_LANG",
     "I18N_LANGS",
     "I18N_STRINGS",
@@ -142,6 +144,7 @@ __all__ = [
     "normalize_effect_fields",
     "parse_drawio_graph",
     "parse_focus_tree",
+    "parse_loc_values",
     "read_file",
     "read_file_with_encoding",
     "convert_newlines",

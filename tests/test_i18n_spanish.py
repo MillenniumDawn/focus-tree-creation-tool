@@ -211,7 +211,7 @@ def test_loc_language_names_offer_spanish():
 
 
 def test_build_loc_yml_uses_spanish_header(tmp_path):
-    focus = Focus(0, 0)
+    focus = Focus(id=1, x=0, y=0)
     focus.name = "TST_root"
 
     text, count = build_loc_yml(None, [focus], "TST", language="spanish")
@@ -302,7 +302,7 @@ def test_detect_loc_file_matches_configured_spanish_suffix(tmp_path):
 
 
 def test_main_export_plan_writes_spanish_localisation(tmp_path):
-    focus = Focus(0, 0)
+    focus = Focus(id=2, x=0, y=0)
     focus.name = "TST_root"
     loc_path = tmp_path / "MD_focus_TST_l_spanish.yml"
     plan = make_main_export_plan(

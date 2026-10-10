@@ -16,6 +16,7 @@ import json
 import tkinter as tk
 
 import pytest
+from tk_helpers import collect_texts, new_toplevels
 
 from hoi4cm.mod import MOD
 from hoi4cm.mod import scan_cache as scan_cache_mod
@@ -40,30 +41,6 @@ def _stub_app(root: tk.Tk) -> tk.Tk:
     if not hasattr(root, "_apply_md_additional_income"):
         root._apply_md_additional_income = lambda *a, **kw: ([], [])  # type: ignore[attr-defined]
     return root
-
-
-def _new_toplevels(before: set[tk.Misc], root: tk.Tk) -> list[tk.Toplevel]:
-    return [
-        w
-        for w in root.winfo_children()
-        if w not in before and isinstance(w, tk.Toplevel)
-    ]
-
-
-def _collect_texts(win: tk.Misc) -> list[str]:
-    texts: list[str] = []
-    stack: list[tk.Misc] = [win]
-    while stack:
-        cur = stack.pop()
-        try:
-            texts.append(cur.cget("text"))  # type: ignore[union-attr]
-        except Exception:
-            pass
-        try:
-            stack.extend(cur.winfo_children())  # type: ignore[union-attr]
-        except Exception:
-            pass
-    return texts
 
 
 def _open_and_assert(
@@ -95,7 +72,7 @@ def _open_and_assert(
     opener = getattr(mod, opener_name)
     opener(tk_root)
     tk_root.update()
-    wins = _new_toplevels(before, tk_root)
+    wins = new_toplevels(before, tk_root)
     assert wins, f"{opener_name} did not create a Toplevel"
     win = wins[0]
     try:
@@ -104,7 +81,7 @@ def _open_and_assert(
         ), f"expected {title_snippet!r} in title {win.title()!r}"
         assert win.winfo_children(), f"{opener_name} Toplevel has no children"
         if header_snippet:
-            texts = _collect_texts(win)
+            texts = collect_texts(win)
             assert any(
                 header_snippet.lower() in t.lower() for t in texts
             ), f"{opener_name} missing header {header_snippet!r}; got {texts[:5]!r}"
@@ -183,7 +160,7 @@ def test_effect_picker_constructs(tk_root, tmp_path, monkeypatch):
     try:
         shared_mod.open_effect_picker(tk_root, target)
         tk_root.update()
-        wins = _new_toplevels(before, tk_root)
+        wins = new_toplevels(before, tk_root)
         assert wins, "open_effect_picker did not create a Toplevel"
         assert wins[0].winfo_children()
     finally:
@@ -216,7 +193,7 @@ def test_wizard_serialization_failure_preserves_autosave(
     monkeypatch.setattr(module, serializer, lambda *_args: {"bad": object()})
     before = set(tk_root.winfo_children())
     getattr(module, opener)(_stub_app(tk_root))
-    win = _new_toplevels(before, tk_root)[0]
+    win = new_toplevels(before, tk_root)[0]
     try:
         tk_root.tk.call(win.protocol("WM_DELETE_WINDOW"))
         assert path.read_text(encoding="utf-8") == previous
@@ -232,7 +209,7 @@ def test_event_legacy_autosave_restores_with_defaults(tk_root, tmp_path, monkeyp
     monkeypatch.setattr(module, "autosave_path", lambda _name: str(path))
     before = set(tk_root.winfo_children())
     module.open_event_wizard(_stub_app(tk_root))
-    win = _new_toplevels(before, tk_root)[0]
+    win = new_toplevels(before, tk_root)[0]
     try:
         tk_root.tk.call(win.protocol("WM_DELETE_WINDOW"))
         records = json.loads(path.read_text(encoding="utf-8"))

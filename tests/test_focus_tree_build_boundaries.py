@@ -1,19 +1,8 @@
 """Boundary tests for focus_tree build + drawio fallback paths."""
 
-import pytest
-
 from hoi4cm.focus_tree.build import build_focuses
 from hoi4cm.focus_tree.drawio import _get_graph_root
 from hoi4cm.focus_tree.parse import ParsedFocusTree
-from hoi4cm.models import Focus
-
-
-@pytest.fixture(autouse=True)
-def reset_counter():
-    old = Focus._next
-    Focus._next = 0
-    yield
-    Focus._next = old
 
 
 def _parsed_with_focus(fields: dict) -> ParsedFocusTree:

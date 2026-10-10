@@ -31,9 +31,9 @@ def test_import_txt_cancel_stops_before_file_dialog(monkeypatch):
 def test_import_txt_pushes_undo_before_replacing_document(monkeypatch, tmp_path):
     source = tmp_path / "tree.txt"
     source.write_text("focus_tree = { id = imported }")
-    old_focus = Focus()
+    old_focus = Focus(id=1)
     old_focus.name = "existing_focus"
-    new_focus = Focus()
+    new_focus = Focus(id=2)
     new_focus.name = "imported_focus"
     app = SimpleNamespace(
         _confirm_discard=Mock(return_value=True),
@@ -71,8 +71,8 @@ def test_import_txt_pushes_undo_before_replacing_document(monkeypatch, tmp_path)
         _invalidate_focus_list_structure=Mock(),
         _fit_all=Mock(),
     )
-    app._push_undo = lambda label="action", touched_ids=None: m.App._push_undo(
-        cast(m.App, app), label, touched_ids
+    app._push_undo = lambda label="action", touched_ids=None, *, tree_state=False: (
+        m.App._push_undo(cast(m.App, app), label, touched_ids, tree_state=tree_state)
     )
     parsed = SimpleNamespace(
         tree_id="imported_tree",

@@ -332,7 +332,6 @@ class CharacterWizard:
                 raise ValueError(
                     "The file must contain at least one character definition."
                 )
-            source = document.to_text()
         except ValueError as exc:
             messagebox.showerror(
                 tr("wizard.character.invalid_script", "Invalid character script"),

@@ -1,3 +1,4 @@
+from .extra_tree_undo import ExtraTreeState, ExtraTreeUndoHistory
 from .project_codec import (
     choose_project_save_path,
     decode_project,
@@ -15,6 +16,8 @@ from .workspace_autosave import (
 
 __all__ = [
     "AUTOSAVE_NAME",
+    "ExtraTreeState",
+    "ExtraTreeUndoHistory",
     "clear_workspace_autosave",
     "choose_project_save_path",
     "decode_project",

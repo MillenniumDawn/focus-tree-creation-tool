@@ -1,17 +1,7 @@
 """Tests for export_focus_tree (extra/shared and joint trees, tree_idx > 0)."""
 
-import pytest
-
 from hoi4cm.focus_tree.export import export_focus_tree
 from hoi4cm.models import Focus
-
-
-@pytest.fixture(autouse=True)
-def reset_counter():
-    old = Focus._next
-    Focus._next = 0
-    yield
-    Focus._next = old
 
 
 def _info(**overrides):
@@ -22,13 +12,13 @@ def _info(**overrides):
 
 def test_duplicate_of_extra_tree_focus_exports_at_new_canvas_position():
     """Regression test for #116: duplicate must not reuse the original's raw coords."""
-    original = Focus(3, 5)
+    original = Focus(id=1, x=3, y=5)
     original.name = "TST_original"
     original.tree_idx = 1
     original._raw_gx = 1
     original._raw_gy = 9
 
-    duplicate = original.duplicate()
+    duplicate = original.duplicate(2)
     duplicate.name = "TST_original_copy"
     duplicate.x = original.x + 1
     duplicate.y = original.y

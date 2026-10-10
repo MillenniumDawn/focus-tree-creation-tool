@@ -118,6 +118,55 @@ def test_saving_imported_character_keeps_original_encoding_across_saves(
     assert writer.encodings == ["latin-1", "latin-1"]
 
 
+@pytest.mark.parametrize(
+    ("original", "edited"),
+    [
+        (
+            "# Keep this header comment\n"
+            "# Disabled legacy = { name = \"Not active\" }\n"
+            "characters = { X = { name = \"Ada\" } }\n",
+            None,
+        ),
+        (
+            "# Keep this header comment\n"
+            "# Disabled legacy = { name = \"Not active\" }\n"
+            "characters = { X = { name = \"Ada\" } }\n",
+            "# Keep this header comment\n"
+            "# Disabled legacy = { name = \"Not active\" }\n"
+            "characters = { X = { name = \"Ada Lovelace\" } }\n",
+        ),
+    ],
+    ids=["no-change", "edited"],
+)
+def test_character_save_preserves_comments_and_disabled_script(
+    tmp_path, monkeypatch, original, edited
+):
+    from hoi4cm.wizards import character as character_mod
+
+    characters_dir = tmp_path / "common" / "characters"
+    characters_dir.mkdir(parents=True)
+    target = characters_dir / "characters.txt"
+    expected = original if edited is None else edited
+
+    class _Editor:
+        def get(self, *_args):
+            return expected
+
+    wizard = object.__new__(character_mod.CharacterWizard)
+    wizard.editor = _Editor()
+    wizard.current_path = str(target)
+    wizard.current_encoding = "utf-8"
+    wizard.mod_root = str(tmp_path)
+    wizard.win = None
+    monkeypatch.setattr(character_mod.MOD, "loaded", False)
+    monkeypatch.setattr(character_mod.MOD, "root", None)
+    monkeypatch.setattr(character_mod.messagebox, "showinfo", lambda *_a, **_kw: None)
+
+    wizard._save()
+
+    assert target.read_text(encoding="utf-8") == expected
+
+
 def test_character_target_rejects_a_directory_symlink_outside_the_mod(
     tmp_path, monkeypatch
 ):

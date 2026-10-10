@@ -20,7 +20,7 @@ def _focus(  # type: ignore[no-untyped-def]
     rel=None,
     tree_idx=0,
 ):
-    f = Focus(x, y)
+    f = Focus(id=1, x=x, y=y)
     f.id = fid
     f.name = name or f"focus_{fid}"
     f.gfx = gfx

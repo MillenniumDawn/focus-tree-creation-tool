@@ -17,7 +17,9 @@ from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
+from tk_helpers import collect_texts, destroy_toplevels, new_toplevels
 
+import hoi4cm.core.logger as logmod
 from hoi4cm.mod import MOD
 from hoi4cm.mod import scan_cache as scan_cache_mod
 from hoi4cm.ui.theme import YELLOW
@@ -33,46 +35,6 @@ def isolate_mod(tmp_path, monkeypatch):
     yield
     MOD.__dict__.clear()
     MOD.__dict__.update(snapshot)
-
-
-def _new_toplevels(before: set[tk.Misc], root: tk.Misc) -> list[tk.Toplevel]:
-    return [
-        w
-        for w in root.winfo_children()  # type: ignore[union-attr]
-        if w not in before and isinstance(w, tk.Toplevel)
-    ]
-
-
-def _destroy_toplevels(wins: list[tk.Toplevel], root: tk.Misc) -> None:
-    for w in wins:
-        try:
-            w.grab_release()
-        except Exception:
-            pass
-        try:
-            w.destroy()
-        except Exception:
-            pass
-    try:
-        root.update()  # type: ignore[union-attr]
-    except Exception:
-        pass
-
-
-def _collect_texts(win: tk.Misc) -> list[str]:
-    texts: list[str] = []
-    stack: list[tk.Misc] = [win]
-    while stack:
-        cur = stack.pop()
-        try:
-            texts.append(cur.cget("text"))  # type: ignore[union-attr]
-        except Exception:
-            pass
-        try:
-            stack.extend(cur.winfo_children())  # type: ignore[union-attr]
-        except Exception:
-            pass
-    return texts
 
 
 def _find_button(win: tk.Misc, needle: str) -> tk.Button | None:
@@ -136,7 +98,7 @@ def _make_fake_app_for_chrome(tk_root: tk.Tk, monkeypatch: pytest.MonkeyPatch) -
         "_show_post_load_prompt",
         "_open_settings",
         "_add_focus",
-        "_toggle_connect",
+        "_pick_prereq",
         "_toggle_mutex",
         "_toggle_multisel",
         "_clear_all",
@@ -164,15 +126,15 @@ def test_open_settings_constructs(tk_root, tmp_path, monkeypatch):
     before: set[tk.Misc] = set(tk_root.winfo_children())
     sd_mod.open_settings(tk_root)
     tk_root.update()
-    wins = _new_toplevels(before, tk_root)
+    wins = new_toplevels(before, tk_root)
     assert wins, "open_settings did not create a Toplevel"
     win = wins[0]
     try:
         assert "Settings" in win.title()
-        texts = _collect_texts(win)
+        texts = collect_texts(win)
         assert any("SETTINGS" in t for t in texts)
     finally:
-        _destroy_toplevels(wins, tk_root)
+        destroy_toplevels(wins, tk_root)
 
 
 # ── menubar / toolbar ────────────────────────────────────────────────────
@@ -191,7 +153,7 @@ def test_build_menubar_constructs(tk_root, monkeypatch):
     controller = build_menubar(tk_root, toolbar, tutorial_command=lambda: None)
     tk_root.update()
     assert len(toolbar.winfo_children()) > len(before_children)
-    texts = _collect_texts(toolbar)
+    texts = collect_texts(toolbar)
     assert any("HOI4 CONTENT MAKER" in t for t in texts)
     assert any("Help" in t for t in texts)
     preview_rows = controller.show_preview(
@@ -223,7 +185,7 @@ def test_build_menubar_constructs(tk_root, monkeypatch):
             if isinstance(sub, tk.Button) and "File" in sub.cget("text"):
                 sub.invoke()
                 tk_root.update()
-                _destroy_toplevels(_new_toplevels(before, tk_root), tk_root)
+                destroy_toplevels(new_toplevels(before, tk_root), tk_root)
                 break
     controller.close()
     toolbar.destroy()
@@ -241,7 +203,7 @@ def test_build_toolbar_row2_constructs(tk_root, monkeypatch):
     build_toolbar_row2(tk_root, toolbar)
     tk_root.update()
     assert len(toolbar.winfo_children()) > len(before)
-    texts = _collect_texts(toolbar)
+    texts = collect_texts(toolbar)
     assert any("Prereq" in t for t in texts)
     assert any("Ideas" in t for t in texts)
     assert tk_root._additional_income_btn.winfo_manager() == ""  # type: ignore[attr-defined]
@@ -300,13 +262,13 @@ def test_open_universal_gfx_browser_constructs(tk_root, tmp_path, monkeypatch):
     before: set[tk.Misc] = set(tk_root.winfo_children())
     open_universal_gfx_browser(tk_root, on_select=lambda *a: None)
     tk_root.update()
-    wins = _new_toplevels(before, tk_root)
+    wins = new_toplevels(before, tk_root)
     assert wins, "open_universal_gfx_browser did not create a Toplevel"
     try:
         assert wins[0].winfo_children()
         assert any("GFX Browser" in wins[0].title() for _ in [1])
     finally:
-        _destroy_toplevels(wins, tk_root)
+        destroy_toplevels(wins, tk_root)
 
 
 def test_open_universal_gfx_browser_select_flow(tk_root, tmp_path, monkeypatch):
@@ -327,7 +289,7 @@ def test_open_universal_gfx_browser_select_flow(tk_root, tmp_path, monkeypatch):
     before: set[tk.Misc] = set(tk_root.winfo_children())
     open_universal_gfx_browser(tk_root, on_select=_on_select)
     tk_root.update()
-    wins = _new_toplevels(before, tk_root)
+    wins = new_toplevels(before, tk_root)
     assert wins, "browser did not open"
     win = wins[0]
     try:
@@ -350,7 +312,7 @@ def test_open_universal_gfx_browser_select_flow(tk_root, tmp_path, monkeypatch):
         assert seen == [("GFX_beta", str(gfx_dir / "beta.png"))]
         assert not win.winfo_exists()
     finally:
-        _destroy_toplevels(wins, tk_root)
+        destroy_toplevels(wins, tk_root)
 
 
 def test_open_gfx_placement_editor_constructs(tk_root, monkeypatch):
@@ -360,12 +322,12 @@ def test_open_gfx_placement_editor_constructs(tk_root, monkeypatch):
     before: set[tk.Misc] = set(tk_root.winfo_children())
     open_gfx_placement_editor(tk_root, initial_items=[], on_confirm=lambda *a: None)
     tk_root.update()
-    wins = _new_toplevels(before, tk_root)
+    wins = new_toplevels(before, tk_root)
     assert wins, "open_gfx_placement_editor did not create a Toplevel"
     try:
         assert wins[0].winfo_children()
     finally:
-        _destroy_toplevels(wins, tk_root)
+        destroy_toplevels(wins, tk_root)
 
 
 def test_open_gfx_placement_editor_confirm_flow(tk_root, tmp_path, monkeypatch):
@@ -395,7 +357,7 @@ def test_open_gfx_placement_editor_confirm_flow(tk_root, tmp_path, monkeypatch):
         on_confirm=lambda items, code: confirmed.append(list(items)),
     )
     tk_root.update()
-    wins = _new_toplevels(before, tk_root)
+    wins = new_toplevels(before, tk_root)
     assert wins
     win = wins[0]
     try:
@@ -410,7 +372,7 @@ def test_open_gfx_placement_editor_confirm_flow(tk_root, tmp_path, monkeypatch):
         assert confirmed[0][0]["img_ref"] is not None
         assert not win.winfo_exists()
     finally:
-        _destroy_toplevels(wins, tk_root)
+        destroy_toplevels(wins, tk_root)
 
 
 def test_open_focus_icon_browser_constructs(tk_root, tmp_path, monkeypatch):
@@ -426,12 +388,12 @@ def test_open_focus_icon_browser_constructs(tk_root, tmp_path, monkeypatch):
     before: set[tk.Misc] = set(tk_root.winfo_children())
     open_focus_icon_browser(tk_root, on_select=lambda *a: None, current_gfx="")
     tk_root.update()
-    wins = _new_toplevels(before, tk_root)
+    wins = new_toplevels(before, tk_root)
     assert wins, "open_focus_icon_browser did not create a Toplevel"
     try:
         assert wins[0].winfo_children()
     finally:
-        _destroy_toplevels(wins, tk_root)
+        destroy_toplevels(wins, tk_root)
 
 
 # ── splash ───────────────────────────────────────────────────────────────
@@ -601,14 +563,14 @@ def test_show_post_load_prompt_constructs(tk_root, tmp_path, monkeypatch):
     before: set[tk.Misc] = set(tk_root.winfo_children())
     ModLoadingMixin._show_post_load_prompt(tk_root)  # type: ignore[arg-type]
     tk_root.update()
-    wins = _new_toplevels(before, tk_root)
+    wins = new_toplevels(before, tk_root)
     assert wins, "_show_post_load_prompt did not create a Toplevel"
     try:
         assert "Edit Targets" in wins[0].title()
-        texts = _collect_texts(wins[0])
+        texts = collect_texts(wins[0])
         assert any("Quick-pick" in t for t in texts)
     finally:
-        _destroy_toplevels(wins, tk_root)
+        destroy_toplevels(wins, tk_root)
 
 
 def test_load_mod_path_removes_stale_recent_entry_and_saves_config(
@@ -634,3 +596,60 @@ def test_load_mod_path_removes_stale_recent_entry_and_saves_config(
     assert missing in str(report_calls[0])
     assert MOD._recent_mods == [str(tmp_path / "still-valid")]  # type: ignore[attr-defined]
     save_config.assert_called_once_with()
+
+
+@pytest.fixture
+def error_buffer(monkeypatch):
+    """Isolate the shared error buffer from callbacks left by earlier Tk tests."""
+    monkeypatch.setattr(logmod, "_error_callback", None)
+    logmod.clear_errors()
+    yield logmod.get_error_entries()
+    logmod.clear_errors()
+
+
+def test_confirm_edit_targets_records_an_unreadable_events_file(
+    tk_root, tmp_path, monkeypatch, error_buffer
+):
+    _stub_mod_app(tk_root, monkeypatch)
+    events_file = tmp_path / "events" / "b.txt"
+    events_file.parent.mkdir(parents=True)
+    events_file.write_text("add_namespace = foo")
+    MOD.loaded = True
+    MOD.root = str(tmp_path)
+    MOD.edit_ideas_file = ""
+    MOD.edit_events_file = str(events_file)
+    MOD.edit_events_ns = "stale"
+    MOD.edit_focus_file = ""
+    MOD.edit_loc_file = ""
+    MOD.edit_scripted_loc_file = ""
+    monkeypatch.setattr(
+        "hoi4cm.ui.mod_loading.read_file_with_encoding", lambda _path: (None, None)
+    )
+    tk_root._mod_lbl = tk.Label(tk_root, text="mod")  # type: ignore[attr-defined]
+    tk_root._mod_lbl.pack()
+    tk_root.update()
+
+    from hoi4cm.ui.mod_loading import ModLoadingMixin
+
+    before: set[tk.Misc] = set(tk_root.winfo_children())
+    ModLoadingMixin._show_post_load_prompt(tk_root)  # type: ignore[arg-type]
+    tk_root.update()
+    wins = [
+        w
+        for w in tk_root.winfo_children()
+        if w not in before and isinstance(w, tk.Toplevel)
+    ]
+    assert wins, "_show_post_load_prompt did not create a Toplevel"
+    try:
+        confirm_button = _find_button(wins[0], "Confirm")
+        assert confirm_button is not None
+        confirm_button.invoke()
+        tk_root.update()
+        assert MOD.edit_events_ns == ""
+        assert len(error_buffer) == 1
+        assert str(events_file) in error_buffer[0][1]
+    finally:
+        for win in wins:
+            if win.winfo_exists():
+                win.grab_release()
+                win.destroy()
