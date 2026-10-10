@@ -8,7 +8,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 from typing import Any
 
-from hoi4cm.core import read_file_with_encoding, sanitize_component, tr
+from hoi4cm.core import read_file_with_encoding, safe_join, sanitize_component, tr
 from hoi4cm.mod import MOD, notifying_workspace_files
 from hoi4cm.script.syntax import match_brace
 from hoi4cm.ui import BG_DARK, BG_PANEL, BLUE, BORDER_G, TEXT, TEXT_DIM, report_error
@@ -193,9 +193,9 @@ class CharacterWizard:
         )
         if not path:
             return
-        expected = os.path.realpath(os.path.join(self.mod_root, "common", "characters"))
-        resolved = os.path.realpath(path)
-        if not self._inside_directory(expected, resolved):
+        try:
+            resolved = self._safe_character_path(path)
+        except ValueError:
             messagebox.showerror(
                 tr("wizard.character.title", "Character Editor"),
                 tr(
@@ -340,10 +340,11 @@ class CharacterWizard:
                 parent=self.win,
             )
             return
-        target = self.current_path or self._new_target()
-        if target is None:
+        selected_target = self.current_path or self._new_target()
+        if selected_target is None:
             return
         try:
+            target = self._safe_character_path(selected_target)
             notifying_workspace_files(MOD, self.mod_root).write_text(
                 target, source, encoding=self.current_encoding
             )
@@ -374,7 +375,17 @@ class CharacterWizard:
             )
             return None
         tag = sanitize_component(raw_tag)
-        target = os.path.join(self.mod_root, "common", "characters", f"{tag}.txt")
+        try:
+            target = self._safe_character_path(
+                os.path.join(self.mod_root, "common", "characters", f"{tag}.txt")
+            )
+        except ValueError as exc:
+            messagebox.showerror(
+                tr("wizard.character.title", "Character Editor"),
+                str(exc),
+                parent=self.win,
+            )
+            return None
         if os.path.exists(target) and not messagebox.askyesno(
             tr("wizard.character.title", "Character Editor"),
             tr(
@@ -385,6 +396,15 @@ class CharacterWizard:
         ):
             return None
         return target
+
+    def _safe_character_path(self, path: str) -> str:
+        """Resolve a target only when it remains under this mod's character folder."""
+        characters_dir = safe_join(self.mod_root, "common", "characters")
+        mod_relative = os.path.relpath(path, self.mod_root)
+        resolved = safe_join(self.mod_root, mod_relative)
+        if not self._inside_directory(characters_dir, resolved):
+            raise ValueError("Choose a file inside common/characters.")
+        return resolved
 
 
 def open_character_wizard(app: tk.Tk) -> None:

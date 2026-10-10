@@ -169,15 +169,15 @@ def _render(block: ScriptBlock, depth: int) -> str:
         if key is None:
             if isinstance(value, _Comparison):
                 lines.append(
-                    f"{indent}{emit_scalar(value.left)} {value.operator} "
-                    f"{emit_scalar(value.right)}"
+                    f"{indent}{_emit_character_scalar(value.left)} "
+                    f"{value.operator} {_emit_character_scalar(value.right)}"
                 )
                 continue
             if not isinstance(value, str):
                 raise ValueError("Bare script values must be scalars")
-            lines.append(f"{indent}{emit_scalar(value)}")
+            lines.append(f"{indent}{_emit_character_scalar(value)}")
         elif isinstance(value, ScriptBlock):
-            rendered_key = emit_scalar(key)
+            rendered_key = _emit_character_scalar(key)
             lines.append(f"{indent}{rendered_key} = {{")
             inner = _render(value, depth + 1)
             if inner:
@@ -186,8 +186,19 @@ def _render(block: ScriptBlock, depth: int) -> str:
         elif isinstance(value, _Comparison):
             raise ValueError("Comparison clauses cannot have assignment keys")
         else:
-            lines.append(f"{indent}{emit_scalar(key)} = {emit_scalar(value)}")
+            lines.append(
+                f"{indent}{_emit_character_scalar(key)} = "
+                f"{_emit_character_scalar(value)}"
+            )
     return "\n".join(lines)
+
+
+def _emit_character_scalar(value: str) -> str:
+    """Quote scalars whose operator characters are syntax to this codec."""
+    rendered = emit_scalar(value)
+    if rendered.startswith('"') or not any(char in value for char in "<>!"):
+        return rendered
+    return f'"{rendered}"'
 
 
 def serialize_character_script(document: CharacterScript) -> str:

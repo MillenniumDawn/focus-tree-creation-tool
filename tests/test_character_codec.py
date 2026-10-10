@@ -55,6 +55,17 @@ def test_round_trip_keeps_repeated_bare_trait_values():
     assert parse_character_script(encoded) == parse_character_script(source)
 
 
+@pytest.mark.parametrize("value", ["a>b", "a<b", "a!b"])
+def test_round_trip_quotes_operator_characters_in_quoted_scalars(value):
+    source = f'characters = {{ X = {{ name = "{value}" }} }}'
+
+    document = parse_character_script(source)
+    encoded = document.to_text()
+
+    assert f'name = "{value}"' in encoded
+    assert parse_character_script(encoded) == document
+
+
 def test_new_character_template_validates_identifiers_and_round_trips():
     generated = new_character_script("AAA", "AAA_example")
 
@@ -73,6 +84,9 @@ def test_saving_imported_character_keeps_original_encoding_across_saves(
 ):
     from hoi4cm.wizards import character as character_mod
 
+    characters_dir = tmp_path / "common" / "characters"
+    characters_dir.mkdir(parents=True)
+
     class _Editor:
         def get(self, *_args):
             return 'characters = { X = { name = "André" } }'
@@ -86,7 +100,7 @@ def test_saving_imported_character_keeps_original_encoding_across_saves(
 
     wizard = object.__new__(character_mod.CharacterWizard)
     wizard.editor = _Editor()
-    wizard.current_path = str(tmp_path / "characters.txt")
+    wizard.current_path = str(characters_dir / "characters.txt")
     wizard.current_encoding = "latin-1"
     wizard.mod_root = str(tmp_path)
     wizard.win = None
@@ -102,6 +116,69 @@ def test_saving_imported_character_keeps_original_encoding_across_saves(
     wizard._save()
 
     assert writer.encodings == ["latin-1", "latin-1"]
+
+
+def test_character_target_rejects_a_directory_symlink_outside_the_mod(
+    tmp_path, monkeypatch
+):
+    import shutil
+
+    from hoi4cm.wizards import character as character_mod
+
+    characters_dir = tmp_path / "common" / "characters"
+    characters_dir.parent.mkdir(parents=True)
+    outside = tmp_path.parent / f"{tmp_path.name}-outside"
+    outside.mkdir()
+    try:
+        characters_dir.symlink_to(outside, target_is_directory=True)
+    except (NotImplementedError, OSError) as exc:
+        pytest.skip(f"directory symlinks are unavailable: {exc}")
+
+    class _Value:
+        def get(self):
+            return "AAA"
+
+    wizard = object.__new__(character_mod.CharacterWizard)
+    wizard.mod_root = str(tmp_path)
+    wizard.tag_var = _Value()
+    wizard.win = None
+    errors = []
+    monkeypatch.setattr(
+        character_mod.messagebox,
+        "showerror",
+        lambda _title, message, **_kwargs: errors.append(message),
+    )
+
+    try:
+        assert wizard._new_target() is None
+        assert errors
+
+        writer_calls = []
+
+        class _Writer:
+            def write_text(self, *_args, **_kwargs):
+                writer_calls.append(True)
+
+        monkeypatch.setattr(
+            character_mod,
+            "notifying_workspace_files",
+            lambda *_args: _Writer(),
+        )
+        monkeypatch.setattr(character_mod, "report_error", lambda *_a, **_kw: None)
+
+        class _Editor:
+            def get(self, *_args):
+                return "characters = { AAA_demo = { name = Demo } }"
+
+        wizard.editor = _Editor()
+        wizard.current_path = str(characters_dir / "AAA.txt")
+        wizard.current_encoding = "utf-8"
+        wizard._save()
+
+        assert not writer_calls
+        assert not (outside / "AAA.txt").exists()
+    finally:
+        shutil.rmtree(outside, ignore_errors=True)
 
 
 @pytest.mark.parametrize(
