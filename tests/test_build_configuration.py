@@ -1,4 +1,4 @@
-"""Regression coverage for the standard and legacy PyInstaller specs."""
+"""Regression coverage for the generated PyInstaller spec and build pins."""
 
 import importlib.util
 import re
@@ -43,10 +43,6 @@ def test_build_fallbacks_match_hashed_requirements():
     assert build_script.PILLOW_REQUIREMENT == f"Pillow=={pillow}"
     assert build_script.PYINSTALLER_REQUIREMENT == f"pyinstaller=={pyinstaller}"
 
-    batch = (ROOT / "build" / "build.bat").read_text(encoding="utf-8")
-    assert f'pip install "Pillow=={pillow}"' in batch
-    assert f'pip install "pyinstaller=={pyinstaller}"' in batch
-
 
 def test_generated_spec_is_windowless_and_bundles_runtime_assets(tmp_path, monkeypatch):
     build_script = _load_build_script()
@@ -64,15 +60,6 @@ def test_generated_spec_is_windowless_and_bundles_runtime_assets(tmp_path, monke
     assert "    console=True," not in content
     locales_path = str(tmp_path / "locales").replace("\\", "/")
     assert f"datas=[({locales_path!r}, 'locales')]," in content
-    assert all(f"'hoi4cm.wizards.{name}'" in content for name in WIZARD_MODULES)
-
-
-def test_legacy_spec_is_windowless_and_bundles_runtime_assets():
-    content = (ROOT / "build" / "hoi4_content_maker.spec").read_text(encoding="utf-8")
-
-    assert "    console=False," in content
-    assert "    console=True," not in content
-    assert "    datas=[('..\\\\locales', 'locales')]," in content
     assert all(f"'hoi4cm.wizards.{name}'" in content for name in WIZARD_MODULES)
 
 

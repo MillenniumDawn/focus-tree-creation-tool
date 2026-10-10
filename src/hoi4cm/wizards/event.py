@@ -7,6 +7,7 @@
 """Event builder wizard."""
 
 import copy
+import glob
 import json
 import os
 import re
@@ -35,11 +36,12 @@ from hoi4cm.ui import (
     GREEN,
     ORANGE,
     RED,
-    SEL_BG,
     TEXT,
     TEXT_DIM,
+    ThumbnailItem,
+    VirtualThumbnailGrid,
     _safe_after,
-    _safe_after_idle,
+    open_folder_gfx_browser,
     report_error,
 )
 from hoi4cm.wizards import _generators
@@ -52,9 +54,12 @@ from hoi4cm.wizards._image_loader import TkImageLoader
 from hoi4cm.wizards._shared import (
     _ev_gfx_cache,
     _ev_imgsize_cache,
+    format_save_summary,
+    make_scrolled_listbox,
     notifying_workspace_files,
     open_effect_picker,
     open_trigger_picker,
+    pack_action_footer,
 )
 
 
@@ -123,129 +128,6 @@ def restore_event_autosave(data, make_record):
 
 def open_event_wizard(app):
     """HOI4 Event Maker — uses main app theme (BG_DARK / BG_PANEL etc.)."""
-
-    # ── GFX lists ────────────────────────────────────────────────────
-    GFX_COUNTRY = sorted(
-        [
-            "GFX_report_event_generic_sign_treaty2",
-            "GFX_report_event_generic_handshake",
-            "GFX_report_event_generic_conference",
-            "GFX_report_event_generic_battle",
-            "GFX_report_event_generic_military_parade",
-            "GFX_report_event_generic_parliament",
-            "GFX_report_event_generic_factory",
-            "GFX_report_event_generic_communist_congress",
-            "GFX_report_event_generic_panzer_attack",
-            "GFX_report_event_generic_bombers",
-            "GFX_report_event_generic_funeral",
-            "GFX_report_event_generic_mussolini",
-            "GFX_report_event_generic_naval_treaty",
-            "GFX_report_event_generic_destroyed_vehicles",
-            "GFX_report_event_generic_italian_celebration",
-            "GFX_report_event_generic_italian_fascists",
-            "GFX_report_event_generic_lend_lease",
-            "GFX_report_event_generic_read_write",
-            "GFX_report_event_generic_croatia_handshake",
-            "GFX_report_event_dead_soldiers",
-            "GFX_report_event_soldiers_marching",
-            "GFX_report_event_soldiers_parade",
-            "GFX_report_event_soldiers_in_france",
-            "GFX_report_event_british_artillery",
-            "GFX_report_event_british_inspect_troops",
-            "GFX_report_event_canadian_soldiers",
-            "GFX_report_event_chinese_soldiers_fighting",
-            "GFX_report_event_chinese_soldiers",
-            "GFX_report_event_chinese_army_training",
-            "GFX_report_event_polish_army",
-            "GFX_report_event_polish_tanks_01",
-            "GFX_report_event_romanian_soldiers",
-            "GFX_report_event_african_soldiers",
-            "GFX_report_event_bulgarian_soldiers",
-            "GFX_report_event_swedish_soldier",
-            "GFX_report_event_france_parade",
-            "GFX_report_event_degaulle_inspect_troops",
-            "GFX_report_event_destroyers",
-            "GFX_report_event_ast_navy",
-            "GFX_report_event_sailors_in_working_rig",
-            "GFX_report_event_usa_destroyers",
-            "GFX_report_event_election_vote",
-            "GFX_report_event_gathering_protest",
-            "GFX_report_event_fascist_speech",
-            "GFX_report_event_fascist_militia",
-            "GFX_report_event_fascist_gathering",
-            "GFX_report_event_fascists_posing",
-            "GFX_report_event_chamberlain_announce",
-            "GFX_report_event_vienna_award_negotiations",
-            "GFX_report_event_vienna_award_hungary",
-            "GFX_report_event_finnish_letter",
-            "GFX_report_event_sign_treaty2",
-            "GFX_report_event_eng_royal_family",
-            "GFX_report_event_europe_funeral",
-            "GFX_report_event_crowd_in_prague",
-            "GFX_report_event_communists_in_riga",
-            "GFX_report_event_german_speech",
-            "GFX_report_event_german_troops",
-            "GFX_report_event_japan_europe_pact",
-            "GFX_report_event_japanese_transport_soldiers",
-            "GFX_report_event_stalin_01",
-            "GFX_report_event_stalin_02",
-            "GFX_report_event_stalin_meeting",
-            "GFX_report_event_stalin_propaganda",
-            "GFX_report_event_soviet_tanks",
-            "GFX_report_event_soviet_tanks_snow",
-            "GFX_report_event_soviet_tank_parade",
-            "GFX_report_event_soviet_soldiers_tank",
-            "GFX_report_event_soviet_purge_officers_01",
-            "GFX_report_event_soviet_purge_trial",
-            "GFX_report_event_soviet_german_soldier_handshake",
-            "GFX_report_event_soviet_japanese_pact",
-            "GFX_report_event_soviet_invasion_map",
-            "GFX_report_event_fighters",
-            "GFX_report_event_airplane_crash",
-            "GFX_report_event_radar_01",
-            "GFX_report_event_physics_lab_01",
-            "GFX_report_event_physics_lab_02",
-            "GFX_report_event_tank_factory",
-            "GFX_report_event_spain_civil_war_soldiers",
-            "GFX_report_event_spr_anarchists",
-            "GFX_report_event_ITA_grand_council",
-            "GFX_report_event_ITA_air_crash",
-            "GFX_report_event_ITA_italian_civil_war",
-            "GFX_report_event_ITA_partisans",
-            "GFX_report_event_SOV_demands",
-            "GFX_report_event_ENG_middle_eastern_conflict",
-            "GFX_report_event_ETH_ethiopian_warriors",
-            "GFX_report_event_IRQ_bakr_sidqi",
-            "GFX_report_event_PER_persepolis_party",
-            "GFX_report_event_bul_boris_military",
-            "GFX_report_event_albanian_king_zog",
-            "GFX_report_event_china_politicians_captured",
-            "GFX_report_event_czech_soldiers_01",
-            "GFX_report_event_czech_soldiers_02",
-            "GFX_report_event_french_british_officers",
-            "GFX_report_event_worried_french",
-            "GFX_report_event_tur_ataturk_death",
-            "GFX_report_event_tur_ataturk_impassioned_speech",
-            "GFX_report_event_tur_britain",
-            "GFX_report_event_tur_industry",
-            "GFX_report_event_tur_inonu_diplomacy",
-            "GFX_report_event_tur_kemalist_officers",
-            "GFX_report_event_tur_political_rally",
-            "GFX_report_event_tur_turkish_soldiers",
-            "GFX_report_event_tur_the_montreux_convention",
-            "GFX_report_event_GetHitlerHandshakeEventPicture",
-        ]
-    )
-    GFX_NEWS = sorted(
-        [
-            "GFX_news_event_generic_sign_treaty2",
-            "GFX_news_event_generic_sign_treaty3",
-            "GFX_news_event_generic_parliament",
-            "GFX_news_event_generic_read_write",
-            "GFX_news_event_generic_arab_revolt",
-            "GFX_news_event_cze_little_entente",
-        ]
-    )
 
     # ── Data model ───────────────────────────────────────────────────
     _n = [1]
@@ -316,7 +198,6 @@ def open_event_wizard(app):
     # ── Window ───────────────────────────────────────────────────────
     win = tk.Toplevel(app)
     preview_image_loader = TkImageLoader(win)
-    gfx_image_loader = TkImageLoader(win)
     win.title(tr("wizard.event.title", "Event Maker"))
     win.configure(bg=BG_DARK)
     win.geometry("1320x820")
@@ -746,28 +627,6 @@ def open_event_wizard(app):
                 font=("Courier", fs_b, "bold"),
                 anchor="e",
             )
-
-    # ── GFX picker helpers ───────────────────────────────────────────
-    def _gfx_list_for_type():
-        ev_type = sel[0].etype if sel[0] else "country_event"
-        base = list(GFX_NEWS) if ev_type == "news_event" else list(GFX_COUNTRY)
-        if MOD.loaded and MOD.root:
-            ev_dir = os.path.join(
-                MOD.root,
-                getattr(
-                    MOD, "path_event_pictures", os.path.join("gfx", "event_pictures")
-                ),
-            )
-            if os.path.isdir(ev_dir):
-                for key, _path in collect_image_pairs(
-                    ev_dir,
-                    "GFX_report_event_",
-                    catalog=MOD.graphics_catalog,
-                    recursive=False,
-                ):
-                    if key not in base:
-                        base.append(key)
-        return sorted(set(base))
 
     def _refresh_list():
         for w in list_inner.winfo_children():
@@ -1314,15 +1173,7 @@ def open_event_wizard(app):
             )
 
         # ── Report ────────────────────────────────────────────────────────
-        msg = ""
-        if saved:
-            msg += "Saved:\n" + "\n".join(saved)
-        if warnings:
-            msg += ("\n\n" if msg else "") + "Notes:\n" + "\n".join(warnings)
-        if errs:
-            msg += ("\n\n" if msg else "") + "Errors:\n" + "\n".join(errs)
-        if not msg:
-            msg = "Nothing to save."
+        msg = format_save_summary(saved, warnings, errs)
         messagebox.showinfo("Saved to Mod", msg, parent=win)
         if saved:
             status_lbl.config(
@@ -1330,9 +1181,6 @@ def open_event_wizard(app):
             )
 
     def _browse_mod_events():
-        import glob as _glob
-        import re as _re2
-
         if not MOD.loaded or not MOD.root:
             messagebox.showinfo(
                 "No Mod Loaded",
@@ -1346,7 +1194,7 @@ def open_event_wizard(app):
                 "Not Found", "No events/ directory found in mod.", parent=win
             )
             return
-        files = sorted(_glob.glob(os.path.join(ev_dir, "*.txt")))
+        files = sorted(glob.glob(os.path.join(ev_dir, "*.txt")))
         if not files:
             messagebox.showinfo(
                 "No Files Found", "No .txt files found in events/.", parent=win
@@ -1381,22 +1229,7 @@ def open_event_wizard(app):
 
         frm = tk.Frame(dlg, bg=BG_DARK)
         frm.pack(fill="both", expand=True, padx=10, pady=6)
-        lb = tk.Listbox(
-            frm,
-            bg=BG_CARD,
-            fg=TEXT,
-            selectbackground=SEL_BG,
-            selectforeground=TEXT,
-            font=("Courier", 10),
-            relief="flat",
-            highlightthickness=1,
-            highlightbackground=BORDER_G,
-            activestyle="none",
-        )
-        sb = tk.Scrollbar(frm, orient="vertical", command=lb.yview)
-        lb.configure(yscrollcommand=sb.set)
-        sb.pack(side="right", fill="y")
-        lb.pack(side="left", fill="both", expand=True)
+        lb = make_scrolled_listbox(frm)
         for fp in files:
             lb.insert("end", f"  {os.path.basename(fp)}")
 
@@ -1413,7 +1246,7 @@ def open_event_wizard(app):
                     raise OSError("event file could not be read")
                 dupes = [
                     m.group(1)
-                    for m in _re2.finditer(r"\bids?\s*=\s*([^\s{}#\n]+)", raw)
+                    for m in re.finditer(r"\bids?\s*=\s*([^\s{}#\n]+)", raw)
                     if m.group(1) in existing_ids
                 ]
             except OSError, UnicodeDecodeError, ValueError:
@@ -1431,32 +1264,7 @@ def open_event_wizard(app):
             _import_txt(_path=fp)
 
         lb.bind("<Double-Button-1>", lambda e: _do_import())
-        bot_dlg = tk.Frame(dlg, bg=BG_DARK, pady=6)
-        bot_dlg.pack(fill="x")
-        tk.Button(
-            bot_dlg,
-            text=tr("common.import_file", "Import File"),
-            command=_do_import,
-            bg="#14532d",
-            fg="#4ade80",
-            relief="flat",
-            font=("Helvetica", 10, "bold"),
-            padx=16,
-            pady=5,
-            cursor="hand2",
-        ).pack(side="left", padx=10)
-        tk.Button(
-            bot_dlg,
-            text=tr("common.cancel", "Cancel"),
-            command=dlg.destroy,
-            bg=BG_CARD,
-            fg=TEXT,
-            relief="flat",
-            font=("Helvetica", 10),
-            padx=12,
-            pady=5,
-            cursor="hand2",
-        ).pack(side="right", padx=10)
+        pack_action_footer(dlg, tr("common.import_file", "Import File"), _do_import)
 
     def _import_txt(_path=None):
         path = _path or filedialog.askopenfilename(
@@ -1596,396 +1404,28 @@ def open_event_wizard(app):
         if not folders:
             folders.append(("[selected folder]", ev_root))
 
-        # ── Window ────────────────────────────────────────────────────
-        bwin = tk.Toplevel(win)
-        bwin.title(
-            tr("gfx.browser.event_pictures_title", "GFX Browser  -  Event Pictures")
-        )
-        bwin.configure(bg=BG_DARK)
-        bwin.geometry("900x580")
-        bwin.resizable(True, True)
-        bwin.grab_set()
-        image_loader = TkImageLoader(bwin)
+        def _apply_picture(gfx):
+            v_picture.set(gfx)
+            _update_gfx_compat()
+            _schedule_preview()
 
-        panes = tk.Frame(bwin, bg=BG_DARK)
-        panes.pack(fill="both", expand=True, padx=8, pady=8)
-
-        # ── LEFT: folder list (text only, instant) ────────────────────
-        lf = tk.Frame(panes, bg=BG_PANEL, width=200)
-        lf.pack(side="left", fill="y", padx=(0, 6))
-        lf.pack_propagate(False)
-        tk.Label(
-            lf,
-            text=tr("gfx.folders", "  FOLDERS"),
-            bg=BG_PANEL,
-            fg=TEXT_DIM,
-            font=("Helvetica", 9, "bold"),
-            anchor="w",
-            pady=6,
-        ).pack(fill="x")
-        tk.Frame(lf, bg=BORDER_G, height=1).pack(fill="x")
-        folder_lb = tk.Listbox(
-            lf,
-            bg=BG_CARD,
-            fg=TEXT,
-            selectbackground=BLUE,
-            selectforeground=TEXT,
-            font=("Courier", 9),
-            relief="flat",
-            bd=0,
-            activestyle="none",
-            highlightthickness=0,
-        )
-        fsb = tk.Scrollbar(lf, orient="vertical", command=folder_lb.yview)
-        folder_lb.configure(yscrollcommand=fsb.set)
-        fsb.pack(side="right", fill="y")
-        folder_lb.pack(fill="both", expand=True, padx=2, pady=4)
-        for display, _ in folders:
-            folder_lb.insert("end", "  " + display)
-
-        # ── RIGHT panel ───────────────────────────────────────────────
-        rf = tk.Frame(panes, bg=BG_DARK)
-        rf.pack(side="left", fill="both", expand=True)
-
-        top_r = tk.Frame(rf, bg=BG_DARK)
-        top_r.pack(fill="x", pady=(0, 6))
-        tk.Label(
-            top_r,
-            text=tr("common.filter", "Filter:"),
-            bg=BG_DARK,
-            fg=TEXT_DIM,
-            font=("Helvetica", 9),
-        ).pack(side="left")
-        search_var = tk.StringVar()
-        tk.Entry(
-            top_r,
-            textvariable=search_var,
-            bg=BG_CARD,
-            fg=TEXT,
-            insertbackground=BLUE,
-            font=("Helvetica", 10),
-            relief="flat",
-            highlightthickness=1,
-            highlightbackground=BORDER_G,
-        ).pack(side="left", padx=6, fill="x", expand=True, ipady=3)
-        status_lbl = tk.Label(
-            top_r,
-            text=tr("gfx.select_folder_status", "select a folder"),
-            bg=BG_DARK,
-            fg=TEXT_DIM,
-            font=("Helvetica", 9),
-        )
-        status_lbl.pack(side="right", padx=6)
-
-        cv_frame = tk.Frame(rf, bg=BG_PANEL)
-        cv_frame.pack(fill="both", expand=True)
-        cv = tk.Canvas(cv_frame, bg=BG_PANEL, highlightthickness=0)
-        vsb = tk.Scrollbar(cv_frame, orient="vertical", command=cv.yview)
-        cv.configure(yscrollcommand=vsb.set)
-        vsb.pack(side="right", fill="y")
-        cv.pack(side="left", fill="both", expand=True)
-
-        # ── Bottom bar ────────────────────────────────────────────────
-        bot = tk.Frame(bwin, bg=BG_DARK)
-        bot.pack(fill="x", padx=10, pady=6)
-        selected_var = tk.StringVar(value="")
-        _initial_gfx = v_picture.get() if "v_picture" in dir() else ""
-        tk.Label(
-            bot, textvariable=selected_var, bg=BG_DARK, fg=BLUE, font=("Helvetica", 9)
-        ).pack(side="left", padx=4)
-        tk.Button(
-            bot,
-            text=tr("common.cancel", "Cancel"),
-            command=bwin.destroy,
-            bg=BG_CARD,
-            fg=TEXT,
-            relief="flat",
-            font=("Helvetica", 9),
-            padx=10,
-            pady=4,
-            cursor="hand2",
-        ).pack(side="right", padx=4)
-
-        def _apply():
-            gfx = selected_var.get()
-            if gfx:
-                v_picture.set(gfx)
-                _update_gfx_compat()
-                _draw_gfx_placeholder()
-                _schedule_preview()
-            bwin.destroy()
-
-        _sel_btn = tk.Button(
-            bot,
-            text=tr("common.select_arrow", "Select ->"),
-            command=_apply,
-            bg="#1a3322",
-            fg="#4b7a5e",
-            relief="flat",
-            font=("Helvetica", 10, "bold"),
-            padx=14,
-            pady=5,
-            cursor="arrow",
-            state="disabled",
-        )
-        _sel_btn.pack(side="right")
-
-        def _on_sel_change(*_):
-            v = selected_var.get()
-            if v:
-                _sel_btn.config(
-                    bg="#14532d", fg="#c8f0d8", cursor="hand2", state="normal"
-                )
-            else:
-                _sel_btn.config(
-                    bg="#1a3322", fg="#4b7a5e", cursor="arrow", state="disabled"
-                )
-
-        selected_var.trace_add("write", _on_sel_change)
-
-        # ── Grid constants (same as Ideas browser) ────────────────────
-        COLS = 5
-        TILE_W = 110
-        TILE_H = 100
-        PAD = 6
-        # Images resized to fit tile (keep aspect ratio within 80x70)
-        IMG_W = 80
-        IMG_H = 70
-
-        # ── State ─────────────────────────────────────────────────────
-        _st = {
-            "pairs": [],
-            "img_cache": {},
-            "drawn": set(),
-            "canvas_ids": {},
-            "sel_idx": None,
-        }
-
-        def _tile_xy(idx):
-            col = idx % COLS
-            row = idx // COLS
-            return PAD + col * (TILE_W + PAD), PAD + row * (TILE_H + PAD)
-
-        def _select_tile(idx):
-            old = _st["sel_idx"]
-            if old is not None and old in _st["canvas_ids"]:
-                rid, _, _ = _st["canvas_ids"][old]
-                cv.itemconfig(rid, fill=BG_CARD, outline=BORDER_G)
-            _st["sel_idx"] = idx
-            gfx_key = _st["pairs"][idx][0]
-            selected_var.set(gfx_key)
-            if idx in _st["canvas_ids"]:
-                rid, _, _ = _st["canvas_ids"][idx]
-                cv.itemconfig(rid, fill=SEL_BG, outline=BLUE)
-
-        def _draw_tile(idx):
-            if idx in _st["drawn"]:
-                return
-            _st["drawn"].add(idx)
-            gfx_key, path = _st["pairs"][idx]
-            x, y = _tile_xy(idx)
-            is_sel = gfx_key == selected_var.get()
-            rid = cv.create_rectangle(
-                x,
-                y,
-                x + TILE_W,
-                y + TILE_H,
-                fill=SEL_BG if is_sel else BG_CARD,
-                outline=BLUE if is_sel else BORDER_G,
-                width=2,
-                tags=("tile", f"t{idx}"),
-            )
-            iid = cv.create_text(
-                x + TILE_W // 2,
-                y + 44,
-                text="...",
-                fill=TEXT_DIM,
-                font=("Helvetica", 14),
-                tags=("tile", f"t{idx}"),
-            )
-            # Strip GFX prefix for label
-            short = gfx_key
-            for pfx in ("GFX_report_event_", "GFX_news_event_", "GFX_event_", "GFX_"):
-                short = short.replace(pfx, "")
-                break
-            short = (short[:16] + "...") if len(short) > 16 else short
-            lid = cv.create_text(
-                x + TILE_W // 2,
-                y + TILE_H - 14,
-                text=short,
-                fill=TEXT_DIM,
-                font=("Helvetica", 7),
-                width=TILE_W - 8,
-                tags=("tile", f"t{idx}"),
-            )
-            _st["canvas_ids"][idx] = (rid, iid, lid)
-            for item in (rid, iid, lid):
-                cv.tag_bind(item, "<Button-1>", lambda e, i=idx: _select_tile(i))
-                cv.tag_bind(
-                    item,
-                    "<Double-Button-1>",
-                    lambda e, i=idx: [_select_tile(i), _apply()],
-                )
-            if path in _st["img_cache"]:
-                _fill_image(idx)
-
-        def _fill_image(idx):
-            if idx not in _st["canvas_ids"]:
-                return
-            rid, iid, lid = _st["canvas_ids"][idx]
-            gfx_key, path = _st["pairs"][idx]
-            img = _st["img_cache"].get(path)
-            cv.delete(iid)
-            if img:
-                new_iid = cv.create_image(
-                    _tile_xy(idx)[0] + TILE_W // 2,
-                    _tile_xy(idx)[1] + 42,
-                    anchor="center",
-                    image=img,
-                    tags=("tile", f"t{idx}"),
-                )
-            else:
-                new_iid = cv.create_text(
-                    _tile_xy(idx)[0] + TILE_W // 2,
-                    _tile_xy(idx)[1] + 30,
-                    text="?",
-                    fill=TEXT_DIM,
-                    font=("Helvetica", 20),
-                    tags=("tile", f"t{idx}"),
-                )
-            _st["canvas_ids"][idx] = (rid, new_iid, lid)
-            for item in (rid, new_iid, lid):
-                cv.tag_bind(item, "<Button-1>", lambda e, i=idx: _select_tile(i))
-                cv.tag_bind(
-                    item,
-                    "<Double-Button-1>",
-                    lambda e, i=idx: [_select_tile(i), _apply()],
-                )
-
-        def _decode_browser_image(item):
-            idx, path = item
-            if not PIL_OK:
-                return None
-            stem_p2 = os.path.splitext(path)[0]
-            paths_to_try2 = [path] + [
-                stem_p2 + alt
-                for alt in (".png", ".tga", ".jpg")
-                if os.path.exists(stem_p2 + alt) and stem_p2 + alt != path
-            ]
-            for try_path2 in paths_to_try2:
-                try:
-                    if not os.path.exists(try_path2):
-                        continue
-                    with PILImage.open(try_path2) as source:
-                        pil = source.convert("RGBA")
-                    rs = getattr(PILImage, "LANCZOS", getattr(PILImage, "ANTIALIAS", 1))
-                    pw, ph = pil.size
-                    ratio = min(IMG_W / max(pw, 1), IMG_H / max(ph, 1))
-                    nw = max(1, int(pw * ratio))
-                    nh = max(1, int(ph * ratio))
-                    return pil.resize((nw, nh), rs)
-                except OSError, ValueError, RuntimeError, AttributeError:
-                    pass
-            return None
-
-        def _apply_browser_image(item, img):
-            idx, path = item
-            _st["img_cache"][path] = img
-            if idx < len(_st["pairs"]) and _st["pairs"][idx][1] == path:
-                _fill_image(idx)
-
-        def _lazy_fill(*_):
-            if not _st["pairs"]:
-                return
-            cv.update_idletasks()
-            top = cv.canvasy(0)
-            bottom = cv.canvasy(cv.winfo_height())
-            visible = []
-            for idx in range(len(_st["pairs"])):
-                _, ty = _tile_xy(idx)
-                if ty + TILE_H >= top and ty <= bottom:
-                    _draw_tile(idx)
-                    visible.append(idx)
-            last = max(visible) if visible else 0
-            ahead = list(range(last + 1, min(last + 41, len(_st["pairs"]))))
-            to_load = [
-                i
-                for i in (visible + ahead)
-                if _st["pairs"][i][1] not in _st["img_cache"]
-            ]
-            if to_load:
-                snapshot = list(_st["pairs"])
-                image_loader.submit_many(
-                    ((i, snapshot[i][1]) for i in to_load if i < len(snapshot)),
-                    _decode_browser_image,
-                    realizer=lambda pil: PILImageTk.PhotoImage(pil),
-                    apply=_apply_browser_image,
-                )
-
-        def _rebuild(pairs):
-            image_loader.invalidate()
-            cv.delete("all")
-            _st["pairs"] = pairs
-            _st["drawn"].clear()
-            _st["canvas_ids"].clear()
-            _st["sel_idx"] = None
-            if not pairs:
-                status_lbl.config(text=tr("gfx.icons_count", "{count} icons", count=0))
-                return
-            status_lbl.config(text="%d icons" % len(pairs))
-            rows = (len(pairs) + COLS - 1) // COLS
-            total_h = PAD + rows * (TILE_H + PAD)
-            total_w = PAD + COLS * (TILE_W + PAD)
-            cv.configure(scrollregion=(0, 0, total_w, total_h))
-            cv.yview_moveto(0)
-            _safe_after_idle(bwin, _lazy_fill)
-
-        def _collect_files(folder_path):
-            prefix = (
-                "GFX_news_event_" if ev_type == "news_event" else "GFX_report_event_"
-            )
-            return collect_image_pairs(
-                folder_path,
-                prefix,
-                search=search_var.get(),
-                catalog=catalog,
-            )
-
-        def _load_folder(folder_path):
-            status_lbl.config(text=tr("gfx.scanning", "scanning..."))
-            bwin.update_idletasks()
-            pairs = _collect_files(folder_path)
-            _rebuild(pairs)
-
-        def _on_folder_select(evt=None):
-            s = folder_lb.curselection()
-            if not s:
-                return
-            _load_folder(folders[s[0]][1])
-
-        cv.bind("<Configure>", lambda e: _safe_after_idle(bwin, _lazy_fill))
-        for event in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
-            cv.bind(
-                event,
-                lambda e: [
-                    cv.yview_scroll(-1 if (e.delta > 0 or e.num == 4) else 1, "units"),
-                    _safe_after_idle(bwin, _lazy_fill),
-                ],
-            )
-        folder_lb.bind("<<ListboxSelect>>", _on_folder_select)
-        search_var.trace_add(
-            "write",
-            lambda *_: _safe_after(
-                bwin,
-                300,
-                lambda: _on_folder_select() if folder_lb.curselection() else None,
+        open_folder_gfx_browser(
+            win,
+            title=tr(
+                "gfx.browser.event_pictures_title", "GFX Browser  -  Event Pictures"
             ),
+            folders=folders,
+            collect_pairs=lambda folder_path, search: collect_image_pairs(
+                folder_path,
+                "GFX_news_event_" if ev_type == "news_event" else "GFX_report_event_",
+                search=search,
+                catalog=catalog,
+            ),
+            on_select=_apply_picture,
+            label_prefixes=("GFX_report_event_",),
+            image_size=(80, 70),
+            preserve_aspect=True,
         )
-
-        # Auto-select first folder
-        if folders:
-            folder_lb.selection_set(0)
-            _load_folder(folders[0][1])
 
     # BUILD UI body: three-pane layout + inline GFX grid + preview canvas
 
@@ -2232,13 +1672,47 @@ def open_event_wizard(app):
     )
     gfx_compat_lbl.pack(fill="x")
 
-    _gfx_cv_frame = tk.Frame(gfx_panel, bg=BG_PANEL)
-    _gfx_cv_frame.pack(fill="both", expand=True)
-    gfx_cv = tk.Canvas(_gfx_cv_frame, bg=BG_PANEL, highlightthickness=0)
-    _gfx_vsb = tk.Scrollbar(_gfx_cv_frame, orient="vertical", command=gfx_cv.yview)
-    gfx_cv.configure(yscrollcommand=_gfx_vsb.set)
-    _gfx_vsb.pack(side="right", fill="y")
-    gfx_cv.pack(side="left", fill="both", expand=True)
+    _gfx_selected = ""
+
+    def _gfx_select_tile(item):
+        nonlocal _gfx_selected
+        gfx_key = item.key
+        _gfx_selected = gfx_key
+        _gfx_sel_lbl.config(text=gfx_key[-40:] if len(gfx_key) > 40 else gfx_key)
+        _gfx_sel_btn.config(bg="#14532d", fg="#c8f0d8", cursor="hand2", state="normal")
+        # Live-update the preview immediately on every tile click
+        v_picture.set(gfx_key)
+        if sel[0]:
+            sel[0].picture = gfx_key
+        _update_gfx_compat(gfx_key)
+        _schedule_preview()
+
+    def _gfx_apply_sel():
+        if _gfx_selected:
+            v_picture.set(_gfx_selected)
+            if sel[0]:
+                sel[0].picture = _gfx_selected
+            _update_gfx_compat(_gfx_selected)
+            _schedule_preview()
+            _show_tab("preview")
+
+    def _gfx_tile_label(item):
+        short = item.key
+        for pfx in ("GFX_report_event_", "GFX_news_event_", "GFX_event_", "GFX_"):
+            if short.startswith(pfx):
+                short = short[len(pfx) :]
+                break
+        return (short[:16] + "...") if len(short) > 16 else short
+
+    gfx_grid = VirtualThumbnailGrid(
+        gfx_panel,
+        image_size=(80, 70),
+        preserve_aspect=True,
+        label_text=_gfx_tile_label,
+        on_select=_gfx_select_tile,
+        on_activate=lambda _item: _gfx_apply_sel(),
+    )
+    gfx_grid.pack(fill="both", expand=True)
 
     _gfx_bot = tk.Frame(gfx_panel, bg=BG_DARK)
     _gfx_bot.pack(fill="x", padx=8, pady=6)
@@ -2272,222 +1746,7 @@ def open_event_wizard(app):
     )
     _gfx_sel_btn.pack(side="right", padx=2)
 
-    GFX_COLS = 5
-    GFX_TILE_W = 110
-    GFX_TILE_H = 100
-    GFX_PAD = 6
-    GFX_IMG_W = 80
-    GFX_IMG_H = 70
-
-    _gfx_st = {
-        "pairs": [],
-        "img_cache": {},
-        "drawn": set(),
-        "canvas_ids": {},
-        "sel_idx": None,
-        "selected": "",
-    }
-
-    def _gfx_tile_xy(idx):
-        col = idx % GFX_COLS
-        row = idx // GFX_COLS
-        return GFX_PAD + col * (GFX_TILE_W + GFX_PAD), GFX_PAD + row * (
-            GFX_TILE_H + GFX_PAD
-        )
-
-    def _gfx_select_tile(idx):
-        old = _gfx_st["sel_idx"]
-        if old is not None and old in _gfx_st["canvas_ids"]:
-            rid, _, _ = _gfx_st["canvas_ids"][old]
-            gfx_cv.itemconfig(rid, fill=BG_CARD, outline=BORDER_G)
-        _gfx_st["sel_idx"] = idx
-        gfx_key = _gfx_st["pairs"][idx][0]
-        _gfx_st["selected"] = gfx_key
-        _gfx_sel_lbl.config(text=gfx_key[-40:] if len(gfx_key) > 40 else gfx_key)
-        _gfx_sel_btn.config(bg="#14532d", fg="#c8f0d8", cursor="hand2", state="normal")
-        if idx in _gfx_st["canvas_ids"]:
-            rid, _, _ = _gfx_st["canvas_ids"][idx]
-            gfx_cv.itemconfig(rid, fill=SEL_BG, outline=BLUE)
-        # Live-update the preview immediately on every tile click
-        v_picture.set(gfx_key)
-        if sel[0]:
-            sel[0].picture = gfx_key
-        _update_gfx_compat(gfx_key)
-        _schedule_preview()
-
-    def _gfx_apply_sel():
-        gfx = _gfx_st.get("selected", "")
-        if gfx:
-            v_picture.set(gfx)
-            if sel[0]:
-                sel[0].picture = gfx
-            _update_gfx_compat(gfx)
-            _schedule_preview()
-            _show_tab("preview")
-
     _gfx_sel_btn.config(command=_gfx_apply_sel)
-
-    def _gfx_draw_tile(idx):
-        if idx in _gfx_st["drawn"]:
-            return
-        _gfx_st["drawn"].add(idx)
-        gfx_key, path = _gfx_st["pairs"][idx]
-        x, y = _gfx_tile_xy(idx)
-        is_sel = gfx_key == _gfx_st.get("selected", "")
-        rid = gfx_cv.create_rectangle(
-            x,
-            y,
-            x + GFX_TILE_W,
-            y + GFX_TILE_H,
-            fill=SEL_BG if is_sel else BG_CARD,
-            outline=BLUE if is_sel else BORDER_G,
-            width=2,
-            tags=("gtile", f"gt{idx}"),
-        )
-        iid = gfx_cv.create_text(
-            x + GFX_TILE_W // 2,
-            y + 44,
-            text="...",
-            fill=TEXT_DIM,
-            font=("Helvetica", 14),
-            tags=("gtile", f"gt{idx}"),
-        )
-        short = gfx_key
-        for pfx in ("GFX_report_event_", "GFX_news_event_", "GFX_event_", "GFX_"):
-            if short.startswith(pfx):
-                short = short[len(pfx) :]
-                break
-        short = (short[:16] + "...") if len(short) > 16 else short
-        lid = gfx_cv.create_text(
-            x + GFX_TILE_W // 2,
-            y + GFX_TILE_H - 14,
-            text=short,
-            fill=TEXT_DIM,
-            font=("Helvetica", 7),
-            width=GFX_TILE_W - 8,
-            tags=("gtile", f"gt{idx}"),
-        )
-        _gfx_st["canvas_ids"][idx] = (rid, iid, lid)
-        for item in (rid, iid, lid):
-            gfx_cv.tag_bind(item, "<Button-1>", lambda e, i=idx: _gfx_select_tile(i))
-            gfx_cv.tag_bind(
-                item,
-                "<Double-Button-1>",
-                lambda e, i=idx: [_gfx_select_tile(i), _gfx_apply_sel()],
-            )
-        if path in _gfx_st["img_cache"]:
-            _gfx_fill_image(idx)
-
-    def _gfx_fill_image(idx):
-        if idx not in _gfx_st["canvas_ids"]:
-            return
-        rid, iid, lid = _gfx_st["canvas_ids"][idx]
-        gfx_key, path = _gfx_st["pairs"][idx]
-        img = _gfx_st["img_cache"].get(path)
-        gfx_cv.delete(iid)
-        if img:
-            new_iid = gfx_cv.create_image(
-                _gfx_tile_xy(idx)[0] + GFX_TILE_W // 2,
-                _gfx_tile_xy(idx)[1] + 44,
-                anchor="center",
-                image=img,
-                tags=("gtile", f"gt{idx}"),
-            )
-        else:
-            new_iid = gfx_cv.create_text(
-                _gfx_tile_xy(idx)[0] + GFX_TILE_W // 2,
-                _gfx_tile_xy(idx)[1] + 34,
-                text="?",
-                fill=TEXT_DIM,
-                font=("Helvetica", 20),
-                tags=("gtile", f"gt{idx}"),
-            )
-        _gfx_st["canvas_ids"][idx] = (rid, new_iid, lid)
-        for item in (rid, new_iid, lid):
-            gfx_cv.tag_bind(item, "<Button-1>", lambda e, i=idx: _gfx_select_tile(i))
-            gfx_cv.tag_bind(
-                item,
-                "<Double-Button-1>",
-                lambda e, i=idx: [_gfx_select_tile(i), _gfx_apply_sel()],
-            )
-
-    def _gfx_decode_image(item):
-        i, path = item
-        if not PIL_OK:
-            return None
-        paths_to_try = [path]
-        # Also queue alt extensions in case primary (DDS) fails
-        stem_p = os.path.splitext(path)[0]
-        for alt in (".png", ".tga", ".jpg"):
-            ap = stem_p + alt
-            if ap != path and os.path.exists(ap):
-                paths_to_try.append(ap)
-        for try_path in paths_to_try:
-            try:
-                if not os.path.exists(try_path):
-                    continue
-                with PILImage.open(try_path) as source:
-                    pil = source.convert("RGBA")
-                rs = getattr(PILImage, "LANCZOS", getattr(PILImage, "ANTIALIAS", 1))
-                pw, ph = pil.size
-                ratio = min(GFX_IMG_W / max(pw, 1), GFX_IMG_H / max(ph, 1))
-                nw2 = max(1, int(pw * ratio))
-                nh2 = max(1, int(ph * ratio))
-                return pil.resize((nw2, nh2), rs)
-            except OSError, ValueError, RuntimeError, AttributeError:
-                pass
-        return None
-
-    def _gfx_apply_image(item, img):
-        i, path = item
-        _gfx_st["img_cache"][path] = img
-        if i < len(_gfx_st["pairs"]) and _gfx_st["pairs"][i][1] == path:
-            _gfx_fill_image(i)
-
-    def _gfx_lazy_fill(*_):
-        if not _gfx_st["pairs"]:
-            return
-        gfx_cv.update_idletasks()
-        top = gfx_cv.canvasy(0)
-        bottom = gfx_cv.canvasy(gfx_cv.winfo_height())
-        visible = []
-        for idx in range(len(_gfx_st["pairs"])):
-            _, ty = _gfx_tile_xy(idx)
-            if ty + GFX_TILE_H >= top and ty <= bottom:
-                _gfx_draw_tile(idx)
-                visible.append(idx)
-        last = max(visible) if visible else 0
-        ahead = list(range(last + 1, min(last + 41, len(_gfx_st["pairs"]))))
-        to_load = [
-            i
-            for i in (visible + ahead)
-            if _gfx_st["pairs"][i][1] not in _gfx_st["img_cache"]
-        ]
-        if to_load:
-            snap = list(_gfx_st["pairs"])
-            gfx_image_loader.submit_many(
-                ((i, snap[i][1]) for i in to_load if i < len(snap)),
-                _gfx_decode_image,
-                realizer=lambda pil: PILImageTk.PhotoImage(pil),
-                apply=_gfx_apply_image,
-            )
-
-    def _gfx_rebuild(pairs):
-        gfx_image_loader.invalidate()
-        gfx_cv.delete("all")
-        _gfx_st.update(
-            {"pairs": pairs, "drawn": set(), "canvas_ids": {}, "sel_idx": None}
-        )
-        if not pairs:
-            gfx_status_lbl.config(text=tr("gfx.icons_count", "{count} icons", count=0))
-            return
-        gfx_status_lbl.config(text="%d icons" % len(pairs))
-        rows = (len(pairs) + GFX_COLS - 1) // GFX_COLS
-        total_h = GFX_PAD + rows * (GFX_TILE_H + GFX_PAD)
-        total_w = GFX_PAD + GFX_COLS * (GFX_TILE_W + GFX_PAD)
-        gfx_cv.configure(scrollregion=(0, 0, total_w, total_h))
-        gfx_cv.yview_moveto(0)
-        _safe_after_idle(win, _gfx_lazy_fill)
 
     def _refresh_gfx_list(*_):
         ev_type = sel[0].etype if sel[0] else "country_event"
@@ -2524,7 +1783,17 @@ def open_event_wizard(app):
                     search=v_gfx_search.get(),
                     catalog=MOD.graphics_catalog,
                 )
-                _gfx_rebuild(pairs)
+                gfx_grid.set_items(
+                    [ThumbnailItem(key, path) for key, path in pairs],
+                    selected_key=_gfx_selected,
+                )
+                gfx_status_lbl.config(
+                    text=(
+                        f"{len(pairs)} icons"
+                        if pairs
+                        else tr("gfx.icons_count", "{count} icons", count=0)
+                    )
+                )
                 return
         gfx_status_lbl.config(
             text=tr("event.gfx_load_hint", "load a mod or Browse GFX >")
@@ -2588,21 +1857,6 @@ def open_event_wizard(app):
                     text="  load mod to validate (%dx%d)" % (exp_w, exp_h), fg=TEXT_DIM
                 )
 
-    def _on_gfx_select(evt=None):
-        pass
-
-    def _draw_gfx_placeholder(gfx_name=None):
-        pass
-
-    gfx_cv.bind("<Configure>", lambda e: _safe_after_idle(win, _gfx_lazy_fill))
-    for _gev in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
-        gfx_cv.bind(
-            _gev,
-            lambda e: [
-                gfx_cv.yview_scroll(-1 if (e.delta > 0 or e.num == 4) else 1, "units"),
-                _safe_after_idle(win, _gfx_lazy_fill),
-            ],
-        )
     v_gfx_search.trace_add("write", lambda *_: _safe_after(win, 300, _refresh_gfx_list))
 
     def _hsep():
