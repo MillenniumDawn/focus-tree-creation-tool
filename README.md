@@ -125,6 +125,9 @@ black --check .        # formatting
 checkout with no install. Tests live under `tests/`. Ruff and Black check all Python
 code except the build scripts.
 
+On Linux, install Xvfb first (`sudo apt-get install xvfb xauth`). The suite runs its
+Tk windows on a private display, so nothing opens on your desktop.
+
 CI runs the same checks on every pull request, then builds the three executables
 (`.github/workflows/ci.yml`). A `v*` tag runs that whole gate and publishes the binaries
 to Releases, so a release can't skip the tests. Every push to `main` whose CI run

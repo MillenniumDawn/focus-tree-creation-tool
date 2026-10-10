@@ -18,8 +18,10 @@ A standalone Python/Tkinter desktop app for authoring Hearts of Iron IV mod cont
 python hoi4_content_maker.py    # run the app (needs a display + tkinter)
 
 pip install ".[dev]"            # tests + linters
+sudo apt-get install xvfb xauth # Linux only: pytest runs Tk on a private display
 pytest                          # full suite (src/ is on the path via pyproject)
 pytest tests/test_config.py::test_cfg_save_merges_existing_keys   # single test
+pytest --no-tk tests/test_config.py   # pure tests only, no Xvfb needed
 ruff check .                    # lint
 black --check .                 # formatting
 mypy                            # type check (src/hoi4cm + tests)

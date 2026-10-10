@@ -77,7 +77,7 @@ jobs:
         # script/loc extractions tested (see docs/dev/wizards.md). No Xvfb
         # here on purpose: these tests must stay headless.
         run: >
-          pytest tests/test_wizard_generators_*.py
+          pytest --no-tk tests/test_wizard_generators_*.py
           --cov=hoi4cm.wizards._generators
           --cov-fail-under=95
           --cov-report=term-missing

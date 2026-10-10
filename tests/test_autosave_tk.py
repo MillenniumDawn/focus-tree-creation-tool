@@ -8,12 +8,14 @@ from __future__ import annotations
 
 import tkinter as tk
 from copy import deepcopy
+from unittest.mock import Mock
 
 import pytest
 from builders import make_focus
 
 import hoi4_content_maker as m
 import hoi4cm.core.logger as logmod
+from hoi4cm.core.undo import UndoStack
 from hoi4cm.models import Focus, FocusDocument
 
 
@@ -93,7 +95,10 @@ class _AutosaveHarness:
         self._fv_continue.set(focus.continue_if_invalid)
         self._fv_cap.set(focus.available_if_capitulated)
         for widget, text in (
-            (self._fv_ai_raw, focus.ai_will_do_raw),
+            (
+                self._fv_ai_raw,
+                focus.ai_will_do_raw.strip() or f"    base = {focus.ai_will_do}",
+            ),
             (self._fv_desc, focus.desc),
             (self._fv_avail, focus.available_cond),
             (self._fv_bypass, focus.bypass_cond),
@@ -141,6 +146,7 @@ def test_autosave_noop_when_form_matches_focus(tk_root, log_state):
 
     assert focus.to_dict() == before
     assert h.focuses.revision == baseline
+    assert h._undo_pushes == []
     assert log_state.get_error_entries() == []
 
 
@@ -154,6 +160,7 @@ def test_autosave_writes_desc_edit_without_touch(tk_root, log_state):
     h._autosave()
 
     assert focus.desc == "edited from form"
+    assert h._undo_pushes == [("edit focus", (focus.id,))]
     assert h.focuses.revision == baseline
     assert h.focuses.validate_indexes()
     assert log_state.get_error_entries() == []
@@ -214,6 +221,7 @@ def test_autosave_empty_name_leaves_focus_untouched(tk_root, log_state):
 
     assert focus.to_dict() == before
     assert h.focuses.revision == baseline
+    assert h._undo_pushes == []
     assert log_state.get_error_entries() == []
 
 
@@ -344,6 +352,19 @@ def test_autosave_keeps_position_when_target_cell_occupied(tk_root, log_state):
     assert log_state.get_error_entries() == []
 
 
+def test_autosave_refused_position_alone_pushes_nothing(tk_root, log_state):
+    mover = make_focus(id=1, name="mover", x=0, y=0)
+    blocker = make_focus(id=2, name="blocker", x=3, y=4)
+    h = _harness_with(tk_root, mover, blocker)
+    h._fv_x.set("3")
+    h._fv_y.set("4")
+
+    h._autosave()
+
+    assert (mover.x, mover.y) == (0, 0)
+    assert h._undo_pushes == []
+
+
 def test_apply_bad_cost_applies_other_fields_uses_fallback(tk_root, monkeypatch):
     """Invalid cost should not block other valid field edits."""
     focus = make_focus(name="keep", icon="⚔", gfx="GFX_goal_generic_political_pressure")
@@ -420,3 +441,94 @@ def test_apply_writes_fields_and_moves_when_valid(tk_root, monkeypatch):
     assert h._list_invalidations == 1
     assert boxes.errors == []
     assert boxes.warnings == []
+
+
+class _UndoHarness(_AutosaveHarness):
+    """The autosave shell wired to a real UndoStack, selection and undo."""
+
+    _push_undo = m.App._push_undo
+    _select = m.App._select
+    _undo = m.App._undo
+    _redo = m.App._redo
+
+    def __init__(self, root):
+        super().__init__(root)
+        self._undo_stack = UndoStack()
+        self.cv = Mock()
+        self._show_form = Mock()
+        self._hide_form = Mock()
+        self._update_focus_list_selection = Mock()
+        self._update_statusbar = Mock()
+        self._refresh_prereqs = Mock()
+        self._refresh_mutex = Mock()
+        self._refresh_effects = Mock()
+        self._hint = Mock()
+
+
+def _undo_harness(root, *focuses: Focus) -> _UndoHarness:
+    h = _UndoHarness(root)
+    h.focuses = FocusDocument(focuses)
+    h.selected = focuses[0]
+    h.load_form(focuses[0])
+    return h
+
+
+def _set_desc(h: _AutosaveHarness, text: str) -> None:
+    h._fv_desc.delete("1.0", "end")
+    h._fv_desc.insert("1.0", text)
+
+
+def test_edit_then_select_other_focus_then_undo_restores_original(tk_root, log_state):
+    first = make_focus(id=1, name="first", x=0, y=0, desc="original")
+    second = make_focus(id=2, name="second", x=1, y=0)
+    h = _undo_harness(tk_root, first, second)
+    _set_desc(h, "edited")
+
+    h._select(second)
+
+    assert first.desc == "edited"
+    assert len(h._undo_stack) == 1
+
+    h._undo()
+
+    assert h.focuses[first.id].desc == "original"
+    h._redo()
+    assert h.focuses[first.id].desc == "edited"
+
+
+def test_select_away_from_untouched_focus_leaves_redo_alone(tk_root, log_state):
+    # ai_will_do_raw is empty on a new focus; the form shows `base = N`.
+    first = make_focus(id=1, name="first", x=0, y=0, desc="original", ai_will_do_raw="")
+    second = make_focus(id=2, name="second", x=1, y=0, ai_will_do_raw="")
+    h = _undo_harness(tk_root, first, second)
+    _set_desc(h, "edited")
+    h._select(second)
+    h._undo()
+    assert len(h._undo_stack) == 0
+
+    h._select(first)
+    h._select(second)
+    h._select(first)
+
+    assert len(h._undo_stack) == 0
+    h._redo()
+    assert h.focuses[first.id].desc == "edited"
+
+
+def test_undo_with_the_edited_focus_still_selected_repopulates_without_pushing(
+    tk_root, log_state
+):
+    first = make_focus(id=1, name="first", x=0, y=0, desc="original")
+    second = make_focus(id=2, name="second", x=1, y=0)
+    h = _undo_harness(tk_root, first, second)
+    _set_desc(h, "edited")
+    h._select(second)
+    h._select(first)
+
+    h._undo()
+    assert h._fv_desc.get("1.0", "end").strip() == "original"
+    h._select(second)
+
+    assert len(h._undo_stack) == 0
+    h._redo()
+    assert h.focuses[first.id].desc == "edited"

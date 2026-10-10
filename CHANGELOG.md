@@ -21,6 +21,11 @@ the version by hand. See `AGENTS.md`.
   instead of an empty "Saved:" heading above them.
 - Build the Windows/macOS/Linux executables in `ci.yml` only for pull requests
   and `v*` tags. Pushes to `main` are already built by the pre-release workflow.
+- Run Linux pytest on a private display so mapped UI tests and smoke-test children
+  cannot open windows on the desktop; clean up direct test roots and display processes.
+- Make sidebar autosave, Code-tab apply, and typing in effect fields undoable.
+  A run of keystrokes in one effect field is a single undo step. An edit that
+  changes nothing adds no entry and keeps the redo trail.
 - Wait for the progress modal to be mapped before taking its Tk grab, so it no
   longer fails with "grab failed: window not viewable" on a live display.
 - Add Spanish (Español) as an interface language.
