@@ -141,9 +141,7 @@ shared_focus = {
 	relative_position_id = TST_parent
 }
 """
-    imported = build_focuses(
-        parse_focus_tree(source, "relative-tree.txt"), tree_idx=1
-    )
+    imported = build_focuses(parse_focus_tree(source, "relative-tree.txt"), tree_idx=1)
     parent, child = imported
     assert parent.tree_idx == child.tree_idx == 1
     undo = UndoStack()
@@ -166,9 +164,7 @@ shared_focus = {
             },
             focus_lookup=dict(app.focuses.items()),
         )
-        return build_focuses(
-            parse_focus_tree(exported, "nudged.txt"), tree_idx=1
-        )
+        return build_focuses(parse_focus_tree(exported, "nudged.txt"), tree_idx=1)
 
     def assert_coordinates_and_offsets(expected_parent, expected_child):
         current_parent = app.focuses[parent.id]

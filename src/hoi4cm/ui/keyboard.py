@@ -82,9 +82,11 @@ def nudge_selection(app: KeyboardNudgeHost, dx: int, dy: int) -> None:
         focus = app.focuses[focus_id]
         parent_id = name_to_id.get(focus.relative_position_id or "")
         if parent_id is not None and parent_id in moving_ids:
-            relative_metadata[focus_id] = tuple(
-                getattr(focus, attribute, None)
-                for attribute in ("_raw_gx", "_raw_gy", "_rel_dx", "_rel_dy")
+            relative_metadata[focus_id] = (
+                getattr(focus, "_raw_gx", None),
+                getattr(focus, "_raw_gy", None),
+                getattr(focus, "_rel_dx", None),
+                getattr(focus, "_rel_dy", None),
             )
     for x, y in targets.values():
         blockers = app.focuses.occupied_positions.get((x, y), set()) - moving_ids
@@ -100,7 +102,7 @@ def nudge_selection(app: KeyboardNudgeHost, dx: int, dy: int) -> None:
     for focus_id, values in relative_metadata.items():
         focus = app.focuses[focus_id]
         for attribute, value in zip(
-            ("_raw_gx", "_raw_gy", "_rel_dx", "_rel_dy"), values
+            ("_raw_gx", "_raw_gy", "_rel_dx", "_rel_dy"), values, strict=True
         ):
             setattr(focus, attribute, value)
     app._redraw()
