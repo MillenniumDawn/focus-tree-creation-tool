@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import tkinter as tk
 from types import SimpleNamespace
+
+import pytest
 
 import hoi4_content_maker as m
 from hoi4cm.models import Focus, FocusDocument
+from hoi4cm.ui.canvas import CanvasMixin
 
 
 class _Variable:
@@ -121,6 +125,73 @@ def test_arrow_shortcuts_do_nothing_if_the_move_hits_an_unselected_focus():
     assert (focus.x, focus.y) == (1, 2)
     assert app._undo_pushes.actions == []
     assert app._redraws == 0
+
+
+def test_arrow_shortcuts_leave_listbox_navigation_alone():
+    focus = _focus(1, 2)
+    app = _NudgeHarness([focus], selected=focus)
+    app.focus_get = lambda: tk.Listbox.__new__(tk.Listbox)
+
+    app._nudge_selection(0, 1)
+
+    assert (focus.x, focus.y) == (1, 2)
+    assert app._undo_pushes.actions == []
+    assert app._redraws == 0
+
+
+@pytest.mark.visible_tk
+def test_canvas_click_moves_focus_from_sidebar_entry_before_arrow_nudge(tk_root):
+    focus = _focus(1, 1)
+    app = _NudgeHarness([focus], selected=focus)
+    app.cv = tk.Canvas(tk_root, width=100, height=100)
+    app.cv.pack()
+    app.mutex_mode = False
+    app._multisel_mode = False
+    app._drag = None
+    app.bind = tk_root.bind
+    app.focus_get = tk_root.focus_get
+    app._select = lambda selected: setattr(app, "selected", selected)
+    app._foc_pr = CanvasMixin._foc_pr.__get__(app, type(app))
+
+    entry = tk.Entry(tk_root)
+    entry.pack()
+    app.cv.bind("<ButtonPress-1>", lambda event: app._foc_pr(focus.id, event))
+    tk_root.bind("<Right>", lambda _event: app._nudge_selection(1, 0))
+    tk_root.update()
+
+    entry.focus_force()
+    tk_root.update()
+    assert tk_root.focus_get() is entry
+
+    app.cv.event_generate("<ButtonPress-1>", x=20, y=20)
+    tk_root.update()
+    assert tk_root.focus_get() is app.cv
+
+    app.cv.event_generate("<Right>")
+    tk_root.update()
+    assert (focus.x, focus.y) == (2, 1)
+
+
+@pytest.mark.visible_tk
+def test_arrow_binding_preserves_listbox_down_navigation(tk_root):
+    focus = _focus(1, 1)
+    app = _NudgeHarness([focus], selected=focus)
+    app.focus_get = tk_root.focus_get
+    listing = tk.Listbox(tk_root, height=3)
+    listing.insert("end", "one", "two", "three")
+    listing.pack()
+    tk_root.bind("<Down>", lambda _event: app._nudge_selection(0, 1))
+    tk_root.update()
+
+    listing.focus_force()
+    listing.selection_set(0)
+    listing.activate(0)
+    tk_root.update()
+    listing.event_generate("<Down>")
+    tk_root.update()
+
+    assert listing.curselection() == (1,)
+    assert (focus.x, focus.y) == (1, 1)
 
 
 def test_keybindings_include_arrows_and_f1_tutorial_shortcut():

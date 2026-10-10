@@ -1292,6 +1292,7 @@ class CanvasMixin:
         return None
 
     def _lmb_dn(self, e):
+        self.cv.focus_set()
         if self.mutex_mode:
             tid = self._focus_id_at(e.x, e.y)
             if tid is not None:
@@ -1378,6 +1379,7 @@ class CanvasMixin:
                 self.cv.coords(self._temp_line, cx, cy, tx, ty)
 
     def _foc_pr(self, fid, e):
+        self.cv.focus_set()
         if self.mutex_mode:
             # Completion is handled at the canvas level (_lmb_dn); swallow the
             # click here so it never starts a drag or selection.

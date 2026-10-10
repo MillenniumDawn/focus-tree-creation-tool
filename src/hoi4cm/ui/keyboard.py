@@ -51,7 +51,10 @@ class StringValue(Protocol):
 def nudge_selection(app: KeyboardNudgeHost, dx: int, dy: int) -> None:
     """Move the current selection one grid cell, preserving document undo."""
     widget = app.focus_get()
-    if isinstance(widget, (tk.Text, tk.Entry)):
+    # Keep normal keyboard navigation in text controls and listboxes. These
+    # can live inside the main window, so their arrow keys reach this binding
+    # through Tk's toplevel bind tag as well.
+    if isinstance(widget, (tk.Text, tk.Entry, tk.Listbox)):
         return
     focus_ids = set(app._multi_sel)
     if not focus_ids and app.selected:
