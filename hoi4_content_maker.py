@@ -3052,6 +3052,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
                 self._invalidate_focus_list_structure()
 
             self._begin_document_generation()
+            self._undo_stack.clear()
 
             # Set tree ID
             self._tree_id.set(tree_id)
@@ -5473,6 +5474,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         self._begin_document_generation()
         self.workspace = workspace
         self.focuses = workspace.focuses
+        self._undo_stack.clear()
         meta = workspace.main_tree.metadata
         self._tree_id.set(meta.tree_id)
         self._tree_country_tag = meta.country_tag

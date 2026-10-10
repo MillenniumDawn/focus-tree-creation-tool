@@ -175,6 +175,7 @@ def test_failed_quick_save_preserves_path_and_dirty_state(monkeypatch):
 
 
 def _replacement_app(root, monkeypatch):
+    from hoi4cm.core.undo import UndoStack
     from hoi4cm.models import Focus, FocusDocument
 
     app = cast(Any, root)
@@ -183,6 +184,7 @@ def _replacement_app(root, monkeypatch):
     old_focus = Focus()
     old_focus.name = "OLD_focus"
     app.focuses = FocusDocument([old_focus])
+    app._undo_stack = UndoStack()
     app.cv = MagicMock()
     app._lines = set()
     app._extra_trees = []

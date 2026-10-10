@@ -8,6 +8,8 @@ the version by hand. See `AGENTS.md`.
 
 ## Unreleased
 
+- Clear undo and redo history on New Tree, Load Project, and autosave restore.
+  Ctrl+Z no longer applies an entry from the previous document to the new one.
 - Replace the three copy-pasted wizard GFX browsers and the event wizard's
   inline GFX tab grid with one shared folder picker
   (`open_folder_gfx_browser`) on the virtualized thumbnail grid, so thumbnails
