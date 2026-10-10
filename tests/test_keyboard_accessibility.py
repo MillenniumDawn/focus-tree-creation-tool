@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import tkinter as tk
 from itertools import count
-from types import SimpleNamespace
+from types import MethodType, SimpleNamespace
 
 import pytest
 
@@ -142,7 +142,7 @@ shared_focus = {
 }
 """
     imported = build_focuses(parse_focus_tree(source, "relative-tree.txt"), tree_idx=1)
-    parent, child = imported
+    parent, child = imported[0], imported[1]
     assert parent.tree_idx == child.tree_idx == 1
     undo = UndoStack()
     app = _NudgeHarness(imported, multi_sel=(parent.id, child.id))
@@ -218,6 +218,8 @@ def test_arrow_shortcuts_leave_listbox_navigation_alone():
 
 @pytest.mark.visible_tk
 def test_canvas_click_moves_focus_from_sidebar_entry_before_arrow_nudge(tk_root):
+    # This test builds a small dynamic app host to bind the canvas method.
+    # pylint: disable=attribute-defined-outside-init
     focus = _focus(1, 1)
     app = _NudgeHarness([focus], selected=focus)
     app.cv = tk.Canvas(tk_root, width=100, height=100)
@@ -228,7 +230,7 @@ def test_canvas_click_moves_focus_from_sidebar_entry_before_arrow_nudge(tk_root)
     app.bind = tk_root.bind
     app.focus_get = tk_root.focus_get
     app._select = lambda selected: setattr(app, "selected", selected)
-    app._foc_pr = CanvasMixin._foc_pr.__get__(app, type(app))
+    app._foc_pr = MethodType(CanvasMixin._foc_pr, app)
 
     entry = tk.Entry(tk_root)
     entry.pack()
