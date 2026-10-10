@@ -8,6 +8,8 @@ the version by hand. See `AGENTS.md`.
 
 ## Unreleased
 
+- Give each focus document its own ID allocator so separate workspaces and
+  imports can allocate focus IDs independently.
 - Wait for the progress modal to be mapped before taking its Tk grab, so it no
   longer fails with "grab failed: window not viewable" on a live display.
 - Add Spanish (Español) as an interface language.

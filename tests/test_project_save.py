@@ -180,7 +180,7 @@ def _replacement_app(root, monkeypatch):
     app = cast(Any, root)
     for name, value in vars(_fake_app()).items():
         setattr(app, name, value)
-    old_focus = Focus()
+    old_focus = Focus(id=1)
     old_focus.name = "OLD_focus"
     app.focuses = FocusDocument([old_focus])
     app.cv = MagicMock()

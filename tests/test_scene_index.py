@@ -4,7 +4,7 @@ from hoi4cm.ui.scene_index import SceneIndex
 
 
 def _focus(focus_id, x, y):
-    focus = Focus(x, y)
+    focus = Focus(id=1, x=x, y=y)
     focus.id = focus_id
     return focus
 

@@ -57,13 +57,7 @@ def encode_project(workspace: EditorWorkspace) -> dict[str, Any]:
 
 
 def decode_project(data: Mapping[str, Any]) -> EditorWorkspace:
-    next_id = Focus._next
-    try:
-        return _decode_project(data)
-    except Exception:
-        # Rejected projects never become live, including their allocator state.
-        Focus._next = next_id
-        raise
+    return _decode_project(data)
 
 
 def _decode_project(data: Mapping[str, Any]) -> EditorWorkspace:

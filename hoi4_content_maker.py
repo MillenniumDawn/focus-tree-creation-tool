@@ -49,6 +49,7 @@ from hoi4cm.core import (  # noqa: E402
     EmptyDrawioGraphError,
     EmptyFocusTreeError,
     Focus,
+    FocusDocument,
     UndoStack,
     add_error,
     apply_focus_code,
@@ -3178,7 +3179,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
 
     def _new_focus_at(self, wx, wy):
         try:
-            f = Focus(wx, wy)
+            f = self.focuses.new_focus(wx, wy)
         except ValueError as e:
             report_error(str(e), e)
             return
@@ -4264,7 +4265,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         self._default_focus_prefix = prefix
 
         # Build Focus objects (sorted by visual order) and wire prerequisites.
-        new_focuses = build_drawio_focuses(drawio_result)
+        new_focuses = build_drawio_focuses(drawio_result, FocusDocument())
         self.focuses.load(new_focuses)
         self._last_project_path = None
 
@@ -5931,7 +5932,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
 
         f = self.selected
         try:
-            nf = f.duplicate()
+            nf = f.duplicate(self.focuses.allocate_id())
         except ValueError as e:
             report_error(str(e), e)
             return

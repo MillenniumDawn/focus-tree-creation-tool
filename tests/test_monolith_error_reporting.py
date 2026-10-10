@@ -105,7 +105,7 @@ def test_load_reports_out_of_range_ids_before_touching_live_state(
     )
     monkeypatch.setattr(m.filedialog, "askopenfilename", lambda **_kw: str(path))
     _patch_load_background(monkeypatch)
-    existing = Focus()
+    existing = Focus(id=1)
     shell = SimpleNamespace(
         focuses=FocusDocument([existing]), _begin_document_generation=lambda: None
     )
@@ -113,7 +113,6 @@ def test_load_reports_out_of_range_ids_before_touching_live_state(
     m.App._load(cast(m.App, shell))
 
     assert list(shell.focuses.values()) == [existing]
-    assert Focus._next == existing.id
     assert len(shown) == 1
     assert shown[0][0] == "Load Project Error"
     assert "focus id must be between" in shown[0][1]
@@ -122,14 +121,14 @@ def test_load_reports_out_of_range_ids_before_touching_live_state(
 @pytest.mark.parametrize("duplicate", [False, True])
 def test_exhausted_allocator_reports_before_mutating_widgets_or_undo(shown, duplicate):
     selected = Focus.from_dict({"id": MAX_FOCUS_ID})
-    shell = SimpleNamespace(selected=selected)
+    focuses = FocusDocument([selected])
+    shell = SimpleNamespace(selected=selected, focuses=focuses)
 
     if duplicate:
         m.App._duplicate_focus(cast(m.App, shell))
     else:
         m.App._new_focus_at(cast(m.App, shell), 0, 0)
 
-    assert Focus._next == MAX_FOCUS_ID
     assert len(shown) == 1
     assert "focus id allocator exhausted" in shown[0][1]
 
@@ -306,7 +305,7 @@ def test_save_reports_a_write_failure(shown, monkeypatch):
 
 def test_apply_focus_code_reports_a_parse_failure(shown):
     shell = type("Shell", (), {"focuses": FocusDocument()})()
-    focus = Focus()
+    focus = Focus(id=2)
 
     assert (
         m.App._apply_focus_code(cast(m.App, shell), focus, "not a focus block") is False
@@ -324,8 +323,8 @@ def test_apply_focus_code_restore_uses_redraw_now(monkeypatch):
     monkeypatch.setattr(m, "apply_focus_code", lambda *_a, **_k: None)
     draws = []
     redraw_now = []
-    focus = Focus()
-    extra = Focus(2, 2)
+    focus = Focus(id=3)
+    extra = Focus(id=4, x=2, y=2)
     shell = SimpleNamespace(
         focuses=FocusDocument([focus, extra]),
         selected=focus,

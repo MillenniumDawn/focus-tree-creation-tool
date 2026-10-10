@@ -12,19 +12,13 @@ from hoi4cm.focus_tree.export_plan import (
 from hoi4cm.focus_tree.identifiers import checked_focus_names
 from hoi4cm.focus_tree.loc import build_loc_yml, hydrate_focus_localization
 from hoi4cm.focus_tree.parse import parse_focus_tree
-from hoi4cm.models import Focus
+from hoi4cm.models import FocusDocument
 
-
-@pytest.fixture(autouse=True)
-def reset_counter():
-    old = Focus._next
-    Focus._next = 0
-    yield
-    Focus._next = old
+_document = FocusDocument()
 
 
 def _focus(name):
-    focus = Focus(0, 0)
+    focus = _document.new_focus(0, 0)
     focus.name = name
     return focus
 

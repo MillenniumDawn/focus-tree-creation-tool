@@ -105,12 +105,13 @@ class _AutosaveHarness:
             x_var = tk.StringVar(value=str(offset.get("x", 0)))
             y_var = tk.StringVar(value=str(offset.get("y", 0)))
             trig = tk.Text(self._fv_desc.master, height=1, width=10)
-            trig.insert("1.0", offset.get("trigger", ""))
+            trigger = offset.get("trigger", "")
+            trig.insert("1.0", trigger if isinstance(trigger, str) else "")
             self._offset_entries.append((x_var, y_var, trig))
 
 
 def _focus(**overrides) -> Focus:
-    focus = Focus(0, 0)
+    focus = Focus(id=1, x=0, y=0)
     focus.id = overrides.pop("id", 1)
     focus.name = "keep"
     focus.icon = "⚔"

@@ -131,7 +131,7 @@ def _confirm_parameter_dialog(harness, key, value=None):
 
 def test_add_effect_defaults_snapshots_and_restores_focus(tk_root, monkeypatch):
     monkeypatch.setattr(MOD, "loaded", False)
-    focus = Focus()
+    focus = Focus(id=1)
     focus.effects = [{"type": "add_ideas", "fields": {"idea_name": "old"}}]
     harness = _Harness(tk_root)
     harness.focuses = FocusDocument([focus])
@@ -157,7 +157,7 @@ def test_add_effect_defaults_snapshots_and_restores_focus(tk_root, monkeypatch):
 
 def test_add_effect_copies_supplied_fields(tk_root, monkeypatch):
     monkeypatch.setattr(MOD, "loaded", False)
-    focus = Focus()
+    focus = Focus(id=2)
     harness = _Harness(tk_root)
     harness.focuses = FocusDocument([focus])
     harness.selected = focus
@@ -173,7 +173,7 @@ def test_add_effect_copies_supplied_fields(tk_root, monkeypatch):
 
 def test_parameter_callback_adds_defaults_and_supplied_fields(tk_root, monkeypatch):
     monkeypatch.setattr(MOD, "loaded", False)
-    focus = Focus()
+    focus = Focus(id=3)
     harness = _Harness(tk_root)
     harness.focuses = FocusDocument([focus])
     harness.selected = focus
@@ -189,7 +189,7 @@ def test_parameter_callback_adds_defaults_and_supplied_fields(tk_root, monkeypat
 
 def test_effect_card_entry_callback_updates_focus(tk_root, monkeypatch):
     monkeypatch.setattr(MOD, "loaded", False)
-    focus = Focus()
+    focus = Focus(id=4)
     focus.effects = [{"type": "add_war_support", "fields": {"amount": "0.1"}}]
     harness = _Harness(tk_root)
     harness.focuses = FocusDocument([focus])
@@ -206,7 +206,7 @@ def test_effect_card_entry_callback_updates_focus(tk_root, monkeypatch):
 
 def test_remove_effect_snapshots_and_restores_exact_focus(tk_root, monkeypatch):
     monkeypatch.setattr(MOD, "loaded", False)
-    focus = Focus()
+    focus = Focus(id=5)
     focus.effects = [
         {"type": "add_ideas", "fields": {"idea_name": "first"}},
         {"type": "add_ideas", "fields": {"idea_name": "second"}},
@@ -248,7 +248,7 @@ def test_add_effect_without_selection_is_a_noop(tk_root):
 
 
 def test_live_effect_edits_update_and_ignore_stale_or_unselected(tk_root):
-    focus = Focus()
+    focus = Focus(id=6)
     focus.effects = [
         {"type": "custom", "fields": {}},
         {"type": "custom", "fields": {}},

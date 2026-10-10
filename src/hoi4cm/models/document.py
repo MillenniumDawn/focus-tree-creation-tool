@@ -5,7 +5,7 @@ from collections.abc import Iterable, Iterator, Mapping, MutableMapping
 from dataclasses import dataclass, field
 from typing import Any
 
-from .focus import Focus
+from .focus import MAX_FOCUS_ID, Focus
 
 
 def _discard[K](index: dict[K, set[int]], key: K, focus_id: int) -> None:
@@ -64,6 +64,7 @@ class FocusDocument(MutableMapping[int, Focus]):
     """Focus ownership boundary with derived indexes and dict compatibility."""
 
     def __init__(self, focuses: Iterable[Focus] = ()) -> None:
+        self._last_allocated_id = 0
         self._focuses: dict[int, Focus] = {}
         self._id_set_cache: frozenset[int] | None = None
         self.geometry_revision = 0
@@ -120,6 +121,21 @@ class FocusDocument(MutableMapping[int, Focus]):
     def __len__(self) -> int:
         return len(self._focuses)
 
+    def allocate_id(self) -> int:
+        """Return the next id owned by this document."""
+        if self._last_allocated_id >= MAX_FOCUS_ID:
+            raise ValueError("focus id allocator exhausted")
+        self._last_allocated_id += 1
+        return self._last_allocated_id
+
+    def reserve_id(self, focus_id: int) -> None:
+        """Advance past an explicitly assigned id without adding a focus."""
+        self._last_allocated_id = max(self._last_allocated_id, focus_id)
+
+    def new_focus(self, x: int = 0, y: int = 0) -> Focus:
+        """Create a focus with an id unique to this document."""
+        return Focus(id=self.allocate_id(), x=x, y=y)
+
     def clear(self) -> None:
         if self._focuses:
             self._focuses.clear()
@@ -130,6 +146,7 @@ class FocusDocument(MutableMapping[int, Focus]):
     def add(self, focus: Focus, *, replace: bool = False) -> Focus:
         if focus.id in self._focuses and not replace:
             raise KeyError(f"focus id already exists: {focus.id}")
+        self.reserve_id(focus.id)
         self._put(focus)
         self._id_set_cache = None
         self._changed()
@@ -146,6 +163,8 @@ class FocusDocument(MutableMapping[int, Focus]):
                 raise KeyError(f"focus id already exists: {min(existing)}")
         if not additions:
             return
+        for focus in additions:
+            self.reserve_id(focus.id)
         if len(additions) >= len(self._focuses) or any(
             focus.id in self._focuses and self._focuses[focus.id].name != focus.name
             for focus in additions
@@ -272,6 +291,7 @@ class FocusDocument(MutableMapping[int, Focus]):
             if focus.id in loaded:
                 raise ValueError(f"focus batch contains duplicate id: {focus.id}")
             loaded[focus.id] = focus
+        self.reserve_id(max(loaded, default=0))
         changed = loaded != self._focuses
         self._focuses = loaded
         if changed:

@@ -14,15 +14,7 @@ from hoi4cm.focus_tree.drawio import (
     drawio_to_focus_data,
     parse_drawio_graph,
 )
-from hoi4cm.models import Focus
-
-
-@pytest.fixture(autouse=True)
-def reset_counter():
-    old = Focus._next
-    Focus._next = 0
-    yield
-    Focus._next = old
+from hoi4cm.models import FocusDocument
 
 
 def _cell_xml(cells):
@@ -219,9 +211,11 @@ def test_build_drawio_focuses_wires_prereqs():
 
 
 def test_build_drawio_focuses_does_not_run_on_cancelled_preview():
-    # Building the preview data must not itself create Focus objects, so
-    # Focus._next stays put until build_drawio_focuses is actually called.
+    # Building preview data does not allocate IDs; the document is supplied
+    # only when the user commits the import.
     graph = parse_drawio_graph(TWO_NODE_EDGE)
-    before = Focus._next
+    document = FocusDocument()
     drawio_to_focus_data(graph, "TAG_")
-    assert Focus._next == before
+    assert len(document) == 0
+    imported = build_drawio_focuses(drawio_to_focus_data(graph, "TAG_"), document)
+    assert [f.id for f in imported] == [1, 2]

@@ -82,8 +82,8 @@ def _states(cv, fid):
 def test_offscreen_focus_gets_no_items(tk_root):
     cv = tk.Canvas(tk_root, width=200, height=200)
     app = _FakeApp(cv)
-    onscreen = Focus(x=1, y=1)
-    offscreen = Focus(x=500, y=500)
+    onscreen = Focus(id=1, x=1, y=1)
+    offscreen = Focus(id=2, x=500, y=500)
 
     app._draw_focus(onscreen, FAR_RECT)
     app._draw_focus(offscreen, FAR_RECT)
@@ -95,7 +95,7 @@ def test_offscreen_focus_gets_no_items(tk_root):
 def test_pan_onscreen_then_offscreen_reclaims_bundle(tk_root):
     cv = tk.Canvas(tk_root, width=200, height=200)
     app = _FakeApp(cv)
-    f = Focus(x=500, y=500)
+    f = Focus(id=3, x=500, y=500)
 
     app._draw_focus(f, FAR_RECT)
     assert f.id not in app._focus_bundles
@@ -118,7 +118,7 @@ def test_pan_onscreen_then_offscreen_reclaims_bundle(tk_root):
 def test_draw_key_fast_exits_when_unchanged(tk_root):
     cv = tk.Canvas(tk_root, width=200, height=200)
     app = _FakeApp(cv)
-    f = Focus(x=5, y=5)
+    f = Focus(id=4, x=5, y=5)
 
     app._draw_focus(f, FAR_RECT)
     box_rect = app._focus_bundles[f.id].items[2]
@@ -132,7 +132,7 @@ def test_draw_key_fast_exits_when_unchanged(tk_root):
 def test_draw_key_updates_changed_icon(tk_root):
     cv = tk.Canvas(tk_root, width=200, height=200)
     app = _FakeApp(cv)
-    f = Focus(x=5, y=5)
+    f = Focus(id=5, x=5, y=5)
 
     app._draw_focus(f, FAR_RECT)
     icon_item = app._focus_bundles[f.id].items[8]
@@ -145,7 +145,7 @@ def test_draw_key_updates_changed_icon(tk_root):
 def test_focus_probe_recovers_after_canvas_is_cleared(tk_root):
     cv = tk.Canvas(tk_root, width=200, height=200)
     app = _FakeApp(cv)
-    f = Focus(x=5, y=5)
+    f = Focus(id=6, x=5, y=5)
 
     app._draw_focus(f, FAR_RECT)
     cv.delete("all")
@@ -239,7 +239,7 @@ def test_interrupted_frame_retries_pending_label_stacking(tk_root, monkeypatch):
 def test_draw_focus_uses_localized_label_with_name_fallback(tk_root):
     cv = tk.Canvas(tk_root, width=200, height=200)
     app = _FakeApp(cv)
-    f = Focus(x=5, y=5)
+    f = Focus(id=7, x=5, y=5)
     f.name = "script_name"
     f.loc_name = "Title"
 
@@ -255,7 +255,7 @@ def test_draw_focus_uses_localized_label_with_name_fallback(tk_root):
 def test_retained_focus_bundles_are_bounded_by_visible_set(tk_root):
     cv = tk.Canvas(tk_root, width=200, height=200)
     app = _FakeApp(cv)
-    focuses = [Focus(x=index * 10, y=0) for index in range(20)]
+    focuses = [Focus(id=index + 1, x=index * 10, y=0) for index in range(20)]
     app.focuses = {focus.id: focus for focus in focuses}
 
     for focus in focuses:
@@ -273,7 +273,7 @@ def test_low_zoom_uses_three_item_focus_lod(tk_root):
     cv = tk.Canvas(tk_root, width=200, height=200)
     app = _FakeApp(cv)
     app.zoom = 0.3
-    focus = Focus(x=1, y=1)
+    focus = Focus(id=8, x=1, y=1)
 
     app._draw_focus(focus, FAR_RECT)
 
@@ -283,8 +283,8 @@ def test_low_zoom_uses_three_item_focus_lod(tk_root):
 
 def test_fit_all_scoped_to_main_tree_keeps_other_trees_culled(mapped_canvas):
     app = _FakeApp(mapped_canvas)
-    main_focus = Focus(x=0, y=0)
-    extra_focus = Focus(x=10, y=4)
+    main_focus = Focus(id=9, x=0, y=0)
+    extra_focus = Focus(id=10, x=10, y=4)
     extra_focus.tree_idx = 1
     app.focuses = {main_focus.id: main_focus, extra_focus.id: extra_focus}
 
@@ -297,8 +297,8 @@ def test_fit_all_scoped_to_main_tree_keeps_other_trees_culled(mapped_canvas):
 
 def test_fit_all_without_scope_still_fits_every_tree(mapped_canvas):
     app = _FakeApp(mapped_canvas)
-    main_focus = Focus(x=0, y=0)
-    extra_focus = Focus(x=10, y=4)
+    main_focus = Focus(id=11, x=0, y=0)
+    extra_focus = Focus(id=12, x=10, y=4)
     extra_focus.tree_idx = 1
     app.focuses = {main_focus.id: main_focus, extra_focus.id: extra_focus}
 
@@ -311,7 +311,7 @@ def test_fit_all_without_scope_still_fits_every_tree(mapped_canvas):
 
 def test_fit_all_falls_back_to_every_focus_when_scope_is_empty(mapped_canvas):
     app = _FakeApp(mapped_canvas)
-    extra_focus = Focus(x=10, y=4)
+    extra_focus = Focus(id=13, x=10, y=4)
     extra_focus.tree_idx = 1
     app.focuses = {extra_focus.id: extra_focus}
 
@@ -362,7 +362,7 @@ def test_bbox_growth_lands_on_the_same_bounds_as_scanning_every_focus(
     cv = tk.Canvas(tk_root, width=200, height=200)
     reference = _FakeApp(cv)
     app = _FakeApp(cv)
-    focuses = [Focus(x, y) for x, y in positions]
+    focuses = [Focus(id=index + 1, x=x, y=y) for index, (x, y) in enumerate(positions)]
     reference.focuses = {f.id: f for f in focuses}
     app.focuses = FocusDocument(focuses)
 
@@ -374,7 +374,7 @@ def test_bbox_growth_lands_on_the_same_bounds_as_scanning_every_focus(
 def test_focus_bounds_are_recomputed_when_the_document_revision_moves(tk_root):
     cv = tk.Canvas(tk_root, width=200, height=200)
     app = _FakeApp(cv)
-    focus = Focus(1, 1)
+    focus = Focus(id=14, x=1, y=1)
     app.focuses = FocusDocument([focus])
 
     assert app._focus_bounds() == (1, 1, 1, 1)
@@ -389,7 +389,7 @@ def test_focus_bounds_are_recomputed_when_the_document_revision_moves(tk_root):
 def test_focus_bounds_reuses_the_cache_while_the_revision_holds(tk_root):
     cv = tk.Canvas(tk_root, width=200, height=200)
     app = _FakeApp(cv)
-    focus = Focus(1, 1)
+    focus = Focus(id=15, x=1, y=1)
     app.focuses = FocusDocument([focus])
     app._focus_bounds()
 
@@ -433,7 +433,7 @@ def mapped_canvas(tk_root):
 
 def test_minimap_toggle_renders_hides_and_reopens(mapped_canvas):
     app = _FakeApp(mapped_canvas)
-    focus = Focus(1, 1)
+    focus = Focus(id=16, x=1, y=1)
     app.focuses = FocusDocument([focus])
 
     app._toggle_minimap()
@@ -774,7 +774,7 @@ def test_unmapped_canvas_still_gets_a_grid_over_the_whole_extent(tk_root):
 
 
 def _linked_chain(count, *, spacing=1):
-    focuses = [Focus(index * spacing, 0) for index in range(count)]
+    focuses = [Focus(id=index + 1, x=index * spacing, y=0) for index in range(count)]
     for previous, focus in zip(focuses, focuses[1:], strict=False):
         focus.prereqs = [[previous.id]]
     return focuses

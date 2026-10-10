@@ -13,7 +13,7 @@ import re
 from collections.abc import Iterable
 from copy import deepcopy
 
-from hoi4cm.models import Focus
+from hoi4cm.models import Focus, FocusDocument
 from hoi4cm.script import dict_to_raw
 
 from .parse import ParsedFocusTree, block_to_str
@@ -50,13 +50,17 @@ _KNOWN_FOCUS_FIELDS = frozenset(
 
 
 class BuildContext:
+    """Cross-tree name/position indexes and the allocator shared by tree builds."""
+
     def __init__(self, existing_focuses: Iterable[Focus] = ()) -> None:
+        self.id_document = FocusDocument()
         self._position_by_name: dict[str, Focus] = {}
         self._link_id_by_name: dict[str, int] = {}
         self.add_focuses(existing_focuses)
 
     def add_focuses(self, focuses: Iterable[Focus]) -> None:
         for focus in focuses:
+            self.id_document.reserve_id(focus.id)
             self._position_by_name.setdefault(focus.name, focus)
             self._link_id_by_name[focus.name] = focus.id
 
@@ -114,6 +118,7 @@ def build_focuses(
     country_tag: str = "",
     existing_focuses: Iterable[Focus] = (),
     context: BuildContext | None = None,
+    document: FocusDocument | None = None,
 ) -> list[Focus]:
     """Return the list of :class:`Focus` objects for one parsed tree.
 
@@ -123,11 +128,20 @@ def build_focuses(
     positions and prerequisite / mutex references. Reuse ``context`` across
     batch calls to index each completed batch incrementally. The caller is
     responsible for inserting the returned focuses into its own registry.
+    Pass ``document`` to allocate IDs from a specific workspace. Without it,
+    IDs come from ``context``'s allocator, which is seeded with
+    ``existing_focuses`` and remains monotonic across calls sharing that context.
     """
+    existing_focuses = list(existing_focuses)
     if context is None:
         context = BuildContext(existing_focuses)
     else:
         context.add_focuses(existing_focuses)
+    if document is None:
+        document = context.id_document
+    else:
+        for focus in existing_focuses:
+            document.reserve_id(focus.id)
 
     raw_rewards = parsed.raw_rewards
     focuses_data = parsed.focuses_data
@@ -149,7 +163,7 @@ def build_focuses(
             gy = 0
         rel_id = rf.get("relative_position_id", None)
         raw_pos[fid_str] = (gx, gy, rel_id)
-        f = Focus(gx, gy)
+        f = document.new_focus(gx, gy)
         f._raw_gx = gx  # original file coords, preserved for export
         f._raw_gy = gy
         f.tree_idx = tree_idx

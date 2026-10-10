@@ -86,7 +86,7 @@ def test_is_dirty_initially_clean():
 
 def test_is_dirty_after_focus_added():
     app = _fake_app()
-    app.focuses.add(Focus(0, 0))
+    app.focuses.add(Focus(id=1, x=0, y=0))
     assert app._is_dirty() is True
 
 
@@ -130,7 +130,7 @@ def test_is_dirty_after_edit_focus_file_change(monkeypatch):
 
 def test_mark_clean_resets_dirty():
     app = _fake_app()
-    app.focuses.add(Focus(0, 0))
+    app.focuses.add(Focus(id=2, x=0, y=0))
     assert app._is_dirty() is True
     app._mark_clean()
     assert app._is_dirty() is False
@@ -206,14 +206,14 @@ def test_mark_clean_fingerprint_error_reports(monkeypatch):
 
 def test_confirm_discard_dirty_cancel_returns_false(monkeypatch):
     app = _fake_app()
-    app.focuses.add(Focus(0, 0))
+    app.focuses.add(Focus(id=3, x=0, y=0))
     monkeypatch.setattr(m.messagebox, "askyesnocancel", lambda *a, **kw: None)
     assert app._confirm_discard("loading") is False
 
 
 def test_confirm_discard_dirty_no_returns_true_without_save(monkeypatch):
     app = _fake_app()
-    app.focuses.add(Focus(0, 0))
+    app.focuses.add(Focus(id=4, x=0, y=0))
     monkeypatch.setattr(m.messagebox, "askyesnocancel", lambda *a, **kw: False)
     app._save = lambda: (_ for _ in ()).throw(AssertionError("should not save"))
     assert app._confirm_discard("loading") is True
@@ -221,7 +221,7 @@ def test_confirm_discard_dirty_no_returns_true_without_save(monkeypatch):
 
 def test_confirm_discard_dirty_yes_saves(monkeypatch):
     app = _fake_app()
-    app.focuses.add(Focus(0, 0))
+    app.focuses.add(Focus(id=5, x=0, y=0))
     monkeypatch.setattr(m.messagebox, "askyesnocancel", lambda *a, **kw: True)
     saved = []
     app._save = lambda: saved.append(1) or True
@@ -231,7 +231,7 @@ def test_confirm_discard_dirty_yes_saves(monkeypatch):
 
 def test_confirm_discard_dirty_yes_save_fails_returns_false(monkeypatch):
     app = _fake_app()
-    app.focuses.add(Focus(0, 0))
+    app.focuses.add(Focus(id=6, x=0, y=0))
     monkeypatch.setattr(m.messagebox, "askyesnocancel", lambda *a, **kw: True)
     app._save = lambda: False
     assert app._confirm_discard("loading") is False
@@ -239,7 +239,7 @@ def test_confirm_discard_dirty_yes_save_fails_returns_false(monkeypatch):
 
 def test_autosave_tick_writes_when_dirty(monkeypatch, tmp_path):
     app = _fake_app()
-    app.focuses.add(Focus(0, 0))
+    app.focuses.add(Focus(id=7, x=0, y=0))
     writes = []
     monkeypatch.setattr(m, "write_project", lambda p, ws: writes.append(p))
     monkeypatch.setattr(
@@ -267,7 +267,7 @@ def test_autosave_tick_no_write_when_clean(monkeypatch, tmp_path):
 
 def test_autosave_tick_writes_sibling_when_last_path(monkeypatch, tmp_path):
     app = _fake_app()
-    app.focuses.add(Focus(0, 0))
+    app.focuses.add(Focus(id=8, x=0, y=0))
     app._last_project_path = str(tmp_path / "project.json")
     writes = []
     monkeypatch.setattr(m, "write_project", lambda p, ws: writes.append(p))
@@ -288,7 +288,7 @@ def test_autosave_tick_writes_sibling_when_last_path(monkeypatch, tmp_path):
 
 def test_autosave_tick_swallows_write_error(monkeypatch, tmp_path):
     app = _fake_app()
-    app.focuses.add(Focus(0, 0))
+    app.focuses.add(Focus(id=9, x=0, y=0))
     monkeypatch.setattr(
         m, "write_project", lambda p, ws: (_ for _ in ()).throw(OSError("disk full"))
     )
@@ -318,7 +318,7 @@ def test_maybe_offer_restore_no_file_no_prompt(monkeypatch, tmp_path):
 
 def test_maybe_offer_restore_when_dirty_no_prompt(monkeypatch, tmp_path):
     app = _fake_app()
-    app.focuses.add(Focus(0, 0))
+    app.focuses.add(Focus(id=10, x=0, y=0))
     monkeypatch.setattr(
         m, "workspace_autosave_path", lambda: str(tmp_path / "autosave.json")
     )
@@ -384,7 +384,7 @@ def test_maybe_offer_restore_yes_restores(monkeypatch, tmp_path):
     app._invalidate_focus_list_structure = lambda: None
 
     ws = EditorWorkspace(
-        focuses=FocusDocument([Focus(0, 0)]),
+        focuses=FocusDocument([Focus(id=11, x=0, y=0)]),
         main_tree=TreeDocument(metadata=TreeMetadata(tree_id="MY_tree")),
     )
     path = tmp_path / "autosave.json"
@@ -401,7 +401,7 @@ def test_maybe_offer_restore_yes_restores(monkeypatch, tmp_path):
 def test_maybe_offer_restore_no_clears_file(monkeypatch, tmp_path):
     app = _fake_app()
     ws = EditorWorkspace(
-        focuses=FocusDocument([Focus(0, 0)]),
+        focuses=FocusDocument([Focus(id=12, x=0, y=0)]),
         main_tree=TreeDocument(metadata=TreeMetadata(tree_id="MY_tree")),
     )
     path = tmp_path / "autosave.json"
@@ -419,7 +419,7 @@ def test_maybe_offer_restore_no_clears_file(monkeypatch, tmp_path):
 def test_maybe_offer_restore_cancel_keeps_file(monkeypatch, tmp_path):
     app = _fake_app()
     ws = EditorWorkspace(
-        focuses=FocusDocument([Focus(0, 0)]),
+        focuses=FocusDocument([Focus(id=13, x=0, y=0)]),
         main_tree=TreeDocument(metadata=TreeMetadata(tree_id="MY_tree")),
     )
     path = tmp_path / "autosave.json"
