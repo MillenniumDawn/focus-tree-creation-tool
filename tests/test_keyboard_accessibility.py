@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-import tkinter as tk
 from types import SimpleNamespace
-
-import pytest
 
 import hoi4_content_maker as m
 from hoi4cm.models import Focus, FocusDocument
@@ -139,23 +136,3 @@ def test_keybindings_include_arrows_and_f1_tutorial_shortcut():
 
     assert app.nudges == [(-1, 0), (1, 0), (0, -1), (0, 1)]
     assert app.tutorial_calls == [{"manual": True}]
-
-
-@pytest.mark.visible_tk
-def test_dialog_escape_binding_invokes_dialog_close(tk_root):
-    dialog = tk.Toplevel(tk_root)
-    closed = []
-    m.App._bind_dialog_escape(dialog, lambda: closed.append(True))
-    entry = tk.Entry(dialog)
-    entry.pack()
-    dialog.deiconify()
-    dialog.update()
-    assert entry.winfo_viewable()
-    entry.focus_force()
-    dialog.update()
-
-    entry.event_generate("<Escape>")
-    dialog.update()
-
-    assert closed == [True]
-    dialog.destroy()

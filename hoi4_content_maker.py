@@ -671,14 +671,6 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         """Delegate arrow-key movement to the extracted UI action."""
         nudge_selection(self, dx, dy)
 
-    @staticmethod
-    def _bind_dialog_escape(dialog, close=None):
-        """Close a dialog when Escape is pressed, including from its children."""
-        dialog.bind(
-            "<Escape>",
-            lambda _event: (close or dialog.destroy)(),
-        )
-
     def _build_layout(self):
         """Build body: status bar, left panel, canvas, sash, sidebar."""
         # ── Status bar (packed BEFORE body so it stays at bottom) ──
@@ -2979,7 +2971,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         win.geometry("480x420")
         win.resizable(False, True)
         win.grab_set()
-        self._bind_dialog_escape(win)
+        win.bind("<Escape>", lambda _event: win.destroy())
 
         def _row(label):
             f = tk.Frame(win, bg=BG_DARK)
@@ -4853,7 +4845,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         win.resizable(True, True)
         win.grab_set()
         win.transient(self)
-        self._bind_dialog_escape(win)
+        win.bind("<Escape>", lambda _event: win.destroy())
 
         tk.Label(
             win,
