@@ -8,7 +8,10 @@ a drift in the fallback now fails here instead of silently shipping
 wrong script.
 """
 
+from functools import partial
 from types import SimpleNamespace
+
+from builders import default_decision
 
 from hoi4cm.wizards._generators import (
     build_dyn_mod_output,
@@ -97,56 +100,7 @@ def test_collect_decision_state_renamed_key_uses_fallback():
 
 def test_collect_decision_state_into_generator_targeted():
     # Seam proof: what the closure hands over actually changes the rendered block.
-    base = {
-        "uid": "dec-1",
-        "cat_uid": "cat-1",
-        "dec_id": "TAG_decision",
-        "loc_name": "My Decision",
-        "loc_desc": "",
-        "icon": "",
-        "allowed": "",
-        "visible": "",
-        "available": "",
-        "cost_type": "pp",
-        "cost": "25",
-        "custom_cost_trigger": "",
-        "custom_cost_text": "",
-        "ai_hint_pp_cost": "",
-        "cost_var": "",
-        "cost_amount": "",
-        "days_remove": "",
-        "days_re_enable": "",
-        "fire_only_once": False,
-        "fixed_random_seed": True,
-        "is_mission": False,
-        "mission_timeout": "100",
-        "selectable_mission": False,
-        "is_good": False,
-        "activation": "",
-        "highlight_states": "",
-        "on_map_mode": "map_and_decisions_view",
-        "state_target_scope": "any",
-        "target_root_trigger": "",
-        "target_trigger": "",
-        "targets": "",
-        "targets_dynamic": False,
-        "target_non_existing": False,
-        "target_array": "",
-        "modifier": "",
-        "complete_effect": "",
-        "timeout_effect": "",
-        "remove_effect": "",
-        "cancel_trigger": "",
-        "cancel_effect": "",
-        "cancel_if_not_visible": False,
-        "remove_trigger": "",
-        "ai_will_do": "",
-        "priority": "1",
-        "war_target_complete": False,
-        "war_target_remove": False,
-        "war_complete_tag": "",
-        "war_remove_tag": "",
-    }
+    base = default_decision()
     untargeted = generate_decision_block(base, **collect_decision_state({}))
     assert "state_target" not in untargeted
     targeted = generate_decision_block(
@@ -376,56 +330,11 @@ def test_collect_decision_state_handles_non_string_and_empty():
 
 
 def test_collect_decision_state_cost_type_into_generator():
-    base = {
-        "uid": "dec-1",
-        "cat_uid": "cat-1",
-        "dec_id": "TAG_decision",
-        "loc_name": "My Decision",
-        "loc_desc": "",
-        "icon": "",
-        "allowed": "",
-        "visible": "",
-        "available": "",
-        "cost_type": "pp",
-        "cost": "25",
-        "custom_cost_trigger": "has_dlc = 1",
-        "custom_cost_text": "CUSTOM",
-        "ai_hint_pp_cost": "10",
-        "cost_var": "",
-        "cost_amount": "",
-        "days_remove": "",
-        "days_re_enable": "",
-        "fire_only_once": False,
-        "fixed_random_seed": True,
-        "is_mission": False,
-        "mission_timeout": "100",
-        "selectable_mission": False,
-        "is_good": False,
-        "activation": "",
-        "highlight_states": "",
-        "on_map_mode": "map_and_decisions_view",
-        "state_target_scope": "any",
-        "target_root_trigger": "",
-        "target_trigger": "",
-        "targets": "",
-        "targets_dynamic": False,
-        "target_non_existing": False,
-        "target_array": "",
-        "modifier": "",
-        "complete_effect": "",
-        "timeout_effect": "",
-        "remove_effect": "",
-        "cancel_trigger": "",
-        "cancel_effect": "",
-        "cancel_if_not_visible": False,
-        "remove_trigger": "",
-        "ai_will_do": "",
-        "priority": "1",
-        "war_target_complete": False,
-        "war_target_remove": False,
-        "war_complete_tag": "",
-        "war_remove_tag": "",
-    }
+    base = default_decision(
+        custom_cost_trigger="has_dlc = 1",
+        custom_cost_text="CUSTOM",
+        ai_hint_pp_cost="10",
+    )
     pp = generate_decision_block(
         base, **collect_decision_state({"cost_type": _FakeVar("pp")})
     )
@@ -522,59 +431,14 @@ def test_national_spirit_and_dyn_mod_integration_roundtrip():
 
 def test_collect_decision_state_targeted_matrix():
     # Covers the most-branching generator path (state vs country vs none).
-    def _base(**overrides):
-        base = {
-            "uid": "dec-1",
-            "cat_uid": "cat-1",
-            "dec_id": "TAG_decision",
-            "loc_name": "N",
-            "loc_desc": "",
-            "icon": "",
-            "allowed": "",
-            "visible": "",
-            "available": "",
-            "cost_type": "pp",
-            "cost": "25",
-            "custom_cost_trigger": "",
-            "custom_cost_text": "",
-            "ai_hint_pp_cost": "",
-            "cost_var": "",
-            "cost_amount": "",
-            "days_remove": "",
-            "days_re_enable": "",
-            "fire_only_once": False,
-            "fixed_random_seed": True,
-            "is_mission": False,
-            "mission_timeout": "100",
-            "selectable_mission": False,
-            "is_good": False,
-            "activation": "",
-            "highlight_states": "",
-            "on_map_mode": "map_and_decisions_view",
-            "state_target_scope": "any",
-            "target_root_trigger": "has_war = yes",
-            "target_trigger": "is_core = yes",
-            "targets": "123",
-            "targets_dynamic": True,
-            "target_non_existing": False,
-            "target_array": "",
-            "modifier": "",
-            "complete_effect": "",
-            "timeout_effect": "",
-            "remove_effect": "",
-            "cancel_trigger": "",
-            "cancel_effect": "",
-            "cancel_if_not_visible": False,
-            "remove_trigger": "",
-            "ai_will_do": "",
-            "priority": "1",
-            "war_target_complete": False,
-            "war_target_remove": False,
-            "war_complete_tag": "",
-            "war_remove_tag": "",
-        }
-        base.update(overrides)
-        return base
+    _base = partial(
+        default_decision,
+        loc_name="N",
+        target_root_trigger="has_war = yes",
+        target_trigger="is_core = yes",
+        targets="123",
+        targets_dynamic=True,
+    )
 
     # state-targeted with scope "any" -> state_target = yes
     state_any = generate_decision_block(

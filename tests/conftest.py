@@ -9,6 +9,10 @@ import tempfile
 import types
 
 import pytest
+from test_display import DISPLAY_ENV, TestDisplay
+
+_TEST_DISPLAY = TestDisplay()
+atexit.register(_TEST_DISPLAY.close)
 
 # Isolate import-time app state before pytest collects test modules.
 _HOME_ENV_NAMES = ("HOME", "USERPROFILE", "XAUTHORITY")
@@ -66,6 +70,7 @@ atexit.register(_cleanup_isolated_home)
 
 def pytest_unconfigure(config):
     """Restore the caller's home after pytest has finished the session."""
+    _TEST_DISPLAY.close()
     _cleanup_isolated_home()
 
 
@@ -82,16 +87,44 @@ def _hidden() -> bool:
     return os.environ.get("HOI4CM_SHOW_TK") != "1"
 
 
+def pytest_addoption(parser):
+    parser.addoption(
+        "--no-tk", action="store_true", help="Run pure tests; fail on Tk construction"
+    )
+
+
 def pytest_configure(config):
     config.addinivalue_line(
         "markers",
         "visible_tk: test needs its windows mapped (real geometry, real events)",
     )
+    # Start before collection, and let nested pytest/smoke processes inherit
+    # this private display. SHOW_TK is the explicit desktop-debugging opt-in.
+    if (
+        sys.platform == "linux"
+        and _hidden()
+        and not config.getoption("--no-tk")
+        and not config.option.collectonly
+        and not (
+            os.environ.get(DISPLAY_ENV)
+            and os.environ.get(DISPLAY_ENV) == os.environ.get("DISPLAY")
+        )
+    ):
+        try:
+            _TEST_DISPLAY.start()
+        except RuntimeError as exc:
+            raise pytest.UsageError(str(exc)) from exc
+
+
+def pytest_collection_finish(session):
+    # Keep the imported app and the collected tests out of per-test collections.
+    gc.collect()
+    gc.freeze()
 
 
 @pytest.fixture(autouse=True)
 def hide_tk_windows(request, monkeypatch):
-    """Withdraw every Toplevel the test creates.
+    """Withdraw every root and Toplevel the test creates.
 
     The widget tests need a display, but almost none of them need the windows
     drawn; left alone the suite maps a thousand roots and dialogs over
@@ -100,11 +133,27 @@ def hide_tk_windows(request, monkeypatch):
     that measure geometry or generate real pointer events opt out with
     `@pytest.mark.visible_tk`, and `HOI4CM_SHOW_TK=1` opts the whole run out.
     """
+    if tk is not None and request.config.getoption("--no-tk"):
+
+        def forbidden_root(*args, **kwargs):
+            pytest.fail("Tk construction is forbidden with --no-tk")
+
+        monkeypatch.setattr(tk.Tk, "__init__", forbidden_root)
+        yield
+        return
     if tk is None or not _hidden() or request.node.get_closest_marker("visible_tk"):
+        yield
         return
 
+    root_init = tk.Tk.__init__
     toplevel_init = tk.Toplevel.__init__
     grab_set = tk.Misc.grab_set
+    roots = []
+
+    def hidden_root_init(self, *args, **kwargs):
+        root_init(self, *args, **kwargs)
+        roots.append(self)
+        self.withdraw()
 
     def hidden_init(self, *args, **kwargs):
         toplevel_init(self, *args, **kwargs)
@@ -114,10 +163,25 @@ def hide_tk_windows(request, monkeypatch):
         try:
             grab_set(self)
         except TclError:
-            pass
+            if self.winfo_viewable():
+                raise
 
+    monkeypatch.setattr(tk.Tk, "__init__", hidden_root_init)
     monkeypatch.setattr(tk.Toplevel, "__init__", hidden_init)
     monkeypatch.setattr(tk.Misc, "grab_set", optional_grab_set)
+    try:
+        yield
+    finally:
+        leftover = False
+        for root in reversed(roots):
+            try:
+                root.destroy()
+            except TclError:
+                continue  # Explicit fixture/test cleanup already destroyed it.
+            leftover = True
+        # A full collection per test more than doubled the suite's runtime.
+        if leftover:
+            gc.collect()
 
 
 @pytest.fixture
