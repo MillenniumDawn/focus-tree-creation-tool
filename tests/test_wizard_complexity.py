@@ -12,7 +12,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
-# Function-level complexity scores when the ratchet was added. This fixed list
+# Function-level complexity caps, lowered whenever a score drops. This fixed list
 # is a cap, not a generated snapshot: lowering scores is allowed, growth and new
 # C901 findings fail. Keep C901 selected only for the wizard tree in this test.
 WIZARD_COMPLEXITY_BUDGETS = {
@@ -24,15 +24,14 @@ WIZARD_COMPLEXITY_BUDGETS = {
     "src/hoi4cm/wizards/_shared.py:open_script_picker": 34,
     "src/hoi4cm/wizards/additional_income.py:open_additional_income_wizard": 26,
     "src/hoi4cm/wizards/additional_income.py:_apply": 15,
-    "src/hoi4cm/wizards/decision.py:open_decision_wizard": 562,
+    "src/hoi4cm/wizards/decision.py:open_decision_wizard": 521,
     "src/hoi4cm/wizards/decision.py:_rebuild_tree": 18,
     "src/hoi4cm/wizards/decision.py:_collect": 24,
     "src/hoi4cm/wizards/decision.py:_build_dec_editor": 47,
     "src/hoi4cm/wizards/decision.py:_rebuild_tgt": 16,
-    "src/hoi4cm/wizards/decision.py:_populate_dec_editor": 14,
     "src/hoi4cm/wizards/decision.py:_decode_dec_icon": 14,
     "src/hoi4cm/wizards/decision.py:_decode_cat_picture": 14,
-    "src/hoi4cm/wizards/decision.py:_hoi4_loc_widget": 17,
+    "src/hoi4cm/wizards/decision.py:_hoi4_loc_widget": 16,
     "src/hoi4cm/wizards/decision.py:_build_preview": 34,
     "src/hoi4cm/wizards/decision.py:_build_code": 52,
     "src/hoi4cm/wizards/decision.py:_apply_code_edits": 34,
@@ -40,25 +39,22 @@ WIZARD_COMPLEXITY_BUDGETS = {
     "src/hoi4cm/wizards/decision.py:_import_txt": 70,
     "src/hoi4cm/wizards/decision.py:_import_scripted_loc": 13,
     "src/hoi4cm/wizards/decision.py:_import_yml_loc": 13,
-    "src/hoi4cm/wizards/decision.py:_save_to_mod": 33,
-    "src/hoi4cm/wizards/dyn_mod.py:open_dyn_mod_wizard": 175,
-    "src/hoi4cm/wizards/dyn_mod.py:_open_dynmod_gfx_browser": 42,
+    "src/hoi4cm/wizards/decision.py:_save_to_mod": 32,
+    "src/hoi4cm/wizards/dyn_mod.py:open_dyn_mod_wizard": 137,
     "src/hoi4cm/wizards/dyn_mod.py:_dm_save_raw": 31,
     "src/hoi4cm/wizards/dyn_mod.py:_save_file": 48,
     "src/hoi4cm/wizards/dyn_mod.py:_browse_mod_dynmods": 29,
     "src/hoi4cm/wizards/dyn_mod.py:_load_selected": 18,
-    "src/hoi4cm/wizards/event.py:open_event_wizard": 269,
+    "src/hoi4cm/wizards/event.py:open_event_wizard": 194,
     "src/hoi4cm/wizards/event.py:_render_preview": 27,
     "src/hoi4cm/wizards/event.py:_decode_preview_image": 12,
-    "src/hoi4cm/wizards/event.py:_save_to_mod": 35,
+    "src/hoi4cm/wizards/event.py:_save_to_mod": 31,
     "src/hoi4cm/wizards/event.py:_browse_mod_events": 11,
     "src/hoi4cm/wizards/event.py:_import_txt": 19,
-    "src/hoi4cm/wizards/event.py:_open_event_gfx_browser": 44,
     "src/hoi4cm/wizards/event.py:_update_gfx_compat": 11,
-    "src/hoi4cm/wizards/national_spirit.py:open_national_spirit_wizard": 205,
-    "src/hoi4cm/wizards/national_spirit.py:_open_idea_gfx_browser": 37,
+    "src/hoi4cm/wizards/national_spirit.py:open_national_spirit_wizard": 166,
     "src/hoi4cm/wizards/national_spirit.py:_save_raw": 48,
-    "src/hoi4cm/wizards/national_spirit.py:_save_to_mod": 29,
+    "src/hoi4cm/wizards/national_spirit.py:_save_to_mod": 25,
     "src/hoi4cm/wizards/national_spirit.py:_browse_existing_spirits": 35,
     "src/hoi4cm/wizards/national_spirit.py:_load_selected": 15,
 }
@@ -110,4 +106,4 @@ def test_wizard_c901_has_fixed_function_budgets():
 
 
 def test_complexity_budget_covers_the_existing_wizard_baseline():
-    assert len(WIZARD_COMPLEXITY_BUDGETS) == 45
+    assert len(WIZARD_COMPLEXITY_BUDGETS) == 41

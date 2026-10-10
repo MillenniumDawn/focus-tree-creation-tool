@@ -82,10 +82,11 @@ jobs:
           --cov-fail-under=95
           --cov-report=term-missing
 
-  # Runs on every push and PR, not just tags, so a PyInstaller break shows up
-  # in the PR that caused it instead of at tag time.
+  # Runs on PRs and v* tags, not on pushes to main (pre-release.yml builds and
+  # smoke-tests those), so a PyInstaller break shows up in the PR that caused it.
   build:
     needs: [lint, test]
+    if: github.event_name == 'pull_request' || startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: read
     strategy:

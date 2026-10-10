@@ -8,6 +8,19 @@ the version by hand. See `AGENTS.md`.
 
 ## Unreleased
 
+- Replace the three copy-pasted wizard GFX browsers and the event wizard's
+  inline GFX tab grid with one shared folder picker
+  (`open_folder_gfx_browser`) on the virtualized thumbnail grid, so thumbnails
+  use the bounded image cache. The event picture browser's enabled Select
+  button now has the same dark text as the other pickers.
+- Remove dead wizard and monolith code, unused locale keys, and the legacy
+  `build/build.bat` and static PyInstaller spec. Share the wizard list-dialog
+  helpers and the mod-scan directory walker, and lower the wizard complexity
+  budgets to the new scores.
+- A decision wizard save where every file fails now reports only the errors
+  instead of an empty "Saved:" heading above them.
+- Build the Windows/macOS/Linux executables in `ci.yml` only for pull requests
+  and `v*` tags. Pushes to `main` are already built by the pre-release workflow.
 - Run Linux pytest on a private display so mapped UI tests and smoke-test children
   cannot open windows on the desktop; clean up direct test roots and display processes.
 - Make sidebar autosave, Code-tab apply, and typing in effect fields undoable.

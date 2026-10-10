@@ -185,10 +185,7 @@ def test_recursive_serializer_supports_bare_values_and_duplicate_keys():
 
 def test_compatibility_consumers_share_parser_and_serializer_semantics():
     source = 'root = { value = one value = two text = "# { }" }'
-    tokens = tokenize(source)
 
-    assert ModContext._tokenize(source) == tokens
-    assert ModContext._parse_block(["{", *tokens, "}"], 0)[0] == parse_script(source)
     assert ModContext._parse_text(source) == parse_script(source)
 
     value = {"enabled": True, "nested": {"item": ["a", "b"]}}

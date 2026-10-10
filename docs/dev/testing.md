@@ -17,8 +17,10 @@ sets USERPROFILE because that is what `expanduser("~")` prefers. DISPLAY and
 explicit XAUTHORITY values are unchanged; when XAUTHORITY is unset, an
 existing original `~/.Xauthority` is exported by absolute path before HOME is
 replaced so X11 authentication still works. The same module provides the
-shared Tk fixtures (see "The headless constraint"); everything else lives in
-the file that uses it.
+shared Tk fixtures (see "The headless constraint"). Plain helpers shared by
+several test files live in `tests/tk_helpers.py` (Toplevel bookkeeping and
+widget lookups) and `tests/builders.py` (`make_focus`, `default_decision`),
+imported by bare name. Everything else lives in the file that uses it.
 
 ## Coverage
 

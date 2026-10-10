@@ -131,12 +131,6 @@ class VirtualThumbnailGrid(tk.Frame):
     def pin_count(self) -> int:
         return self._broker.pin_count
 
-    @property
-    def selected_item(self) -> ThumbnailItem | None:
-        if self._selected_index is None:
-            return None
-        return self._items[self._selected_index]
-
     def set_items(
         self, items: Sequence[ThumbnailItem], *, selected_key: str | None = None
     ) -> None:
