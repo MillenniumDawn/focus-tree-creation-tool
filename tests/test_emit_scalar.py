@@ -4,7 +4,7 @@ from hoi4cm.script.syntax import emit_scalar
 
 
 def test_emit_scalar_empty():
-    assert emit_scalar("") == ""
+    assert emit_scalar("") == '""'
 
 
 def test_emit_scalar_no_special_chars():

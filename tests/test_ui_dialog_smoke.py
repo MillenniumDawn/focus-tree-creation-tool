@@ -129,6 +129,7 @@ def _make_fake_app_for_chrome(tk_root: tk.Tk, monkeypatch: pytest.MonkeyPatch) -
         "_dyn_mod_wizard",
         "_decision_wizard",
         "_event_wizard",
+        "_character_wizard",
         "_additional_income_wizard",
         "_validate_tree",
         "_load_mod",
@@ -194,10 +195,11 @@ def test_build_menubar_constructs(tk_root, monkeypatch):
     assert any("HOI4 CONTENT MAKER" in t for t in texts)
     assert any("Help" in t for t in texts)
     preview_rows = controller.show_preview(
-        "tools", ("national_spirit_builder", "validate_tree")
+        "tools", ("national_spirit_builder", "character_editor", "validate_tree")
     )
     tk_root.update()
-    assert len(preview_rows) == 2
+    assert len(preview_rows) == 3
+    assert "Character Editor" in _collect_texts(preview_rows[1])
     assert controller.preview_active
     preview_menu = preview_rows[0].master
     assert int(preview_menu.cget("highlightthickness")) == 3

@@ -14,7 +14,7 @@ a = Analysis(
         # The wizard entry points are resolved lazily at runtime.
         'hoi4cm.wizards.national_spirit', 'hoi4cm.wizards.decision',
         'hoi4cm.wizards.dyn_mod', 'hoi4cm.wizards.additional_income',
-        'hoi4cm.wizards.event',
+        'hoi4cm.wizards.event', 'hoi4cm.wizards.character',
         'tkinter', 'tkinter.ttk', 'tkinter.messagebox',
         'tkinter.filedialog', 'tkinter.font', 'tkinter.scrolledtext',
         'PIL', 'PIL.Image', 'PIL.ImageTk',

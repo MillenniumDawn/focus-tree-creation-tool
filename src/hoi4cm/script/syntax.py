@@ -218,6 +218,8 @@ def emit_scalar(value: str) -> str:
     """
     if '"' in value:
         raise ValueError(f"Cannot emit scalar containing a double quote: {value!r}")
+    if not value:
+        return '""'
     if any(c in value for c in " \t\n\r{}=#"):
         return f'"{value}"'
     return value

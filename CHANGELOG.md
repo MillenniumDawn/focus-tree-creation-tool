@@ -8,6 +8,9 @@ the version by hand. See `AGENTS.md`.
 
 ## Unreleased
 
+- Add a Character Editor for creating and editing character files, with
+  role, trait, and portrait insertion helpers. Preserve repeated role and
+  portrait blocks and unknown fields through import/export.
 - Wait for the progress modal to be mapped before taking its Tk grab, so it no
   longer fails with "grab failed: window not viewable" on a live display.
 - Add Spanish (Español) as an interface language.

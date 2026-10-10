@@ -88,6 +88,9 @@ def _open_and_assert(
 
     if opener_name == "open_additional_income_wizard":
         MOD.is_md = True
+    if opener_name == "open_character_wizard":
+        MOD.loaded = True
+        MOD.root = str(tmp_path)
     before: set[tk.Misc] = set(tk_root.winfo_children())
     opener = getattr(mod, opener_name)
     opener(tk_root)
@@ -146,6 +149,12 @@ def _open_and_assert(
             "open_additional_income_wizard",
             "Additional Income",
             "Additional Income",
+        ),
+        (
+            "hoi4cm.wizards.character",
+            "open_character_wizard",
+            "Character",
+            "duplicate blocks",
         ),
     ],
 )
