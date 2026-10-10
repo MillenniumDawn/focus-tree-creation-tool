@@ -110,7 +110,6 @@ from hoi4cm.mod import (  # noqa: E402
 from hoi4cm.mod.workspace_files import WorkspaceFiles  # noqa: E402
 from hoi4cm.models import (  # noqa: E402
     EditorWorkspace,
-    FocusDocument,
     FocusSidebarValues,
     TreeDocument,
     TreeMetadata,

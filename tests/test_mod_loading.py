@@ -6,7 +6,7 @@ import copy
 import threading
 import types
 from collections.abc import Callable, Iterator
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from ui_fakes import AppFake
@@ -290,12 +290,13 @@ def _mod_loaded_app(monkeypatch: pytest.MonkeyPatch) -> tuple[AppFake, list[str]
     app._lifecycle = None
     app._mod_lbl = types.SimpleNamespace(config=lambda **_kwargs: None)
     app.cv.delete = lambda _tag: None
-    app._apply_md_visibility = lambda: None
-    app._refresh_mod_dropdowns = lambda: None
-    app._update_statusbar = lambda: None
-    app._invalidate_canvas_images = lambda: None
-    app._redraw_now = lambda: None
-    app.after = lambda _delay, _callback: None
+    app_any = cast(Any, app)
+    app_any._apply_md_visibility = lambda: None
+    app_any._refresh_mod_dropdowns = lambda: None
+    app_any._update_statusbar = lambda: None
+    app_any._invalidate_canvas_images = lambda: None
+    app_any._redraw_now = lambda: None
+    app_any.after = lambda _delay, _callback: None
     return app, dialogs
 
 
@@ -337,12 +338,12 @@ def test_on_mod_loaded_records_a_failed_validation_and_still_prompts(
 ) -> None:
     app, _dialogs = _mod_loaded_app(monkeypatch)
     prompts: list[int] = []
-    app.after = lambda delay, _callback: prompts.append(delay)
+    cast(Any, app).after = lambda delay, _callback: prompts.append(delay)
 
     def validate() -> None:
         raise RuntimeError("validation exploded")
 
-    app._schedule_validation = validate
+    cast(Any, app)._schedule_validation = validate
 
     ModLoadingMixin._on_mod_loaded(app, "/mods/sample-mod")
 

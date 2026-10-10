@@ -1,5 +1,5 @@
 from types import SimpleNamespace
-from typing import cast
+from typing import Any, cast
 from unittest.mock import Mock
 
 import pytest
@@ -406,7 +406,7 @@ def test_rmb_on_free_cell_places(monkeypatch: pytest.MonkeyPatch):
 
 def _code_app(focus: Focus) -> AppFake:
     app = AppFake([focus])
-    app.selected = focus
+    cast(Any, app).selected = focus
     app.zoom = 1.0
     app.offset = [0, 0]
     app._undo_stack = UndoStack()
