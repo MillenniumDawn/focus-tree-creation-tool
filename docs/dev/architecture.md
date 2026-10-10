@@ -6,8 +6,10 @@
 
 - **`core/`**: logging, config, paths, i18n, the Pillow import gate
   (`image.py`, so a missing optional extra degrades to placeholders),
-  path/XML sanitizing, the sparse undo stack (`undo.py`, `UndoStack`), and
-  a bounded LRU mapping (`lru.py`, `LRUCache`) backing the in-memory
+  path/XML sanitizing, the sparse undo stack (`undo.py`, `UndoStack`; a
+  keyed `run` folds a stream of edits such as keystrokes in one effect field
+  into one entry, and `record` pushes only if the edit changed something),
+  and a bounded LRU mapping (`lru.py`, `LRUCache`) backing the in-memory
   `PhotoImage` caches. Re-exported flat through `core/__init__.py` (the
   "facade", see below). Everything else in the package can depend on `core`;
   core submodules other than the facade depend on nothing else in `hoi4cm`.

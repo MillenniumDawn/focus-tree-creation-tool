@@ -974,7 +974,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         _refresh()
 
     # ── UNDO ────────────────────────────────────────────────────
-    def _push_undo(self, label="action", touched_ids=None):
+    def _push_undo(self, label="action", touched_ids=None, run=None):
         """Call BEFORE making a change to save enough state to undo it.
 
         `touched_ids` lists the focus ids the caller is about to mutate or
@@ -983,8 +983,11 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         Pass `None` (the default) when the touched set isn't known or is
         most of the tree anyway (bulk import/clear) — that takes a full
         compressed snapshot instead, same as the old behavior.
+
+        `run` keys a stream of edits that undo as one step (typing in one
+        field); see `UndoStack.push`.
         """
-        self._undo_stack.push(label, self.focuses, touched_ids)
+        self._undo_stack.push(label, self.focuses, touched_ids, run=run)
 
     def _undo(self):
         """Restore the previous state, touching only what it changed."""
@@ -2459,6 +2462,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             # Pure select-away with an untouched form must not rebuild indexes.
             if sidebar_values_match_focus(f, values):
                 return
+            self._push_undo("edit focus", touched_ids=(f.id,))
             name_changed = apply_sidebar_values(f, values)
             self.focuses.move(f.id, values.x, values.y)
             # name is the only autosave field that still needs a full index rebuild;
@@ -2555,11 +2559,14 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         Return True on success.
         """
         try:
-            apply_focus_code(
-                f,
-                new_code,
-                focus_lookup=self.focuses,
-            )
+            if new_code == App._build_focus_code(self, f):
+                return True
+            with self._undo_stack.record("edit focus code", self.focuses, (f.id,)):
+                apply_focus_code(
+                    f,
+                    new_code,
+                    focus_lookup=self.focuses,
+                )
             self.focuses.touch()
             self._invalidate_focus_list_structure()
             if self.selected and self.selected.id == f.id:
