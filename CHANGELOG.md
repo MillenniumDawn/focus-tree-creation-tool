@@ -8,6 +8,8 @@ the version by hand. See `AGENTS.md`.
 
 ## Unreleased
 
+- Confirm before unloading an extra focus tree, and make extra-tree loads and
+  unloads undoable with Ctrl+Z, including their loaded-tree metadata.
 - Wait for the progress modal to be mapped before taking its Tk grab, so it no
   longer fails with "grab failed: window not viewable" on a live display.
 - Add Spanish (Español) as an interface language.

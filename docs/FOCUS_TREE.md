@@ -134,3 +134,6 @@ Use zoom out (scroll wheel) to see the full tree. Use Ctrl+A to select all focus
 
 **Undo history:**
 Up to 60 undo steps are kept per session.
+Loading or unloading an extra tree is one undo step. Unloading asks before it
+removes the tree's focuses; Ctrl+Z and Ctrl+Y restore the focuses and loaded-tree
+registry together.

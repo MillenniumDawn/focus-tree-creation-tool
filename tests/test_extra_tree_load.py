@@ -6,6 +6,8 @@ from unittest.mock import Mock
 
 import hoi4_content_maker as m
 import hoi4cm.focus_tree.parse as parse_module
+from hoi4cm.core.undo import UndoStack
+from hoi4cm.editor.extra_tree_undo import ExtraTreeUndoHistory
 from hoi4cm.focus_tree.parse import (
     EmptyFocusTreeError,
     FocusTreeParseBudgetExceeded,
@@ -18,6 +20,8 @@ def _shell():
         _extra_trees=[],
         _shared_focuses=[],
         _joint_focuses=[],
+        _undo_stack=UndoStack(),
+        _tree_undo_history=ExtraTreeUndoHistory(),
         focuses=FocusDocument(),
         _tree_country_tag="",
         _invalidate_tree_badges=Mock(),
@@ -26,8 +30,17 @@ def _shell():
         _redraw=Mock(),
         _invalidate_focus_list_structure=Mock(),
         _fit_all=Mock(),
+        _hide_form=Mock(),
+        _hint=Mock(),
+        cv=Mock(),
+        selected=None,
     )
     app._install_extra_tree = m.App._install_extra_tree.__get__(app)
+    app._push_undo = m.App._push_undo.__get__(app)
+    app._snapshot_extra_tree_state = m.App._snapshot_extra_tree_state.__get__(app)
+    app._restore_extra_tree_state = m.App._restore_extra_tree_state.__get__(app)
+    app._undo = m.App._undo.__get__(app)
+    app._redo = m.App._redo.__get__(app)
     return app
 
 
@@ -80,6 +93,24 @@ def test_load_extra_tree_parses_off_the_tk_thread(tmp_path, monkeypatch):
     assert app._extra_trees[0]["tree_id"] == "TST_shared"
     assert app._shared_focuses == ["TST_shared"]
     app._fit_all.assert_called_once()
+
+    app._undo()
+
+    assert not app.focuses
+    assert app._extra_trees == []
+    assert app._shared_focuses == []
+
+    app._redo()
+
+    assert len(app.focuses) == 1
+    assert app._extra_trees[0]["tree_id"] == "TST_shared"
+    assert app._shared_focuses == ["TST_shared"]
+
+    app._undo()
+    m.App._load_extra_tree(cast(m.App, app), "shared")
+
+    assert len(app.focuses) == 1
+    assert app._extra_trees[0]["tree_id"] == "TST_shared"
 
 
 def test_import_tree_rejects_oversized_file(tmp_path, monkeypatch):

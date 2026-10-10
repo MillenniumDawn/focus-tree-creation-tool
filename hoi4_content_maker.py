@@ -80,6 +80,8 @@ from hoi4cm.core import (  # noqa: E402
     worst_severity_per_focus,
 )
 from hoi4cm.editor import (  # noqa: E402
+    ExtraTreeState,
+    ExtraTreeUndoHistory,
     choose_project_save_path,
     clear_workspace_autosave,
     read_project,
@@ -601,6 +603,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         """Orchestrate full UI construction."""
         self._init_error_log()
         self._undo_stack = UndoStack(maxlen=60)
+        self._tree_undo_history = ExtraTreeUndoHistory(maxlen=60)
         self._tree_id = tk.StringVar(value="TAG_focus_tree")
         # Continuous focus position — stored as integers when read from file
         self._cfp_x = None  # None = no value read; use fallback on export
@@ -974,7 +977,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         _refresh()
 
     # ── UNDO ────────────────────────────────────────────────────
-    def _push_undo(self, label="action", touched_ids=None):
+    def _push_undo(self, label="action", touched_ids=None, *, tree_state=False):
         """Call BEFORE making a change to save enough state to undo it.
 
         `touched_ids` lists the focus ids the caller is about to mutate or
@@ -984,15 +987,47 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         most of the tree anyway (bulk import/clear) — that takes a full
         compressed snapshot instead, same as the old behavior.
         """
+        history = getattr(self, "_tree_undo_history", None)
+        if history is not None and not history.is_aligned(len(self._undo_stack)):
+            history.clear()
         self._undo_stack.push(label, self.focuses, touched_ids)
+        if history is not None:
+            state = self._snapshot_extra_tree_state() if tree_state else None
+            history.push(label, state)
+
+    def _snapshot_extra_tree_state(self):
+        """Capture the registry metadata needed to restore loaded extra trees."""
+        return ExtraTreeState.capture(
+            self._extra_trees, self._shared_focuses, self._joint_focuses
+        )
+
+    def _restore_extra_tree_state(self, state):
+        """Restore extra-tree metadata and refresh its panels before redraw."""
+        restored = ExtraTreeState.capture(
+            state.trees, state.shared_focuses, state.joint_focuses
+        )
+        self._extra_trees[:] = restored.trees
+        self._shared_focuses[:] = restored.shared_focuses
+        self._joint_focuses[:] = restored.joint_focuses
+        self._invalidate_tree_badges()
+        self._refresh_tree_meta_panel()
+        self._refresh_loaded_trees_panel()
 
     def _undo(self):
         """Restore the previous state, touching only what it changed."""
+        history = getattr(self, "_tree_undo_history", None)
+        aligned = history is not None and history.is_aligned(len(self._undo_stack))
         result = self._undo_stack.undo(self.focuses, Focus.from_dict)
         if result is None:
             self._hint("Nothing to undo.")
             return
         label, changed_ids, removed_ids = result
+        if history is not None:
+            tree_state = history.undo(
+                label, self._snapshot_extra_tree_state, aligned=aligned
+            )
+            if tree_state is not None:
+                self._restore_extra_tree_state(tree_state)
         for fid in changed_ids | removed_ids:
             self.cv.delete("F" + str(fid))
         if self.selected and self.selected.id in removed_ids:
@@ -1010,11 +1045,19 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
 
     def _redo(self):
         """Re-apply the most recently undone action."""
+        history = getattr(self, "_tree_undo_history", None)
+        aligned = history is not None and history.is_aligned(len(self._undo_stack))
         result = self._undo_stack.redo(self.focuses, Focus.from_dict)
         if result is None:
             self._hint("Nothing to redo.")
             return
         label, changed_ids, removed_ids = result
+        if history is not None:
+            tree_state = history.redo(
+                label, self._snapshot_extra_tree_state, aligned=aligned
+            )
+            if tree_state is not None:
+                self._restore_extra_tree_state(tree_state)
         for fid in changed_ids | removed_ids:
             self.cv.delete("F" + str(fid))
         if self.selected and self.selected.id in removed_ids:
@@ -4625,6 +4668,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         def on_done(result):
             modal.close()
             parsed, new_focuses = result
+            self._push_undo("load extra tree", touched_ids=(), tree_state=True)
             count, tree_id = self._install_extra_tree(
                 parsed, new_focuses, path, tree_type
             )
@@ -4655,6 +4699,26 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         if tree_idx <= 0 or tree_idx > len(self._extra_trees):
             return
         info = self._extra_trees[tree_idx - 1]
+        focus_count = len(info["focus_ids"])
+        if not messagebox.askyesno(
+            tr("dialog.unload_extra_tree.title", "Unload Tree"),
+            tr(
+                "dialog.unload_extra_tree.body",
+                "Unload {tree} and remove its {count} focus(es) from the canvas?",
+                tree=info["tree_id"],
+                count=focus_count,
+            ),
+            parent=self,
+        ):
+            return
+        touched_ids = set(info["focus_ids"])
+        for later_tree in self._extra_trees[tree_idx:]:
+            touched_ids.update(later_tree["focus_ids"])
+        self._push_undo(
+            "unload extra tree",
+            touched_ids=touched_ids,
+            tree_state=True,
+        )
         tid = info["tree_id"]
         if info["type"] == "shared" and tid in self._shared_focuses:
             self._shared_focuses.remove(tid)
@@ -4990,11 +5054,19 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
                 results, was_cancelled = payload
                 ok, fail = [], []
                 pending_focuses = []
+                pushed_undo = False
                 for r in results:
                     fname = os.path.basename(r["path"])
                     if not r["ok"]:
                         fail.append(f"{fname}: {r['error']}")
                         continue
+                    if not pushed_undo:
+                        self._push_undo(
+                            "load extra trees",
+                            touched_ids=(),
+                            tree_state=True,
+                        )
+                        pushed_undo = True
                     ok.append(fname)
                     parsed = r["parsed"]
                     tree_info = {
