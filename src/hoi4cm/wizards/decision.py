@@ -3111,16 +3111,6 @@ def open_decision_wizard(app):
         )
         txt.pack(side="left", fill="x", expand=True, padx=(0, 4))
 
-        # Bind the widget width to parent to enable proper wrapping
-        def _resize(e, t=txt):
-            try:
-                new_w = max(10, e.width // 7)
-                t.config(width=new_w)
-            except tk.TclError:
-                pass
-
-        parent.bind("<Configure>", _resize, add=True)
-
         # Configure colour tags
         txt.tag_config("base", foreground=base_fg)
         for code, colour in _HOI4_CLR.items():

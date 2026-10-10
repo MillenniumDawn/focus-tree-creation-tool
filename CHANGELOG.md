@@ -8,6 +8,11 @@ the version by hand. See `AGENTS.md`.
 
 ## Unreleased
 
+- Preserve national-spirit raw-edit titles and descriptions, including escaped
+  quotes and versioned localisation keys, when saving to a mod.
+- Stop decision-preview text sizing from growing without bound in withdrawn
+  windows and crashing Xwayland.
+- Run native Windows cache-permission tests before executable builds.
 - Clear undo and redo history on New Tree, Load Project, and autosave restore.
   Ctrl+Z no longer applies an entry from the previous document to the new one.
 - Replace the three copy-pasted wizard GFX browsers and the event wizard's

@@ -135,3 +135,19 @@ gfx lookups, dialog state wiring). Those are Tk-coupled: testing them means
 exercising the non-Tk logic separately from the dialog construction itself.
 The script/loc generators, which carry the loc-export and mod-file writing
 risk the extraction was meant to de-risk, are now covered.
+
+## Dialog interaction coverage
+
+`test_wizard_save.py` drives national-spirit Edit -> Save Raw -> Save to Mod
+with modern and versioned localisation keys, escaped quotes, backslashes, and
+newlines. Raw overrides retain unknown script fields. The wizard and focus
+hydration share `focus_tree.loc.parse_loc_values` instead of separate decoding
+rules. Directory-creation failures are reported with the other save errors.
+
+`test_decision_canvas_preview.py` exercises mapped and withdrawn windows,
+missing and real icons, repeated Preview/Code rebuilds, and closing with a
+rebuild pending. Each case runs in a bounded child pytest process, so a native
+Tk/X11 failure cannot kill the full suite. Its separate coverage report must
+show execution of the real preview renderer. Preview text uses Tk's normal
+packing and word wrapping; deriving its requested character width from the
+parent's pixel width caused a growth loop in withdrawn windows.

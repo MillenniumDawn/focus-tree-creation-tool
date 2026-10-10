@@ -203,6 +203,11 @@ when a desktop DISPLAY is present: mapped canvas, decision-wizard, and
 `visible_tk` tests otherwise put real windows on that desktop. The former
 withdraw-only fixture did not prevent explicit `deiconify()` calls.
 
+The separate `windows-permissions` job runs `tests/test_cache_permissions.py`
+on native Windows. Both new-cache and existing-cache cases inspect real directory
+and database DACLs. Executable builds depend on this job as well as lint and the
+Linux test job, so a cache-permission failure blocks release artifacts.
+
 ```sh
 pytest                            # full suite, private Linux display
 HOI4CM_REQUIRE_TK=1 pytest --cov    # require real Tk coverage, as in CI
