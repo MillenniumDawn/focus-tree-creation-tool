@@ -87,7 +87,8 @@ class _Harness(EffectsMixin, tk.Frame):
         self._eff_box = tk.Frame(self)
         self._eff_box.pack()
         self.focuses = FocusDocument()
-        self.selected: Focus | SimpleNamespace | None = None
+        self.selected: Focus | None = None
+        self._eb_win = None
         self._effects_sig = None
         self._undo_stack = UndoStack()
         self._focus_list_cache = Mock()

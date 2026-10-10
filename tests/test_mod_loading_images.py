@@ -4,21 +4,15 @@ from __future__ import annotations
 
 import gc
 import threading
-from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, cast
 
 import pytest
+from ui_fakes import AppFake
 
 from hoi4cm.mod.context import ModContext
 from hoi4cm.ui import mod_loading, tasks
 from hoi4cm.ui.lifecycle import ApplicationLifecycle
-from hoi4cm.ui.mod_loading import ModLoadingMixin
-
-
-class FakeTcl:
-    def call(self, *_args: object) -> object:
-        return ()
 
 
 class FakeProgress:
@@ -34,35 +28,6 @@ class FakeProgress:
 
     def close(self):
         self.closed = True
-
-
-class FakeApp(ModLoadingMixin):
-    _lifecycle: ApplicationLifecycle | None
-
-    def __init__(self):
-        self._lifecycle = None
-        self.callbacks: list[Callable[[], None]] = []
-        self.loaded_roots: list[str] = []
-        self.tk = FakeTcl()
-
-    def after(self, milliseconds: int, callback: Callable[[], None]) -> object:
-        self.callbacks.append(callback)
-        return callback
-
-    def after_cancel(self, identifier: object) -> None:
-        self.callbacks = [
-            callback for callback in self.callbacks if callback is not identifier
-        ]
-
-    def winfo_exists(self) -> int:
-        return 1
-
-    def _on_mod_loaded(self, root):
-        self.loaded_roots.append(root)
-
-    def flush(self):
-        while self.callbacks:
-            self.callbacks.pop(0)()
 
 
 @pytest.mark.parametrize(
@@ -83,7 +48,7 @@ def test_mod_load_finalizes_images_on_tk(
     scanned = threading.Event()
     resume = threading.Event()
     futures = []
-    app = FakeApp()
+    app = AppFake()
     mod = ModContext()
     mod.use_cache = False
     mod._recent_mods = []

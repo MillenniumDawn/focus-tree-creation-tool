@@ -6,9 +6,10 @@ import copy
 import threading
 import types
 from collections.abc import Callable, Iterator
-from typing import Any
+from typing import Any, cast
 
 import pytest
+from ui_fakes import AppFake
 
 import hoi4cm.core.logger as logmod
 from hoi4cm.mod import MOD
@@ -35,26 +36,6 @@ def error_buffer(
     logmod.clear_errors()
     yield logmod.get_error_entries()
     logmod.clear_errors()
-
-
-class _FakeApp(ModLoadingMixin):
-    _lifecycle: Any
-    _mod_lbl: Any
-    _focus_bundles: Any
-    cv: Any
-    visibility_updates: int
-    dropdown_refreshes: int
-    status_updates: int
-    invalidations: int
-    redraws: int
-    after_calls: list[tuple[int, Callable[[], None]]]
-    _apply_md_visibility: Any
-    _refresh_mod_dropdowns: Any
-    _update_statusbar: Any
-    _invalidate_canvas_images: Any
-    _redraw_now: Any
-    _schedule_validation: Any
-    after: Any
 
 
 class _AcceptingLifecycle:
@@ -148,7 +129,7 @@ def test_load_mod_moves_duplicate_to_front_and_caps_recent_mods(
         background_calls.append((worker, on_done, kwargs))
 
     monkeypatch.setattr(mod_loading, "run_bg", run_bg)
-    app = _FakeApp()
+    app = AppFake()
     app._lifecycle = _AcceptingLifecycle()
     monkeypatch.setattr(app, "_on_mod_loaded", loaded.append)
     previous_recent = MOD._recent_mods.copy()  # type: ignore[attr-defined]
@@ -198,7 +179,7 @@ def test_load_mod_is_rejected_when_lifecycle_is_not_accepting(
 
     monkeypatch.setattr(mod_loading.filedialog, "askdirectory", askdirectory)
     monkeypatch.setattr(MOD, "save_config", save_config)
-    app = _FakeApp()
+    app = AppFake()
     app._lifecycle = type("ClosedLifecycle", (), {"accepting": False})()
 
     app._load_mod()
@@ -242,9 +223,9 @@ def test_on_mod_loaded_invalidates_canvas_and_wizard_images_on_ui_thread(
         lambda _mod, name: image_loads.append((name, threading.get_ident())),
     )
 
-    app = _FakeApp()
+    app = AppFake()
     app._mod_lbl = FakeLabel()
-    app._focus_bundles = {"stale": object()}
+    app._focus_bundles = {7: object()}
     app.cv = FakeCanvas()
     app.visibility_updates = 0
     app.dropdown_refreshes = 0
@@ -252,23 +233,28 @@ def test_on_mod_loaded_invalidates_canvas_and_wizard_images_on_ui_thread(
     app.invalidations = 0
     app.redraws = 0
     app.after_calls = []
-    app._apply_md_visibility = lambda: setattr(
-        app, "visibility_updates", app.visibility_updates + 1
+
+    def bump(attribute: str) -> Callable[[], None]:
+        def update() -> None:
+            setattr(app, attribute, getattr(app, attribute) + 1)
+
+        return update
+
+    monkeypatch.setattr(
+        app, "_apply_md_visibility", bump("visibility_updates"), raising=False
     )
-    app._refresh_mod_dropdowns = lambda: setattr(
-        app, "dropdown_refreshes", app.dropdown_refreshes + 1
+    monkeypatch.setattr(
+        app, "_refresh_mod_dropdowns", bump("dropdown_refreshes"), raising=False
     )
-    app._update_statusbar = lambda: setattr(
-        app, "status_updates", app.status_updates + 1
+    monkeypatch.setattr(app, "_update_statusbar", bump("status_updates"))
+    monkeypatch.setattr(app, "_invalidate_canvas_images", bump("invalidations"))
+    monkeypatch.setattr(app, "_redraw_now", bump("redraws"))
+    monkeypatch.setattr(
+        app, "after", lambda delay, callback: app.after_calls.append((delay, callback))
     )
-    app._invalidate_canvas_images = lambda: setattr(
-        app, "invalidations", app.invalidations + 1
-    )
-    app._redraw_now = lambda: setattr(app, "redraws", app.redraws + 1)
-    app.after = lambda delay, callback: app.after_calls.append((delay, callback))
     ui_thread = threading.get_ident()
 
-    app._on_mod_loaded("/mods/sample-mod")
+    ModLoadingMixin._on_mod_loaded(app, "/mods/sample-mod")
 
     assert app._mod_lbl.configurations[0]["text"].startswith("📂 sample-mod")
     assert app.visibility_updates == 1
@@ -276,6 +262,7 @@ def test_on_mod_loaded_invalidates_canvas_and_wizard_images_on_ui_thread(
     assert app.status_updates == 1
     assert app.invalidations == 1
     assert app._focus_bundles == {}
+    assert app.validation_schedules == 1
     assert app.cv.deleted == ["focus"]
     assert app.redraws == 1
     assert cache == {}
@@ -284,7 +271,7 @@ def test_on_mod_loaded_invalidates_canvas_and_wizard_images_on_ui_thread(
     assert app.after_calls[0][0] == 150
 
 
-def _mod_loaded_app(monkeypatch: pytest.MonkeyPatch) -> tuple[_FakeApp, list[str]]:
+def _mod_loaded_app(monkeypatch: pytest.MonkeyPatch) -> tuple[AppFake, list[str]]:
     """A fake app whose Mod Loaded dialog text is collected into the list."""
     dialogs: list[str] = []
     monkeypatch.setattr(
@@ -299,15 +286,17 @@ def _mod_loaded_app(monkeypatch: pytest.MonkeyPatch) -> tuple[_FakeApp, list[str
     monkeypatch.setattr(MOD, "_img_errors", [])
     monkeypatch.setattr(MOD, "failed_steps", [])
     monkeypatch.setattr(MOD, "unparsable_files", [])
-    app = _FakeApp()
+    app = AppFake()
+    app._lifecycle = None
     app._mod_lbl = types.SimpleNamespace(config=lambda **_kwargs: None)
-    app.cv = types.SimpleNamespace(delete=lambda _tag: None)
-    app._apply_md_visibility = lambda: None
-    app._refresh_mod_dropdowns = lambda: None
-    app._update_statusbar = lambda: None
-    app._invalidate_canvas_images = lambda: None
-    app._redraw_now = lambda: None
-    app.after = lambda _delay, _callback: None
+    app.cv.delete = lambda _tag: None
+    app_any = cast(Any, app)
+    app_any._apply_md_visibility = lambda: None
+    app_any._refresh_mod_dropdowns = lambda: None
+    app_any._update_statusbar = lambda: None
+    app_any._invalidate_canvas_images = lambda: None
+    app_any._redraw_now = lambda: None
+    app_any.after = lambda _delay, _callback: None
     return app, dialogs
 
 
@@ -319,7 +308,7 @@ def test_on_mod_loaded_names_failed_steps_and_unparsable_files(
     monkeypatch.setattr(MOD, "failed_steps", ["Events", "Characters"])
     monkeypatch.setattr(MOD, "unparsable_files", paths)
 
-    app._on_mod_loaded("/mods/sample-mod")
+    ModLoadingMixin._on_mod_loaded(app, "/mods/sample-mod")
 
     assert len(dialogs) == 1
     assert "Events, Characters" in dialogs[0]
@@ -336,7 +325,7 @@ def test_on_mod_loaded_adds_nothing_for_a_clean_scan(
 ) -> None:
     app, dialogs = _mod_loaded_app(monkeypatch)
 
-    app._on_mod_loaded("/mods/sample-mod")
+    ModLoadingMixin._on_mod_loaded(app, "/mods/sample-mod")
 
     assert len(dialogs) == 1
     assert "failed" not in dialogs[0]
@@ -349,14 +338,14 @@ def test_on_mod_loaded_records_a_failed_validation_and_still_prompts(
 ) -> None:
     app, _dialogs = _mod_loaded_app(monkeypatch)
     prompts: list[int] = []
-    app.after = lambda delay, _callback: prompts.append(delay)
+    cast(Any, app).after = lambda delay, _callback: prompts.append(delay)
 
     def validate() -> None:
         raise RuntimeError("validation exploded")
 
-    app._schedule_validation = validate
+    cast(Any, app)._schedule_validation = validate
 
-    app._on_mod_loaded("/mods/sample-mod")
+    ModLoadingMixin._on_mod_loaded(app, "/mods/sample-mod")
 
     assert len(error_buffer) == 1
     assert "validation exploded" in error_buffer[0][1]

@@ -7,14 +7,14 @@ headless dev box.
 
 import tkinter as tk
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import cast
 
 import pytest
+from ui_fakes import AppFake
 
 import hoi4_content_maker as app_module
 from hoi4cm.models import Focus
 from hoi4cm.models.document import FocusDocument
-from hoi4cm.ui.canvas import CanvasMixin
 from hoi4cm.ui.canvas_scheduler import RedrawChannel
 from hoi4cm.ui.theme import XGRID, YGRID
 from hoi4cm.ui.viewport import focus_visible, visible_world_rect
@@ -31,57 +31,13 @@ def tk_root(tk_root):
     return tk_root
 
 
-class _FakeApp(CanvasMixin):
-    """Bare host exposing just the attributes _draw_focus/_draw_lines touch."""
-
-    _cfp_x: Any
-    _cfp_y: Any
-
-    CANVAS_MIN_SIZE = 10
-    CANVAS_EXPAND_STEP = 5
-
-    def __init__(self, cv):
-        self.cv = cv
-        self.focuses = {}
-        self.offset = [0, 0]
-        self.zoom = 1.0
-        self.selected = None
-        self._multi_sel = set()
-        self.mutex_mode = False
-        self.mutex_src = None
-        self._extra_trees = []
-        self._redraw_job = None
-        self._lines_job = None
-        self._lines = []
-        self._grid_on = True
-        self._grid_key = None
-        self._grid_item = None
-        # _reset_canvas_bounds sets these, but spelling them out here keeps
-        # them declared on the class for the tests that widen the bounds.
-        self._canvas_min = [0, 0]
-        self._canvas_max = [self.CANVAS_MIN_SIZE - 1, self.CANVAS_MIN_SIZE - 1]
-        # _unload_extra_tree touches these; the App defines them, the bare
-        # host declares them so tests can override without surprising pylint.
-        self._shared_focuses = []
-        self._joint_focuses = []
-        self._invalidate_tree_badges = lambda: None
-        self._refresh_tree_meta_panel = lambda: None
-        self._refresh_loaded_trees_panel = lambda: None
-        self._invalidate_focus_list_structure = lambda: None
-        self._update_statusbar = lambda: None
-        self._reset_canvas_bounds()
-
-    def _get_tree_badge(self, tree_idx):
-        return "", "#374151"
-
-
 def _states(cv, fid):
     return {cv.itemcget(i, "state") for i in cv.find_withtag(f"F{fid}")}
 
 
 def test_offscreen_focus_gets_no_items(tk_root):
     cv = tk.Canvas(tk_root, width=200, height=200)
-    app = _FakeApp(cv)
+    app = AppFake(cv=cv)
     onscreen = Focus(id=1, x=1, y=1)
     offscreen = Focus(id=2, x=500, y=500)
 
@@ -94,7 +50,7 @@ def test_offscreen_focus_gets_no_items(tk_root):
 
 def test_pan_onscreen_then_offscreen_reclaims_bundle(tk_root):
     cv = tk.Canvas(tk_root, width=200, height=200)
-    app = _FakeApp(cv)
+    app = AppFake(cv=cv)
     f = Focus(id=3, x=500, y=500)
 
     app._draw_focus(f, FAR_RECT)
@@ -117,7 +73,7 @@ def test_pan_onscreen_then_offscreen_reclaims_bundle(tk_root):
 
 def test_draw_key_fast_exits_when_unchanged(tk_root):
     cv = tk.Canvas(tk_root, width=200, height=200)
-    app = _FakeApp(cv)
+    app = AppFake(cv=cv)
     f = Focus(id=4, x=5, y=5)
 
     app._draw_focus(f, FAR_RECT)
@@ -131,7 +87,7 @@ def test_draw_key_fast_exits_when_unchanged(tk_root):
 
 def test_draw_key_updates_changed_icon(tk_root):
     cv = tk.Canvas(tk_root, width=200, height=200)
-    app = _FakeApp(cv)
+    app = AppFake(cv=cv)
     f = Focus(id=5, x=5, y=5)
 
     app._draw_focus(f, FAR_RECT)
@@ -144,7 +100,7 @@ def test_draw_key_updates_changed_icon(tk_root):
 
 def test_focus_probe_recovers_after_canvas_is_cleared(tk_root):
     cv = tk.Canvas(tk_root, width=200, height=200)
-    app = _FakeApp(cv)
+    app = AppFake(cv=cv)
     f = Focus(id=6, x=5, y=5)
 
     app._draw_focus(f, FAR_RECT)
@@ -157,7 +113,7 @@ def test_focus_probe_recovers_after_canvas_is_cleared(tk_root):
 
 def test_rendered_frame_uses_one_canvas_probe(tk_root, monkeypatch):
     cv = tk.Canvas(tk_root, width=200, height=200)
-    app = _FakeApp(cv)
+    app = AppFake(cv=cv)
     app.focuses = FocusDocument(_linked_chain(3))
     for name in (
         "_draw_canvas_bounds",
@@ -198,7 +154,7 @@ def test_rendered_frame_uses_one_canvas_probe(tk_root, monkeypatch):
 
 def test_interrupted_frame_retries_pending_label_stacking(tk_root, monkeypatch):
     cv = tk.Canvas(tk_root, width=200, height=200)
-    app = _FakeApp(cv)
+    app = AppFake(cv=cv)
     app.focuses = FocusDocument(_linked_chain(3))
     for name in (
         "_draw_canvas_bounds",
@@ -238,7 +194,7 @@ def test_interrupted_frame_retries_pending_label_stacking(tk_root, monkeypatch):
 
 def test_draw_focus_uses_localized_label_with_name_fallback(tk_root):
     cv = tk.Canvas(tk_root, width=200, height=200)
-    app = _FakeApp(cv)
+    app = AppFake(cv=cv)
     f = Focus(id=7, x=5, y=5)
     f.name = "script_name"
     f.loc_name = "Title"
@@ -254,7 +210,7 @@ def test_draw_focus_uses_localized_label_with_name_fallback(tk_root):
 
 def test_retained_focus_bundles_are_bounded_by_visible_set(tk_root):
     cv = tk.Canvas(tk_root, width=200, height=200)
-    app = _FakeApp(cv)
+    app = AppFake(cv=cv)
     focuses = [Focus(id=index + 1, x=index * 10, y=0) for index in range(20)]
     app.focuses = {focus.id: focus for focus in focuses}
 
@@ -271,7 +227,7 @@ def test_retained_focus_bundles_are_bounded_by_visible_set(tk_root):
 
 def test_low_zoom_uses_three_item_focus_lod(tk_root):
     cv = tk.Canvas(tk_root, width=200, height=200)
-    app = _FakeApp(cv)
+    app = AppFake(cv=cv)
     app.zoom = 0.3
     focus = Focus(id=8, x=1, y=1)
 
@@ -282,7 +238,7 @@ def test_low_zoom_uses_three_item_focus_lod(tk_root):
 
 
 def test_fit_all_scoped_to_main_tree_keeps_other_trees_culled(mapped_canvas):
-    app = _FakeApp(mapped_canvas)
+    app = AppFake(cv=mapped_canvas)
     main_focus = Focus(id=9, x=0, y=0)
     extra_focus = Focus(id=10, x=10, y=4)
     extra_focus.tree_idx = 1
@@ -296,7 +252,7 @@ def test_fit_all_scoped_to_main_tree_keeps_other_trees_culled(mapped_canvas):
 
 
 def test_fit_all_without_scope_still_fits_every_tree(mapped_canvas):
-    app = _FakeApp(mapped_canvas)
+    app = AppFake(cv=mapped_canvas)
     main_focus = Focus(id=11, x=0, y=0)
     extra_focus = Focus(id=12, x=10, y=4)
     extra_focus.tree_idx = 1
@@ -310,7 +266,7 @@ def test_fit_all_without_scope_still_fits_every_tree(mapped_canvas):
 
 
 def test_fit_all_falls_back_to_every_focus_when_scope_is_empty(mapped_canvas):
-    app = _FakeApp(mapped_canvas)
+    app = AppFake(cv=mapped_canvas)
     extra_focus = Focus(id=13, x=10, y=4)
     extra_focus.tree_idx = 1
     app.focuses = {extra_focus.id: extra_focus}
@@ -323,7 +279,7 @@ def test_fit_all_falls_back_to_every_focus_when_scope_is_empty(mapped_canvas):
 
 def test_wheel_redraw_requests_share_one_tk_job(tk_root, monkeypatch):
     cv = tk.Canvas(tk_root, width=200, height=200)
-    app = _FakeApp(cv)
+    app = AppFake(cv=cv)
     callbacks = []
     monkeypatch.setattr(
         cv,
@@ -360,8 +316,8 @@ def test_bbox_growth_lands_on_the_same_bounds_as_scanning_every_focus(
     tk_root, positions
 ):
     cv = tk.Canvas(tk_root, width=200, height=200)
-    reference = _FakeApp(cv)
-    app = _FakeApp(cv)
+    reference = AppFake(cv=cv)
+    app = AppFake(cv=cv)
     focuses = [Focus(id=index + 1, x=x, y=y) for index, (x, y) in enumerate(positions)]
     reference.focuses = {f.id: f for f in focuses}
     app.focuses = FocusDocument(focuses)
@@ -373,7 +329,7 @@ def test_bbox_growth_lands_on_the_same_bounds_as_scanning_every_focus(
 
 def test_focus_bounds_are_recomputed_when_the_document_revision_moves(tk_root):
     cv = tk.Canvas(tk_root, width=200, height=200)
-    app = _FakeApp(cv)
+    app = AppFake(cv=cv)
     focus = Focus(id=14, x=1, y=1)
     app.focuses = FocusDocument([focus])
 
@@ -388,7 +344,7 @@ def test_focus_bounds_are_recomputed_when_the_document_revision_moves(tk_root):
 
 def test_focus_bounds_reuses_the_cache_while_the_revision_holds(tk_root):
     cv = tk.Canvas(tk_root, width=200, height=200)
-    app = _FakeApp(cv)
+    app = AppFake(cv=cv)
     focus = Focus(id=15, x=1, y=1)
     app.focuses = FocusDocument([focus])
     app._focus_bounds()
@@ -402,7 +358,7 @@ def test_focus_bounds_reuses_the_cache_while_the_revision_holds(tk_root):
 
 def test_focus_bounds_of_an_empty_document_grows_nothing(tk_root):
     cv = tk.Canvas(tk_root, width=200, height=200)
-    app = _FakeApp(cv)
+    app = AppFake(cv=cv)
     app.focuses = FocusDocument()
     bounds = list(app._canvas_min), list(app._canvas_max)
 
@@ -432,7 +388,7 @@ def mapped_canvas(tk_root):
 
 
 def test_minimap_toggle_renders_hides_and_reopens(mapped_canvas):
-    app = _FakeApp(mapped_canvas)
+    app = AppFake(cv=mapped_canvas)
     focus = Focus(id=16, x=1, y=1)
     app.focuses = FocusDocument([focus])
 
@@ -457,7 +413,7 @@ def test_grid_covers_the_viewport_without_drawing_the_whole_canvas_extent(
     mapped_canvas,
 ):
     cv = mapped_canvas
-    app = _FakeApp(cv)
+    app = AppFake(cv=cv)
     app._canvas_min = [-500, -500]
     app._canvas_max = [500, 500]
 
@@ -486,7 +442,7 @@ def test_grid_covers_the_viewport_without_drawing_the_whole_canvas_extent(
 
 def test_grid_reuses_its_line_items_across_regenerations(mapped_canvas):
     cv = mapped_canvas
-    app = _FakeApp(cv)
+    app = AppFake(cv=cv)
 
     app._draw_grid()
     first = list(cv.find_withtag("grid"))
@@ -500,7 +456,7 @@ def test_grid_reuses_its_line_items_across_regenerations(mapped_canvas):
 
 def test_grid_shrinking_hides_the_surplus_lines(mapped_canvas):
     cv = mapped_canvas
-    app = _FakeApp(cv)
+    app = AppFake(cv=cv)
     app._canvas_min = [-500, -500]
     app._canvas_max = [500, 500]
 
@@ -516,7 +472,7 @@ def test_grid_shrinking_hides_the_surplus_lines(mapped_canvas):
 
 def test_grid_regenerates_after_the_canvas_is_cleared(mapped_canvas):
     cv = mapped_canvas
-    app = _FakeApp(cv)
+    app = AppFake(cv=cv)
     app._draw_grid()
     assert _grid_lines(cv)
 
@@ -528,7 +484,7 @@ def test_grid_regenerates_after_the_canvas_is_cleared(mapped_canvas):
 
 def test_grid_toggled_off_hides_every_line(mapped_canvas):
     cv = mapped_canvas
-    app = _FakeApp(cv)
+    app = AppFake(cv=cv)
     app._draw_grid()
     assert _grid_lines(cv)
 
@@ -548,7 +504,7 @@ def test_coord_labels_reuse_items_and_skip_an_unchanged_view(
     mapped_canvas, monkeypatch
 ):
     cv = mapped_canvas
-    app = _FakeApp(cv)
+    app = AppFake(cv=cv)
     app._draw_coord_labels()
     original_items = set(cv.find_withtag("coord_lbl"))
     origin_line = app._coord_label_pools["line"][0]
@@ -592,7 +548,7 @@ def test_coord_labels_reuse_items_and_skip_an_unchanged_view(
 
 def test_coord_label_surplus_is_hidden_and_reused(mapped_canvas):
     cv = mapped_canvas
-    app = _FakeApp(cv)
+    app = AppFake(cv=cv)
     app._draw_coord_labels()
     pool_ids = {item for pool in app._coord_label_pools.values() for item in pool}
 
@@ -609,7 +565,7 @@ def test_coord_label_surplus_is_hidden_and_reused(mapped_canvas):
 
 def test_coord_labels_keep_grid_and_focus_layering(mapped_canvas):
     cv = mapped_canvas
-    app = _FakeApp(cv)
+    app = AppFake(cv=cv)
     app._draw_grid()
     focus = cv.create_rectangle(200, 100, 210, 110, tags="focus")
     app._draw_coord_labels()
@@ -625,7 +581,7 @@ def test_coord_labels_keep_grid_and_focus_layering(mapped_canvas):
 
 def test_coord_label_pool_growth_keeps_text_above_its_chip(mapped_canvas):
     cv = mapped_canvas
-    app = _FakeApp(cv)
+    app = AppFake(cv=cv)
     app.offset = [40, 40]
     app._draw_grid()
     focus = cv.create_rectangle(200, 100, 210, 110, tags="focus")
@@ -652,7 +608,7 @@ def test_coord_label_pool_growth_keeps_text_above_its_chip(mapped_canvas):
 
 def test_legend_pool_skips_unchanged_rows_and_hides_surplus(mapped_canvas, monkeypatch):
     cv = mapped_canvas
-    app = _FakeApp(cv)
+    app = AppFake(cv=cv)
     app._extra_trees = [
         {"tree_id": f"tree_{index}", "type": "shared"} for index in range(3)
     ]
@@ -698,7 +654,7 @@ def test_legend_pool_skips_unchanged_rows_and_hides_surplus(mapped_canvas, monke
 
 def test_legend_stays_above_focus_items_after_view_changes(mapped_canvas):
     cv = mapped_canvas
-    app = _FakeApp(cv)
+    app = AppFake(cv=cv)
     app._extra_trees = [{"tree_id": "shared", "type": "shared"}]
     app._draw_canvas_legend()
     focus = cv.create_rectangle(200, 100, 210, 110, tags="focus")
@@ -716,7 +672,7 @@ def test_same_view_frames_keep_legend_above_recreated_cfp(
     mapped_canvas, monkeypatch, marker_tree
 ):
     cv = mapped_canvas
-    app = _FakeApp(cv)
+    app = AppFake(cv=cv)
     app._extra_trees = [{"tree_id": "shared", "type": "shared"}]
     cfp = {"cfp_x": 16, "cfp_y": cv.winfo_height() - 20}
     if marker_tree == "main":
@@ -746,7 +702,7 @@ def test_same_view_frames_keep_legend_above_recreated_cfp(
 
 def test_canvas_pools_recover_after_external_delete_all(mapped_canvas):
     cv = mapped_canvas
-    app = _FakeApp(cv)
+    app = AppFake(cv=cv)
     app._extra_trees = [{"tree_id": "shared", "type": "shared"}]
     app._draw_coord_labels()
     app._draw_canvas_legend()
@@ -765,7 +721,7 @@ def test_canvas_pools_recover_after_external_delete_all(mapped_canvas):
 
 def test_unmapped_canvas_still_gets_a_grid_over_the_whole_extent(tk_root):
     cv = tk.Canvas(tk_root, width=200, height=200)  # withdrawn root: winfo_* == 1
-    app = _FakeApp(cv)
+    app = AppFake(cv=cv)
 
     app._draw_grid()
 
@@ -782,7 +738,7 @@ def _linked_chain(count, *, spacing=1):
 
 def test_unload_extra_tree_deletes_pooled_connection_items(tk_root, monkeypatch):
     cv = tk.Canvas(tk_root, width=200, height=200)
-    app = _FakeApp(cv)
+    app = AppFake(cv=cv)
     focuses = _linked_chain(12)
     app.focuses = FocusDocument(focuses)
     app._extra_trees = [
@@ -814,7 +770,7 @@ def test_unload_extra_tree_deletes_pooled_connection_items(tk_root, monkeypatch)
 
 def test_narrow_frame_hides_the_lines_the_wide_frame_left_behind(tk_root):
     cv = tk.Canvas(tk_root, width=200, height=200)
-    app = _FakeApp(cv)
+    app = AppFake(cv=cv)
     app.focuses = FocusDocument(_linked_chain(40))
 
     app._draw_lines((-1.0, -1.0, 100.0, 1.0))  # every edge visible
@@ -830,7 +786,7 @@ def test_narrow_frame_hides_the_lines_the_wide_frame_left_behind(tk_root):
 
 def test_unchanged_line_frame_skips_tk_updates(tk_root, monkeypatch):
     cv = tk.Canvas(tk_root, width=200, height=200)
-    app = _FakeApp(cv)
+    app = AppFake(cv=cv)
     app.focuses = FocusDocument(_linked_chain(3))
     rect = (-1.0, -1.0, 100.0, 1.0)
     app._draw_lines(rect)
@@ -853,7 +809,7 @@ def test_unchanged_line_frame_skips_tk_updates(tk_root, monkeypatch):
 
 def test_line_frame_redraws_after_scene_or_view_changes(tk_root, monkeypatch):
     cv = tk.Canvas(tk_root, width=200, height=200)
-    app = _FakeApp(cv)
+    app = AppFake(cv=cv)
     focuses = _linked_chain(3)
     app.focuses = FocusDocument(focuses)
     rect = (-1.0, -1.0, 100.0, 1.0)
@@ -886,7 +842,7 @@ def test_line_frame_redraws_after_scene_or_view_changes(tk_root, monkeypatch):
 
 def test_line_frame_recovers_from_tk_mutation_failure(tk_root, monkeypatch):
     cv = tk.Canvas(tk_root, width=200, height=200)
-    app = _FakeApp(cv)
+    app = AppFake(cv=cv)
     app.focuses = FocusDocument(_linked_chain(3))
     rect = (-1.0, -1.0, 100.0, 1.0)
     app._draw_lines(rect)
@@ -916,7 +872,7 @@ def test_line_frame_recovers_from_tk_mutation_failure(tk_root, monkeypatch):
 
 def test_line_edges_can_be_removed_and_restored(tk_root):
     cv = tk.Canvas(tk_root, width=200, height=200)
-    app = _FakeApp(cv)
+    app = AppFake(cv=cv)
     focuses = _linked_chain(3)
     app.focuses = FocusDocument(focuses)
     rect = (-1.0, -1.0, 100.0, 1.0)
@@ -941,7 +897,7 @@ def test_line_edges_can_be_removed_and_restored(tk_root):
 
 def test_line_pool_recovers_after_canvas_clear(tk_root):
     cv = tk.Canvas(tk_root, width=200, height=200)
-    app = _FakeApp(cv)
+    app = AppFake(cv=cv)
     app.focuses = FocusDocument(_linked_chain(3))
     rect = (-1.0, -1.0, 100.0, 1.0)
 
@@ -954,7 +910,7 @@ def test_line_pool_recovers_after_canvas_clear(tk_root):
 
 def test_surplus_lines_are_hidden_once_not_once_per_frame(tk_root, monkeypatch):
     cv = tk.Canvas(tk_root, width=200, height=200)
-    app = _FakeApp(cv)
+    app = AppFake(cv=cv)
     app.focuses = FocusDocument(_linked_chain(40))
     app._draw_lines((-1.0, -1.0, 100.0, 1.0))  # grow the pool to 40 edges
     pool = len(app._lines)
@@ -980,7 +936,7 @@ def test_surplus_lines_are_hidden_once_not_once_per_frame(tk_root, monkeypatch):
 
 def test_full_redraw_cancels_pending_line_job(tk_root, monkeypatch):
     cv = tk.Canvas(tk_root, width=200, height=200)
-    app = _FakeApp(cv)
+    app = AppFake(cv=cv)
     app._lines_job = "after#lines"
     canceled = []
     monkeypatch.setattr(cv, "after_cancel", canceled.append)
@@ -994,7 +950,7 @@ def test_full_redraw_cancels_pending_line_job(tk_root, monkeypatch):
 
 def test_pan_moves_the_cfp_marker_with_the_offset(tk_root):
     cv = tk.Canvas(tk_root, width=200, height=200)
-    app = _FakeApp(cv)
+    app = AppFake(cv=cv)
     app._cfp_x = XGRID * 5
     app._cfp_y = YGRID * 5
 
@@ -1013,7 +969,7 @@ def test_pan_moves_the_cfp_marker_with_the_offset(tk_root):
 
 def test_cfp_marker_hidden_below_the_zoom_floor(tk_root):
     cv = tk.Canvas(tk_root, width=200, height=200)
-    app = _FakeApp(cv)
+    app = AppFake(cv=cv)
     app.zoom = 0.2
     app._cfp_x = XGRID * 5
     app._cfp_y = YGRID * 5
@@ -1025,7 +981,7 @@ def test_cfp_marker_hidden_below_the_zoom_floor(tk_root):
 
 def test_cfp_marker_culled_when_outside_the_viewport(tk_root, monkeypatch):
     cv = tk.Canvas(tk_root, width=200, height=200)
-    app = _FakeApp(cv)
+    app = AppFake(cv=cv)
     app._cfp_x = XGRID * 500
     app._cfp_y = YGRID * 500
     monkeypatch.setattr(app, "_visible_rect", lambda: FAR_RECT)

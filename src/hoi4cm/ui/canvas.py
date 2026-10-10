@@ -57,13 +57,8 @@ class CanvasMixin:
 
     # App-owned attributes accessed through the mixin. Declared here so
     # type-checkers know they exist on the concrete App instance.
-    cv: Any  # type: ignore[no-redef]
-    focuses: Any  # type: ignore[no-redef]
-    offset: Any  # type: ignore[no-redef]
-    zoom: Any  # type: ignore[no-redef]
-    selected: Any  # type: ignore[no-redef]
-    _multi_sel: Any  # type: ignore[no-redef]
-    _multisel_mode: Any  # type: ignore[no-redef]
+    _multi_sel: set[int]
+    _multisel_mode: bool
     mutex_src: Any  # type: ignore[no-redef]
     mutex_mode: Any  # type: ignore[no-redef]
     _lines: Any  # type: ignore[no-redef]
@@ -72,7 +67,7 @@ class CanvasMixin:
     _drag: Any  # type: ignore[no-redef]
     _redraw_state: Any  # type: ignore[no-redef]
     _scene_index: Any  # type: ignore[no-redef]
-    _focus_bundles: Any  # type: ignore[no-redef]
+    _focus_bundles: dict[int, FocusCanvasBundle]
     _canvas_probe: Any  # type: ignore[no-redef]
     _rendering_frame: Any  # type: ignore[no-redef]
     _focus_line_stack_dirty: Any  # type: ignore[no-redef]
@@ -92,17 +87,9 @@ class CanvasMixin:
     _legend_used: Any  # type: ignore[no-redef]
     _legend_key: Any  # type: ignore[no-redef]
     _legend_stack_key: Any  # type: ignore[no-redef]
-    _grid_on: Any  # type: ignore[no-redef]
-    _canvas_min: Any  # type: ignore[no-redef]
-    _canvas_max: Any  # type: ignore[no-redef]
-    _extra_trees: Any  # type: ignore[no-redef]
-    _lifecycle: Any  # type: ignore[no-redef]
-    _image_broker: Any  # type: ignore[no-redef]
+    _grid_on: bool
     _image_poll_job: Any  # type: ignore[no-redef]
-    _validation_worst: dict[int, Severity]  # type: ignore[no-redef]
-
-    def __getattr__(self, name: str) -> Any:  # type: ignore[no-redef]
-        raise AttributeError(name)
+    _validation_worst: dict[int, Severity]
 
     # Above this many loaded focuses, the minimap buckets dots to one per
     # occupied pixel cell and skips prereq lines (see _draw_minimap).
@@ -114,7 +101,7 @@ class CanvasMixin:
             get_executor(self), generation=lambda: MOD.graphics_catalog.generation
         )
         self._image_poll_job = None
-        lifecycle = getattr(self, "_lifecycle", None)
+        lifecycle = self._lifecycle
         if lifecycle is not None:
             lifecycle.add_resource(self._close_canvas_tasks)
         c.bind("<ButtonPress-1>", self._lmb_dn)
@@ -139,7 +126,7 @@ class CanvasMixin:
 
     def _poll_images(self):
         self._image_poll_job = None
-        lifecycle = getattr(self, "_lifecycle", None)
+        lifecycle = self._lifecycle
         if lifecycle is not None and not lifecycle.accepting:
             return
         self._image_broker.drain()
@@ -147,7 +134,7 @@ class CanvasMixin:
             self._image_poll_job = self.cv.after(16, self._poll_images)
 
     def _start_image_poll(self):
-        lifecycle = getattr(self, "_lifecycle", None)
+        lifecycle = self._lifecycle
         if (
             (lifecycle is None or lifecycle.accepting)
             and self._image_poll_job is None
@@ -156,7 +143,7 @@ class CanvasMixin:
             self._image_poll_job = self.cv.after(16, self._poll_images)
 
     def _invalidate_canvas_images(self):
-        image_broker = getattr(self, "_image_broker", None)
+        image_broker = self._image_broker
         if image_broker is not None:
             image_broker.clear()
 
@@ -170,7 +157,7 @@ class CanvasMixin:
             except tk.TclError:
                 pass
             setattr(self, attribute, None)
-        image_broker = getattr(self, "_image_broker", None)
+        image_broker = self._image_broker
         if image_broker is not None:
             image_broker.close()
 
@@ -314,8 +301,6 @@ class CanvasMixin:
             self._redraw_state = DirtyRedrawState()
         if not hasattr(self, "_scene_index"):
             self._scene_index = SceneIndex()
-        if not hasattr(self, "_focus_bundles"):
-            self._focus_bundles = {}
         if not hasattr(self, "_focus_line_stack_dirty"):
             self._focus_line_stack_dirty = False
         if not hasattr(self, "_canvas_probe"):
@@ -502,7 +487,7 @@ class CanvasMixin:
         W = max(1, self.cv.winfo_width())
         H = max(1, self.cv.winfo_height())
         z = self.zoom
-        on = getattr(self, "_grid_on", True)
+        on = self._grid_on
         stepx = XGRID * z
 
         # Rebuild only when something visible actually changed.
@@ -858,7 +843,7 @@ class CanvasMixin:
         if bundle is not None:
             for item in bundle.items:
                 self.cv.delete(item)
-        image_broker = getattr(self, "_image_broker", None)
+        image_broker = self._image_broker
         if image_broker is not None:
             image_broker.release(("canvas", focus_id))
 
@@ -934,7 +919,7 @@ class CanvasMixin:
         fill_col = FC_SEL if sel else ("#0a2030" if msel else FC_BG)
         bw = 3 if sel else (2 if msel else 1)
         # validation overlay: error red, warning amber when not selected
-        val_sev = getattr(self, "_validation_worst", {}).get(f.id)
+        val_sev = self._validation_worst.get(f.id)
         if val_sev and not sel and not msel and not mut:
             if val_sev == "error":
                 border_col = "#ef4444"
@@ -976,7 +961,7 @@ class CanvasMixin:
             self.cv.itemconfig(box_rect, outline=border_col, fill=fill_col, width=bw)
             self.cv.itemconfig(center, fill=border_col)
             bundle.draw_key = state_key
-            image_broker = getattr(self, "_image_broker", None)
+            image_broker = self._image_broker
             if image_broker is not None:
                 image_broker.release(("canvas", f.id))
             return
@@ -1170,12 +1155,12 @@ class CanvasMixin:
         # Use mod GFX image — fixed 64px tile, cached once, no per-zoom resize
         gfx_name = getattr(f, "gfx", "")
         mod_img = None
-        image_broker = getattr(self, "_image_broker", None)
+        image_broker = self._image_broker
         if image_broker is not None and MOD.loaded and gfx_name:
             asset = MOD.graphics_catalog.resolve(gfx_name)
             if asset is not None:
                 path = MOD.graphics_catalog.path_for(asset)
-                lifecycle = getattr(self, "_lifecycle", None)
+                lifecycle = self._lifecycle
                 document_token = (
                     lifecycle.token("document") if lifecycle is not None else None
                 )
@@ -1484,7 +1469,7 @@ class CanvasMixin:
         ch = cv.winfo_height()
         x, y = 8, ch - 8
         row_height = 14
-        extra = getattr(self, "_extra_trees", [])
+        extra = self._extra_trees
         rows: list[tuple[str, str]] = []
         if extra:
             # Rows that fit between the bottom margin and the top of the canvas,
@@ -1616,7 +1601,7 @@ class CanvasMixin:
             )
 
         # Extra tree CFPs
-        for idx, et in enumerate(getattr(self, "_extra_trees", []), start=1):
+        for idx, et in enumerate(self._extra_trees, start=1):
             if et.get("cfp_x") is not None and et.get("cfp_y") is not None:
                 badge, _ = self._get_tree_badge(idx)
                 tree_type = et.get("type", "shared")
@@ -1633,7 +1618,7 @@ class CanvasMixin:
 
     def _toggle_grid(self):
         """Toggle canvas grid visibility."""
-        self._grid_on = not getattr(self, "_grid_on", True)
+        self._grid_on = not self._grid_on
         # Force _draw_grid to rebuild (it honours _grid_on).
         self._grid_key = None
         self._redraw()
@@ -1805,10 +1790,7 @@ class CanvasMixin:
         cfp_key = (
             getattr(self, "_cfp_x", None),
             getattr(self, "_cfp_y", None),
-            tuple(
-                (et.get("cfp_x"), et.get("cfp_y"))
-                for et in getattr(self, "_extra_trees", [])
-            ),
+            tuple((et.get("cfp_x"), et.get("cfp_y")) for et in self._extra_trees),
         )
         bounds_key = (self._scene_index.revision, cfp_key)
         if getattr(self, "_mm_bounds_key", None) != bounds_key:
@@ -1818,7 +1800,7 @@ class CanvasMixin:
                 all_xs.append(self._cfp_x / XGRID)
             if getattr(self, "_cfp_y", None) is not None:
                 all_ys.append(self._cfp_y / YGRID)
-            for et in getattr(self, "_extra_trees", []):
+            for et in self._extra_trees:
                 if et.get("cfp_x") is not None:
                     all_xs.append(et["cfp_x"] / XGRID)
                 if et.get("cfp_y") is not None:
@@ -1883,7 +1865,7 @@ class CanvasMixin:
             and getattr(self, "_cfp_y", None) is not None
         ):
             _mm_cfp(self._cfp_x / XGRID, self._cfp_y / YGRID, "#22d3ee")
-        for idx, et in enumerate(getattr(self, "_extra_trees", []), start=1):
+        for idx, et in enumerate(self._extra_trees, start=1):
             if et.get("cfp_x") is not None and et.get("cfp_y") is not None:
                 _, col = self._get_tree_badge(idx)
                 _mm_cfp(et["cfp_x"] / XGRID, et["cfp_y"] / YGRID, col)

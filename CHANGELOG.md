@@ -8,6 +8,10 @@ the version by hand. See `AGENTS.md`.
 
 ## Unreleased
 
+- Define checked host-state protocols for the canvas, effects, and mod-loading
+  UI mixins, initialize app-owned canvas state before use, replace the
+  mod-load validation fallback with the required typed call, and use one shared
+  host fake across headless mixin tests.
 - Confirm before unloading an extra focus tree, and make extra-tree loads and
   unloads undoable with Ctrl+Z, including their loaded-tree metadata.
 - Give each focus document its own ID allocator so separate workspaces and

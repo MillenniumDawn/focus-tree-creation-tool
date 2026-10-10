@@ -9,6 +9,7 @@ methods here call it via ``self``.
 import os
 import re
 import tkinter as tk
+from collections.abc import Callable
 from tkinter import filedialog, messagebox
 from typing import Any, cast
 
@@ -22,7 +23,9 @@ from hoi4cm.core import (
 from hoi4cm.core.config import CONFIG_PATH
 from hoi4cm.core.logger import add_error, get_logger
 from hoi4cm.mod import MOD, find_loc_files, notifying_workspace_files
+from hoi4cm.ui.canvas_renderer import FocusCanvasBundle
 from hoi4cm.ui.error_report import report_error
+from hoi4cm.ui.lifecycle import ApplicationLifecycle
 from hoi4cm.ui.tasks import make_progress, progress_modal, run_bg
 from hoi4cm.ui.theme import (
     BG_CARD,
@@ -46,17 +49,17 @@ _default_hoi4_mod_dir = default_hoi4_mod_dir
 class ModLoadingMixin:
     """Mod picking/scanning, post-load prompt and MD additional-income setup."""
 
-    _mod_lbl: Any  # type: ignore[no-redef]
-    _focus_bundles: Any  # type: ignore[no-redef]
+    _mod_lbl: tk.Label
+    cv: tk.Canvas
+    _focus_bundles: dict[int, FocusCanvasBundle]
+    _lifecycle: ApplicationLifecycle | None
     _mod_image_resource_registered: bool
-    cv: Any  # type: ignore[no-redef]
-
-    def __getattr__(self, name: str) -> Any:  # type: ignore[no-redef]
-        raise AttributeError(name)
+    _config_write_warned: bool
+    _schedule_validation: Callable[[], None]
 
     def _warn_config_write_failed(self) -> None:
         """Show a one-time-per-session warning when a config write fails."""
-        if getattr(self, "_config_write_warned", False):
+        if self._config_write_warned:
             return
         self._config_write_warned = True
         messagebox.showwarning(
@@ -99,7 +102,7 @@ class ModLoadingMixin:
             _fd.askdirectory = orig
 
     def _load_mod(self):
-        lifecycle = getattr(self, "_lifecycle", None)
+        lifecycle = self._lifecycle
         if lifecycle is not None and not lifecycle.accepting:
             return
         _hoi4_mod_dir = _default_hoi4_mod_dir()
@@ -134,9 +137,7 @@ class ModLoadingMixin:
         remove_modal_resource = (
             lifecycle.add_resource(pw.close) if lifecycle is not None else lambda: None
         )
-        if lifecycle is not None and not getattr(
-            self, "_mod_image_resource_registered", False
-        ):
+        if lifecycle is not None and not self._mod_image_resource_registered:
             self._mod_image_resource_registered = True
             lifecycle.add_resource(lambda: MOD.sprite_imgs.clear())
 
@@ -201,8 +202,7 @@ class ModLoadingMixin:
         self._update_statusbar()
         # Invalidate all focus draw caches so mod images render on next frame
         self._invalidate_canvas_images()
-        if hasattr(self, "_focus_bundles"):
-            self._focus_bundles.clear()
+        self._focus_bundles.clear()
         self.cv.delete("focus")
         self._redraw_now()
         # Clear all wizard image caches so new mod GFX loads fresh. The live
@@ -286,14 +286,12 @@ class ModLoadingMixin:
             ),
         )
         try:
-            sched = getattr(self, "_schedule_validation", None)
-            if callable(sched):
-                sched()
+            self._schedule_validation()
         except Exception as ex:
             log.exception("validation after mod load failed")
             add_error(f"Validation after mod load failed: {ex}")
         # Prompt user to pick edit targets for ideas/events files
-        lifecycle = getattr(self, "_lifecycle", None)
+        lifecycle = self._lifecycle
         if lifecycle is None:
             self.after(150, self._show_post_load_prompt)
         else:
