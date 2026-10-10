@@ -6,6 +6,7 @@
 
 """Dynamic Modifier builder wizard."""
 
+import glob
 import json
 import os
 import re
@@ -23,7 +24,6 @@ from hoi4cm.core import (
     sanitize_component,
     tr,
 )
-from hoi4cm.core.image import PIL_OK, PILImage, PILImageTk
 from hoi4cm.mod import MOD, append_sprite_types, find_loc_files
 from hoi4cm.script.syntax import match_brace, parse_script, serialize_block
 from hoi4cm.ui import (
@@ -33,11 +33,9 @@ from hoi4cm.ui import (
     BLUE,
     BORDER_G,
     ORANGE,
-    SEL_BG,
     TEXT,
     TEXT_DIM,
-    _safe_after,
-    _safe_after_idle,
+    open_folder_gfx_browser,
     report_error,
 )
 from hoi4cm.wizards._generators import (
@@ -45,10 +43,11 @@ from hoi4cm.wizards._generators import (
     build_dyn_mod_output,
 )
 from hoi4cm.wizards._graphics import browser_folders, collect_image_pairs
-from hoi4cm.wizards._image_loader import TkImageLoader
 from hoi4cm.wizards._shared import (
+    make_scrolled_listbox,
     notifying_workspace_files,
     open_trigger_picker,
+    pack_action_footer,
     svar_get,
     text_get,
 )
@@ -266,374 +265,21 @@ def open_dyn_mod_wizard(app):
                 parent=win,
             )
             return
-        bwin = tk.Toplevel(win)
-        bwin.title(
-            tr(
+        open_folder_gfx_browser(
+            win,
+            title=tr(
                 "gfx.browser.ideas_dynamic_title",
                 "GFX Browser  -  Ideas / Dynamic Modifier",
-            )
-        )
-        bwin.configure(bg=BG_DARK)
-        bwin.geometry("900x580")
-        bwin.resizable(True, True)
-        bwin.grab_set()
-        image_loader = TkImageLoader(bwin)
-        panes = tk.Frame(bwin, bg=BG_DARK)
-        panes.pack(fill="both", expand=True, padx=8, pady=8)
-        lf = tk.Frame(panes, bg=BG_PANEL, width=200)
-        lf.pack(side="left", fill="y", padx=(0, 6))
-        lf.pack_propagate(False)
-        tk.Label(
-            lf,
-            text=tr("gfx.folders", "  FOLDERS"),
-            bg=BG_PANEL,
-            fg=TEXT_DIM,
-            font=("Helvetica", 9, "bold"),
-            anchor="w",
-            pady=6,
-        ).pack(fill="x")
-        tk.Frame(lf, bg=BORDER_G, height=1).pack(fill="x")
-        folder_lb = tk.Listbox(
-            lf,
-            bg=BG_CARD,
-            fg=TEXT,
-            selectbackground=BLUE,
-            selectforeground=TEXT,
-            font=("Courier", 9),
-            relief="flat",
-            bd=0,
-            activestyle="none",
-            highlightthickness=0,
-        )
-        fsb = tk.Scrollbar(lf, orient="vertical", command=folder_lb.yview)
-        folder_lb.configure(yscrollcommand=fsb.set)
-        fsb.pack(side="right", fill="y")
-        folder_lb.pack(fill="both", expand=True, padx=2, pady=4)
-        for display, _ in folders:
-            folder_lb.insert("end", "  " + display)
-        rf = tk.Frame(panes, bg=BG_DARK)
-        rf.pack(side="left", fill="both", expand=True)
-        top_r = tk.Frame(rf, bg=BG_DARK)
-        top_r.pack(fill="x", pady=(0, 6))
-        tk.Label(
-            top_r,
-            text=tr("common.filter", "Filter:"),
-            bg=BG_DARK,
-            fg=TEXT_DIM,
-            font=("Helvetica", 9),
-        ).pack(side="left")
-        search_var = tk.StringVar()
-        tk.Entry(
-            top_r,
-            textvariable=search_var,
-            bg=BG_CARD,
-            fg=TEXT,
-            insertbackground=BLUE,
-            font=("Helvetica", 10),
-            relief="flat",
-            highlightthickness=1,
-            highlightbackground=BORDER_G,
-        ).pack(side="left", padx=6, fill="x", expand=True, ipady=3)
-        status_lbl = tk.Label(
-            top_r,
-            text=tr("gfx.select_folder_status", "select a folder"),
-            bg=BG_DARK,
-            fg=TEXT_DIM,
-            font=("Helvetica", 9),
-        )
-        status_lbl.pack(side="right", padx=6)
-        cv_frame = tk.Frame(rf, bg=BG_PANEL)
-        cv_frame.pack(fill="both", expand=True)
-        cv = tk.Canvas(cv_frame, bg=BG_PANEL, highlightthickness=0)
-        vsb = tk.Scrollbar(cv_frame, orient="vertical", command=cv.yview)
-        cv.configure(yscrollcommand=vsb.set)
-        vsb.pack(side="right", fill="y")
-        cv.pack(side="left", fill="both", expand=True)
-        bot2 = tk.Frame(bwin, bg=BG_DARK)
-        bot2.pack(fill="x", padx=10, pady=6)
-        selected_var2 = tk.StringVar(value="")
-        tk.Label(
-            bot2, textvariable=selected_var2, bg=BG_DARK, fg=BLUE, font=("Helvetica", 9)
-        ).pack(side="left", padx=4)
-        tk.Button(
-            bot2,
-            text=tr("common.cancel", "Cancel"),
-            command=bwin.destroy,
-            bg=BG_CARD,
-            fg=TEXT,
-            relief="flat",
-            font=("Helvetica", 9),
-            padx=10,
-            pady=4,
-            cursor="hand2",
-        ).pack(side="right", padx=4)
-
-        def _apply_dynmod_icon():
-            v_icon.set(selected_var2.get())
-            bwin.destroy()
-
-        _sel_btn2 = tk.Button(
-            bot2,
-            text=tr("common.select_arrow", "Select ->"),
-            command=_apply_dynmod_icon,
-            bg="#1a3322",
-            fg="#4b7a5e",
-            relief="flat",
-            font=("Helvetica", 10, "bold"),
-            padx=14,
-            pady=5,
-            cursor="arrow",
-            state="disabled",
-        )
-        _sel_btn2.pack(side="right")
-
-        def _on_sel2(*_):
-            if selected_var2.get():
-                _sel_btn2.config(
-                    bg="#14532d", fg="#0a0a0a", cursor="hand2", state="normal"
-                )
-            else:
-                _sel_btn2.config(
-                    bg="#1a3322", fg="#4b7a5e", cursor="arrow", state="disabled"
-                )
-
-        selected_var2.trace_add("write", _on_sel2)
-        COLS2 = 5
-        TILE_W2 = 110
-        TILE_H2 = 100
-        PAD2 = 6
-        IMG_W2 = 80
-        IMG_H2 = 70
-        _st2 = {
-            "pairs": [],
-            "img_cache": {},
-            "drawn": set(),
-            "canvas_ids": {},
-            "sel_idx": None,
-        }
-
-        def _tile_xy2(idx):
-            col = idx % COLS2
-            row = idx // COLS2
-            return PAD2 + col * (TILE_W2 + PAD2), PAD2 + row * (TILE_H2 + PAD2)
-
-        def _select_tile2(idx):
-            old = _st2["sel_idx"]
-            if old is not None and old in _st2["canvas_ids"]:
-                rid, _, _ = _st2["canvas_ids"][old]
-                cv.itemconfig(rid, fill=BG_CARD, outline=BORDER_G)
-            _st2["sel_idx"] = idx
-            gfx_key = _st2["pairs"][idx][0]
-            selected_var2.set(gfx_key)
-            if idx in _st2["canvas_ids"]:
-                rid, _, _ = _st2["canvas_ids"][idx]
-                cv.itemconfig(rid, fill=SEL_BG, outline=BLUE)
-
-        def _draw_tile2(idx):
-            if idx in _st2["drawn"]:
-                return
-            _st2["drawn"].add(idx)
-            gfx_key, path = _st2["pairs"][idx]
-            x, y = _tile_xy2(idx)
-            is_sel = gfx_key == selected_var2.get()
-            rid = cv.create_rectangle(
-                x,
-                y,
-                x + TILE_W2,
-                y + TILE_H2,
-                fill=SEL_BG if is_sel else BG_CARD,
-                outline=BLUE if is_sel else BORDER_G,
-                width=2,
-                tags=("dt", f"dt{idx}"),
-            )
-            iid = cv.create_text(
-                x + TILE_W2 // 2,
-                y + 44,
-                text="...",
-                fill=TEXT_DIM,
-                font=("Helvetica", 14),
-                tags=("dt", f"dt{idx}"),
-            )
-            short = gfx_key.replace("GFX_idea_", "").replace("GFX_focus_", "")
-            short = (short[:16] + "...") if len(short) > 16 else short
-            lid = cv.create_text(
-                x + TILE_W2 // 2,
-                y + TILE_H2 - 14,
-                text=short,
-                fill=TEXT_DIM,
-                font=("Helvetica", 7),
-                width=TILE_W2 - 8,
-                tags=("dt", f"dt{idx}"),
-            )
-            _st2["canvas_ids"][idx] = (rid, iid, lid)
-            for item in (rid, iid, lid):
-                cv.tag_bind(item, "<Button-1>", lambda e, i=idx: _select_tile2(i))
-                cv.tag_bind(
-                    item,
-                    "<Double-Button-1>",
-                    lambda e, i=idx: [_select_tile2(i), _apply_dynmod_icon()],
-                )
-            if path in _st2["img_cache"]:
-                _fill_image2(idx)
-
-        def _fill_image2(idx):
-            if idx not in _st2["canvas_ids"]:
-                return
-            rid, iid, lid = _st2["canvas_ids"][idx]
-            gfx_key, path = _st2["pairs"][idx]
-            img = _st2["img_cache"].get(path)
-            cv.delete(iid)
-            if img:
-                new_iid = cv.create_image(
-                    _tile_xy2(idx)[0] + TILE_W2 // 2,
-                    _tile_xy2(idx)[1] + 44,
-                    anchor="center",
-                    image=img,
-                    tags=("dt", f"dt{idx}"),
-                )
-            else:
-                new_iid = cv.create_text(
-                    _tile_xy2(idx)[0] + TILE_W2 // 2,
-                    _tile_xy2(idx)[1] + 34,
-                    text="?",
-                    fill=TEXT_DIM,
-                    font=("Helvetica", 20),
-                    tags=("dt", f"dt{idx}"),
-                )
-            _st2["canvas_ids"][idx] = (rid, new_iid, lid)
-            for item in (rid, new_iid, lid):
-                cv.tag_bind(item, "<Button-1>", lambda e, i=idx: _select_tile2(i))
-                cv.tag_bind(
-                    item,
-                    "<Double-Button-1>",
-                    lambda e, i=idx: [_select_tile2(i), _apply_dynmod_icon()],
-                )
-
-        def _decode_image2(item):
-            i, path = item
-            if not PIL_OK or PILImage is None:
-                return None
-            paths_try = [path] + [
-                os.path.splitext(path)[0] + ext
-                for ext in (".png", ".tga")
-                if os.path.exists(os.path.splitext(path)[0] + ext)
-            ]
-            for tp in paths_try:
-                try:
-                    if not os.path.exists(tp):
-                        continue
-                    with PILImage.open(tp) as source:
-                        pil = source.convert("RGBA")
-                    rs = getattr(PILImage, "LANCZOS", getattr(PILImage, "ANTIALIAS", 1))
-                    pw, ph = pil.size
-                    ratio = min(IMG_W2 / max(pw, 1), IMG_H2 / max(ph, 1))
-                    return pil.resize(
-                        (max(1, int(pw * ratio)), max(1, int(ph * ratio))), rs
-                    )
-                except OSError, ValueError, RuntimeError, AttributeError:
-                    pass
-            return None
-
-        def _realize_image2(pil):
-            if PILImageTk is None:
-                raise RuntimeError("Pillow Tk support is unavailable")
-            return PILImageTk.PhotoImage(pil)
-
-        def _apply_image2(item, img):
-            i, path = item
-            _st2["img_cache"][path] = img
-            if i < len(_st2["pairs"]) and _st2["pairs"][i][1] == path:
-                _fill_image2(i)
-
-        def _lazy_fill2(*_):
-            if not _st2["pairs"]:
-                return
-            cv.update_idletasks()
-            top = cv.canvasy(0)
-            bottom = cv.canvasy(cv.winfo_height())
-            visible = []
-            for idx in range(len(_st2["pairs"])):
-                _, ty = _tile_xy2(idx)
-                if ty + TILE_H2 >= top and ty <= bottom:
-                    _draw_tile2(idx)
-                    visible.append(idx)
-            last = max(visible) if visible else 0
-            ahead = list(range(last + 1, min(last + 41, len(_st2["pairs"]))))
-            to_load = [
-                i
-                for i in (visible + ahead)
-                if _st2["pairs"][i][1] not in _st2["img_cache"]
-            ]
-            if to_load and PILImageTk is not None:
-                snap = list(_st2["pairs"])
-                image_loader.submit_many(
-                    ((i, snap[i][1]) for i in to_load if i < len(snap)),
-                    _decode_image2,
-                    realizer=_realize_image2,
-                    apply=_apply_image2,
-                )
-
-        def _rebuild2(pairs):
-            image_loader.invalidate()
-            cv.delete("all")
-            _st2.update(
-                {"pairs": pairs, "drawn": set(), "canvas_ids": {}, "sel_idx": None}
-            )
-            if not pairs:
-                status_lbl.config(text=tr("gfx.icons_count", "{count} icons", count=0))
-                return
-            status_lbl.config(text="%d icons" % len(pairs))
-            rows = (len(pairs) + COLS2 - 1) // COLS2
-            cv.configure(
-                scrollregion=(
-                    0,
-                    0,
-                    PAD2 + COLS2 * (TILE_W2 + PAD2),
-                    PAD2 + rows * (TILE_H2 + PAD2),
-                )
-            )
-            cv.yview_moveto(0)
-            _safe_after_idle(bwin, _lazy_fill2)
-
-        def _collect_files2(folder_path):
-            return collect_image_pairs(
-                folder_path,
-                "GFX_idea_",
-                search=search_var.get().strip(),
-                catalog=catalog,
-            )
-
-        def _load_folder2(folder_path):
-            status_lbl.config(text=tr("gfx.scanning", "scanning..."))
-            bwin.update_idletasks()
-            _rebuild2(_collect_files2(folder_path))
-
-        def _on_folder_select2(evt=None):
-            s = folder_lb.curselection()
-            if s:
-                _load_folder2(folders[s[0]][1])
-
-        cv.bind("<Configure>", lambda e: _safe_after_idle(bwin, _lazy_fill2))
-        for _ev in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
-            cv.bind(
-                _ev,
-                lambda e: [
-                    cv.yview_scroll(-1 if (e.delta > 0 or e.num == 4) else 1, "units"),
-                    _safe_after_idle(bwin, _lazy_fill2),
-                ],
-            )
-        folder_lb.bind("<<ListboxSelect>>", _on_folder_select2)
-        search_var.trace_add(
-            "write",
-            lambda *_: _safe_after(
-                bwin,
-                300,
-                lambda: _on_folder_select2() if folder_lb.curselection() else None,
             ),
+            folders=folders,
+            collect_pairs=lambda folder_path, search: collect_image_pairs(
+                folder_path, "GFX_idea_", search=search.strip(), catalog=catalog
+            ),
+            on_select=v_icon.set,
+            label_prefixes=("GFX_idea_", "GFX_focus_"),
+            image_size=(80, 70),
+            preserve_aspect=True,
         )
-        if folders:
-            folder_lb.selection_set(0)
-            _load_folder2(folders[0][1])
 
     tk.Button(
         _icon_row,
@@ -1373,8 +1019,6 @@ def open_dyn_mod_wizard(app):
         )
 
     def _browse_mod_dynmods():
-        import glob as _glob
-
         if not MOD.loaded or not MOD.root:
             messagebox.showinfo(
                 "No Mod Loaded",
@@ -1393,7 +1037,7 @@ def open_dyn_mod_wizard(app):
 
         # Scan all files for modifier IDs
         mods = []  # list of (modifier_id, file_path)
-        for fp in sorted(_glob.glob(os.path.join(dm_dir, "*.txt"))):
+        for fp in sorted(glob.glob(os.path.join(dm_dir, "*.txt"))):
             try:
                 src, encoding = read_file_with_encoding(fp)
                 if not src:
@@ -1441,22 +1085,7 @@ def open_dyn_mod_wizard(app):
 
         frm = tk.Frame(dlg, bg=BG_DARK)
         frm.pack(fill="both", expand=True, padx=10, pady=6)
-        lb = tk.Listbox(
-            frm,
-            bg=BG_CARD,
-            fg=TEXT,
-            selectbackground=SEL_BG,
-            selectforeground=TEXT,
-            font=("Courier", 10),
-            relief="flat",
-            highlightthickness=1,
-            highlightbackground=BORDER_G,
-            activestyle="none",
-        )
-        sb = tk.Scrollbar(frm, orient="vertical", command=lb.yview)
-        lb.configure(yscrollcommand=sb.set)
-        sb.pack(side="right", fill="y")
-        lb.pack(side="left", fill="both", expand=True)
+        lb = make_scrolled_listbox(frm)
         for mid, fp in mods:
             lb.insert("end", f"  {mid:<50}  {os.path.basename(fp)}")
 
@@ -1553,32 +1182,9 @@ def open_dyn_mod_wizard(app):
             )
 
         lb.bind("<Double-Button-1>", lambda e: _load_selected())
-        bot_dlg = tk.Frame(dlg, bg=BG_DARK, pady=6)
-        bot_dlg.pack(fill="x")
-        tk.Button(
-            bot_dlg,
-            text=tr("common.load_selected", "Load Selected"),
-            command=_load_selected,
-            bg="#14532d",
-            fg="#4ade80",
-            relief="flat",
-            font=("Helvetica", 10, "bold"),
-            padx=16,
-            pady=5,
-            cursor="hand2",
-        ).pack(side="left", padx=10)
-        tk.Button(
-            bot_dlg,
-            text=tr("common.cancel", "Cancel"),
-            command=dlg.destroy,
-            bg=BG_CARD,
-            fg=TEXT,
-            relief="flat",
-            font=("Helvetica", 10),
-            padx=12,
-            pady=5,
-            cursor="hand2",
-        ).pack(side="right", padx=10)
+        pack_action_footer(
+            dlg, tr("common.load_selected", "Load Selected"), _load_selected
+        )
 
     bf = tk.Frame(win, bg=BG_DARK)
     bf.pack(fill="x", padx=12, pady=8)

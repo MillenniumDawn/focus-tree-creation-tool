@@ -166,15 +166,6 @@ _FIELD_COERCERS: dict[str, Callable[[object], object]] = {
 class Focus:
     """A single national focus in the editor canvas."""
 
-    _next = 0
-
-    @staticmethod
-    def _allocate_id() -> int:
-        if Focus._next >= MAX_FOCUS_ID:
-            raise ValueError("focus id allocator exhausted")
-        Focus._next += 1
-        return Focus._next
-
     # Set only when a focus is built from a parsed file; used to preserve the
     # original coordinates across edits. Declared here (no default) so mypy
     # knows they exist while `hasattr` still reports them absent on fresh
@@ -186,8 +177,8 @@ class Focus:
     _joint_extra: str
     _script_extras: dict[str, object] | None
 
-    def __init__(self, x=0, y=0):
-        self.id = Focus._allocate_id()
+    def __init__(self, *, id: int, x=0, y=0):  # pylint: disable=redefined-builtin
+        self.id = _bounded_id(id)
         self.name = f"focus_{self.id}"
         self.loc_name = ""
         self.icon = "⚔"
@@ -196,9 +187,9 @@ class Focus:
         self.y = y
         self.cost: int | float = 10
         self.desc = ""
-        self.effects = []  # [{"type":str,"fields":{name:val}}]
-        self.prereqs = []  # [[fid,...]] AND of OR-groups
-        self.mutex = []  # [fid,...]
+        self.effects: list[dict[str, object]] = []  # type + effect-specific fields
+        self.prereqs: list[list[int]] = []  # AND of OR-groups
+        self.mutex: list[int] = []
         self.cancel_if_invalid = True
         self.continue_if_invalid = False
         self.available_if_capitulated = False
@@ -216,16 +207,16 @@ class Focus:
         self.allow_branch = ""  # raw block content (inside allow_branch = { })
         self.text = ""  # custom localisation key override
         # conditional position offsets: [{"x": int, "y": int, "trigger": str}, ...]
-        self.offsets = []
+        self.offsets: list[dict[str, object]] = []
         self.tree_idx = 0  # 0 = main tree; >0 = index into _extra_trees (1-based)
 
     def to_dict(self):
         return {k: v for k, v in self.__dict__.items() if not k.startswith("_")}
 
-    def duplicate(self):
-        """Deep copy with a fresh counter id and no stale imported coordinates."""
+    def duplicate(self, id: int):  # pylint: disable=redefined-builtin
+        """Deep copy with an explicit fresh id and no stale imported coordinates."""
         nf = copy.deepcopy(self)
-        nf.id = Focus._allocate_id()
+        nf.id = _bounded_id(id)
         for attr in ("_raw_gx", "_raw_gy", "_rel_dx", "_rel_dy"):
             if attr in nf.__dict__:
                 del nf.__dict__[attr]
@@ -282,5 +273,4 @@ class Focus:
                 f.x = f.x // 96
             if f.y >= 96 and f.y % 96 == 0:
                 f.y = f.y // 96
-        Focus._next = max(Focus._next, f.id)
         return f

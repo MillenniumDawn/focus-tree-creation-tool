@@ -259,3 +259,16 @@ def test_finished_load_skips_cleanup_and_outcome_after_app_close_or_destroy(
     modal.close.assert_not_called()
     shell._install_workspace.assert_not_called()
     errors.assert_not_called()
+
+
+def test_raising_discard_guard_blocks_the_load(load_case, monkeypatch):
+    shell, _executor, _modal, _errors = load_case
+    picker = Mock()
+    monkeypatch.setattr(app_module.filedialog, "askopenfilename", picker)
+    shell._confirm_discard = Mock(side_effect=AttributeError("guard is broken"))
+
+    with pytest.raises(AttributeError, match="guard is broken"):
+        app_module.App._load(cast(app_module.App, shell))
+
+    picker.assert_not_called()
+    shell._install_workspace.assert_not_called()

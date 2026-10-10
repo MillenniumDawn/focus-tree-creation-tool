@@ -21,6 +21,7 @@ from hoi4cm.core import (
     tr,
 )
 from hoi4cm.core.config import CONFIG_PATH
+from hoi4cm.core.logger import add_error, get_logger
 from hoi4cm.mod import MOD, find_loc_files, notifying_workspace_files
 from hoi4cm.ui.canvas_renderer import FocusCanvasBundle
 from hoi4cm.ui.error_report import report_error
@@ -38,6 +39,8 @@ from hoi4cm.ui.theme import (
     TEXT_DIM,
 )
 from hoi4cm.wizards import _shared as _wiz_shared
+
+log = get_logger("mod_loading")
 
 # Alias used by the moved methods (matches the monolith's alias).
 _default_hoi4_mod_dir = default_hoi4_mod_dir
@@ -247,6 +250,28 @@ class ModLoadingMixin:
                 + "\n"
                 + "\n".join(MOD._img_errors[:3])
             )
+        scan_problems = []
+        if MOD.failed_steps:
+            scan_problems.append(
+                tr(
+                    "mod.loaded.failed_steps",
+                    "Scan steps that failed: {steps}",
+                    steps=", ".join(MOD.failed_steps),
+                )
+            )
+        if MOD.unparsable_files:
+            scan_problems.append(
+                tr(
+                    "mod.loaded.unparsable_files",
+                    "Files that could not be parsed ({count}, first 3):\n{paths}",
+                    count=len(MOD.unparsable_files),
+                    paths="\n".join(MOD.unparsable_files[:3]),
+                )
+            )
+        if scan_problems:
+            scan_note = "\n".join(scan_problems)
+            err_note += "\n\n" + scan_note
+            add_error(scan_note)
         messagebox.showinfo(
             tr("dialog.mod_loaded.title", "Mod Loaded"),
             tr(
@@ -260,7 +285,11 @@ class ModLoadingMixin:
                 err_note=err_note,
             ),
         )
-        self._schedule_validation()
+        try:
+            self._schedule_validation()
+        except Exception as ex:
+            log.exception("validation after mod load failed")
+            add_error(f"Validation after mod load failed: {ex}")
         # Prompt user to pick edit targets for ideas/events files
         lifecycle = self._lifecycle
         if lifecycle is None:
@@ -678,8 +707,11 @@ class ModLoadingMixin:
                         if m
                         else os.path.splitext(os.path.basename(MOD.edit_events_file))[0]
                     )
-                except OSError, ValueError, RuntimeError, UnicodeDecodeError:
-                    pass
+                except (OSError, ValueError, RuntimeError, UnicodeDecodeError) as exc:
+                    log.exception("could not read events file %s", MOD.edit_events_file)
+                    add_error(
+                        f"Could not read events file {MOD.edit_events_file}: {exc}"
+                    )
             # Update mod label
             parts = []
             if MOD.edit_ideas_file:
@@ -725,16 +757,6 @@ class ModLoadingMixin:
 
     def _refresh_mod_dropdowns(self):
         """Update all dynamic dropdowns that depend on mod data."""
-        # Refresh the GFX picker dropdown if visible
-        if hasattr(self, "_gfx_dd") and self._gfx_dd:
-            sprite_names = sorted(MOD.sprites.keys())
-            if sprite_names:
-                menu = self._gfx_dd["menu"]
-                menu.delete(0, "end")
-                for name in sprite_names:
-                    menu.add_command(
-                        label=name, command=lambda n=name: self._set_gfx(n)
-                    )
         # Rebuild effect cards if open (they may have mod-aware dropdowns).
         if self.selected:
             self._refresh_effects(force=True)

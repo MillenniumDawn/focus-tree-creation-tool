@@ -17,7 +17,6 @@ import pytest
 
 from hoi4cm.core import read_file
 from hoi4cm.focus_tree import build_focuses, parse_focus_tree
-from hoi4cm.models import Focus
 
 FIX_DIR = os.path.join(os.path.dirname(__file__), "fixtures", "focus_trees")
 GOLDEN_DIR = os.path.join(FIX_DIR, "golden")
@@ -31,14 +30,6 @@ FIXTURES = {
     "brace_broken.txt": {},
     "scanner_edge_cases.txt": {},
 }
-
-
-@pytest.fixture(autouse=True)
-def reset_counter():
-    old = Focus._next
-    Focus._next = 0
-    yield
-    Focus._next = old
 
 
 def normalize(focus_list):

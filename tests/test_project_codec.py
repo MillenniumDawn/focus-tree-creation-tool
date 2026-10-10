@@ -132,11 +132,11 @@ def test_validate_project_file_path_requires_containment(tmp_path):
 
 
 def test_v2_roundtrip_preserves_workspace_and_tree_metadata():
-    main = Focus(1, 2)
+    main = Focus(id=1, x=1, y=2)
     main.id = MAX_FOCUS_ID
     main.name = "same_name"
     main.loc_name = "Same Name"
-    extra = Focus(8, 9)
+    extra = Focus(id=2, x=8, y=9)
     extra.id = 7
     extra.name = "same_name"
     extra.tree_idx = 1
@@ -190,15 +190,15 @@ def test_v2_roundtrip_preserves_workspace_and_tree_metadata():
     assert restored.focuses.names["same_name"] == (MAX_FOCUS_ID, extra.id)
 
 
-def test_focus_counter_is_reset_after_large_project_id_roundtrip():
-    """A loaded large ID must not leak into the next test's allocator."""
-    assert Focus().id == 1
+def test_new_document_ids_are_independent_after_large_project_roundtrip():
+    """A loaded large ID does not affect a different document's allocator."""
+    assert FocusDocument().new_focus().id == 1
 
 
 @pytest.mark.parametrize("legacy", [False, True])
 @pytest.mark.parametrize("ids", [(MAX_FOCUS_ID + 1, MAX_FOCUS_ID + 2), (7, "7")])
 def test_invalid_project_ids_reject_without_losing_existing_data(legacy, ids):
-    existing = Focus()
+    existing = Focus(id=3)
     live = FocusDocument([existing])
     focuses = [
         {"id": 20, "name": "valid_first"},
@@ -219,18 +219,15 @@ def test_invalid_project_ids_reject_without_losing_existing_data(legacy, ids):
         }
     )
     original = copy.deepcopy(project)
-    next_id = Focus._next
-
     with pytest.raises(ValueError, match="focus.*id"):
         live.load(decode_project(project).focuses)
 
     assert project == original
     assert list(live.values()) == [existing]
-    assert Focus._next == next_id
 
 
 def test_duplicate_document_load_keeps_existing_data():
-    existing = Focus()
+    existing = Focus(id=4)
     document = FocusDocument([existing])
     revision = document.revision
     first = Focus.from_dict({"id": 7, "name": "first"})
@@ -246,7 +243,7 @@ def test_duplicate_document_load_keeps_existing_data():
 
 def test_near_cap_add_duplicate_save_reload_preserves_ids_and_references(tmp_path):
     parent = Focus.from_dict({"id": MAX_FOCUS_ID - 2, "name": "parent"})
-    child = Focus()
+    child = Focus(id=MAX_FOCUS_ID - 1)
     child.name = "child"
     child.tree_idx = 1
     child.prereqs = [[parent.id]]
@@ -256,7 +253,7 @@ def test_near_cap_add_duplicate_save_reload_preserves_ids_and_references(tmp_pat
         main_tree=TreeDocument(focus_ids={parent.id}),
         extra_trees=[TreeDocument(focus_ids={child.id})],
     )
-    duplicate = child.duplicate()
+    duplicate = child.duplicate(workspace.focuses.allocate_id())
     duplicate.name = "duplicate"
     workspace.focuses.add(duplicate)
     workspace.extra_trees[0].focus_ids.add(duplicate.id)
@@ -269,18 +266,15 @@ def test_near_cap_add_duplicate_save_reload_preserves_ids_and_references(tmp_pat
     assert set(restored.focuses) == {MAX_FOCUS_ID - 2, MAX_FOCUS_ID - 1, MAX_FOCUS_ID}
     assert restored.focuses[child.id].prereqs == [[parent.id]]
     assert restored.focuses[duplicate.id].mutex == [parent.id]
-    assert Focus._next == MAX_FOCUS_ID
-    for create in (Focus, restored.focuses[child.id].duplicate):
-        with pytest.raises(ValueError, match="allocator exhausted"):
-            create()
-        assert Focus._next == MAX_FOCUS_ID
+    with pytest.raises(ValueError, match="allocator exhausted"):
+        restored.focuses.allocate_id()
     assert encode_project(restored) == encode_project(workspace)
 
 
 def test_v2_roundtrip_preserves_grid_coords_that_are_multiples_of_96():
     """Grid coords that happen to be multiples of 96 (XGRID) must survive a
     current-format save/load unchanged -- they aren't legacy pixel coords."""
-    focus = Focus(96, 192)
+    focus = Focus(id=6, x=96, y=192)
     workspace = EditorWorkspace(
         focuses=FocusDocument([focus]),
         main_tree=TreeDocument(metadata=TreeMetadata(tree_id="TAG_focus_tree")),
@@ -392,7 +386,7 @@ def test_future_project_version_is_rejected_without_legacy_fallback():
 
 
 def _one_focus_workspace():
-    focus = Focus(1, 2)
+    focus = Focus(id=7, x=1, y=2)
     focus.name = "TAG_start"
     return EditorWorkspace(
         focuses=FocusDocument([focus]),
@@ -429,24 +423,16 @@ def test_failed_project_write_keeps_the_previous_save(tmp_path, monkeypatch):
 # ── duplicate after load (issue #116) ────────────────────────────
 
 
-@pytest.fixture
-def reset_counter():
-    old = Focus._next
-    Focus._next = 0
-    yield
-    Focus._next = old
-
-
-def test_duplicate_after_save_load_gets_a_small_unique_id(reset_counter):
+def test_duplicate_after_save_load_gets_a_small_unique_id():
     workspace = EditorWorkspace(
-        focuses=FocusDocument([Focus(1, 1), Focus(2, 2)]),
+        focuses=FocusDocument([Focus(id=9, x=1, y=1), Focus(id=10, x=2, y=2)]),
         main_tree=TreeDocument(metadata=TreeMetadata(tree_id="TAG_focus_tree")),
     )
 
     restored = decode_project(encode_project(workspace))
     existing_ids = set(restored.focuses)
     original = restored.focuses[max(existing_ids)]
-    duplicate = original.duplicate()
+    duplicate = original.duplicate(restored.focuses.allocate_id())
 
     assert duplicate.id not in existing_ids
     assert duplicate.id < 100_000

@@ -8,11 +8,11 @@ from hoi4cm.models import Focus
 
 
 def test_code_block_apply_round_trips_all_editable_fields():
-    prerequisite = Focus(1, 1)
+    prerequisite = Focus(id=1, x=1, y=1)
     prerequisite.name = "TST_prerequisite"
-    mutex = Focus(2, 2)
+    mutex = Focus(id=2, x=2, y=2)
     mutex.name = "TST_mutex"
-    focus = Focus(5, 6)
+    focus = Focus(id=3, x=5, y=6)
     focus.name = "TST_focus"
     focus.relative_position_id = prerequisite.name
     focus._rel_dx = 4
@@ -82,7 +82,7 @@ def test_code_block_apply_round_trips_all_editable_fields():
 
 
 def test_code_apply_failure_does_not_mutate_existing_focus():
-    focus = Focus(5, 6)
+    focus = Focus(id=4, x=5, y=6)
     focus.name = "TST_unchanged"
     focus.effects = [{"type": "set_country_flag", "fields": {"flag": "safe"}}]
     before = deepcopy(focus.__dict__)
@@ -96,7 +96,7 @@ def test_code_apply_failure_does_not_mutate_existing_focus():
 
 
 def test_code_block_apply_preserves_joint_trigger():
-    focus = Focus(1, 2)
+    focus = Focus(id=5, x=1, y=2)
     focus.name = "TST_joint"
     focus._joint_extra = 'joint_trigger = {\n\thas_dlc = "No Step Back"\n}'
     lookup = {focus.id: focus}
@@ -115,9 +115,9 @@ def test_code_block_apply_preserves_joint_trigger():
 
 
 def test_code_block_apply_keeps_moved_relative_focus_position():
-    parent = Focus(0, 0)
+    parent = Focus(id=6, x=0, y=0)
     parent.name = "TST_parent"
-    focus = Focus(5, 2)
+    focus = Focus(id=7, x=5, y=2)
     focus.name = "TST_child"
     focus.relative_position_id = parent.name
     focus._raw_gx = 1
@@ -138,7 +138,7 @@ def test_code_block_apply_keeps_moved_relative_focus_position():
 
 
 def test_code_block_apply_keeps_raw_coordinates_with_conditional_offset():
-    focus = Focus(3, 0)
+    focus = Focus(id=8, x=3, y=0)
     focus.name = "TST_offset"
     focus._raw_gx = 1
     focus._raw_gy = 0

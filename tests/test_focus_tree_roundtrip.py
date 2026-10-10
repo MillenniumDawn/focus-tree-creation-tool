@@ -26,14 +26,6 @@ from hoi4cm.models import Focus, FocusDocument
 FIX_DIR = os.path.join(os.path.dirname(__file__), "fixtures", "focus_trees")
 
 
-@pytest.fixture(autouse=True)
-def reset_counter():
-    old = Focus._next
-    Focus._next = 0
-    yield
-    Focus._next = old
-
-
 def raw_block_renderer(eff):
     """Mirror the monolith's _raw_block effect rendering (3-tab base indent)."""
     if eff.get("type") != "_raw_block":
@@ -320,7 +312,7 @@ def test_will_lead_to_war_with_repeated_bare_tags_round_trips():
 def test_extra_tree_export_preserves_main_tree_only_focus_fields(
     tree_type, had_wrapper, block_keyword
 ):
-    focus = Focus(3, 4)
+    focus = Focus(id=1, x=3, y=4)
     focus.name = "TST_extra"
     focus.text = "TST_extra_custom_text"
     focus.allow_branch = "OR = {\n\thas_government = democratic\n}"
@@ -383,7 +375,7 @@ def _extra_tree_info(**overrides):
 
 def test_extra_tree_export_preserves_country_raw_verbatim():
     """export_focus_tree must not discard an imported country block (#39)."""
-    focus = Focus(0, 0)
+    focus = Focus(id=2, x=0, y=0)
     focus.name = "TST_root"
     country_raw = "base = 0\nmodifier = {\n\tadd = 20\n\toriginal_tag=TST\n}"
     info = _extra_tree_info(country_raw=country_raw)
@@ -411,7 +403,7 @@ def test_extra_tree_export_preserves_country_raw_verbatim():
 
 
 def test_extra_tree_export_falls_back_to_canned_country_block_when_blank():
-    focus = Focus(0, 0)
+    focus = Focus(id=3, x=0, y=0)
     focus.name = "TST_root"
     info = _extra_tree_info()  # no country_raw override -> blank
 
@@ -428,7 +420,7 @@ def test_extra_tree_export_falls_back_to_canned_country_block_when_blank():
 def test_extra_tree_export_emits_tree_extras():
     """Wrapper-level keys with no named field (default, reset_on_civilwar,
     initial_show_position, ...) must survive via tree_extras (#39)."""
-    focus = Focus(0, 0)
+    focus = Focus(id=4, x=0, y=0)
     focus.name = "TST_root"
     info = _extra_tree_info(tree_extras={"default": "yes", "reset_on_civilwar": "no"})
 
@@ -443,7 +435,7 @@ def test_extra_tree_export_emits_tree_extras():
 
 
 def test_extra_tree_export_omits_tree_extras_block_when_empty():
-    focus = Focus(0, 0)
+    focus = Focus(id=5, x=0, y=0)
     focus.name = "TST_root"
     info = _extra_tree_info()
 
@@ -543,7 +535,7 @@ focus_tree = {
 def test_extra_tree_export_empty_completion_reward_omits_todo_block():
     """Issue #115: an extra-tree focus with no completion_reward must not
     gain a synthesized log line + TODO comment on export."""
-    focus = Focus(0, 0)
+    focus = Focus(id=6, x=0, y=0)
     focus.name = "TST_root"
     info = _extra_tree_info()
 

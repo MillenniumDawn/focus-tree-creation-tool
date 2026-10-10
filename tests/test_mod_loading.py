@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import copy
 import threading
-from collections.abc import Callable
+import types
+from collections.abc import Callable, Iterator
 from typing import Any
 
 import pytest
 from ui_fakes import AppFake
 
+import hoi4cm.core.logger as logmod
 from hoi4cm.mod import MOD
 from hoi4cm.ui import mod_loading
 from hoi4cm.ui.mod_loading import ModLoadingMixin
@@ -23,6 +25,37 @@ def isolate_mod():
     yield
     MOD.__dict__.clear()
     MOD.__dict__.update(snapshot)
+
+
+@pytest.fixture
+def error_buffer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> Iterator[list[tuple[str, str]]]:
+    """Isolate the shared error buffer from callbacks left by earlier Tk tests."""
+    monkeypatch.setattr(logmod, "_error_callback", None)
+    logmod.clear_errors()
+    yield logmod.get_error_entries()
+    logmod.clear_errors()
+
+
+class _FakeApp(ModLoadingMixin):
+    _lifecycle: Any
+    _mod_lbl: Any
+    _focus_bundles: Any
+    cv: Any
+    visibility_updates: int
+    dropdown_refreshes: int
+    status_updates: int
+    invalidations: int
+    redraws: int
+    after_calls: list[tuple[int, Callable[[], None]]]
+    _apply_md_visibility: Any
+    _refresh_mod_dropdowns: Any
+    _update_statusbar: Any
+    _invalidate_canvas_images: Any
+    _redraw_now: Any
+    _schedule_validation: Any
+    after: Any
 
 
 class _AcceptingLifecycle:
@@ -256,3 +289,82 @@ def test_on_mod_loaded_invalidates_canvas_and_wizard_images_on_ui_thread(
     assert image_loads == [("GFX_sample", ui_thread)]
     assert len(app.after_calls) == 1
     assert app.after_calls[0][0] == 150
+
+
+def _mod_loaded_app(monkeypatch: pytest.MonkeyPatch) -> tuple[_FakeApp, list[str]]:
+    """A fake app whose Mod Loaded dialog text is collected into the list."""
+    dialogs: list[str] = []
+    monkeypatch.setattr(
+        mod_loading.messagebox,
+        "showinfo",
+        lambda _title, message, **_kwargs: dialogs.append(message),
+    )
+    monkeypatch.setattr(mod_loading._wiz_shared, "_app_img_caches", [])
+    monkeypatch.setattr(type(MOD), "summary", lambda _mod: "loaded summary")
+    monkeypatch.setattr(MOD, "is_md", False)
+    monkeypatch.setattr(MOD, "sprites", {})
+    monkeypatch.setattr(MOD, "_img_errors", [])
+    monkeypatch.setattr(MOD, "failed_steps", [])
+    monkeypatch.setattr(MOD, "unparsable_files", [])
+    app = _FakeApp()
+    app._mod_lbl = types.SimpleNamespace(config=lambda **_kwargs: None)
+    app.cv = types.SimpleNamespace(delete=lambda _tag: None)
+    app._apply_md_visibility = lambda: None
+    app._refresh_mod_dropdowns = lambda: None
+    app._update_statusbar = lambda: None
+    app._invalidate_canvas_images = lambda: None
+    app._redraw_now = lambda: None
+    app.after = lambda _delay, _callback: None
+    return app, dialogs
+
+
+def test_on_mod_loaded_names_failed_steps_and_unparsable_files(
+    monkeypatch: pytest.MonkeyPatch, error_buffer: list[tuple[str, str]]
+) -> None:
+    app, dialogs = _mod_loaded_app(monkeypatch)
+    paths = [f"/mod/common/ideas/{name}.txt" for name in ("a", "b", "c", "d")]
+    monkeypatch.setattr(MOD, "failed_steps", ["Events", "Characters"])
+    monkeypatch.setattr(MOD, "unparsable_files", paths)
+
+    app._on_mod_loaded("/mods/sample-mod")
+
+    assert len(dialogs) == 1
+    assert "Events, Characters" in dialogs[0]
+    assert "(4, first 3)" in dialogs[0]
+    assert all(path in dialogs[0] for path in paths[:3])
+    assert paths[3] not in dialogs[0]
+    assert len(error_buffer) == 1
+    assert "Events, Characters" in error_buffer[0][1]
+    assert paths[0] in error_buffer[0][1]
+
+
+def test_on_mod_loaded_adds_nothing_for_a_clean_scan(
+    monkeypatch: pytest.MonkeyPatch, error_buffer: list[tuple[str, str]]
+) -> None:
+    app, dialogs = _mod_loaded_app(monkeypatch)
+
+    app._on_mod_loaded("/mods/sample-mod")
+
+    assert len(dialogs) == 1
+    assert "failed" not in dialogs[0]
+    assert "parsed" not in dialogs[0]
+    assert error_buffer == []
+
+
+def test_on_mod_loaded_records_a_failed_validation_and_still_prompts(
+    monkeypatch: pytest.MonkeyPatch, error_buffer: list[tuple[str, str]]
+) -> None:
+    app, _dialogs = _mod_loaded_app(monkeypatch)
+    prompts: list[int] = []
+    app.after = lambda delay, _callback: prompts.append(delay)
+
+    def validate() -> None:
+        raise RuntimeError("validation exploded")
+
+    app._schedule_validation = validate
+
+    app._on_mod_loaded("/mods/sample-mod")
+
+    assert len(error_buffer) == 1
+    assert "validation exploded" in error_buffer[0][1]
+    assert prompts == [150]
