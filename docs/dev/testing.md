@@ -113,6 +113,11 @@ state leaks between tests. Six patterns cover what's here today:
   pins the other side of that: with no dimensions to clip to, the grid
   falls back to covering the canvas extent.
 
+  Headless `ModLoadingMixin` tests share `ModLoadingAppFake` from
+  `tests/ui_fakes.py`; each test customizes only the callbacks and widgets its
+  scenario needs. `hoi4cm.ui.app_contracts` checks the real `App` host against
+  the three mixin protocols.
+
 ## Golden-fixture tests for the focus-tree pipeline
 
 `tests/fixtures/focus_trees/*.txt` are small hand-written files, each one

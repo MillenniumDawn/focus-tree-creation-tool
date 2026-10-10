@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, cast
 
 import pytest
+from ui_fakes import ModLoadingAppFake
 
 from hoi4cm.mod import context as context_module
 from hoi4cm.mod import scan_cache
@@ -15,7 +16,6 @@ from hoi4cm.mod.context import ModContext
 from hoi4cm.mod.graphics_catalog import GraphicsScanConfig, ScanCancelled
 from hoi4cm.ui import mod_loading, tasks
 from hoi4cm.ui.lifecycle import ApplicationLifecycle
-from hoi4cm.ui.mod_loading import ModLoadingMixin
 
 
 @pytest.fixture(autouse=True)
@@ -286,11 +286,6 @@ def test_success_adopts_candidate_and_releases_warm_images_on_tk(loaded_mod, tmp
     assert finalized_on == [main_thread]
 
 
-class _FakeTcl:
-    def call(self, *_args: object) -> object:
-        return ()
-
-
 class _FakeProgress:
     def __init__(self) -> None:
         self.cancelled = threading.Event()
@@ -304,35 +299,6 @@ class _FakeProgress:
 
     def close(self) -> None:
         self.closed = True
-
-
-class _FakeApp(ModLoadingMixin):
-    _lifecycle: ApplicationLifecycle | None
-
-    def __init__(self) -> None:
-        self._lifecycle = None
-        self.tk = _FakeTcl()
-        self.callbacks: list[Any] = []
-        self.loaded_roots: list[str] = []
-
-    def after(self, milliseconds: int, callback):
-        self.callbacks.append(callback)
-        return callback
-
-    def after_cancel(self, identifier: object) -> None:
-        self.callbacks = [
-            callback for callback in self.callbacks if callback is not identifier
-        ]
-
-    def winfo_exists(self) -> int:
-        return 1
-
-    def _on_mod_loaded(self, root):
-        self.loaded_roots.append(root)
-
-    def flush(self) -> None:
-        while self.callbacks:
-            self.callbacks.pop(0)()
 
 
 @pytest.mark.parametrize("window", ["final_step", "after_completion"])
@@ -365,7 +331,7 @@ def test_late_cancel_discards_a_completed_scan(monkeypatch, tmp_path, window):
     monkeypatch.setattr(
         type(mod_loading.MOD), "save_config", lambda _mod: saved.append(True) or True
     )
-    app = _FakeApp()
+    app = ModLoadingAppFake()
     previous_recent = mod_loading.MOD._recent_mods.copy()
     futures = []
     original_run_bg = tasks.run_bg
@@ -444,7 +410,7 @@ def test_superseded_result_is_discarded_and_modal_cleanup_runs(monkeypatch, tmp_
         lambda _mod, value: adopted.append(value) or [],
     )
     monkeypatch.setattr(type(mod_loading.MOD), "save_config", lambda _mod: True)
-    app = _FakeApp()
+    app = ModLoadingAppFake()
     futures = []
     original_run_bg = tasks.run_bg
 
@@ -505,7 +471,7 @@ def test_worker_error_closes_modal_without_adopting_or_recording_recent(
         return True
 
     monkeypatch.setattr(type(mod_loading.MOD), "save_config", save_config)
-    app = _FakeApp()
+    app = ModLoadingAppFake()
     loaded_mod = mod_loading.MOD
     previous_recent = loaded_mod._recent_mods.copy()
     previous_root = loaded_mod.root

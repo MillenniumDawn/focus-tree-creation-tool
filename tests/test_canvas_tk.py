@@ -50,6 +50,9 @@ class _FakeApp(CanvasMixin):
         self.mutex_mode = False
         self.mutex_src = None
         self._extra_trees = []
+        self._lifecycle = None
+        self._image_broker = None
+        self._validation_worst = {}
         self._redraw_job = None
         self._lines_job = None
         self._lines = []

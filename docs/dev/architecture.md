@@ -58,7 +58,10 @@
 - **`ui/`**: Tk-facing code: the three mixins `App` is built from —
   `CanvasMixin` (`canvas.py`), `EffectsMixin` (`effects_panel.py`, the
   sidebar Effects tab, the effect browser popup and the per-effect
-  parameter form), and `ModLoadingMixin` (`mod_loading.py`) — plus
+  parameter form), and `ModLoadingMixin` (`mod_loading.py`). Their shared
+  host-state requirements are recorded as `CanvasHost`, `EffectsHost`, and
+  `ModLoadingHost` protocols in `app_contracts.py`, checked against `App`
+  without adding runtime inheritance — plus
   `gfx_browser.py` (the universal GFX picker, the drag-to-place GFX
   editor, and the sidebar's narrower focus-icon picker, see
   `monolith-migration.md` for why there are two GFX browsers instead of

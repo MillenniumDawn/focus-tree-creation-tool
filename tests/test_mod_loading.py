@@ -8,6 +8,7 @@ from collections.abc import Callable
 from typing import Any
 
 import pytest
+from ui_fakes import ModLoadingAppFake
 
 from hoi4cm.mod import MOD
 from hoi4cm.ui import mod_loading
@@ -22,25 +23,6 @@ def isolate_mod():
     yield
     MOD.__dict__.clear()
     MOD.__dict__.update(snapshot)
-
-
-class _FakeApp(ModLoadingMixin):
-    _lifecycle: Any
-    _mod_lbl: Any
-    _focus_bundles: Any
-    cv: Any
-    visibility_updates: int
-    dropdown_refreshes: int
-    status_updates: int
-    invalidations: int
-    redraws: int
-    after_calls: list[tuple[int, Callable[[], None]]]
-    _apply_md_visibility: Any
-    _refresh_mod_dropdowns: Any
-    _update_statusbar: Any
-    _invalidate_canvas_images: Any
-    _redraw_now: Any
-    after: Any
 
 
 class _AcceptingLifecycle:
@@ -134,7 +116,7 @@ def test_load_mod_moves_duplicate_to_front_and_caps_recent_mods(
         background_calls.append((worker, on_done, kwargs))
 
     monkeypatch.setattr(mod_loading, "run_bg", run_bg)
-    app = _FakeApp()
+    app = ModLoadingAppFake()
     app._lifecycle = _AcceptingLifecycle()
     monkeypatch.setattr(app, "_on_mod_loaded", loaded.append)
     previous_recent = MOD._recent_mods.copy()  # type: ignore[attr-defined]
@@ -184,7 +166,7 @@ def test_load_mod_is_rejected_when_lifecycle_is_not_accepting(
 
     monkeypatch.setattr(mod_loading.filedialog, "askdirectory", askdirectory)
     monkeypatch.setattr(MOD, "save_config", save_config)
-    app = _FakeApp()
+    app = ModLoadingAppFake()
     app._lifecycle = type("ClosedLifecycle", (), {"accepting": False})()
 
     app._load_mod()
@@ -228,9 +210,9 @@ def test_on_mod_loaded_invalidates_canvas_and_wizard_images_on_ui_thread(
         lambda _mod, name: image_loads.append((name, threading.get_ident())),
     )
 
-    app = _FakeApp()
+    app = ModLoadingAppFake()
     app._mod_lbl = FakeLabel()
-    app._focus_bundles = {"stale": object()}
+    app._focus_bundles = {7: object()}
     app.cv = FakeCanvas()
     app.visibility_updates = 0
     app.dropdown_refreshes = 0
@@ -238,23 +220,24 @@ def test_on_mod_loaded_invalidates_canvas_and_wizard_images_on_ui_thread(
     app.invalidations = 0
     app.redraws = 0
     app.after_calls = []
-    app._apply_md_visibility = lambda: setattr(
-        app, "visibility_updates", app.visibility_updates + 1
+
+    def bump(attribute: str) -> Callable[[], None]:
+        def update() -> None:
+            setattr(app, attribute, getattr(app, attribute) + 1)
+
+        return update
+
+    app._apply_md_visibility = bump("visibility_updates")
+    app._refresh_mod_dropdowns = bump("dropdown_refreshes")
+    app._update_statusbar = bump("status_updates")
+    app._invalidate_canvas_images = bump("invalidations")
+    app._redraw_now = bump("redraws")
+    monkeypatch.setattr(
+        app, "after", lambda delay, callback: app.after_calls.append((delay, callback))
     )
-    app._refresh_mod_dropdowns = lambda: setattr(
-        app, "dropdown_refreshes", app.dropdown_refreshes + 1
-    )
-    app._update_statusbar = lambda: setattr(
-        app, "status_updates", app.status_updates + 1
-    )
-    app._invalidate_canvas_images = lambda: setattr(
-        app, "invalidations", app.invalidations + 1
-    )
-    app._redraw_now = lambda: setattr(app, "redraws", app.redraws + 1)
-    app.after = lambda delay, callback: app.after_calls.append((delay, callback))
     ui_thread = threading.get_ident()
 
-    app._on_mod_loaded("/mods/sample-mod")
+    ModLoadingMixin._on_mod_loaded(app, "/mods/sample-mod")
 
     assert app._mod_lbl.configurations[0]["text"].startswith("📂 sample-mod")
     assert app.visibility_updates == 1

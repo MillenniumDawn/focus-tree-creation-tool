@@ -39,10 +39,15 @@ Controls:
 
 import os as _os
 import sys as _sys
+from typing import TYPE_CHECKING, Any
 
 _SRC = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "src")
 if _os.path.isdir(_SRC) and _SRC not in _sys.path:
     _sys.path.insert(0, _SRC)
+
+if TYPE_CHECKING:
+    from hoi4cm.ui.app_contracts import CanvasHost, EffectsHost, ModLoadingHost
+    from hoi4cm.ui.image_broker import ImageBroker
 
 from hoi4cm.core import (  # noqa: E402
     EFFECT_CATS,
@@ -99,6 +104,7 @@ from hoi4cm.mod import (  # noqa: E402
 from hoi4cm.mod.workspace_files import WorkspaceFiles  # noqa: E402
 from hoi4cm.models import (  # noqa: E402
     EditorWorkspace,
+    FocusDocument,
     FocusSidebarValues,
     TreeDocument,
     TreeMetadata,
@@ -224,6 +230,35 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
     CANVAS_MIN_SIZE = 10
     CANVAS_EXPAND_STEP = 5
     TREE_META_REF_CAP = 50
+    _mod_lbl: Any
+    cv: tk.Canvas
+    focuses: FocusDocument
+    offset: list[float]
+    zoom: float
+    selected: Focus | None
+    _multi_sel: set[int]
+    _multisel_mode: bool
+    mutex_src: Focus | None
+    mutex_mode: bool
+    _canvas_min: list[int]
+    _canvas_max: list[int]
+    _extra_trees: list[dict[str, Any]]
+    _grid_on: bool
+    _validation_worst: dict[int, Any]
+    _focus_bundles: dict[int, Any]
+    _lifecycle: ApplicationLifecycle | None
+    _config_write_warned: bool
+    _mod_image_resource_registered: bool
+    _image_broker: ImageBroker | None
+
+    if TYPE_CHECKING:
+
+        def _check_mixin_contracts(self) -> None:
+            """Keep the three UI mixin contracts tied to their real host."""
+            canvas_host: CanvasHost = self
+            effects_host: EffectsHost = self
+            mod_loading_host: ModLoadingHost = self
+            assert canvas_host is effects_host is mod_loading_host
 
     def __init__(self):
         log.info("App.__init__: calling tk.Tk.__init__...")
@@ -245,12 +280,20 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         self.resizable(True, True)
         self.workspace = EditorWorkspace()
         self.focuses = self.workspace.focuses
+        # Extra loaded shared/joint tree metadata, populated during UI setup.
+        self._extra_trees: list[dict[str, Any]] = []
+        self._eb_win = None
+        self._effects_sig = None
+        self._config_write_warned = False
+        self._mod_image_resource_registered = False
+        self._image_broker = None
         # Inclusive cell bounds of the usable canvas (grid indices).
         self._canvas_min = [0, 0]
         self._canvas_max = [self.CANVAS_MIN_SIZE - 1, self.CANVAS_MIN_SIZE - 1]
         self.selected = None
         self._multi_sel = set()  # set of fids in multi-select
         self._multisel_mode = False  # True when multi-select mode active
+        self._grid_on = True
         self._default_focus_prefix = ""  # set by tag detection
         self.mutex_src = None
         self.mutex_mode = False
@@ -324,7 +367,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         except TypeError, ValueError, AttributeError:
             cfp_y = getattr(self, "_cfp_y", None)
         extra_fp = []
-        for tree in getattr(self, "_extra_trees", []):
+        for tree in self._extra_trees:
             extra_fp.append(
                 (
                     tree.get("type", ""),
@@ -352,14 +395,14 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             cfp_y,
             tuple(getattr(self, "_shared_focuses", [])),
             tuple(getattr(self, "_joint_focuses", [])),
-            tuple(getattr(self, "_canvas_min", [0, 0])),
-            tuple(getattr(self, "_canvas_max", [9, 9])),
+            tuple(self._canvas_min),
+            tuple(self._canvas_max),
             getattr(self, "_default_focus_prefix", ""),
             tuple(extra_fp),
         )
 
     def _is_dirty(self) -> bool:
-        if getattr(self, "focuses", None) is None:
+        if self.focuses is None:
             return False
         if self.focuses.revision != getattr(self, "_saved_revision", 0):
             return True
@@ -610,10 +653,6 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         # shared_focus and joint_focus lines preserved from import
         self._shared_focuses = self.workspace.main_tree.metadata.shared_focuses
         self._joint_focuses = self.workspace.main_tree.metadata.joint_focuses
-        # Extra loaded trees (shared/joint trees loaded alongside the main tree)
-        # Each dict has type, file_path, tree_id, cfp_x/y, shared_focuses,
-        # joint_focuses, country_tag/raw, tree_extras, had_wrapper, and focus_ids.
-        self._extra_trees = []
         self._tree_badge_table = None  # rebuilt by _get_tree_badge on change
         toolbar = tk.Frame(self, bg=BG_DARK)
         toolbar.pack(fill="x")
@@ -4509,7 +4548,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         The length check is a backstop for a mutation site that forgot to call
         _invalidate_tree_badges.
         """
-        extra_trees = getattr(self, "_extra_trees", [])
+        extra_trees = self._extra_trees
         if tree_idx <= 0 or tree_idx > len(extra_trees):
             return "", FC_BORDER
         table = getattr(self, "_tree_badge_table", None)
@@ -4821,10 +4860,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             return
 
         # Already-loaded paths for duplicate detection
-        loaded_paths = {
-            os.path.normpath(et["file_path"])
-            for et in getattr(self, "_extra_trees", [])
-        }
+        loaded_paths = {os.path.normpath(et["file_path"]) for et in self._extra_trees}
 
         # ── Checklist dialog ────────────────────────────────────────
         win = tk.Toplevel(self)
@@ -5809,7 +5845,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         tid = self._tree_id.get() or tr("status.no_tree", "no tree")
         fc = len(self.focuses)
         sel = getattr(self.selected, "name", "—") if self.selected else "—"
-        zoom = int(getattr(self, "zoom", 1.0) * 100)
+        zoom = int(self.zoom * 100)
         # mod name from _mod_lbl text (set by _on_mod_loaded)
         try:
             mod_txt = (
@@ -5852,7 +5888,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         self._lp_search_job = None
         if not hasattr(self, "_focus_list"):
             return
-        worst = getattr(self, "_validation_worst", {})
+        worst = self._validation_worst
 
         def _build_items():
             return (

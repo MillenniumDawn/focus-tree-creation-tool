@@ -81,6 +81,9 @@ def _effects_signature(focus, effects):
 class EffectsMixin:
     """Effects tab, effect browser and parameter-form for :class:`App`."""
 
+    _eb_win: tk.Toplevel | None
+    _effects_sig: object | None
+
     if TYPE_CHECKING:
 
         def _get_mod_suggestions(self, etype: str, fname: str) -> list[str]: ...
@@ -141,7 +144,7 @@ class EffectsMixin:
         if not self.selected:
             self._hint(tr("dialog.select_focus_first", "Select a focus first."))
             return
-        existing = getattr(self, "_eb_win", None)
+        existing = self._eb_win
         if existing is not None and existing.winfo_exists():
             existing.deiconify()
             existing.lift()
@@ -378,7 +381,7 @@ class EffectsMixin:
         pop.configure(bg=BG_DARK)
         parent = (
             self._eb_win
-            if (getattr(self, "_eb_win", None) and self._eb_win.winfo_exists())
+            if self._eb_win is not None and self._eb_win.winfo_exists()
             else self
         )
         pop.transient(parent)
@@ -522,11 +525,7 @@ class EffectsMixin:
     def _refresh_effects(self, force=False):
         effects = self.selected.effects if self.selected else []
         sig = _effects_signature(self.selected, effects)
-        if (
-            not force
-            and MOD.sidebar_refresh_skip
-            and getattr(self, "_effects_sig", None) == sig
-        ):
+        if not force and MOD.sidebar_refresh_skip and self._effects_sig == sig:
             return
         self._effects_sig = sig
         for w in self._eff_box.winfo_children():
