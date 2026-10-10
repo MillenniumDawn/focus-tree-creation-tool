@@ -50,6 +50,11 @@ The additional gate
 covered, and runs without Xvfb on purpose so they can't quietly grow a
 Tk dependency.
 
+The character codec has headless round-trip tests in
+`tests/test_character_codec.py`. The dialog itself is included in
+`tests/test_wizard_smoke.py`; it is skipped by the shared Tk fixture when no
+display is available.
+
 The package number is still
 dominated by the large Tk dialog bodies, but construction is now
 smoke-tested (`tests/test_wizard_smoke.py`,

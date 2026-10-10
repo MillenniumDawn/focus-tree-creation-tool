@@ -11,6 +11,7 @@ WIZARD_MODULES = (
     "dyn_mod",
     "additional_income",
     "event",
+    "character",
 )
 DEAD_ENCRYPTED_BUILD_FILES = (
     ROOT / "build" / "patch_spec_encrypted.py",

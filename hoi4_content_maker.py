@@ -5867,6 +5867,12 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
 
         open_event_wizard(self)
 
+    def _character_wizard(self):
+        """Open the character authoring wizard."""
+        from hoi4cm.wizards import open_character_wizard
+
+        open_character_wizard(self)
+
     def _update_statusbar(self):
         """Refresh all status bar labels."""
         if not hasattr(self, "_sb_focus_lbl"):

@@ -8,6 +8,9 @@ the version by hand. See `AGENTS.md`.
 
 ## Unreleased
 
+- Add a Character Editor for creating and editing character files, with
+  role, trait, and portrait insertion helpers. Preserve repeated role and
+  portrait blocks and unknown fields through import/export.
 - Confirm before unloading an extra focus tree, and make extra-tree loads and
   unloads undoable with Ctrl+Z, including their loaded-tree metadata.
 - Give each focus document its own ID allocator so separate workspaces and

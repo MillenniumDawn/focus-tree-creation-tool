@@ -29,6 +29,7 @@ _MENU_CALLBACKS = (
     "_dyn_mod_wizard",
     "_decision_wizard",
     "_event_wizard",
+    "_character_wizard",
     "_validate_tree",
     "_load_mod",
     "_show_post_load_prompt",
@@ -96,3 +97,33 @@ def test_load_mod_is_only_in_file_import_export(tk_root):
     tk_root.after(50, tk_root.quit)
     tk_root.mainloop()
     callbacks["_load_mod"].assert_called_once_with()
+
+
+def test_character_editor_is_available_in_tools_menu(tk_root):
+    callbacks = {name: MagicMock() for name in _MENU_CALLBACKS}
+    for name, callback in callbacks.items():
+        setattr(tk_root, name, callback)
+    toolbar = tk.Frame(tk_root)
+    toolbar.pack()
+    controller = build_menubar(tk_root, toolbar)
+
+    before = set(tk_root.winfo_children())
+    controller.buttons["tools"].invoke()
+    tk_root.update()
+    dropdowns = [
+        widget
+        for widget in tk_root.winfo_children()
+        if isinstance(widget, tk.Toplevel) and widget not in before
+    ]
+    assert len(dropdowns) == 1
+    button = next(
+        widget
+        for widget in _descendants(dropdowns[0])
+        if isinstance(widget, tk.Button) and widget.cget("text") == "Character Editor"
+    )
+    button.invoke()
+    tk_root.after(30, tk_root.quit)
+    tk_root.mainloop()
+    callbacks["_character_wizard"].assert_called_once_with()
+
+    controller.close()
