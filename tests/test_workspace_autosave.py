@@ -56,7 +56,8 @@ def test_clear_workspace_autosave_removes_file(tmp_path, monkeypatch):
     path = workspace_autosave_path()
     os.makedirs(os.path.dirname(path), exist_ok=True)
     # test tmp is safe — not a user-controlled traversal sink
-    open(path, "w", encoding="utf-8").write("x")  # nosemgrep: python-path-traversal
+    with open(path, "w", encoding="utf-8") as f:  # nosemgrep: python-path-traversal
+        f.write("x")
     assert os.path.isfile(path)
     clear_workspace_autosave()
     assert not os.path.isfile(path)
@@ -89,7 +90,7 @@ def test_clear_workspace_autosave_explicit_path(tmp_path):
 
 
 def _one_focus_workspace():
-    focus = Focus(1, 2)
+    focus = Focus(id=1, x=1, y=2)
     focus.name = "TAG_start"
     return EditorWorkspace(
         focuses=FocusDocument([focus]),

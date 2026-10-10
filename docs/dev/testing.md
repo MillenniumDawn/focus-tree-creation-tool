@@ -17,8 +17,10 @@ sets USERPROFILE because that is what `expanduser("~")` prefers. DISPLAY and
 explicit XAUTHORITY values are unchanged; when XAUTHORITY is unset, an
 existing original `~/.Xauthority` is exported by absolute path before HOME is
 replaced so X11 authentication still works. The same module provides the
-shared Tk fixtures (see "The headless constraint"); everything else lives in
-the file that uses it.
+shared Tk fixtures (see "The headless constraint"). Plain helpers shared by
+several test files live in `tests/tk_helpers.py` (Toplevel bookkeeping and
+widget lookups) and `tests/builders.py` (`make_focus`, `default_decision`),
+imported by bare name. Everything else lives in the file that uses it.
 
 ## Coverage
 
@@ -43,7 +45,7 @@ must stay separately included in `pyproject.toml` so a future change cannot
 silently stop measuring either source.
 
 The additional gate
-`pytest tests/test_wizard_generators_*.py --cov=hoi4cm.wizards._generators
+`pytest --no-tk tests/test_wizard_generators_*.py --cov=hoi4cm.wizards._generators
 --cov-fail-under=95` keeps the wizard script/loc renderers near-fully
 covered, and runs without Xvfb on purpose so they can't quietly grow a
 Tk dependency.
@@ -93,8 +95,8 @@ state leaks between tests. Six patterns cover what's here today:
   parse -> build -> export -> reparse stability: the exporter normalizes
   whitespace, so the guarantee it checks is that a second export equals the
   first, plus that structural fields and known content survive. Its
-  `reset_counter` fixture saves and restores `Focus._next` around each test
-  so ID assignment doesn't depend on test order.
+  related builds reuse a `BuildContext` allocator, while standalone builds use
+  their own context, so IDs stay local and independent of test order.
 - **The shared Tk fixtures.** `tests/conftest.py` provides the autouse
   `hide_tk_windows` fixture and builds a `tk.Tk()` in `tk_root`, destroying it
   after the test and skipping when no display is reachable (see "The headless
@@ -130,7 +132,7 @@ each one and compares the result against a committed golden JSON under
 `tests/fixtures/focus_trees/golden/`.
 
 The comparison normalizes before asserting: focuses are keyed by name
-instead of numeric id (ids depend on `Focus._next`, a global counter), and
+instead of numeric id (IDs belong to the document), and
 `prereqs`/`mutex` id-lists are remapped to names for the same reason. Group
 structure and ordering are left alone since OR-group membership and AND
 ordering are semantically meaningful.
@@ -194,31 +196,55 @@ regression, so it was documented rather than reverted.
 
 ## The headless constraint
 
-CI's `test` job (`.github/workflows/ci.yml`) runs the suite under
-`xvfb-run -a`, so widget tests do get a display there. `tkinter` itself
-imports fine on `actions/setup-python`'s CPython; the display was the only
-thing missing, and Xvfb supplies it.
+On Linux, plain `pytest` starts a private Xvfb server before collection and
+restores the caller's display when the session ends. Install `xvfb` first
+(`sudo apt-get install xvfb xauth` on Debian/Ubuntu). This is intentional even
+when a desktop DISPLAY is present: mapped canvas, decision-wizard, and
+`visible_tk` tests otherwise put real windows on that desktop. The former
+withdraw-only fixture did not prevent explicit `deiconify()` calls.
 
-The job also sets `HOI4CM_REQUIRE_TK=1`, which turns `tk_root`'s "no
-display" skip into a failure. Without that, a broken Xvfb would take every
-widget test out of the run and still report green: before Xvfb landed, 18
-tests skipped in CI and nobody saw it. Locally the variable is unset, so a
-headless dev box still skips cleanly.
+The separate `windows-permissions` job runs `tests/test_cache_permissions.py`
+on native Windows. Both new-cache and existing-cache cases inspect real directory
+and database DACLs. Executable builds depend on this job as well as lint and the
+Linux test job, so a cache-permission failure blocks release artifacts.
 
-On a dev box that *does* have a display, the run used to map a window per
-widget test and cover the desktop for the length of the suite. It no longer
-does: `tests/conftest.py` withdraws the `tk_root` and every `Toplevel` built
-during a test, and turns `grab_set` into a no-op (Tk refuses to grab a
-window that is not viewable). The widget tree is built exactly the same
-way, it just never gets drawn.
+```sh
+pytest                            # full suite, private Linux display
+HOI4CM_REQUIRE_TK=1 pytest --cov    # require real Tk coverage, as in CI
+pytest --no-tk tests/test_config.py # pure tests; Tk construction fails
+HOI4CM_SHOW_TK=1 pytest -m visible_tk # explicitly show UI on your display
+```
 
-A handful of tests need the real thing, either because they measure
-geometry or because they generate pointer and key events that only land on
-a mapped window. Those carry `@pytest.mark.visible_tk` and get an ordinary
-visible root. `tests/test_canvas_tk.py`'s `mapped_canvas` fixture does the
-same job by calling `deiconify()` itself, and fails loudly if the canvas
-still has no size. To watch a whole run happen on screen, set
-`HOI4CM_SHOW_TK=1`.
+`--no-tk` needs no Xvfb and rejects in-process Tk construction instead of
+silently omitting UI assertions. Use it for the wizard-generator coverage gate.
+`--collect-only` also needs no display. A normal Linux run without Xvfb fails
+with installation instructions rather than falling back to the desktop.
+
+The private server chooses a free display, disables TCP, and is inherited by
+subprocess smoke checks and nested pytest runs. Startup has a ten-second
+limit. Teardown restores DISPLAY, terminates and waits for the server, and
+kills/reaps it if it does not stop within five seconds. The entry-point smoke
+child retains its 30-second timeout. No test starts the interactive editor's
+main loop; the real entry point is tested with `--smoke-test`.
+
+Ordinary widget tests withdraw roots (including directly constructed Tk roots)
+and Toplevels and destroy leftover roots during teardown. `visible_tk` tests
+and fixtures that need mapped geometry still use real mapping, events, and
+grabs on the private display; they are not skipped or converted to mocked UI.
+Grab errors are suppressed only for unviewable windows. `HOI4CM_SHOW_TK=1`
+opts out of display isolation and withdrawal for desktop debugging.
+
+Each Tk test ends with one `gc.collect()`, so Tk objects are finalized on the Tk
+thread (#149). Pure tests do not collect. `pytest_collection_finish` freezes
+everything imported and collected up to that point, which keeps the remaining
+collections short. Collecting after every test instead took the suite from
+about 12 seconds to 46.
+
+Native Windows/macOS do not have Xvfb. Ordinary roots/dialogs are withdrawn,
+but explicit mapped UI tests can still appear there. For a completely quiet
+full suite, run it on Linux/Xvfb (including CI or a Linux VM). Linux automated
+verification does not establish behavior on a user's Windows/macOS desktop.
+`HOI4CM_REQUIRE_TK=1` still makes unavailable Tk fail instead of skip.
 
 Widget tests are still the expensive kind, so the split stands: put logic
 in a pure function and test it headlessly wherever that's possible. Every

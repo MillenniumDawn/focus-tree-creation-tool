@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 from collections import deque
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from hoi4cm.core.undo import UndoStack
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,7 +38,7 @@ class ExtraTreeState:
 
 
 class ExtraTreeUndoHistory:
-    """Metadata snapshots aligned with App calls to ``UndoStack.push``.
+    """Metadata snapshots aligned with committed focus undo entries.
 
     Ordinary entries carry a ``None`` marker, so they incur no tree snapshot
     cost. The caller supplies the current state lazily when undoing or redoing
@@ -58,6 +62,26 @@ class ExtraTreeUndoHistory:
     def push(self, label: str, state: ExtraTreeState | None = None) -> None:
         self._undo.append((label, state))
         self._redo.clear()
+
+    @contextmanager
+    def track(
+        self, stack: UndoStack, label: str, state: ExtraTreeState | None = None
+    ) -> Iterator[None]:
+        """Mirror one push/record, including commits made while unwinding errors.
+
+        Every commit appends a new immutable entry tuple. Comparing its identity
+        detects commits even at capacity, while dropped runs and no-op records
+        leave both the metadata history and its redo trail alone.
+        """
+        if not self.is_aligned(len(stack)):
+            self.clear()
+        previous = stack._stack[-1] if stack else None
+        try:
+            yield
+        finally:
+            current = stack._stack[-1] if stack else None
+            if current is not None and current is not previous:
+                self.push(label, state)
 
     def undo(
         self,

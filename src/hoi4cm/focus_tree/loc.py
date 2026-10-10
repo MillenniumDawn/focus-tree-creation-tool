@@ -76,15 +76,20 @@ class LocTarget:
         return f"{stem}_{_LOC_SPECS[self.language].filename_suffix}.yml"
 
 
-def hydrate_focus_localization(text, focuses):
-    """Apply matching title and description keys from localization *text*."""
-    values = {}
+def parse_loc_values(text: str | None) -> dict[str, str]:
+    """Decode quoted localisation values, skipping malformed entries."""
+    values: dict[str, str] = {}
     for match in _KEY_RE.finditer(text or ""):
         try:
             values[match.group("key")] = json.loads(f'"{match.group("value")}"')
         except json.JSONDecodeError, TypeError:
             continue
+    return values
 
+
+def hydrate_focus_localization(text, focuses):
+    """Apply matching title and description keys from localization *text*."""
+    values = parse_loc_values(text)
     for focus in focuses:
         loc_key = focus.name
         if loc_key in values:

@@ -8,6 +8,8 @@ canvas preview does not use the file generator. Headless behavior lives in
 
 import tkinter as tk
 
+from tk_helpers import cleanup_toplevels, release_grab
+
 import hoi4cm.core.logger as logmod
 import hoi4cm.wizards._generators as gen_mod
 from hoi4cm.wizards.event import open_event_wizard
@@ -51,25 +53,8 @@ def _flush_after(root):
     root.mainloop()
 
 
-def _cleanup_toplevels(root):
-    for w in list(root.winfo_children()):
-        if isinstance(w, tk.Toplevel):
-            try:
-                w.destroy()
-            except tk.TclError:
-                pass
-    try:
-        root.grab_release()
-    except tk.TclError:
-        pass
-    root.update_idletasks()
-
-
 def test_event_export_failure_preserves_canvas_and_logs(tk_root, tmp_path, monkeypatch):
-    try:
-        tk_root.grab_release()
-    except tk.TclError:
-        pass
+    release_grab(tk_root)
     orig_cb = logmod._error_callback
     logmod.clear_errors()
     logmod.set_error_callback(None)
@@ -108,4 +93,4 @@ def test_event_export_failure_preserves_canvas_and_logs(tk_root, tmp_path, monke
     finally:
         logmod.clear_errors()
         logmod.set_error_callback(orig_cb)
-        _cleanup_toplevels(tk_root)
+        cleanup_toplevels(tk_root)

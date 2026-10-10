@@ -6,7 +6,7 @@ from hoi4cm.models import Focus
 
 
 def _focus(focus_id, name, *, tree_idx=0, prereqs=None, mutex=None):
-    focus = Focus()
+    focus = Focus(id=1)
     focus.id = focus_id
     focus.name = name
     focus.tree_idx = tree_idx

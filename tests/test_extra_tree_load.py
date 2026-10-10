@@ -12,7 +12,7 @@ from hoi4cm.focus_tree.parse import (
     EmptyFocusTreeError,
     FocusTreeParseBudgetExceeded,
 )
-from hoi4cm.models import FocusDocument
+from hoi4cm.models import Focus, FocusDocument
 
 
 def _shell():
@@ -41,6 +41,7 @@ def _shell():
     app._restore_extra_tree_state = m.App._restore_extra_tree_state.__get__(app)
     app._undo = m.App._undo.__get__(app)
     app._redo = m.App._redo.__get__(app)
+    app._load_extra_tree = m.App._load_extra_tree.__get__(app)
     return app
 
 
@@ -111,6 +112,61 @@ def test_load_extra_tree_parses_off_the_tk_thread(tmp_path, monkeypatch):
 
     assert len(app.focuses) == 1
     assert app._extra_trees[0]["tree_id"] == "TST_shared"
+
+
+def test_load_extra_tree_after_undo_does_not_reuse_redo_id(tmp_path, monkeypatch):
+    tree = tmp_path / "shared.txt"
+    tree.write_text(
+        "focus_tree = {\n"
+        "\tid = TST_shared\n"
+        "\tfocus = {\n"
+        "\t\tid = EXTRA_one\n"
+        "\t\tx = 0\n"
+        "\t\ty = 0\n"
+        "\t}\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    calls: list[dict[str, Any]] = []
+    _patch_run_bg(monkeypatch, calls)
+    monkeypatch.setattr(m.filedialog, "askopenfilename", lambda **_k: str(tree))
+    monkeypatch.setattr(m.messagebox, "showinfo", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        m,
+        "progress_modal",
+        lambda *_a, **_k: SimpleNamespace(close=lambda: None),
+    )
+    monkeypatch.setattr(m.MOD, "loaded", False)
+    monkeypatch.setattr(m.MOD, "root", None)
+    app = _shell()
+    app.focuses.add(Focus(id=1))
+    app._undo_stack = UndoStack()
+    app._undo_stack.push("add focus", app.focuses, touched_ids=())
+    added = app.focuses.new_focus()
+    added.name = "MAIN_added"
+    app.focuses.add(added)
+
+    assert added.id == 2
+    assert app._undo_stack.undo(app.focuses, Focus.from_dict) is not None
+    assert list(app.focuses) == [1]
+    assert app.focuses.last_allocated_id == 2
+
+    m.App._load_extra_tree(cast(m.App, app), "shared")
+
+    imported = next(
+        focus for focus in app.focuses.values() if focus.name == "EXTRA_one"
+    )
+    assert imported.id == 3
+    # An undoable load starts a new branch, but must still reserve the old ID.
+    assert app._undo_stack.redo(app.focuses, Focus.from_dict) is None
+    app._undo()
+    assert list(app.focuses) == [1]
+    assert app._extra_trees == []
+    app._redo()
+    assert 2 not in app.focuses
+    assert app.focuses[3].name == "EXTRA_one"
+    assert len(app.focuses) == 2
+    assert app.focuses.new_focus().id == 4
 
 
 def test_import_tree_rejects_oversized_file(tmp_path, monkeypatch):

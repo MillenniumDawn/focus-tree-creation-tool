@@ -2,7 +2,7 @@
 generate_icon.py — Creates icon.ico for the HOI4 Content Maker .exe
 
 Generates a multi-resolution .ico file with a watermelon icon.
-Run automatically by build.bat, or manually:  python generate_icon.py
+Run automatically by build.py, or manually:  python generate_icon.py
 """
 
 try:

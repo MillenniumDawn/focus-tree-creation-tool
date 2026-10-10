@@ -10,7 +10,7 @@ from hoi4cm.models import Focus, FocusDocument
 
 
 def _shell():
-    old_focus = Focus()
+    old_focus = Focus(id=1)
     old_focus.name = "OLD_focus"
     app = SimpleNamespace(
         cv=SimpleNamespace(delete=Mock()),

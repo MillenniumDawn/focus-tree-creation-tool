@@ -20,6 +20,8 @@ def _app(focuses=()):
         _tree_undo_history=ExtraTreeUndoHistory(),
         focuses=FocusDocument(focuses),
         selected=None,
+        zoom=1,
+        offset=[0, 0],
         _lines=[],
         _lines_used=0,
         cv=Mock(),
@@ -61,7 +63,7 @@ def _app(focuses=()):
 
 
 def test_unload_extra_tree_prompts_and_undo_restores_canvas(monkeypatch):
-    focus = Focus()
+    focus = Focus(id=1)
     focus.tree_idx = 1
     app = _app([focus])
     app._extra_trees = [
@@ -94,7 +96,7 @@ def test_unload_extra_tree_prompts_and_undo_restores_canvas(monkeypatch):
 
 
 def test_unload_extra_tree_cancel_does_not_change_state_or_push_undo(monkeypatch):
-    focus = Focus()
+    focus = Focus(id=1)
     focus.tree_idx = 1
     app = _app([focus])
     app._extra_trees = [
@@ -110,7 +112,7 @@ def test_unload_extra_tree_cancel_does_not_change_state_or_push_undo(monkeypatch
 
 
 def test_clear_all_undo_restores_extra_tree_registry_and_focuses(monkeypatch):
-    focus = Focus()
+    focus = Focus(id=1)
     focus.tree_idx = 1
     app = _app([focus])
     app._extra_trees = [
@@ -141,9 +143,9 @@ def test_clear_all_undo_restores_extra_tree_registry_and_focuses(monkeypatch):
 
 
 def test_unload_first_of_two_restores_save_all_tree_assignments(monkeypatch):
-    shared_focus = Focus()
+    shared_focus = Focus(id=1)
     shared_focus.tree_idx = 1
-    joint_focus = Focus()
+    joint_focus = Focus(id=2)
     joint_focus.tree_idx = 2
     app = _app([shared_focus, joint_focus])
     app._extra_trees = [
@@ -213,7 +215,7 @@ def test_unload_first_of_two_restores_save_all_tree_assignments(monkeypatch):
 
 
 def test_extra_tree_metadata_history_tracks_dirty_fingerprint(monkeypatch):
-    focus = Focus()
+    focus = Focus(id=1)
     focus.tree_idx = 1
     app = _app([focus])
     app._extra_trees = [
@@ -256,6 +258,146 @@ def test_sidecar_stays_aligned_across_eviction_clear_and_redo_branch():
     assert app._hint.call_args.args == ("Nothing to redo.",)
     assert app._extra_trees[0]["tree_id"] == "tree"
     assert app._tree_undo_history.is_aligned(len(app._undo_stack))
+
+
+def _load_for_history(app):
+    app._push_undo("load tree", touched_ids=(), tree_state=True)
+    focus = app.focuses.new_focus()
+    focus.tree_idx = 1
+    app.focuses.add(focus)
+    app._extra_trees.append(
+        {"tree_id": "tree", "type": "shared", "focus_ids": {focus.id}}
+    )
+    app._shared_focuses.append("tree")
+    return focus
+
+
+def test_tree_history_coalesces_typing_with_focus_entries():
+    app = _app()
+    focus = _load_for_history(app)
+    before = focus.cost
+    for _ in range(3):
+        app._push_undo("typing", (focus.id,), run=(focus.id, "cost"))
+        focus.cost += 1
+
+    assert len(app._undo_stack) == len(app._tree_undo_history) == 2
+    app._undo()
+    assert app.focuses[focus.id].cost == before
+    assert app._extra_trees[0]["focus_ids"] == {focus.id}
+    app._undo()
+    assert not app.focuses
+    assert not app._extra_trees
+    app._redo()
+    app._redo()
+    assert app.focuses[focus.id].cost == before + 3
+    assert app._extra_trees[0]["focus_ids"] == {focus.id}
+
+
+def test_code_records_keep_tree_history_and_no_op_redo_aligned(monkeypatch):
+    app = _app()
+    focus = _load_for_history(app)
+    before = focus.cost
+    monkeypatch.setattr(
+        m, "apply_focus_code", lambda f, *_a, **_k: setattr(f, "cost", 7)
+    )
+    assert m.App._apply_focus_code(cast(m.App, app), focus, "changed") is True
+    assert len(app._undo_stack) == len(app._tree_undo_history) == 2
+    app._undo()
+    assert app.focuses[focus.id].cost == before
+
+    monkeypatch.setattr(m, "apply_focus_code", lambda *_a, **_k: None)
+    assert (
+        m.App._apply_focus_code(cast(m.App, app), app.focuses[focus.id], "no-op")
+        is True
+    )
+    assert len(app._undo_stack) == len(app._tree_undo_history) == 1
+    app._redo()
+    assert app.focuses[focus.id].cost == 7
+    app._undo()
+    app._undo()
+    assert not app.focuses
+    assert not app._extra_trees
+    app._redo()
+    app._redo()
+    assert app.focuses[focus.id].cost == 7
+    assert app._shared_focuses == ["tree"]
+
+
+def test_partial_code_error_commits_metadata_marker(monkeypatch):
+    app = _app()
+    focus = _load_for_history(app)
+    before = focus.cost
+
+    def partial_edit(f, *_args, **_kwargs):
+        f.cost = 7
+        raise ValueError("partial parse")
+
+    errors = Mock()
+    monkeypatch.setattr(m, "apply_focus_code", partial_edit)
+    monkeypatch.setattr(m, "report_error", errors)
+    assert m.App._apply_focus_code(cast(m.App, app), focus, "changed") is False
+    errors.assert_called_once()
+    assert len(app._undo_stack) == len(app._tree_undo_history) == 2
+    app._undo()
+    assert app.focuses[focus.id].cost == before
+    app._undo()
+    assert not app._extra_trees
+    assert not app.focuses
+
+
+def test_code_commit_at_capacity_keeps_retained_tree_snapshot(monkeypatch):
+    app = _app()
+    app._undo_stack = UndoStack(maxlen=2)
+    app._tree_undo_history = ExtraTreeUndoHistory(maxlen=2)
+    app._push_undo("evicted", ())
+    focus = _load_for_history(app)
+    monkeypatch.setattr(
+        m, "apply_focus_code", lambda f, *_a, **_k: setattr(f, "cost", 7)
+    )
+    assert m.App._apply_focus_code(cast(m.App, app), focus, "changed") is True
+    assert len(app._undo_stack) == len(app._tree_undo_history) == 2
+    app._undo()
+    app._undo()
+    assert not app.focuses
+    assert not app._extra_trees
+    app._redo()
+    app._redo()
+    assert app.focuses[focus.id].cost == 7
+    assert app._extra_trees[0]["focus_ids"] == {focus.id}
+
+
+def test_direct_tree_adoption_preserves_earlier_redo_and_allocator():
+    focus = Focus(id=1)
+    app = _app([focus])
+    before = focus.cost
+    app._push_undo("edit", (focus.id,))
+    focus.cost = 7
+    app._undo()
+    parsed = SimpleNamespace(
+        tree_id="tree",
+        cfp_x=None,
+        cfp_y=None,
+        shared_refs=[],
+        joint_refs=[],
+        country_tag="",
+        country_raw="",
+        tree_extras={},
+        had_wrapper=True,
+    )
+    imported = app.focuses.new_focus()
+    imported.tree_idx = 1
+    m.App._install_extra_tree(
+        cast(m.App, app), parsed, [imported], "tree.txt", "shared"
+    )
+
+    app._redo()
+    assert app.focuses[focus.id].cost == 7
+    assert imported.id in app.focuses
+    assert app._extra_trees[0]["focus_ids"] == {imported.id}
+    app._undo()
+    assert app.focuses[focus.id].cost == before
+    assert imported.id in app.focuses
+    assert app.focuses.new_focus().id == imported.id + 1
 
 
 def test_sidecar_discards_stale_history_after_undo_stack_clear():
@@ -332,8 +474,8 @@ def test_batch_load_is_one_undo_redo_action(monkeypatch, tmp_path):
     monkeypatch.setattr(m.messagebox, "showinfo", Mock())
     monkeypatch.setattr(m.messagebox, "showwarning", Mock())
 
-    shared_focus = Focus()
-    joint_focus = Focus()
+    shared_focus = Focus(id=1)
+    joint_focus = Focus(id=2)
     shared_focus.tree_idx = 1
     joint_focus.tree_idx = 2
 

@@ -11,6 +11,7 @@ from copy import deepcopy
 from types import SimpleNamespace
 from unittest.mock import Mock
 
+import hoi4_content_maker as m
 from hoi4cm.core.undo import UndoStack
 from hoi4cm.mod import MOD
 from hoi4cm.models import Focus, FocusDocument
@@ -77,6 +78,10 @@ def test_signature_survives_address_reuse():
 
 
 class _Harness(EffectsMixin, tk.Frame):
+    _select = m.App._select
+    _undo = m.App._undo
+    _redo = m.App._redo
+
     def __init__(self, root):
         tk.Frame.__init__(self, root)
         self._eff_box = tk.Frame(self)
@@ -89,6 +94,18 @@ class _Harness(EffectsMixin, tk.Frame):
         self._invalidate_focus_list_structure = Mock()
         self._hint = Mock()
         self._flash_added = Mock()
+        self.cv = Mock()
+        self._autosave = Mock()
+        self._redraw = Mock()
+        self._show_form = Mock()
+        self._hide_form = Mock()
+        self._update_focus_list_selection = Mock()
+        self._update_statusbar = Mock()
+        self._refresh_prereqs = Mock()
+        self._refresh_mutex = Mock()
+
+    def _populate(self, focus):
+        self._refresh_effects()
 
     def _get_mod_suggestions(self, etype, fname):
         return []
@@ -96,8 +113,8 @@ class _Harness(EffectsMixin, tk.Frame):
     def _mk_btn(self, parent, text, cmd=None, **kwargs):
         return tk.Button(parent, text=text, command=cmd or (lambda: None))
 
-    def _push_undo(self, label="action", touched_ids=None):
-        self._undo_stack.push(label, self.focuses, touched_ids)
+    def _push_undo(self, label="action", touched_ids=None, run=None):
+        self._undo_stack.push(label, self.focuses, touched_ids, run=run)
 
 
 def _descendants(widget, kind):
@@ -131,7 +148,7 @@ def _confirm_parameter_dialog(harness, key, value=None):
 
 def test_add_effect_defaults_snapshots_and_restores_focus(tk_root, monkeypatch):
     monkeypatch.setattr(MOD, "loaded", False)
-    focus = Focus()
+    focus = Focus(id=1)
     focus.effects = [{"type": "add_ideas", "fields": {"idea_name": "old"}}]
     harness = _Harness(tk_root)
     harness.focuses = FocusDocument([focus])
@@ -157,7 +174,7 @@ def test_add_effect_defaults_snapshots_and_restores_focus(tk_root, monkeypatch):
 
 def test_add_effect_copies_supplied_fields(tk_root, monkeypatch):
     monkeypatch.setattr(MOD, "loaded", False)
-    focus = Focus()
+    focus = Focus(id=2)
     harness = _Harness(tk_root)
     harness.focuses = FocusDocument([focus])
     harness.selected = focus
@@ -173,7 +190,7 @@ def test_add_effect_copies_supplied_fields(tk_root, monkeypatch):
 
 def test_parameter_callback_adds_defaults_and_supplied_fields(tk_root, monkeypatch):
     monkeypatch.setattr(MOD, "loaded", False)
-    focus = Focus()
+    focus = Focus(id=3)
     harness = _Harness(tk_root)
     harness.focuses = FocusDocument([focus])
     harness.selected = focus
@@ -189,7 +206,7 @@ def test_parameter_callback_adds_defaults_and_supplied_fields(tk_root, monkeypat
 
 def test_effect_card_entry_callback_updates_focus(tk_root, monkeypatch):
     monkeypatch.setattr(MOD, "loaded", False)
-    focus = Focus()
+    focus = Focus(id=4)
     focus.effects = [{"type": "add_war_support", "fields": {"amount": "0.1"}}]
     harness = _Harness(tk_root)
     harness.focuses = FocusDocument([focus])
@@ -206,7 +223,7 @@ def test_effect_card_entry_callback_updates_focus(tk_root, monkeypatch):
 
 def test_remove_effect_snapshots_and_restores_exact_focus(tk_root, monkeypatch):
     monkeypatch.setattr(MOD, "loaded", False)
-    focus = Focus()
+    focus = Focus(id=5)
     focus.effects = [
         {"type": "add_ideas", "fields": {"idea_name": "first"}},
         {"type": "add_ideas", "fields": {"idea_name": "second"}},
@@ -248,7 +265,7 @@ def test_add_effect_without_selection_is_a_noop(tk_root):
 
 
 def test_live_effect_edits_update_and_ignore_stale_or_unselected(tk_root):
-    focus = Focus()
+    focus = Focus(id=6)
     focus.effects = [
         {"type": "custom", "fields": {}},
         {"type": "custom", "fields": {}},
@@ -312,3 +329,205 @@ def test_refresh_effects_rebuilds_when_flag_disabled(tk_root, monkeypatch):
     h._refresh_effects()
     h._refresh_effects()
     assert calls == [0, 0]
+
+
+def _harness_with_effects(root, monkeypatch, *effects):
+    monkeypatch.setattr(MOD, "loaded", False)
+    focus = Focus(id=1)
+    focus.effects = list(effects)
+    harness = _Harness(root)
+    harness.focuses = FocusDocument([focus])
+    harness.selected = focus
+    harness._refresh_effects()
+    return harness, focus
+
+
+def _entries(harness):
+    return _descendants(harness._eff_box, tk.Entry)
+
+
+def _type(entry, text):
+    """Replace the entry text one character at a time, the way typing does."""
+    entry.delete(0, "end")
+    for char in text:
+        entry.insert("end", char)
+
+
+def _field(harness, focus, index, name):
+    return harness.focuses[focus.id].effects[index]["fields"][name]
+
+
+def test_typing_in_an_effect_field_then_undo_restores_previous_value(
+    tk_root, monkeypatch
+):
+    harness, focus = _harness_with_effects(
+        tk_root,
+        monkeypatch,
+        {"type": "add_war_support", "fields": {"amount": "0.1"}},
+    )
+
+    _type(_entries(harness)[0], "0.35")
+
+    assert _field(harness, focus, 0, "amount") == "0.35"
+    assert len(harness._undo_stack) == 1
+
+    harness._undo()
+
+    assert _field(harness, focus, 0, "amount") == "0.1"
+    assert _entries(harness)[0].get() == "0.1"
+    assert len(harness._undo_stack) == 0
+
+    harness._redo()
+
+    assert _field(harness, focus, 0, "amount") == "0.35"
+    assert _entries(harness)[0].get() == "0.35"
+
+
+def test_typing_after_undo_starts_a_new_entry(tk_root, monkeypatch):
+    harness, focus = _harness_with_effects(
+        tk_root,
+        monkeypatch,
+        {"type": "add_war_support", "fields": {"amount": "0.1"}},
+    )
+    _type(_entries(harness)[0], "0.35")
+    harness._undo()
+
+    _type(_entries(harness)[0], "0.5")
+
+    assert len(harness._undo_stack) == 1
+    harness._undo()
+    assert _field(harness, focus, 0, "amount") == "0.1"
+
+
+def test_typing_in_different_fields_makes_one_entry_per_run(tk_root, monkeypatch):
+    harness, focus = _harness_with_effects(
+        tk_root,
+        monkeypatch,
+        {
+            "type": "set_popularities",
+            "fields": {"democratic": "25", "fascism": "25"},
+        },
+    )
+
+    _type(_entries(harness)[0], "30")
+    _type(_entries(harness)[1], "40")
+    _type(_entries(harness)[0], "50")
+
+    assert len(harness._undo_stack) == 3
+    harness._undo()
+    assert _field(harness, focus, 0, "democratic") == "30"
+    harness._undo()
+    assert _field(harness, focus, 0, "fascism") == "25"
+    harness._undo()
+    assert _field(harness, focus, 0, "democratic") == "25"
+
+
+def test_typing_in_the_same_field_of_two_effects_stays_separate(tk_root, monkeypatch):
+    harness, focus = _harness_with_effects(
+        tk_root,
+        monkeypatch,
+        {"type": "add_war_support", "fields": {"amount": "0.1"}},
+        {"type": "add_war_support", "fields": {"amount": "0.2"}},
+    )
+
+    _type(_entries(harness)[0], "0.3")
+    _type(_entries(harness)[1], "0.4")
+
+    assert len(harness._undo_stack) == 2
+
+
+def test_selecting_a_focus_ends_the_run(tk_root, monkeypatch):
+    harness, focus = _harness_with_effects(
+        tk_root,
+        monkeypatch,
+        {"type": "add_war_support", "fields": {"amount": "0.1"}},
+    )
+    other = harness.focuses.new_focus(5, 5)
+    harness.focuses.add(other)
+    _type(_entries(harness)[0], "0.2")
+
+    harness._select(other)
+    harness._select(focus)
+    _type(_entries(harness)[0], "0.3")
+
+    assert len(harness._undo_stack) == 2
+
+
+def test_reselecting_the_same_focus_ends_the_run(tk_root, monkeypatch):
+    harness, focus = _harness_with_effects(
+        tk_root,
+        monkeypatch,
+        {"type": "add_war_support", "fields": {"amount": "0.1"}},
+    )
+    _type(_entries(harness)[0], "0.2")
+
+    harness._select(focus)
+    _type(_entries(harness)[0], "0.3")
+
+    assert len(harness._undo_stack) == 2
+
+
+def test_other_undoable_actions_end_the_run(tk_root, monkeypatch):
+    harness, _ = _harness_with_effects(
+        tk_root,
+        monkeypatch,
+        {"type": "add_war_support", "fields": {"amount": "0.1"}},
+    )
+    _type(_entries(harness)[0], "0.2")
+
+    harness._add_effect_type("add_stability")
+    _type(_entries(harness)[0], "0.3")
+
+    assert len(harness._undo_stack) == 3
+
+
+def test_writing_the_stored_value_again_pushes_nothing(tk_root, monkeypatch):
+    harness, focus = _harness_with_effects(
+        tk_root,
+        monkeypatch,
+        {"type": "add_war_support", "fields": {"amount": "0.1"}},
+    )
+    text = tk.Text(harness)
+    text.insert("1.0", "body")
+    harness._live_eff_text(0, "body", text)
+    assert len(harness._undo_stack) == 1
+    harness._undo_stack.clear()
+
+    harness._live_eff_field(0, "amount", tk.StringVar(value="0.1"))
+    harness._live_eff_text(0, "body", text)
+
+    assert len(harness._undo_stack) == 0
+
+
+def test_unchanged_write_after_undo_keeps_redo(tk_root, monkeypatch):
+    harness, focus = _harness_with_effects(
+        tk_root,
+        monkeypatch,
+        {"type": "add_war_support", "fields": {"amount": "0.1"}},
+    )
+    _type(_entries(harness)[0], "0.35")
+    harness._undo()
+
+    harness._live_eff_field(0, "amount", tk.StringVar(value="0.1"))
+    harness._redo()
+
+    assert _field(harness, focus, 0, "amount") == "0.35"
+
+
+def test_multiline_text_edits_coalesce_and_undo_to_a_missing_field(tk_root):
+    focus = Focus(id=1)
+    focus.effects = [{"type": "custom", "fields": {}}]
+    harness = _Harness(tk_root)
+    harness.focuses = FocusDocument([focus])
+    harness.selected = focus
+    text = tk.Text(harness)
+
+    for body in ("a", "ab", "abc"):
+        text.delete("1.0", "end")
+        text.insert("1.0", body)
+        harness._live_eff_text(0, "body", text)
+
+    assert focus.effects[0]["fields"] == {"body": "abc"}
+    assert len(harness._undo_stack) == 1
+    harness._undo_stack.undo(harness.focuses, Focus.from_dict)
+    assert harness.focuses[focus.id].effects[0]["fields"] == {}

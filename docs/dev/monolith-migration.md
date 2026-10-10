@@ -141,10 +141,10 @@
 What's left in `hoi4_content_maker.py` today is essentially: the `sys.path`
 shim and import block (lines ~40-166), two Windows-DPI helpers (~172-222),
 and `class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk)`
-(~224-6455, 143 methods, most bodies much smaller now), plus the
+(~223-6426, 137 methods, most bodies much smaller now), plus the
 `__main__` entry point (`--smoke-test` routes to
 `ui/startup_check.py`'s `check_tk_startup`) that calls
-`show_splash(_launch)`. Those 143 methods group into:
+`show_splash(_launch)`. Those 137 methods group into:
 
 - **Sidebar** (still deferred, see below): `_build_sidebar`,
   `_build_sidebar_props`, `_build_sidebar_conditions`, `_build_sidebar_code`,
@@ -155,7 +155,7 @@ and `class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk)`
   `_focus_flag_label`), and the focus-icon field (`_sb_gfx_picker`, a
   plain-text entry with no sidebar preview whose browse button opens
   `ui/gfx_browser.py`'s `open_focus_icon_browser`;
-  `_set_gfx`/`_update_gfx_preview` commit the name and invalidate the
+  `_set_gfx` commits the name and invalidates the
   canvas). The form-snapshot half the autosave dirty check leans on is
   extracted: `_read_sidebar_values` builds `models/sidebar_form.py`'s
   `FocusSidebarValues`, with `_coerce_numeric`/`_set_field_error` handling
@@ -169,12 +169,12 @@ and `class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk)`
   `_new_focus_at`, `_apply`, `_delete_focus`, `_delete_selected`,
   `_key_delete`, `_clear_all`, `_toggle_multisel`, `_select_all_focuses`,
   `_duplicate_focus`, `_on_icon_change`.
-- **Prereq/mutex picking**: `_pick_prereq`, `_toggle_connect`,
+- **Prereq/mutex picking**: `_pick_prereq`,
   `_make_prereq`, `_rm_prereq`, `_toggle_mutex`, `_end_mutex`, `_make_mutex`,
   `_rm_mutex`, `_refresh_prereqs`, `_refresh_mutex`, `_ref_name` (resolves
   row targets through `self.focuses`).
 - **View-code / Code-tab**: `_refresh_code_tab`, `_apply_focus_code`,
-  `_build_focus_code`, `_view_code`, `_add_effect`.
+  `_build_focus_code`, `_view_code`.
 - **Validation** (#132): `_validate_tree`, `_refresh_validation_dialog`,
   and the debounced background pass (`_schedule_validation`,
   `_run_validation`, `_apply_validation_result` plus
@@ -214,8 +214,8 @@ and `class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk)`
   undo).
 - **Autocomplete / mod-aware suggestions**: `_attach_autocomplete`,
   `_get_mod_suggestions`.
-- **Widget factories / low-level helpers**: `_mk_btn`, `_mk_lbl`,
-  `_mk_entry`, `_mk_hsep`, `_hint`, `_sash_pr`/`_sash_mv`/`_sash_rl`
+- **Widget factories / low-level helpers**: `_mk_btn`, `_hint`,
+  `_sash_pr`/`_sash_mv`/`_sash_rl`
   (sidebar-splitter drag), `_update_statusbar`,
   `_refresh_tree_meta_panel`/`_fill_tree_meta_box`, the canvas redraw
   wrappers (`_redraw`, `_redraw_now`, `_center_on_focus`).
