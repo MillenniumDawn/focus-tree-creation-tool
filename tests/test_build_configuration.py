@@ -86,3 +86,24 @@ def test_encrypted_build_path_is_removed_and_cipher_stays_disabled():
         doc = doc_path.read_text(encoding="utf-8")
         assert "build_encrypted" not in doc
         assert "--encrypted" not in doc
+
+
+def test_stable_build_checks_tag_against_project_before_compiling():
+    workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    build = workflow.split("\n  build:\n", 1)[1].split("\n  release:\n", 1)[0]
+    check = "python scripts/versioning.py check-release-tag"
+
+    assert check in build
+    assert "RELEASE_TAG: ${{ github.ref_name }}" in build
+    assert "startsWith(github.ref, 'refs/tags/v')" in build
+    assert "!contains(github.ref_name, '-pre.')" in build
+    assert (
+        "if: github.event_name == 'pull_request' || "
+        "startsWith(github.ref, 'refs/tags/v')" in build
+    )
+    check_step = build.split("      - name: Check the release tag\n", 1)[1].split(
+        "      - name:", 1
+    )[0]
+    assert "shell: bash" in check_step
+    assert '"$RELEASE_TAG"' in check_step
+    assert build.index(check) < build.index("python build/build.py")

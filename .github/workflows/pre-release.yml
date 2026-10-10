@@ -41,7 +41,8 @@ jobs:
       # publishing a pre-release into the stable line.
       - name: Resolve the pre-release identity
         id: identity
-        run: python scripts/versioning.py prerelease-identity >> "$GITHUB_OUTPUT"
+        run: >
+          python scripts/versioning.py prerelease-identity >> "$GITHUB_OUTPUT"
 
   build:
     needs: version
@@ -69,10 +70,15 @@ jobs:
 
       - name: Install tkinter (Linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y python3-tk xvfb xauth
+        run: >
+          sudo apt-get update &&
+          sudo apt-get install -y python3-tk xvfb xauth
 
       - name: Install build dependencies
         run: pip install --require-hashes -r build/requirements.txt
+
+      - name: Stamp the pre-release version
+        run: python scripts/versioning.py stamp-prerelease
 
       - name: Build executable
         run: python build/build.py
@@ -84,8 +90,10 @@ jobs:
       - name: Smoke-test executable
         run: >
           python -c "import os, subprocess, sys;
-          command = [os.path.abspath('${{ matrix.artifact_name }}'), '--smoke-test'];
-          command = ['xvfb-run', '-a', *command] if sys.platform == 'linux' else command;
+          command =
+          [os.path.abspath('${{ matrix.artifact_name }}'), '--smoke-test'];
+          command = ['xvfb-run', '-a', *command]
+          if sys.platform == 'linux' else command;
           subprocess.run(command, check=True, timeout=60)"
 
       - name: Upload artifact
@@ -121,7 +129,10 @@ jobs:
             [ -n "$run_id" ] && break
             sleep 10
           done
-          [ -n "$run_id" ] || { echo "::error::No CI run for $GITHUB_SHA"; exit 1; }
+          [ -n "$run_id" ] || {
+            echo "::error::No CI run for $GITHUB_SHA"
+            exit 1
+          }
           gh run watch "$run_id" --interval 30 --exit-status
 
   publish:
@@ -147,8 +158,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           # This job checks nothing out — it only needs the built artifacts — so
-          # gh has no Git remote to infer the repository from. Without GH_REPO it
-          # dies on `fatal: not a git repository` before reaching the API.
+          # gh has no Git remote to infer the repository from. Without GH_REPO
+          # it dies on `fatal: not a git repository` before reaching the API.
           GH_REPO: ${{ github.repository }}
           TAG: ${{ needs.version.outputs.tag }}
           VERSION: ${{ needs.version.outputs.version }}

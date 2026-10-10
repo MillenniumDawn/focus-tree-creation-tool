@@ -48,3 +48,11 @@ def test_gate_is_read_only_and_bounded() -> None:
     # The job checks nothing out, so gh needs both to reach the API.
     assert "GH_TOKEN: ${{ github.token }}" in gate
     assert "GH_REPO: ${{ github.repository }}" in gate
+
+
+def test_build_stamps_prerelease_version_before_compiling() -> None:
+    build = _job("build")
+    stamp = "python scripts/versioning.py stamp-prerelease"
+
+    assert stamp in build
+    assert build.index(stamp) < build.index("python build/build.py")
