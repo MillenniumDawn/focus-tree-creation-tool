@@ -53,6 +53,16 @@ Tk-handling block, plus the picker popups shared across wizards:
   graphics catalog (see `architecture.md`'s "Writing mod files").
 - `svar_get(var, default)`: safe variable read — coerces to `str` and
   returns `default` when the variable is missing or its read raises.
+- `make_scrolled_listbox(parent, **options)` and
+  `pack_action_footer(dlg, action_text, action_command)`: the themed listbox
+  and the action-plus-Cancel footer every "browse mod files" dialog uses.
+- `format_save_summary(saved, warnings, errs)`: the "Saved to Mod" message
+  body, no Tk.
+
+The spirit, event and dynamic-modifier wizards' picture and icon browse
+buttons open `ui/gfx_browser.py`'s `open_folder_gfx_browser`, each passing
+its own folder list and key prefix. The decision wizard uses
+`open_universal_gfx_browser`.
 
 Pulling these into one module keeps the wizards free of cross-wizard
 coupling (no wizard imports another wizard's globals directly) while still
@@ -82,8 +92,8 @@ still runs clean on the file without a style pass first.
 ## Wizard complexity ratchet
 
 `tests/test_wizard_complexity.py` runs Ruff C901 over only `src/hoi4cm/wizards/`.
-The fixed function-level budgets record the 45 findings at the 10-point
-threshold when the ratchet was added; lowering a score is allowed, but growth
+The fixed function-level budgets record the 41 findings at the 10-point
+threshold (45 when the ratchet was added); lowering a score is allowed, but growth
 past a recorded score or a newly complex function fails. Do not regenerate the
 budget to make a failure green. When an extraction lowers a score, lower its
 budget in the same change so the gain cannot regrow. An empty result fails too,
@@ -125,3 +135,19 @@ gfx lookups, dialog state wiring). Those are Tk-coupled: testing them means
 exercising the non-Tk logic separately from the dialog construction itself.
 The script/loc generators, which carry the loc-export and mod-file writing
 risk the extraction was meant to de-risk, are now covered.
+
+## Dialog interaction coverage
+
+`test_wizard_save.py` drives national-spirit Edit -> Save Raw -> Save to Mod
+with modern and versioned localisation keys, escaped quotes, backslashes, and
+newlines. Raw overrides retain unknown script fields. The wizard and focus
+hydration share `focus_tree.loc.parse_loc_values` instead of separate decoding
+rules. Directory-creation failures are reported with the other save errors.
+
+`test_decision_canvas_preview.py` exercises mapped and withdrawn windows,
+missing and real icons, repeated Preview/Code rebuilds, and closing with a
+rebuild pending. Each case runs in a bounded child pytest process, so a native
+Tk/X11 failure cannot kill the full suite. Its separate coverage report must
+show execution of the real preview renderer. Preview text uses Tk's normal
+packing and word wrapping; deriving its requested character width from the
+parent's pixel width caused a growth loop in withdrawn windows.

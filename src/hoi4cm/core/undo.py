@@ -18,12 +18,26 @@ entries capture just the touched ids, full entries still capture everything.
 ``redo`` restores it and mirrors the same capture back onto the undo stack.
 A new ``push`` clears the redo stack; a new edit branch invalidates any redo
 trail, matching every other editor's behavior.
+
+Runs and ``record``
+-------------------
+A stream of small edits (one effect field, keystroke by keystroke) should be
+one undo step. ``push(..., run=key)`` drops a push whose key equals the
+previous push's key, because the entry already on the stack holds the state
+from before the stream began. Any other push, ``undo``, ``redo``, ``clear``
+or ``end_run`` ends the run.
+
+``record`` is for an edit that may turn out to change nothing, or fail: it
+snapshots first and pushes only if the touched focuses actually differ
+afterward, so a no-op leaves the stack and the redo trail alone.
 """
 
 import copy
 import json
 import zlib
 from collections import deque
+from collections.abc import Hashable, Iterable, Iterator
+from contextlib import contextmanager
 
 _FULL = "full"
 _SPARSE = "sparse"
@@ -78,6 +92,12 @@ def _encode_full(focuses) -> bytes:
     )
 
 
+def _encode_snapshot(snapshot) -> bytes:
+    return zlib.compress(
+        json.dumps({str(fid): data for fid, data in snapshot.items()}).encode("utf-8")
+    )
+
+
 def _id_set(focuses) -> frozenset:
     """Cached id-set for a document, or a fresh frozenset for a plain dict."""
     cached = getattr(focuses, "id_set", None)
@@ -107,6 +127,7 @@ class UndoStack:
     def __init__(self, maxlen=60):
         self._stack: deque = deque(maxlen=maxlen)
         self._redo: deque = deque(maxlen=maxlen)
+        self._run: Hashable | None = None
 
     def __len__(self):
         return len(self._stack)
@@ -115,8 +136,34 @@ class UndoStack:
         """Drop every entry from both stacks."""
         self._stack.clear()
         self._redo.clear()
+        self._run = None
 
-    def push(self, label, focuses, touched_ids=None):
+    def preserve_on_redo(self, focuses):
+        """Keep imported focuses when an earlier edit is redone."""
+        if not self._redo:
+            return
+        additions = {
+            focus_id: _snapshot_focus_for_encoding(focus)
+            for focus_id, focus in focuses.items()
+        }
+        if not additions:
+            return
+        addition_ids = set(additions)
+        for index, entry in enumerate(self._redo):
+            label, kind, payload, id_set = entry
+            if kind == _FULL:
+                snapshot = _decode_full(payload)
+                if snapshot is None:
+                    continue
+                snapshot.update(additions)
+                payload = _encode_snapshot(snapshot)
+            self._redo[index] = (label, kind, payload, id_set | addition_ids)
+
+    def end_run(self) -> None:
+        """Make the next keyed ``push`` start a new entry."""
+        self._run = None
+
+    def push(self, label, focuses, touched_ids=None, *, run: Hashable | None = None):
         """Save enough state to undo an action about to run on ``focuses``.
 
         Call this BEFORE mutating ``focuses``. ``touched_ids`` lists the ids
@@ -132,15 +179,51 @@ class UndoStack:
         a set of every id per action.
 
         A new edit branch invalidates the redo trail.
+
+        ``run`` is an optional hashable key for a stream of edits that should
+        undo as one step (see the module docstring). A push whose ``run``
+        equals the previous push's is dropped, and the redo trail is left
+        alone. Leave it ``None`` for one-off actions.
         """
-        self._redo.clear()
-        if touched_ids is None:
-            self._stack.append((label, _FULL, _encode_full(focuses), _id_set(focuses)))
+        if run is not None and run == self._run:
             return
+        self._commit(self._entry(label, focuses, touched_ids), run)
+
+    @contextmanager
+    def record(self, label, focuses, touched_ids: Iterable[int]) -> Iterator[None]:
+        """Push an entry for ``touched_ids`` only if the block changes them.
+
+        The state is captured before the block runs. If the touched focuses
+        and the id set match afterward, nothing is pushed and the redo trail
+        survives. A block that raises after mutating still pushes, so the
+        partial edit can be undone.
+        """
+        entry = self._entry(label, focuses, touched_ids)
+        try:
+            yield
+        finally:
+            _label, _kind, before, id_set = entry
+            after = {
+                fid: _snapshot_focus_for_encoding(focuses[fid])
+                for fid in before
+                if fid in focuses
+            }
+            if after != before or _id_set(focuses) != id_set:
+                self._commit(entry)
+
+    def _commit(self, entry, run: Hashable | None = None) -> None:
+        self._redo.clear()
+        self._stack.append(entry)
+        self._run = run
+
+    @staticmethod
+    def _entry(label, focuses, touched_ids):
+        if touched_ids is None:
+            return (label, _FULL, _encode_full(focuses), _id_set(focuses))
         touched = {
             fid: _snapshot_focus(focuses[fid]) for fid in touched_ids if fid in focuses
         }
-        self._stack.append((label, _SPARSE, touched, _id_set(focuses)))
+        return (label, _SPARSE, touched, _id_set(focuses))
 
     def undo(self, focuses, focus_factory):
         """Pop the last entry and restore it into ``focuses`` in place.
@@ -154,6 +237,7 @@ class UndoStack:
         created/overwritten in ``focuses`` and need a redraw, ``removed_ids``
         were deleted and need their canvas items cleaned up.
         """
+        self._run = None
         if not self._stack:
             return None
         entry = self._stack[-1]
@@ -171,6 +255,7 @@ class UndoStack:
         ``(label, changed_ids, removed_ids)`` in the same shape as
         ``undo``.
         """
+        self._run = None
         if not self._redo:
             return None
         entry = self._redo[-1]

@@ -4,10 +4,8 @@ from __future__ import annotations
 
 import threading
 
-import pytest
-
 from hoi4cm.focus_tree.batch_load import batch_load_trees
-from hoi4cm.models import Focus
+from hoi4cm.models import Focus, FocusDocument
 
 _TREE = """\
 focus_tree = {
@@ -20,14 +18,6 @@ focus_tree = {
 	}
 }
 """
-
-
-@pytest.fixture(autouse=True)
-def reset_focus_counter():
-    old = Focus._next
-    Focus._next = 0
-    yield
-    Focus._next = old
 
 
 def _write_tree(path, name):
@@ -52,6 +42,31 @@ def test_batch_load_worker_returns_all_files_when_not_cancelled(tmp_path):
     assert [item["path"] for item in results] == [first, second]
     assert all(item["ok"] for item in results)
     assert seen == ["a.txt", "b.txt"]
+
+
+def test_batch_load_allocates_unique_ids_across_trees_and_existing_seed(tmp_path):
+    first = _write_tree(tmp_path / "a.txt", "a")
+    second = _write_tree(tmp_path / "b.txt", "b")
+    seed = Focus(id=41)
+    document = FocusDocument([seed])
+    undone = document.new_focus()
+    document.add(undone)
+    document.delete_many((undone.id,))
+
+    results, stopped = batch_load_trees(
+        [(first, "shared"), (second, "joint")],
+        [seed],
+        0,
+        "TST",
+        lambda *_args: None,
+        allocator_floor=document.last_allocated_id,
+    )
+    added = [focus for result in results for focus in result["new_focuses"]]
+
+    assert stopped is False
+    assert [focus.id for focus in added] == [43, 44]
+    document.extend(added)
+    assert list(document) == [41, 43, 44]
 
 
 def test_batch_load_worker_stops_before_any_file_when_already_cancelled(tmp_path):

@@ -11,7 +11,7 @@ def _host() -> m.App:
 
 
 def _focus(fid: int, gfx: str) -> Focus:
-    f = Focus(0, 0)
+    f = Focus(id=1, x=0, y=0)
     f.id = fid
     f.name = f"focus_{fid}"
     f.gfx = gfx

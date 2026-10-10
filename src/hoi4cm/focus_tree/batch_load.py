@@ -37,11 +37,12 @@ def batch_load_trees(
     country_tag,
     progress,
     cancelled=None,
+    allocator_floor=0,
 ):
     """Parse and build selected trees sequentially, stopping if cancelled."""
     total = len(to_load)
     existing = list(existing_seed)
-    build_context = BuildContext(existing)
+    build_context = BuildContext(existing, id_floor=allocator_floor)
     tree_idx = extra_trees_start_idx
     results = []
     stopped_early = False

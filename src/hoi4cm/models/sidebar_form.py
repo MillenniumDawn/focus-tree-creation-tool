@@ -61,6 +61,13 @@ class FocusSidebarValues:
     offsets: tuple[dict[str, Any], ...]
 
 
+def _ai_raw_text(focus: Focus) -> str:
+    """The ai_will_do text the sidebar shows for ``focus``."""
+    # An empty raw block is shown as ``base = N``, so it must not read as dirty.
+    raw = getattr(focus, "ai_will_do_raw", "").strip()
+    return raw or f"base = {focus.ai_will_do}"
+
+
 def sidebar_values_match_focus(focus: Focus, values: FocusSidebarValues) -> bool:
     """True when writing ``values`` onto ``focus`` would change nothing."""
     return (
@@ -68,7 +75,7 @@ def sidebar_values_match_focus(focus: Focus, values: FocusSidebarValues) -> bool
         and focus.icon == values.icon
         and getattr(focus, "gfx", _DEFAULT_GFX) == values.gfx
         and focus.cost == values.cost
-        and getattr(focus, "ai_will_do_raw", "").strip() == values.ai_will_do_raw
+        and _ai_raw_text(focus) == values.ai_will_do_raw
         and focus.ai_will_do == values.ai_will_do
         and focus.x == values.x
         and focus.y == values.y

@@ -20,10 +20,8 @@ Hard rules for anything that runs inside ``work`` (i.e. on a worker thread):
 A worker is allowed to construct plain-data objects that aren't Tk-bound --
 ``Focus`` instances, ``ParsedFocusTree`` results, etc. -- since ``App`` only
 adopts them once ``on_done`` inserts them into its own dicts/lists. Note that
-``Focus.__init__`` bumps the shared ``Focus._next`` class counter; building
-focuses on a worker thread is only safe because a ``progress_modal``'s
-``grab_set()`` prevents the user from creating a focus (and bumping the same
-counter) concurrently on the Tk thread.
+Focus IDs are allocated from a document snapshot passed to the worker; the
+worker does not mutate the live document.
 """
 
 import tkinter as tk

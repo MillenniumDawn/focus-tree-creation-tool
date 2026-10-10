@@ -4,6 +4,7 @@ from hoi4cm.ui.error_report import report_error
 from hoi4cm.ui.file_errors import report_write_failure
 from hoi4cm.ui.gfx_browser import (
     open_focus_icon_browser,
+    open_folder_gfx_browser,
     open_gfx_placement_editor,
     open_universal_gfx_browser,
 )
@@ -105,6 +106,7 @@ __all__ = [
     "make_progress",
     "nudge_selection",
     "open_focus_icon_browser",
+    "open_folder_gfx_browser",
     "open_gfx_placement_editor",
     "open_settings",
     "open_universal_gfx_browser",

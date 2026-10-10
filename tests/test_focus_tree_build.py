@@ -1,19 +1,10 @@
 """Tests for hoi4cm.focus_tree.build — parsed data -> Focus objects."""
 
-import pytest
 from test_focus_tree_parse import WRAPPED
 
 from hoi4cm.focus_tree.build import BuildContext, build_focuses
 from hoi4cm.focus_tree.parse import parse_focus_tree
 from hoi4cm.models import Focus
-
-
-@pytest.fixture(autouse=True)
-def reset_counter():
-    old = Focus._next
-    Focus._next = 0
-    yield
-    Focus._next = old
 
 
 def _by_name(focuses):
@@ -81,7 +72,7 @@ def test_build_ignores_nonmatching_country_offset():
 
 
 def test_build_cross_tree_relative_and_prereq():
-    anchor = Focus(10, 10)
+    anchor = Focus(id=1, x=10, y=10)
     anchor.name = "MAIN_anchor"
     src = (
         "focus_tree = {\n"
@@ -108,11 +99,11 @@ def test_build_name_collision_semantics():
     # Two existing focuses share a name at different coords — resolve_abs's
     # cross-tree fallback must use the FIRST one in list order (setdefault
     # semantics), matching the old linear scan.
-    dup_first = Focus(1, 1)
+    dup_first = Focus(id=2, x=1, y=1)
     dup_first.name = "DUP_name"
-    dup_second = Focus(5, 5)
+    dup_second = Focus(id=3, x=5, y=5)
     dup_second.name = "DUP_name"
-    shared_existing = Focus(0, 0)
+    shared_existing = Focus(id=4, x=0, y=0)
     shared_existing.name = "SHARED_name"
     src = (
         "focus_tree = {\n"
@@ -197,7 +188,8 @@ def test_build_context_updates_first_position_and_last_link_indexes():
         "\t}\n"
         "}\n"
     )
-    context = BuildContext()
+    seed = Focus(id=41)
+    context = BuildContext([seed])
     first_batch = build_focuses(
         parse_focus_tree(first_source, "/tmp/first.txt"),
         tree_idx=1,
@@ -211,4 +203,7 @@ def test_build_context_updates_first_position_and_last_link_indexes():
     )
 
     assert (second_batch[0].x, second_batch[0].y) == (3, 4)
+    assert [focus.id for focus in first_batch] == [42, 43]
+    assert second_batch[0].id == 44
     assert second_batch[0].prereqs == [[first_batch[-1].id]]
+    assert second_batch[0].prereqs != [[second_batch[0].id]]

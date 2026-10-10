@@ -14,14 +14,6 @@ from hoi4cm.models import Focus
 FIX_DIR = os.path.join(os.path.dirname(__file__), "fixtures", "focus_trees")
 
 
-@pytest.fixture(autouse=True)
-def reset_counter():
-    old = Focus._next
-    Focus._next = 0
-    yield
-    Focus._next = old
-
-
 def raw_block_renderer(eff):
     """Mirror the monolith's _raw_block effect rendering (3-tab base indent)."""
     if eff.get("type") != "_raw_block":
@@ -45,10 +37,10 @@ def _info(**overrides):
 
 
 def test_full_focus_body_matches_hand_derived_text():
-    root = Focus(0, 0)
+    root = Focus(id=1, x=0, y=0)
     root.name = "TST_root"
 
-    child = Focus(2, 3)
+    child = Focus(id=2, x=2, y=3)
     child.name = "TST_child"
     child.gfx = "GFX_goal_political_effort"
     child.text = "custom_loc_key"
@@ -176,9 +168,9 @@ def test_full_focus_body_matches_hand_derived_text():
 
 
 def test_cfp_none_derives_from_focus_bounds():
-    a = Focus(1, 2)
+    a = Focus(id=3, x=1, y=2)
     a.name = "TST_a"
-    b = Focus(3, 5)
+    b = Focus(id=4, x=3, y=5)
     b.name = "TST_b"
     focuses = [a, b]
     lookup = {f.id: f for f in focuses}
@@ -199,7 +191,7 @@ def test_cfp_none_and_no_focuses_defaults_to_zero():
 
 
 def test_default_effect_renderer_removes_ui_callback_requirement():
-    focus = Focus(0, 0)
+    focus = Focus(id=5, x=0, y=0)
     focus.name = "TST_effect"
     focus.effects = [{"type": "add_political_power", "fields": {"amount": "25"}}]
 
@@ -209,11 +201,11 @@ def test_default_effect_renderer_removes_ui_callback_requirement():
 
 
 def test_relative_position_first_match_wins_on_duplicate_names():
-    first = Focus(1, 1)
+    first = Focus(id=6, x=1, y=1)
     first.name = "DUP"
-    second = Focus(9, 9)
+    second = Focus(id=7, x=9, y=9)
     second.name = "DUP"
-    child = Focus(2, 2)
+    child = Focus(id=8, x=2, y=2)
     child.name = "TST_child"
     child.relative_position_id = "DUP"
 
@@ -228,7 +220,7 @@ def test_relative_position_first_match_wins_on_duplicate_names():
 
 
 def test_focus_id_with_quote_and_newline_is_rejected_without_renaming():
-    focus = Focus(0, 0)
+    focus = Focus(id=9, x=0, y=0)
     focus.name = 'a"\n b: c'
     with pytest.raises(ValueError, match="cannot be exported safely"):
         export_main_tree([focus], _info(), focus_lookup={focus.id: focus})
@@ -238,7 +230,7 @@ def test_focus_id_with_quote_and_newline_is_rejected_without_renaming():
 
 
 def test_country_raw_written_verbatim_with_nested_indent_preserved():
-    root = Focus(0, 0)
+    root = Focus(id=10, x=0, y=0)
     root.name = "TST_root"
     country_raw = (
         "factor    =   0\nmodifier = {\n\tadd = 20\n\toriginal_tag=TST\n}\n\n\t"
@@ -264,7 +256,7 @@ def test_country_raw_written_verbatim_with_nested_indent_preserved():
 
 
 def test_country_raw_unmatched_closer_stays_inside_country_block():
-    root = Focus(0, 0)
+    root = Focus(id=11, x=0, y=0)
     root.name = "TST_root"
     info = _info(country_raw="factor = 0\n}\ninjected = {\n\tvalue = yes\n}\n")
 
@@ -280,7 +272,7 @@ def test_country_raw_unmatched_closer_stays_inside_country_block():
 def test_tree_extras_written_after_continuous_focus_position():
     """Wrapper-level keys with no named field (default, reset_on_civilwar,
     initial_show_position, ...) must survive via tree_extras (#39)."""
-    root = Focus(0, 0)
+    root = Focus(id=12, x=0, y=0)
     root.name = "TST_root"
     info = _info(tree_extras={"default": "yes", "initial_show_position": "yes"})
     text = export_main_tree(
@@ -291,7 +283,7 @@ def test_tree_extras_written_after_continuous_focus_position():
 
 
 def test_tree_extras_omitted_when_empty():
-    root = Focus(0, 0)
+    root = Focus(id=13, x=0, y=0)
     root.name = "TST_root"
     text = export_main_tree(
         [root],

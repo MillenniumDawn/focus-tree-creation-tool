@@ -35,7 +35,7 @@ from hoi4cm.mod.graphics_catalog import (
     GraphicsCatalog,
     GraphicsScanConfig,
 )
-from hoi4cm.models import Focus
+from hoi4cm.models import Focus, FocusDocument
 from hoi4cm.ui.scene_index import SceneIndex
 
 AREAS = (
@@ -238,17 +238,13 @@ def _time_batch_load(files: int, per_file: int, repeats: int) -> AreaResult:
 
 
 def _focus_dict(count: int) -> dict:
-    old = Focus._next
-    Focus._next = 0
-    try:
-        focuses = {}
-        for i in range(count):
-            focus = Focus(i % 64, i // 64)
-            focus.name = f"PERF_{i:05d}"
-            focuses[focus.id] = focus
-        return focuses
-    finally:
-        Focus._next = old
+    document = FocusDocument()
+    focuses = {}
+    for i in range(count):
+        focus = document.new_focus(i % 64, i // 64)
+        focus.name = f"PERF_{i:05d}"
+        focuses[focus.id] = focus
+    return focuses
 
 
 def _time_undo(count: int, repeats: int) -> AreaResult:

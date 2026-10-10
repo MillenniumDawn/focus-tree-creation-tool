@@ -3,11 +3,16 @@
 from __future__ import annotations
 
 import tkinter as tk
+from itertools import count
 from types import SimpleNamespace
 
 import pytest
 
 import hoi4_content_maker as m
+from hoi4cm.core.undo import UndoStack
+from hoi4cm.focus_tree.build import build_focuses
+from hoi4cm.focus_tree.export import export_focus_tree
+from hoi4cm.focus_tree.parse import parse_focus_tree
 from hoi4cm.models import Focus, FocusDocument
 from hoi4cm.ui.canvas import CanvasMixin
 
@@ -79,7 +84,10 @@ class _KeybindHarness:
 
 
 def _focus(x, y):
-    return Focus(x, y)
+    return Focus(id=next(_focus_ids), x=x, y=y)
+
+
+_focus_ids = count(1)
 
 
 def test_arrow_shortcuts_nudge_single_selected_focus_and_record_undo():
@@ -114,6 +122,55 @@ def test_arrow_shortcuts_move_multiselection_as_a_group():
     assert (left.x, left.y) == (1, 1)
     assert (right.x, right.y) == (2, 1)
     assert app._undo_pushes.actions == [("nudge focuses", {left.id, right.id})]
+
+
+@pytest.mark.parametrize(("dx", "dy"), [(1, 0), (0, -1)])
+def test_group_nudge_preserves_relative_offsets_through_export_undo_redo(dx, dy):
+    parent = _focus(10, 20)
+    parent.name = "TST_parent"
+    parent._raw_gx, parent._raw_gy = 10, 20
+    child = _focus(11, 22)
+    child.name = "TST_child"
+    child.relative_position_id = parent.name
+    child._raw_gx, child._raw_gy = 1, 2
+    child._rel_dx, child._rel_dy = 1, 2
+    app = _NudgeHarness([parent, child], multi_sel=(parent.id, child.id))
+    undo = UndoStack()
+    app._push_undo = lambda label, touched_ids: undo.push(
+        label, app.focuses, touched_ids=touched_ids
+    )
+
+    app._nudge_selection(dx, dy)
+
+    assert (child._rel_dx, child._rel_dy) == (1, 2)
+    info = {
+        "tree_id": "TST_focus_tree",
+        "country_tag": "TST",
+        "type": "shared",
+        "had_wrapper": False,
+        "shared_focuses": [],
+        "joint_focuses": [],
+    }
+    exported = export_focus_tree(
+        [parent, child], info, focus_lookup=dict(app.focuses.items())
+    )
+    imported = build_focuses(
+        parse_focus_tree(exported, "nudged.txt"), tree_idx=1
+    )
+    assert [(focus.x, focus.y) for focus in imported] == [
+        (10 + dx, 20 + dy),
+        (11 + dx, 22 + dy),
+    ]
+    assert (imported[1]._rel_dx, imported[1]._rel_dy) == (1, 2)
+
+    undo.undo(app.focuses, Focus.from_dict)
+    assert (app.focuses[parent.id].x, app.focuses[parent.id].y) == (10, 20)
+    restored_child = app.focuses[child.id]
+    assert (restored_child._rel_dx, restored_child._rel_dy) == (1, 2)
+    undo.redo(app.focuses, Focus.from_dict)
+    restored_child = app.focuses[child.id]
+    assert (restored_child.x, restored_child.y) == (11 + dx, 22 + dy)
+    assert (restored_child._rel_dx, restored_child._rel_dy) == (1, 2)
 
 
 def test_arrow_shortcuts_do_nothing_if_the_move_hits_an_unselected_focus():
