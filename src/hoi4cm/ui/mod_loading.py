@@ -690,6 +690,8 @@ class ModLoadingMixin:
             dlg.grab_release()
             dlg.destroy()
 
+        dlg.bind("<Escape>", lambda _event: _skip())
+
         def _confirm():
             MOD.edit_ideas_file = ideas_path_var.get().strip()
             MOD.edit_events_file = events_path_var.get().strip()
