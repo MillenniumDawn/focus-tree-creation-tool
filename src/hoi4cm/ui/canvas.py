@@ -301,8 +301,6 @@ class CanvasMixin:
             self._redraw_state = DirtyRedrawState()
         if not hasattr(self, "_scene_index"):
             self._scene_index = SceneIndex()
-        if not hasattr(self, "_focus_bundles"):
-            self._focus_bundles = {}
         if not hasattr(self, "_focus_line_stack_dirty"):
             self._focus_line_stack_dirty = False
         if not hasattr(self, "_canvas_probe"):

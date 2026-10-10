@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, cast
 
 import pytest
-from ui_fakes import ModLoadingAppFake
+from ui_fakes import AppFake
 
 from hoi4cm.mod import context as context_module
 from hoi4cm.mod import scan_cache
@@ -331,7 +331,7 @@ def test_late_cancel_discards_a_completed_scan(monkeypatch, tmp_path, window):
     monkeypatch.setattr(
         type(mod_loading.MOD), "save_config", lambda _mod: saved.append(True) or True
     )
-    app = ModLoadingAppFake()
+    app = AppFake()
     previous_recent = mod_loading.MOD._recent_mods.copy()
     futures = []
     original_run_bg = tasks.run_bg
@@ -410,7 +410,7 @@ def test_superseded_result_is_discarded_and_modal_cleanup_runs(monkeypatch, tmp_
         lambda _mod, value: adopted.append(value) or [],
     )
     monkeypatch.setattr(type(mod_loading.MOD), "save_config", lambda _mod: True)
-    app = ModLoadingAppFake()
+    app = AppFake()
     futures = []
     original_run_bg = tasks.run_bg
 
@@ -471,7 +471,7 @@ def test_worker_error_closes_modal_without_adopting_or_recording_recent(
         return True
 
     monkeypatch.setattr(type(mod_loading.MOD), "save_config", save_config)
-    app = ModLoadingAppFake()
+    app = AppFake()
     loaded_mod = mod_loading.MOD
     previous_recent = loaded_mod._recent_mods.copy()
     previous_root = loaded_mod.root

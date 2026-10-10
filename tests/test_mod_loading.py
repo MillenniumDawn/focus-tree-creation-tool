@@ -8,7 +8,7 @@ from collections.abc import Callable
 from typing import Any
 
 import pytest
-from ui_fakes import ModLoadingAppFake
+from ui_fakes import AppFake
 
 from hoi4cm.mod import MOD
 from hoi4cm.ui import mod_loading
@@ -116,7 +116,7 @@ def test_load_mod_moves_duplicate_to_front_and_caps_recent_mods(
         background_calls.append((worker, on_done, kwargs))
 
     monkeypatch.setattr(mod_loading, "run_bg", run_bg)
-    app = ModLoadingAppFake()
+    app = AppFake()
     app._lifecycle = _AcceptingLifecycle()
     monkeypatch.setattr(app, "_on_mod_loaded", loaded.append)
     previous_recent = MOD._recent_mods.copy()  # type: ignore[attr-defined]
@@ -166,7 +166,7 @@ def test_load_mod_is_rejected_when_lifecycle_is_not_accepting(
 
     monkeypatch.setattr(mod_loading.filedialog, "askdirectory", askdirectory)
     monkeypatch.setattr(MOD, "save_config", save_config)
-    app = ModLoadingAppFake()
+    app = AppFake()
     app._lifecycle = type("ClosedLifecycle", (), {"accepting": False})()
 
     app._load_mod()
@@ -210,7 +210,7 @@ def test_on_mod_loaded_invalidates_canvas_and_wizard_images_on_ui_thread(
         lambda _mod, name: image_loads.append((name, threading.get_ident())),
     )
 
-    app = ModLoadingAppFake()
+    app = AppFake()
     app._mod_lbl = FakeLabel()
     app._focus_bundles = {7: object()}
     app.cv = FakeCanvas()
@@ -227,11 +227,15 @@ def test_on_mod_loaded_invalidates_canvas_and_wizard_images_on_ui_thread(
 
         return update
 
-    app._apply_md_visibility = bump("visibility_updates")
-    app._refresh_mod_dropdowns = bump("dropdown_refreshes")
-    app._update_statusbar = bump("status_updates")
-    app._invalidate_canvas_images = bump("invalidations")
-    app._redraw_now = bump("redraws")
+    monkeypatch.setattr(
+        app, "_apply_md_visibility", bump("visibility_updates"), raising=False
+    )
+    monkeypatch.setattr(
+        app, "_refresh_mod_dropdowns", bump("dropdown_refreshes"), raising=False
+    )
+    monkeypatch.setattr(app, "_update_statusbar", bump("status_updates"))
+    monkeypatch.setattr(app, "_invalidate_canvas_images", bump("invalidations"))
+    monkeypatch.setattr(app, "_redraw_now", bump("redraws"))
     monkeypatch.setattr(
         app, "after", lambda delay, callback: app.after_calls.append((delay, callback))
     )
@@ -245,6 +249,7 @@ def test_on_mod_loaded_invalidates_canvas_and_wizard_images_on_ui_thread(
     assert app.status_updates == 1
     assert app.invalidations == 1
     assert app._focus_bundles == {}
+    assert app.validation_schedules == 1
     assert app.cv.deleted == ["focus"]
     assert app.redraws == 1
     assert cache == {}

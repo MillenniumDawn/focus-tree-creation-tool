@@ -5,7 +5,7 @@ from __future__ import annotations
 import copy
 
 import pytest
-from ui_fakes import ModLoadingAppFake
+from ui_fakes import AppFake
 
 from hoi4cm.mod import MOD
 from hoi4cm.ui import mod_loading
@@ -32,7 +32,7 @@ def test_stale_recent_mod_removal_warns_once_on_failed_save(monkeypatch):
     monkeypatch.setattr(MOD, "save_config", lambda *args, **kwargs: False)
     MOD._recent_mods = ["/gone-one", "/gone-two"]  # type: ignore[attr-defined]
 
-    app = ModLoadingAppFake()
+    app = AppFake()
     app._load_mod_path("/gone-one")
     app._load_mod_path("/gone-two")
 
@@ -52,6 +52,6 @@ def test_successful_recent_mod_save_shows_no_warning(monkeypatch):
     monkeypatch.setattr(MOD, "save_config", lambda *args, **kwargs: True)
     MOD._recent_mods = ["/gone"]  # type: ignore[attr-defined]
 
-    ModLoadingAppFake()._load_mod_path("/gone")
+    AppFake()._load_mod_path("/gone")
 
     assert warnings == []

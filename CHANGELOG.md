@@ -9,8 +9,9 @@ the version by hand. See `AGENTS.md`.
 ## Unreleased
 
 - Define checked host-state protocols for the canvas, effects, and mod-loading
-  UI mixins, initialize extra-tree state before UI setup, and share the mod
-  loading test host across its headless tests.
+  UI mixins, initialize app-owned canvas state before use, replace the
+  mod-load validation fallback with the required typed call, and use one shared
+  host fake across headless mixin tests.
 - Wait for the progress modal to be mapped before taking its Tk grab, so it no
   longer fails with "grab failed: window not viewable" on a live display.
 - Add Spanish (Español) as an interface language.

@@ -100,10 +100,9 @@ state leaks between tests. Six patterns cover what's here today:
   after the test and skipping when no display is reachable (see "The headless
   constraint" below). `tests/test_canvas_tk.py`
   overrides it to `withdraw()` the window, since it drives `CanvasMixin`
-  against a bare `tk.Canvas` through a minimal fake host exposing only the
-  attributes `_draw_focus` touches (`cv`, `focuses`, `offset`, `zoom`,
-  `selected`, `_multi_sel`, `mutex_mode`, `mutex_src`, `_get_tree_badge`)
-  rather than a real `App`, and never needs real geometry. The grid tests
+  against a bare `tk.Canvas` through the shared `AppFake` with just that canvas
+  attached, rather than constructing the full application or needing real
+  geometry. The grid tests
   are the exception: `_draw_grid` clips to the viewport, and a withdrawn
   root's children never map, so `winfo_width/height` report 1 and there is
   no viewport to clip to. Those use the module's `mapped_canvas` fixture,
@@ -113,10 +112,10 @@ state leaks between tests. Six patterns cover what's here today:
   pins the other side of that: with no dimensions to clip to, the grid
   falls back to covering the canvas extent.
 
-  Headless `ModLoadingMixin` tests share `ModLoadingAppFake` from
-  `tests/ui_fakes.py`; each test customizes only the callbacks and widgets its
-  scenario needs. `hoi4cm.ui.app_contracts` checks the real `App` host against
-  the three mixin protocols.
+  Headless canvas, effects, undo-call-site, and mod-loading tests share
+  `AppFake` from `tests/ui_fakes.py`; each test customizes only the callbacks
+  and widgets its scenario needs. `hoi4cm.ui.app_contracts` checks the real
+  `App` host against the three mixin protocols.
 
 ## Golden-fixture tests for the focus-tree pipeline
 

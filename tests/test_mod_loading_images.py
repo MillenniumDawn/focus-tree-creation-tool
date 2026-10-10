@@ -8,7 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Any, cast
 
 import pytest
-from ui_fakes import ModLoadingAppFake
+from ui_fakes import AppFake
 
 from hoi4cm.mod.context import ModContext
 from hoi4cm.ui import mod_loading, tasks
@@ -48,7 +48,7 @@ def test_mod_load_finalizes_images_on_tk(
     scanned = threading.Event()
     resume = threading.Event()
     futures = []
-    app = ModLoadingAppFake()
+    app = AppFake()
     mod = ModContext()
     mod.use_cache = False
     mod._recent_mods = []

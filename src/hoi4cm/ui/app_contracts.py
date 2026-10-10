@@ -10,7 +10,9 @@ from __future__ import annotations
 import tkinter as tk
 from typing import Any, Protocol
 
+from hoi4cm.focus_tree.validate import Severity
 from hoi4cm.models import Focus, FocusDocument
+from hoi4cm.ui.canvas_renderer import FocusCanvasBundle
 from hoi4cm.ui.image_broker import ImageBroker
 from hoi4cm.ui.lifecycle import ApplicationLifecycle
 
@@ -31,7 +33,7 @@ class CanvasHost(Protocol):
     _canvas_max: list[int]
     _extra_trees: list[dict[str, Any]]
     _grid_on: bool
-    _validation_worst: dict[int, Any]
+    _validation_worst: dict[int, Severity]
     _lifecycle: ApplicationLifecycle | None
     _image_broker: ImageBroker | None
 
@@ -47,9 +49,11 @@ class EffectsHost(Protocol):
 class ModLoadingHost(Protocol):
     """State required by the mod-loading mixin."""
 
-    _mod_lbl: Any
-    cv: Any
-    _focus_bundles: dict[int, Any]
+    _mod_lbl: tk.Label
+    cv: tk.Canvas
+    _focus_bundles: dict[int, FocusCanvasBundle]
     _lifecycle: ApplicationLifecycle | None
     _config_write_warned: bool
     _mod_image_resource_registered: bool
+
+    def _schedule_validation(self) -> None: ...

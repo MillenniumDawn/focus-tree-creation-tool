@@ -9,6 +9,7 @@ methods here call it via ``self``.
 import os
 import re
 import tkinter as tk
+from collections.abc import Callable
 from tkinter import filedialog, messagebox
 from typing import Any, cast
 
@@ -21,7 +22,9 @@ from hoi4cm.core import (
 )
 from hoi4cm.core.config import CONFIG_PATH
 from hoi4cm.mod import MOD, find_loc_files, notifying_workspace_files
+from hoi4cm.ui.canvas_renderer import FocusCanvasBundle
 from hoi4cm.ui.error_report import report_error
+from hoi4cm.ui.lifecycle import ApplicationLifecycle
 from hoi4cm.ui.tasks import make_progress, progress_modal, run_bg
 from hoi4cm.ui.theme import (
     BG_CARD,
@@ -43,12 +46,13 @@ _default_hoi4_mod_dir = default_hoi4_mod_dir
 class ModLoadingMixin:
     """Mod picking/scanning, post-load prompt and MD additional-income setup."""
 
-    _mod_lbl: Any
-    cv: Any
-    _focus_bundles: Any
-    _lifecycle: Any
+    _mod_lbl: tk.Label
+    cv: tk.Canvas
+    _focus_bundles: dict[int, FocusCanvasBundle]
+    _lifecycle: ApplicationLifecycle | None
     _mod_image_resource_registered: bool
     _config_write_warned: bool
+    _schedule_validation: Callable[[], None]
 
     def _warn_config_write_failed(self) -> None:
         """Show a one-time-per-session warning when a config write fails."""
@@ -256,12 +260,7 @@ class ModLoadingMixin:
                 err_note=err_note,
             ),
         )
-        try:
-            sched = getattr(self, "_schedule_validation", None)
-            if callable(sched):
-                sched()
-        except Exception:
-            pass
+        self._schedule_validation()
         # Prompt user to pick edit targets for ideas/events files
         lifecycle = self._lifecycle
         if lifecycle is None:

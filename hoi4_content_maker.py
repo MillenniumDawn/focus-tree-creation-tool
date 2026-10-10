@@ -46,7 +46,9 @@ if _os.path.isdir(_SRC) and _SRC not in _sys.path:
     _sys.path.insert(0, _SRC)
 
 if TYPE_CHECKING:
+    from hoi4cm.focus_tree.validate import Severity
     from hoi4cm.ui.app_contracts import CanvasHost, EffectsHost, ModLoadingHost
+    from hoi4cm.ui.canvas_renderer import FocusCanvasBundle
     from hoi4cm.ui.image_broker import ImageBroker
 
 from hoi4cm.core import (  # noqa: E402
@@ -230,7 +232,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
     CANVAS_MIN_SIZE = 10
     CANVAS_EXPAND_STEP = 5
     TREE_META_REF_CAP = 50
-    _mod_lbl: Any
+    _mod_lbl: tk.Label
     cv: tk.Canvas
     focuses: FocusDocument
     offset: list[float]
@@ -244,8 +246,8 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
     _canvas_max: list[int]
     _extra_trees: list[dict[str, Any]]
     _grid_on: bool
-    _validation_worst: dict[int, Any]
-    _focus_bundles: dict[int, Any]
+    _validation_worst: dict[int, Severity]
+    _focus_bundles: dict[int, FocusCanvasBundle]
     _lifecycle: ApplicationLifecycle | None
     _config_write_warned: bool
     _mod_image_resource_registered: bool
@@ -287,6 +289,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         self._config_write_warned = False
         self._mod_image_resource_registered = False
         self._image_broker = None
+        self._focus_bundles: dict[int, FocusCanvasBundle] = {}
         # Inclusive cell bounds of the usable canvas (grid indices).
         self._canvas_min = [0, 0]
         self._canvas_max = [self.CANVAS_MIN_SIZE - 1, self.CANVAS_MIN_SIZE - 1]
