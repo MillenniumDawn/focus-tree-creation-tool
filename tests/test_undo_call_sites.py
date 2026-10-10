@@ -1,8 +1,9 @@
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import cast
 from unittest.mock import Mock
 
 import pytest
+from ui_fakes import AppFake
 
 import hoi4_content_maker as app_module
 from hoi4cm.core.undo import UndoStack
@@ -12,68 +13,12 @@ from hoi4cm.models.document import FocusDocument
 from hoi4cm.ui.theme import XGRID, YGRID
 
 
-class _UndoCallSiteApp:
-    selected: Focus | None
-    zoom: float
-    offset: list[int]
-    mutex_mode: bool
-    _multisel_mode: bool
-    _multi_sel: set[int]
-    _select: Any
-    _push_undo: Any
-    _undo_stack: UndoStack
-    _drag: dict[str, object]
-    w2c: Any
-    c2w: Any
-    _fv_x: Any
-    _fv_y: Any
-    _hint: Any
-    _draw_lines_throttled: Any
-    _new_focus_at: Any
-
-    def __init__(self, focuses=()):
-        self.focuses = FocusDocument(focuses)
-        self._default_focus_prefix = ""
-        self.selected = None
-        self._multisel_mode = False
-        self._multi_sel = set()
-        self._select = Mock()
-        self._push_undo = Mock()
-        self._redraw = Mock()
-        self._refresh_prereqs = Mock()
-        self._refresh_mutex = Mock()
-        self._refresh_effects = Mock()
-        self._focus_list_cache = Mock()
-        self._save_offsets_to_focus = Mock()
-        self._refresh_offsets = Mock()
-        self._populate = Mock()
-        self._hint = Mock()
-        self._draw_lines = Mock()
-        self._begin_document_generation = Mock()
-        self._hide_form = Mock()
-        self._draw_grid = Mock()
-        self._invalidate_focus_list_structure = Mock()
-        self._invalidate_tree_badges = Mock()
-        self._refresh_loaded_trees_panel = Mock()
-        self._refresh_tree_meta_panel = Mock()
-        self._reset_canvas_bounds = Mock()
-        self.cv = Mock()
-        self._focus_bundles = {}
-        self._lines = []
-        self._extra_trees = []
-        self._shared_focuses = []
-        self._joint_focuses = []
-        self._grid_item = None
-        self._grid_key = None
-        self._grid_img = None
-
-
-def _as_app(app: _UndoCallSiteApp) -> app_module.App:
+def _as_app(app: AppFake) -> app_module.App:
     return cast(app_module.App, app)
 
 
 def test_clear_all_pushes_full_snapshot_after_confirmation(monkeypatch):
-    app = _UndoCallSiteApp([Focus(id=33)])
+    app = AppFake([Focus(id=33)])
     monkeypatch.setattr(app_module.messagebox, "askyesno", lambda *args: True)
 
     app_module.App._clear_all(_as_app(app))
@@ -84,7 +29,7 @@ def test_clear_all_pushes_full_snapshot_after_confirmation(monkeypatch):
 
 def test_clear_all_cancel_keeps_document_without_undo(monkeypatch):
     focus = Focus(id=1)
-    app = _UndoCallSiteApp([focus])
+    app = AppFake([focus])
     monkeypatch.setattr(app_module.messagebox, "askyesno", lambda *args: False)
 
     app_module.App._clear_all(_as_app(app))
@@ -95,7 +40,7 @@ def test_clear_all_cancel_keeps_document_without_undo(monkeypatch):
 
 def test_clear_all_round_trips_through_real_undo_stack(monkeypatch):
     focus = Focus(id=2)
-    app = _UndoCallSiteApp([focus])
+    app = AppFake([focus])
     app._undo_stack = UndoStack()
 
     def push_undo(label="action", touched_ids=None, *, tree_state=False):
@@ -159,7 +104,7 @@ def test_undo_clears_selected_focus_after_removal():
 def test_make_prereq_pushes_child_id():
     child = Focus(id=5)
     parent = Focus(id=6)
-    app = _UndoCallSiteApp([child, parent])
+    app = AppFake([child, parent])
 
     app_module.App._make_prereq(_as_app(app), child, parent)
 
@@ -180,7 +125,7 @@ def test_duplicate_prereq_does_not_push_undo():
 
 
 def test_remove_prereq_without_selection_does_not_push_undo():
-    app = _UndoCallSiteApp([Focus(id=34)])
+    app = AppFake([Focus(id=34)])
 
     app_module.App._rm_prereq(_as_app(app), 0)
 
@@ -203,7 +148,7 @@ def test_remove_prereq_group_pushes_child_id():
 
 
 def test_remove_mutex_without_selection_does_not_push_undo():
-    app = _UndoCallSiteApp([Focus(id=35)])
+    app = AppFake([Focus(id=35)])
 
     app_module.App._rm_mutex(_as_app(app), 0)
 
@@ -213,7 +158,7 @@ def test_remove_mutex_without_selection_does_not_push_undo():
 def test_make_mutex_pushes_both_focus_ids():
     first = Focus(id=11)
     second = Focus(id=12)
-    app = _UndoCallSiteApp([first, second])
+    app = AppFake([first, second])
 
     app_module.App._make_mutex(_as_app(app), first, second)
 
@@ -345,7 +290,7 @@ def test_del_offset_round_trip_through_real_undo_stack():
 
 def test_drag_click_without_grid_move_does_not_push_undo():
     focus = Focus(id=21)
-    app = _UndoCallSiteApp([focus])
+    app = AppFake([focus])
     app.zoom = 1.0
     app.mutex_mode = False
 
@@ -359,7 +304,7 @@ def test_drag_click_without_grid_move_does_not_push_undo():
 def test_drag_into_occupied_cell_does_not_push_undo():
     focus = Focus(id=22)
     occupied = Focus(id=23, x=1, y=1)
-    app = _UndoCallSiteApp([focus, occupied])
+    app = AppFake([focus, occupied])
     app.zoom = 1.0
     app.mutex_mode = False
 
@@ -373,7 +318,7 @@ def test_drag_into_occupied_cell_does_not_push_undo():
 def test_drag_event_for_other_focus_does_not_push_undo():
     focus = Focus(id=24)
     other = Focus(id=25, x=1, y=1)
-    app = _UndoCallSiteApp([focus, other])
+    app = AppFake([focus, other])
     app.zoom = 1.0
     app.mutex_mode = False
 
@@ -386,7 +331,7 @@ def test_drag_event_for_other_focus_does_not_push_undo():
 
 def test_drag_in_mutex_mode_does_not_push_undo():
     focus = Focus(id=26)
-    app = _UndoCallSiteApp([focus])
+    app = AppFake([focus])
     app.zoom = 1.0
     app.mutex_mode = False
 
@@ -400,7 +345,7 @@ def test_drag_in_mutex_mode_does_not_push_undo():
 
 def test_drag_move_pushes_once_with_moved_focus_id():
     focus = Focus(id=27)
-    app = _UndoCallSiteApp([focus])
+    app = AppFake([focus])
     app.zoom = 1.0
     app.mutex_mode = False
     app._fv_x = Mock()
@@ -426,7 +371,7 @@ def test_drag_move_pushes_once_with_moved_focus_id():
 def test_drag_start_snapshots_occupied_positions():
     focus = Focus(id=28)
     other = Focus(id=29, x=3, y=4)
-    app = _UndoCallSiteApp([focus, other])
+    app = AppFake([focus, other])
     app.zoom = 1.0
     app.mutex_mode = False
 
@@ -435,9 +380,9 @@ def test_drag_start_snapshots_occupied_positions():
     assert app._drag["occupied"] == {(3, 4)}
 
 
-def test_rmb_on_occupied_cell_does_not_place():
+def test_rmb_on_occupied_cell_does_not_place(monkeypatch: pytest.MonkeyPatch):
     focus = Focus(id=30, x=2, y=3)
-    app = _UndoCallSiteApp([focus])
+    app = AppFake([focus])
     app._new_focus_at = Mock()
     monkeypatch.setattr(app, "c2w", lambda _x, _y: (2, 3))
     app.cv.find_overlapping.return_value = ()
@@ -447,9 +392,9 @@ def test_rmb_on_occupied_cell_does_not_place():
     app._new_focus_at.assert_not_called()
 
 
-def test_rmb_on_free_cell_places():
+def test_rmb_on_free_cell_places(monkeypatch: pytest.MonkeyPatch):
     focus = Focus(id=31, x=2, y=3)
-    app = _UndoCallSiteApp([focus])
+    app = AppFake([focus])
     app._new_focus_at = Mock()
     monkeypatch.setattr(app, "c2w", lambda _x, _y: (5, 5))
     app.cv.find_overlapping.return_value = ()
@@ -459,8 +404,8 @@ def test_rmb_on_free_cell_places():
     app._new_focus_at.assert_called_once_with(5, 5)
 
 
-def _code_app(focus: Focus) -> _UndoCallSiteApp:
-    app = _UndoCallSiteApp([focus])
+def _code_app(focus: Focus) -> AppFake:
+    app = AppFake([focus])
     app.selected = focus
     app.zoom = 1.0
     app.offset = [0, 0]
@@ -468,7 +413,7 @@ def _code_app(focus: Focus) -> _UndoCallSiteApp:
     return app
 
 
-def _code_of(app: _UndoCallSiteApp, focus: Focus) -> str:
+def _code_of(app: AppFake, focus: Focus) -> str:
     return render_focus_block(
         focus, focus_lookup=app.focuses, focus_name_lookup=app.focuses.by_name
     )
@@ -577,7 +522,7 @@ def test_apply_focus_code_keeps_the_entry_when_a_later_step_fails(reported):
 
 
 def test_add_focus_picks_first_free_cell_without_repairing_indexes():
-    app = _UndoCallSiteApp([Focus(id=36, x=0, y=0), Focus(id=37, x=2, y=0)])
+    app = AppFake([Focus(id=36, x=0, y=0), Focus(id=37, x=2, y=0)])
     app._new_focus_at = Mock()
     app.focuses.validate_indexes = Mock()  # type: ignore[method-assign]
     app.focuses.rebuild_indexes = Mock()  # type: ignore[method-assign]
@@ -591,7 +536,7 @@ def test_add_focus_picks_first_free_cell_without_repairing_indexes():
 
 def test_new_focus_at_keeps_indexes_exact_without_a_rebuild():
     existing = Focus(id=32, x=0, y=0)
-    app = _UndoCallSiteApp([existing])
+    app = AppFake([existing])
     app._default_focus_prefix = "tag_"
     app.focuses.rebuild_indexes = Mock()  # type: ignore[method-assign]
 

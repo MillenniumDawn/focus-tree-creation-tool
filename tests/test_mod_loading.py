@@ -38,26 +38,6 @@ def error_buffer(
     logmod.clear_errors()
 
 
-class _FakeApp(ModLoadingMixin):
-    _lifecycle: Any
-    _mod_lbl: Any
-    _focus_bundles: Any
-    cv: Any
-    visibility_updates: int
-    dropdown_refreshes: int
-    status_updates: int
-    invalidations: int
-    redraws: int
-    after_calls: list[tuple[int, Callable[[], None]]]
-    _apply_md_visibility: Any
-    _refresh_mod_dropdowns: Any
-    _update_statusbar: Any
-    _invalidate_canvas_images: Any
-    _redraw_now: Any
-    _schedule_validation: Any
-    after: Any
-
-
 class _AcceptingLifecycle:
     accepting = True
 
@@ -291,7 +271,7 @@ def test_on_mod_loaded_invalidates_canvas_and_wizard_images_on_ui_thread(
     assert app.after_calls[0][0] == 150
 
 
-def _mod_loaded_app(monkeypatch: pytest.MonkeyPatch) -> tuple[_FakeApp, list[str]]:
+def _mod_loaded_app(monkeypatch: pytest.MonkeyPatch) -> tuple[AppFake, list[str]]:
     """A fake app whose Mod Loaded dialog text is collected into the list."""
     dialogs: list[str] = []
     monkeypatch.setattr(
@@ -306,9 +286,10 @@ def _mod_loaded_app(monkeypatch: pytest.MonkeyPatch) -> tuple[_FakeApp, list[str
     monkeypatch.setattr(MOD, "_img_errors", [])
     monkeypatch.setattr(MOD, "failed_steps", [])
     monkeypatch.setattr(MOD, "unparsable_files", [])
-    app = _FakeApp()
+    app = AppFake()
+    app._lifecycle = None
     app._mod_lbl = types.SimpleNamespace(config=lambda **_kwargs: None)
-    app.cv = types.SimpleNamespace(delete=lambda _tag: None)
+    app.cv.delete = lambda _tag: None
     app._apply_md_visibility = lambda: None
     app._refresh_mod_dropdowns = lambda: None
     app._update_statusbar = lambda: None
@@ -326,7 +307,7 @@ def test_on_mod_loaded_names_failed_steps_and_unparsable_files(
     monkeypatch.setattr(MOD, "failed_steps", ["Events", "Characters"])
     monkeypatch.setattr(MOD, "unparsable_files", paths)
 
-    app._on_mod_loaded("/mods/sample-mod")
+    ModLoadingMixin._on_mod_loaded(app, "/mods/sample-mod")
 
     assert len(dialogs) == 1
     assert "Events, Characters" in dialogs[0]
@@ -343,7 +324,7 @@ def test_on_mod_loaded_adds_nothing_for_a_clean_scan(
 ) -> None:
     app, dialogs = _mod_loaded_app(monkeypatch)
 
-    app._on_mod_loaded("/mods/sample-mod")
+    ModLoadingMixin._on_mod_loaded(app, "/mods/sample-mod")
 
     assert len(dialogs) == 1
     assert "failed" not in dialogs[0]
@@ -363,7 +344,7 @@ def test_on_mod_loaded_records_a_failed_validation_and_still_prompts(
 
     app._schedule_validation = validate
 
-    app._on_mod_loaded("/mods/sample-mod")
+    ModLoadingMixin._on_mod_loaded(app, "/mods/sample-mod")
 
     assert len(error_buffer) == 1
     assert "validation exploded" in error_buffer[0][1]
