@@ -126,51 +126,75 @@ def test_arrow_shortcuts_move_multiselection_as_a_group():
 
 @pytest.mark.parametrize(("dx", "dy"), [(1, 0), (0, -1)])
 def test_group_nudge_preserves_relative_offsets_through_export_undo_redo(dx, dy):
-    parent = _focus(10, 20)
-    parent.name = "TST_parent"
-    parent._raw_gx, parent._raw_gy = 10, 20
-    child = _focus(11, 22)
-    child.name = "TST_child"
-    child.relative_position_id = parent.name
-    child._raw_gx, child._raw_gy = 1, 2
-    child._rel_dx, child._rel_dy = 1, 2
-    app = _NudgeHarness([parent, child], multi_sel=(parent.id, child.id))
+    source = """
+shared_focus = {
+	id = TST_parent
+	icon = GFX_goal_generic_political_pressure
+	x = 10
+	y = 20
+}
+shared_focus = {
+	id = TST_child
+	icon = GFX_goal_generic_political_pressure
+	x = 1
+	y = 2
+	relative_position_id = TST_parent
+}
+"""
+    imported = build_focuses(
+        parse_focus_tree(source, "relative-tree.txt"), tree_idx=1
+    )
+    parent, child = imported
+    assert parent.tree_idx == child.tree_idx == 1
     undo = UndoStack()
+    app = _NudgeHarness(imported, multi_sel=(parent.id, child.id))
     app._push_undo = lambda label, touched_ids: undo.push(
         label, app.focuses, touched_ids=touched_ids
     )
 
+    def export_and_reimport():
+        current = list(app.focuses.values())
+        exported = export_focus_tree(
+            current,
+            {
+                "tree_id": "TST_focus_tree",
+                "country_tag": "TST",
+                "type": "shared",
+                "had_wrapper": False,
+                "shared_focuses": [],
+                "joint_focuses": [],
+            },
+            focus_lookup=dict(app.focuses.items()),
+        )
+        return build_focuses(
+            parse_focus_tree(exported, "nudged.txt"), tree_idx=1
+        )
+
+    def assert_coordinates_and_offsets(expected_parent, expected_child):
+        current_parent = app.focuses[parent.id]
+        current_child = app.focuses[child.id]
+        assert (current_parent.x, current_parent.y) == expected_parent
+        assert (current_child.x, current_child.y) == expected_child
+        assert (current_parent._raw_gx, current_parent._raw_gy) == expected_parent
+        assert (current_child._raw_gx, current_child._raw_gy) == (1, 2)
+        assert (current_child._rel_dx, current_child._rel_dy) == (1, 2)
+        roundtrip = export_and_reimport()
+        assert [(focus.x, focus.y) for focus in roundtrip] == [
+            expected_parent,
+            expected_child,
+        ]
+        assert (roundtrip[0]._raw_gx, roundtrip[0]._raw_gy) == expected_parent
+        assert (roundtrip[1]._raw_gx, roundtrip[1]._raw_gy) == (1, 2)
+        assert (roundtrip[1]._rel_dx, roundtrip[1]._rel_dy) == (1, 2)
+
     app._nudge_selection(dx, dy)
 
-    assert (child._rel_dx, child._rel_dy) == (1, 2)
-    info = {
-        "tree_id": "TST_focus_tree",
-        "country_tag": "TST",
-        "type": "shared",
-        "had_wrapper": False,
-        "shared_focuses": [],
-        "joint_focuses": [],
-    }
-    exported = export_focus_tree(
-        [parent, child], info, focus_lookup=dict(app.focuses.items())
-    )
-    imported = build_focuses(
-        parse_focus_tree(exported, "nudged.txt"), tree_idx=1
-    )
-    assert [(focus.x, focus.y) for focus in imported] == [
-        (10 + dx, 20 + dy),
-        (11 + dx, 22 + dy),
-    ]
-    assert (imported[1]._rel_dx, imported[1]._rel_dy) == (1, 2)
+    assert_coordinates_and_offsets((10 + dx, 20 + dy), (11 + dx, 22 + dy))
 
     undo.undo(app.focuses, Focus.from_dict)
-    assert (app.focuses[parent.id].x, app.focuses[parent.id].y) == (10, 20)
-    restored_child = app.focuses[child.id]
-    assert (restored_child._rel_dx, restored_child._rel_dy) == (1, 2)
+    assert_coordinates_and_offsets((10, 20), (11, 22))
     undo.redo(app.focuses, Focus.from_dict)
-    restored_child = app.focuses[child.id]
-    assert (restored_child.x, restored_child.y) == (11 + dx, 22 + dy)
-    assert (restored_child._rel_dx, restored_child._rel_dy) == (1, 2)
+    assert_coordinates_and_offsets((10 + dx, 20 + dy), (11 + dx, 22 + dy))
 
 
 def test_arrow_shortcuts_do_nothing_if_the_move_hits_an_unselected_focus():

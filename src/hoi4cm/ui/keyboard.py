@@ -67,21 +67,25 @@ def nudge_selection(app: KeyboardNudgeHost, dx: int, dy: int) -> None:
         focus_id: (app.focuses[focus_id].x + dx, app.focuses[focus_id].y + dy)
         for focus_id in focus_ids
     }
-    # Raw export coordinates for a relative-positioned focus are offsets from
-    # its named parent. Moving both focuses together must leave that offset
-    # alone. Document.move() accounts for the focus's canvas movement, so
-    # subtract the resolved parent's movement from each child's raw offset.
+    # Export coordinates for a relative-positioned focus are offsets from its
+    # named parent. When the parent moves with it, preserve the child's stored
+    # raw and relative coordinates; FocusDocument.move() otherwise increments
+    # both metadata pairs by the child's canvas movement.
     name_to_id: dict[str, int] = {}
     for focus_id in app.focuses.keys():
         name_to_id.setdefault(app.focuses[focus_id].name, focus_id)
-    moved_by_name = {
-        app.focuses[focus_id].name: (
-            x - app.focuses[focus_id].x,
-            y - app.focuses[focus_id].y,
-        )
-        for focus_id, (x, y) in targets.items()
-    }
     moving_ids = set(targets)
+    relative_metadata: dict[
+        int, tuple[int | None, int | None, int | None, int | None]
+    ] = {}
+    for focus_id in moving_ids:
+        focus = app.focuses[focus_id]
+        parent_id = name_to_id.get(focus.relative_position_id or "")
+        if parent_id is not None and parent_id in moving_ids:
+            relative_metadata[focus_id] = tuple(
+                getattr(focus, attribute, None)
+                for attribute in ("_raw_gx", "_raw_gy", "_rel_dx", "_rel_dy")
+            )
     for x, y in targets.values():
         blockers = app.focuses.occupied_positions.get((x, y), set()) - moving_ids
         if blockers:
@@ -93,19 +97,12 @@ def nudge_selection(app: KeyboardNudgeHost, dx: int, dy: int) -> None:
     )
     for focus_id, (x, y) in targets.items():
         app.focuses.move(focus_id, x, y, allow_occupied=True)
-    for focus_id in moving_ids:
+    for focus_id, values in relative_metadata.items():
         focus = app.focuses[focus_id]
-        parent_id = name_to_id.get(focus.relative_position_id or "")
-        if parent_id is None or parent_id not in moving_ids:
-            continue
-        parent = app.focuses[parent_id]
-        parent_dx, parent_dy = moved_by_name[parent.name]
-        relative_x = getattr(focus, "_rel_dx", None)
-        relative_y = getattr(focus, "_rel_dy", None)
-        if relative_x is not None:
-            focus._rel_dx = relative_x - parent_dx
-        if relative_y is not None:
-            focus._rel_dy = relative_y - parent_dy
+        for attribute, value in zip(
+            ("_raw_gx", "_raw_gy", "_rel_dx", "_rel_dy"), values
+        ):
+            setattr(focus, attribute, value)
     app._redraw()
     if app.selected and app.selected.id in moving_ids:
         app.selected = app.focuses[app.selected.id]
