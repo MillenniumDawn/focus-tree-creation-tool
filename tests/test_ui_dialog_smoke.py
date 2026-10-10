@@ -17,6 +17,7 @@ from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
+from tk_helpers import collect_texts, destroy_toplevels, new_toplevels
 
 from hoi4cm.mod import MOD
 from hoi4cm.mod import scan_cache as scan_cache_mod
@@ -33,46 +34,6 @@ def isolate_mod(tmp_path, monkeypatch):
     yield
     MOD.__dict__.clear()
     MOD.__dict__.update(snapshot)
-
-
-def _new_toplevels(before: set[tk.Misc], root: tk.Misc) -> list[tk.Toplevel]:
-    return [
-        w
-        for w in root.winfo_children()  # type: ignore[union-attr]
-        if w not in before and isinstance(w, tk.Toplevel)
-    ]
-
-
-def _destroy_toplevels(wins: list[tk.Toplevel], root: tk.Misc) -> None:
-    for w in wins:
-        try:
-            w.grab_release()
-        except Exception:
-            pass
-        try:
-            w.destroy()
-        except Exception:
-            pass
-    try:
-        root.update()  # type: ignore[union-attr]
-    except Exception:
-        pass
-
-
-def _collect_texts(win: tk.Misc) -> list[str]:
-    texts: list[str] = []
-    stack: list[tk.Misc] = [win]
-    while stack:
-        cur = stack.pop()
-        try:
-            texts.append(cur.cget("text"))  # type: ignore[union-attr]
-        except Exception:
-            pass
-        try:
-            stack.extend(cur.winfo_children())  # type: ignore[union-attr]
-        except Exception:
-            pass
-    return texts
 
 
 def _find_button(win: tk.Misc, needle: str) -> tk.Button | None:
@@ -135,7 +96,7 @@ def _make_fake_app_for_chrome(tk_root: tk.Tk, monkeypatch: pytest.MonkeyPatch) -
         "_show_post_load_prompt",
         "_open_settings",
         "_add_focus",
-        "_toggle_connect",
+        "_pick_prereq",
         "_toggle_mutex",
         "_toggle_multisel",
         "_clear_all",
@@ -163,15 +124,15 @@ def test_open_settings_constructs(tk_root, tmp_path, monkeypatch):
     before: set[tk.Misc] = set(tk_root.winfo_children())
     sd_mod.open_settings(tk_root)
     tk_root.update()
-    wins = _new_toplevels(before, tk_root)
+    wins = new_toplevels(before, tk_root)
     assert wins, "open_settings did not create a Toplevel"
     win = wins[0]
     try:
         assert "Settings" in win.title()
-        texts = _collect_texts(win)
+        texts = collect_texts(win)
         assert any("SETTINGS" in t for t in texts)
     finally:
-        _destroy_toplevels(wins, tk_root)
+        destroy_toplevels(wins, tk_root)
 
 
 # ── menubar / toolbar ────────────────────────────────────────────────────
@@ -190,7 +151,7 @@ def test_build_menubar_constructs(tk_root, monkeypatch):
     controller = build_menubar(tk_root, toolbar, tutorial_command=lambda: None)
     tk_root.update()
     assert len(toolbar.winfo_children()) > len(before_children)
-    texts = _collect_texts(toolbar)
+    texts = collect_texts(toolbar)
     assert any("HOI4 CONTENT MAKER" in t for t in texts)
     assert any("Help" in t for t in texts)
     preview_rows = controller.show_preview(
@@ -221,7 +182,7 @@ def test_build_menubar_constructs(tk_root, monkeypatch):
             if isinstance(sub, tk.Button) and "File" in sub.cget("text"):
                 sub.invoke()
                 tk_root.update()
-                _destroy_toplevels(_new_toplevels(before, tk_root), tk_root)
+                destroy_toplevels(new_toplevels(before, tk_root), tk_root)
                 break
     controller.close()
     toolbar.destroy()
@@ -239,7 +200,7 @@ def test_build_toolbar_row2_constructs(tk_root, monkeypatch):
     build_toolbar_row2(tk_root, toolbar)
     tk_root.update()
     assert len(toolbar.winfo_children()) > len(before)
-    texts = _collect_texts(toolbar)
+    texts = collect_texts(toolbar)
     assert any("Prereq" in t for t in texts)
     assert any("Ideas" in t for t in texts)
     assert tk_root._additional_income_btn.winfo_manager() == ""  # type: ignore[attr-defined]
@@ -298,13 +259,13 @@ def test_open_universal_gfx_browser_constructs(tk_root, tmp_path, monkeypatch):
     before: set[tk.Misc] = set(tk_root.winfo_children())
     open_universal_gfx_browser(tk_root, on_select=lambda *a: None)
     tk_root.update()
-    wins = _new_toplevels(before, tk_root)
+    wins = new_toplevels(before, tk_root)
     assert wins, "open_universal_gfx_browser did not create a Toplevel"
     try:
         assert wins[0].winfo_children()
         assert any("GFX Browser" in wins[0].title() for _ in [1])
     finally:
-        _destroy_toplevels(wins, tk_root)
+        destroy_toplevels(wins, tk_root)
 
 
 def test_open_universal_gfx_browser_select_flow(tk_root, tmp_path, monkeypatch):
@@ -325,7 +286,7 @@ def test_open_universal_gfx_browser_select_flow(tk_root, tmp_path, monkeypatch):
     before: set[tk.Misc] = set(tk_root.winfo_children())
     open_universal_gfx_browser(tk_root, on_select=_on_select)
     tk_root.update()
-    wins = _new_toplevels(before, tk_root)
+    wins = new_toplevels(before, tk_root)
     assert wins, "browser did not open"
     win = wins[0]
     try:
@@ -348,7 +309,7 @@ def test_open_universal_gfx_browser_select_flow(tk_root, tmp_path, monkeypatch):
         assert seen == [("GFX_beta", str(gfx_dir / "beta.png"))]
         assert not win.winfo_exists()
     finally:
-        _destroy_toplevels(wins, tk_root)
+        destroy_toplevels(wins, tk_root)
 
 
 def test_open_gfx_placement_editor_constructs(tk_root, monkeypatch):
@@ -358,12 +319,12 @@ def test_open_gfx_placement_editor_constructs(tk_root, monkeypatch):
     before: set[tk.Misc] = set(tk_root.winfo_children())
     open_gfx_placement_editor(tk_root, initial_items=[], on_confirm=lambda *a: None)
     tk_root.update()
-    wins = _new_toplevels(before, tk_root)
+    wins = new_toplevels(before, tk_root)
     assert wins, "open_gfx_placement_editor did not create a Toplevel"
     try:
         assert wins[0].winfo_children()
     finally:
-        _destroy_toplevels(wins, tk_root)
+        destroy_toplevels(wins, tk_root)
 
 
 def test_open_gfx_placement_editor_confirm_flow(tk_root, tmp_path, monkeypatch):
@@ -393,7 +354,7 @@ def test_open_gfx_placement_editor_confirm_flow(tk_root, tmp_path, monkeypatch):
         on_confirm=lambda items, code: confirmed.append(list(items)),
     )
     tk_root.update()
-    wins = _new_toplevels(before, tk_root)
+    wins = new_toplevels(before, tk_root)
     assert wins
     win = wins[0]
     try:
@@ -408,7 +369,7 @@ def test_open_gfx_placement_editor_confirm_flow(tk_root, tmp_path, monkeypatch):
         assert confirmed[0][0]["img_ref"] is not None
         assert not win.winfo_exists()
     finally:
-        _destroy_toplevels(wins, tk_root)
+        destroy_toplevels(wins, tk_root)
 
 
 def test_open_focus_icon_browser_constructs(tk_root, tmp_path, monkeypatch):
@@ -424,12 +385,12 @@ def test_open_focus_icon_browser_constructs(tk_root, tmp_path, monkeypatch):
     before: set[tk.Misc] = set(tk_root.winfo_children())
     open_focus_icon_browser(tk_root, on_select=lambda *a: None, current_gfx="")
     tk_root.update()
-    wins = _new_toplevels(before, tk_root)
+    wins = new_toplevels(before, tk_root)
     assert wins, "open_focus_icon_browser did not create a Toplevel"
     try:
         assert wins[0].winfo_children()
     finally:
-        _destroy_toplevels(wins, tk_root)
+        destroy_toplevels(wins, tk_root)
 
 
 # ── splash ───────────────────────────────────────────────────────────────
@@ -599,14 +560,14 @@ def test_show_post_load_prompt_constructs(tk_root, tmp_path, monkeypatch):
     before: set[tk.Misc] = set(tk_root.winfo_children())
     ModLoadingMixin._show_post_load_prompt(tk_root)  # type: ignore[arg-type]
     tk_root.update()
-    wins = _new_toplevels(before, tk_root)
+    wins = new_toplevels(before, tk_root)
     assert wins, "_show_post_load_prompt did not create a Toplevel"
     try:
         assert "Edit Targets" in wins[0].title()
-        texts = _collect_texts(wins[0])
+        texts = collect_texts(wins[0])
         assert any("Quick-pick" in t for t in texts)
     finally:
-        _destroy_toplevels(wins, tk_root)
+        destroy_toplevels(wins, tk_root)
 
 
 def test_load_mod_path_removes_stale_recent_entry_and_saves_config(

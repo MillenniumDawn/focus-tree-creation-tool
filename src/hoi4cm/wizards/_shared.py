@@ -69,6 +69,75 @@ def text_get(widget, default=""):
     return str(val).strip()
 
 
+# ── Shared list-dialog helpers ────────────────────────────────────
+
+
+def make_scrolled_listbox(parent, **options):
+    """Pack a themed ``Listbox`` and its vertical scrollbar into ``parent``.
+
+    ``options`` override the listbox defaults (``selectmode``, ``font``, ...).
+    """
+    config = {
+        "bg": BG_CARD,
+        "fg": TEXT,
+        "selectbackground": SEL_BG,
+        "selectforeground": TEXT,
+        "font": ("Courier", 10),
+        "relief": "flat",
+        "highlightthickness": 1,
+        "highlightbackground": BORDER_G,
+        "activestyle": "none",
+        **options,
+    }
+    listbox = tk.Listbox(parent, **config)
+    scrollbar = tk.Scrollbar(parent, orient="vertical", command=listbox.yview)
+    listbox.configure(yscrollcommand=scrollbar.set)
+    scrollbar.pack(side="right", fill="y")
+    listbox.pack(side="left", fill="both", expand=True)
+    return listbox
+
+
+def pack_action_footer(dlg, action_text, action_command):
+    """Pack a footer with a green action button (left) and Cancel (right)."""
+    footer = tk.Frame(dlg, bg=BG_DARK, pady=6)
+    footer.pack(fill="x")
+    tk.Button(
+        footer,
+        text=action_text,
+        command=action_command,
+        bg="#14532d",
+        fg="#4ade80",
+        relief="flat",
+        font=("Helvetica", 10, "bold"),
+        padx=16,
+        pady=5,
+        cursor="hand2",
+    ).pack(side="left", padx=10)
+    tk.Button(
+        footer,
+        text=tr("common.cancel", "Cancel"),
+        command=dlg.destroy,
+        bg=BG_CARD,
+        fg=TEXT,
+        relief="flat",
+        font=("Helvetica", 10),
+        padx=12,
+        pady=5,
+        cursor="hand2",
+    ).pack(side="right", padx=10)
+    return footer
+
+
+def format_save_summary(saved, warnings, errs):
+    """Return the "Saved to Mod" message body, skipping empty sections."""
+    sections = [
+        f"{title}:\n" + "\n".join(lines)
+        for title, lines in (("Saved", saved), ("Notes", warnings), ("Errors", errs))
+        if lines
+    ]
+    return "\n\n".join(sections) or "Nothing to save."
+
+
 # ── Image cache registry ──────────────────────────────────────────
 # Wizards register their own caches here so the App can invalidate
 # everything on mod reload without poking into each module.
@@ -619,10 +688,13 @@ __all__ = [
     "_ev_gfx_cache",
     "_ev_imgsize_cache",
     "_LOC_KEY_RE",
+    "format_save_summary",
+    "make_scrolled_listbox",
     "notifying_workspace_files",
     "open_effect_picker",
     "open_script_picker",
     "open_trigger_picker",
+    "pack_action_footer",
     "render_script_snippet",
     "svar_get",
     "text_get",

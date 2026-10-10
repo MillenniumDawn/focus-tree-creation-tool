@@ -730,16 +730,6 @@ class ModLoadingMixin:
 
     def _refresh_mod_dropdowns(self):
         """Update all dynamic dropdowns that depend on mod data."""
-        # Refresh the GFX picker dropdown if visible
-        if hasattr(self, "_gfx_dd") and self._gfx_dd:
-            sprite_names = sorted(MOD.sprites.keys())
-            if sprite_names:
-                menu = self._gfx_dd["menu"]
-                menu.delete(0, "end")
-                for name in sprite_names:
-                    menu.add_command(
-                        label=name, command=lambda n=name: self._set_gfx(n)
-                    )
         # Rebuild effect cards if open (they may have mod-aware dropdowns).
         if self.selected:
             self._refresh_effects(force=True)

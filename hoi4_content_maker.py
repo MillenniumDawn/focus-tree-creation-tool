@@ -550,53 +550,6 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             Tooltip(b, tip)
         return b
 
-    def _mk_lbl(
-        self,
-        parent,
-        text,
-        fg=None,
-        bg=None,
-        font_size=9,
-        bold=False,
-        dim=False,
-        anchor="w",
-        padx=6,
-        pady=2,
-    ):
-        """Standard label, dim or normal."""
-        return tk.Label(
-            parent,
-            text=text,
-            bg=bg or BG_PANEL,
-            fg=fg or (TEXT_DIM if dim else TEXT),
-            font=("Helvetica", font_size, "bold" if bold else "normal"),
-            anchor=anchor,
-            padx=padx,
-            pady=pady,
-        )
-
-    def _mk_entry(self, parent, var, width=None):
-        """Standard dark entry bound to StringVar."""
-        kw = dict(
-            textvariable=var,
-            bg=BG_CARD,
-            fg=TEXT,
-            insertbackground=BLUE,
-            font=("Helvetica", 10),
-            relief="flat",
-            highlightthickness=1,
-            highlightbackground=BORDER_G,
-        )
-        if width:
-            kw["width"] = width
-        return tk.Entry(parent, **kw)
-
-    def _mk_hsep(self, parent, padx=6, pady=4):
-        """1px horizontal separator."""
-        f = tk.Frame(parent, bg=BORDER_G, height=1)
-        f.pack(fill="x", padx=padx, pady=pady)
-        return f
-
     def _build_ui(self):
         """Orchestrate full UI construction."""
         self._init_error_log()
@@ -974,7 +927,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         _refresh()
 
     # ── UNDO ────────────────────────────────────────────────────
-    def _push_undo(self, label="action", touched_ids=None):
+    def _push_undo(self, label="action", touched_ids=None, run=None):
         """Call BEFORE making a change to save enough state to undo it.
 
         `touched_ids` lists the focus ids the caller is about to mutate or
@@ -983,8 +936,11 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         Pass `None` (the default) when the touched set isn't known or is
         most of the tree anyway (bulk import/clear) — that takes a full
         compressed snapshot instead, same as the old behavior.
+
+        `run` keys a stream of edits that undo as one step (typing in one
+        field); see `UndoStack.push`.
         """
-        self._undo_stack.push(label, self.focuses, touched_ids)
+        self._undo_stack.push(label, self.focuses, touched_ids, run=run)
 
     def _undo(self):
         """Restore the previous state, touching only what it changed."""
@@ -2207,20 +2163,12 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             highlightbackground=BORDER_G,
             padx=4,
         ).pack(side="right", padx=(2, 0))
-        self._gfx_dd = None
-        self._gfx_preview = None  # no sidebar preview
         return var
 
     def _set_gfx(self, name):
         self._fv_gfx.set(name)
         if self.selected:
             self.selected.gfx = name
-            self._redraw_now()
-
-    def _update_gfx_preview(self, gfx_name):
-        """No sidebar preview — just invalidate canvas so icon redraws."""
-        if self.selected and getattr(self.selected, "gfx", "") != gfx_name:
-            self.selected.gfx = gfx_name
             self._redraw_now()
 
     def _attach_autocomplete(self, entry_widget, var, get_choices_fn):
@@ -2459,6 +2407,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             # Pure select-away with an untouched form must not rebuild indexes.
             if sidebar_values_match_focus(f, values):
                 return
+            self._push_undo("edit focus", touched_ids=(f.id,))
             name_changed = apply_sidebar_values(f, values)
             self.focuses.move(f.id, values.x, values.y)
             # name is the only autosave field that still needs a full index rebuild;
@@ -2555,11 +2504,14 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         Return True on success.
         """
         try:
-            apply_focus_code(
-                f,
-                new_code,
-                focus_lookup=self.focuses,
-            )
+            if new_code == App._build_focus_code(self, f):
+                return True
+            with self._undo_stack.record("edit focus code", self.focuses, (f.id,)):
+                apply_focus_code(
+                    f,
+                    new_code,
+                    focus_lookup=self.focuses,
+                )
             self.focuses.touch()
             self._invalidate_focus_list_structure()
             if self.selected and self.selected.id == f.id:
@@ -3619,10 +3571,6 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
 
         win.after(50, se.focus_set)
 
-    def _toggle_connect(self):
-        """Legacy stub — no longer used for drag-line connect. Kept for safety."""
-        self._pick_prereq()
-
     def _make_prereq(self, child, parent):
         for g in child.prereqs:
             if parent.id in g:
@@ -3699,11 +3647,6 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         self.focuses.unlink_mutex(self.selected.id, mid)
         self._refresh_mutex()
         self._draw_lines()
-
-    # ── EFFECT LIVE UPDATES ─────────────────────────────────────
-    def _add_effect(self):
-        # Legacy entry point — effects are now added via the browser popup.
-        self._open_effect_browser()
 
     # ── IMPORT .TXT ─────────────────────────────────────────────
 

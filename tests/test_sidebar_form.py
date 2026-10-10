@@ -7,6 +7,7 @@ another focus. The apply path must touch indexes only when name changes.
 from unittest.mock import patch
 
 import pytest
+from builders import make_focus
 
 from hoi4cm.focus_tree.codec import render_focus_block
 from hoi4cm.focus_tree.operations import build_focus_name_lookup
@@ -21,31 +22,8 @@ from hoi4cm.models import (
 )
 
 
-def _focus(**overrides):
-    focus = Focus(0, 0)
-    focus.id = 1
-    focus.name = "keep"
-    focus.icon = "⚔"
-    focus.gfx = "GFX_goal_generic_political_pressure"
-    focus.cost = 10
-    focus.ai_will_do = 1
-    focus.ai_will_do_raw = "base = 1"
-    focus.desc = "desc"
-    focus.search_filters = "FOCUS_FILTER_POLITICAL"
-    focus.available_cond = ""
-    focus.bypass_cond = ""
-    focus.cancel_cond = ""
-    focus.cancel_if_invalid = True
-    focus.continue_if_invalid = False
-    focus.available_if_capitulated = False
-    focus.offsets = []
-    for key, value in overrides.items():
-        setattr(focus, key, value)
-    return focus
-
-
 def _values(focus=None, **overrides):
-    focus = focus or _focus()
+    focus = focus or make_focus()
     base = FocusSidebarValues(
         name=focus.name,
         icon=focus.icon,
@@ -107,7 +85,7 @@ def test_parse_focus_cost_rejects_non_numeric():
 
 
 def test_matching_form_is_noop():
-    focus = _focus()
+    focus = make_focus()
     assert sidebar_values_match_focus(focus, _values(focus)) is True
 
 
@@ -135,18 +113,18 @@ def test_matching_form_is_noop():
     ],
 )
 def test_each_form_field_counts_as_a_change(field, value):
-    focus = _focus()
+    focus = make_focus()
     assert sidebar_values_match_focus(focus, _values(focus, **{field: value})) is False
 
 
 def test_ai_will_do_raw_strips_focus_whitespace_for_match():
-    focus = _focus(ai_will_do_raw="  base = 1\n")
+    focus = make_focus(ai_will_do_raw="  base = 1\n")
     values = _values(focus, ai_will_do_raw="base = 1")
     assert sidebar_values_match_focus(focus, values) is True
 
 
 def test_apply_name_change_returns_true_and_writes_fields():
-    focus = _focus(desc="old")
+    focus = make_focus(desc="old")
     values = _values(focus, name="new_name", desc="new")
     document = FocusDocument((focus,))
     revision = document.revision
@@ -158,7 +136,7 @@ def test_apply_name_change_returns_true_and_writes_fields():
 
 
 def test_apply_non_name_change_returns_false():
-    focus = _focus()
+    focus = make_focus()
     values = _values(focus, desc="edited", loc_name="Localized title", cost=12)
 
     assert apply_sidebar_values(focus, values) is False
@@ -169,7 +147,7 @@ def test_apply_non_name_change_returns_false():
 
 
 def test_apply_copies_offsets_so_form_list_is_not_shared():
-    focus = _focus()
+    focus = make_focus()
     offset = {"x": 1, "y": 2, "trigger": ""}
     values = _values(focus, offsets=(offset,))
 
@@ -180,7 +158,7 @@ def test_apply_copies_offsets_so_form_list_is_not_shared():
 
 
 def test_name_change_needs_touch_position_change_uses_move_only():
-    focus = _focus(name="old", x=0, y=0)
+    focus = make_focus(name="old", x=0, y=0)
     document = FocusDocument((focus,))
     baseline = document.revision
 
@@ -203,11 +181,11 @@ def test_name_change_needs_touch_position_change_uses_move_only():
 
 
 def test_by_name_matches_build_focus_name_lookup_first_wins():
-    first = _focus(name="duplicate")
+    first = make_focus(name="duplicate")
     first.id = 10
-    second = _focus(name="duplicate")
+    second = make_focus(name="duplicate")
     second.id = 20
-    other = _focus(name="unique")
+    other = make_focus(name="unique")
     other.id = 30
     document = FocusDocument((first, second, other))
 
@@ -220,7 +198,7 @@ def test_by_name_matches_build_focus_name_lookup_first_wins():
 
 
 def test_by_name_missing_key_raises_key_error():
-    document = FocusDocument((_focus(),))
+    document = FocusDocument((make_focus(),))
 
     with pytest.raises(KeyError):
         _ = document.by_name["missing"]
@@ -302,3 +280,16 @@ def test_by_name_get_does_not_scan_all_focuses():
 
     assert got is selected
     assert visits["n"] == 0
+
+
+def test_empty_ai_raw_matches_the_base_line_the_form_shows():
+    """A new focus has no raw block; the form shows ``base = N`` for it."""
+    focus = make_focus(ai_will_do_raw="", ai_will_do=3)
+    values = _values(focus, ai_will_do_raw="base = 3")
+    assert sidebar_values_match_focus(focus, values) is True
+
+
+def test_empty_ai_raw_still_notices_an_edited_base_line():
+    focus = make_focus(ai_will_do_raw="", ai_will_do=3)
+    values = _values(focus, ai_will_do_raw="base = 4", ai_will_do=4)
+    assert sidebar_values_match_focus(focus, values) is False

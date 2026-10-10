@@ -65,7 +65,7 @@ def build_toolbar_row2(app, toolbar):
     )
     app._conn_btn = _tb_btn(
         tr("toolbar.prereq", "Prereq"),
-        app._toggle_connect,
+        app._pick_prereq,
         TEXT,
         BG_CARD,
         tr(
