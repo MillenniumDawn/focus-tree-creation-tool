@@ -19,15 +19,8 @@ from hoi4cm.ui.lifecycle import ApplicationLifecycle
 
 
 @pytest.fixture(autouse=True)
-def preserve_mod_ui_state():
-    mod = mod_loading.MOD
-    recent = list(mod._recent_mods)
-    images = dict(mod.sprite_imgs._data)
-    yield
-    mod._recent_mods = recent
-    mod.sprite_imgs.clear()
-    for key, image in images.items():
-        mod.sprite_imgs[key] = image
+def isolate_mod_state(mod_state_isolation):
+    """Protect the MOD singleton while preserving live cached image handles."""
 
 
 @pytest.fixture

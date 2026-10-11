@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import copy
 import json
 import tkinter as tk
 
@@ -16,9 +15,8 @@ from hoi4cm.mod import scan_cache as scan_cache_mod
 
 
 @pytest.fixture(autouse=True)
-def isolate_mod(tmp_path, monkeypatch):
+def isolate_mod(tmp_path, monkeypatch, mod_state_isolation):
     monkeypatch.setattr(scan_cache_mod, "STATE_DIR", str(tmp_path / "scan_cache"))
-    snapshot = copy.deepcopy(MOD.__dict__)
     MOD.loaded = False
     MOD.root = None
     MOD.is_md = False
@@ -31,9 +29,6 @@ def isolate_mod(tmp_path, monkeypatch):
     monkeypatch.setattr("tkinter.messagebox.showwarning", lambda *a, **k: None)
     monkeypatch.setattr("tkinter.messagebox.showerror", lambda *a, **k: None)
     monkeypatch.setattr("tkinter.messagebox.askyesno", lambda *a, **k: False)
-    yield
-    MOD.__dict__.clear()
-    MOD.__dict__.update(snapshot)
 
 
 def _ensure_dnd_available():
