@@ -8,6 +8,10 @@ the version by hand. See `AGENTS.md`.
 
 ## Unreleased
 
+---
+
+## [0.4.4] — 2026-10-11
+
 - Define checked host-state protocols for the canvas, effects, and mod-loading
   UI mixins, initialize app-owned canvas state before use, replace the
   mod-load validation fallback with the required typed call, and use one shared
