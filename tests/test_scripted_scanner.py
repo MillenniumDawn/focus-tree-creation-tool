@@ -3,10 +3,11 @@
 import os
 
 import pytest
+from ui_fakes import AppFake
 
 from hoi4cm.mod import ModContext
 from hoi4cm.mod import scan_cache as scan_cache_mod
-from hoi4cm.ui.effects_panel import EffectsMixin, _augment_scripted_suggestions
+from hoi4cm.ui.effects_panel import _augment_scripted_suggestions
 
 
 @pytest.fixture(autouse=True)
@@ -152,19 +153,15 @@ def test_effects_mixin_uses_scanned_scripted_suggestions(monkeypatch):
     )
     monkeypatch.setattr("hoi4cm.ui.effects_panel.MOD.on_action_ids", ["custom_action"])
 
-    class DummyApp(EffectsMixin):
-        def _get_mod_suggestions(self, etype, fname):
-            return ["built_in"]
-
-    assert EffectsMixin._get_effect_suggestions(DummyApp(), "x", "effect") == [
+    assert AppFake()._get_effect_suggestions("x", "effect") == [
         "built_in",
         "custom_effect",
     ]
-    assert EffectsMixin._get_effect_suggestions(DummyApp(), "x", "limit") == [
+    assert AppFake()._get_effect_suggestions("x", "limit") == [
         "built_in",
         "custom_trigger",
     ]
-    assert EffectsMixin._get_effect_suggestions(DummyApp(), "x", "on_action") == [
+    assert AppFake()._get_effect_suggestions("x", "on_action") == [
         "built_in",
         "custom_action",
     ]

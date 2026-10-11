@@ -8,6 +8,10 @@ the version by hand. See `AGENTS.md`.
 
 ## Unreleased
 
+- Define checked host-state protocols for the canvas, effects, and mod-loading
+  UI mixins, initialize app-owned canvas state before use, replace the
+  mod-load validation fallback with the required typed call, and use one shared
+  host fake across headless mixin tests.
 - Add a Character Editor for creating and editing character files, with
   role, trait, and portrait insertion helpers. Preserve repeated role and
   portrait blocks and unknown fields through import/export.
