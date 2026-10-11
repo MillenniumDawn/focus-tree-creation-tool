@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+import versioning
 from versioning import (
     VERSION_SOURCES,
     check_release_tag,
@@ -193,7 +194,8 @@ def test_set_windows_version_reports_a_resource_it_cannot_move() -> None:
         set_windows_version("VSVersionInfo()\n", "0.4.2")
 
 
-def test_write_version_sources_moves_every_source_together(tmp_path: Path) -> None:
+@pytest.fixture
+def version_repo(tmp_path: Path) -> Path:
     (tmp_path / "src" / "hoi4cm").mkdir(parents=True)
     (tmp_path / "build").mkdir()
     (tmp_path / "pyproject.toml").write_text(PYPROJECT, encoding="utf-8")
@@ -202,7 +204,11 @@ def test_write_version_sources_moves_every_source_together(tmp_path: Path) -> No
     )
     (tmp_path / "build" / "version_info.txt").write_text(VERSION_INFO, encoding="utf-8")
     (tmp_path / "README.md").write_text(BADGE, encoding="utf-8")
+    return tmp_path
 
+
+def test_write_version_sources_moves_every_source_together(version_repo: Path) -> None:
+    tmp_path = version_repo
     written = write_version_sources(tmp_path, "0.4.2")
 
     assert written == [relative for relative, _ in VERSION_SOURCES]
@@ -218,15 +224,59 @@ def test_write_version_sources_moves_every_source_together(tmp_path: Path) -> No
     assert "Version-0.4.2-gold" in (tmp_path / "README.md").read_text(encoding="utf-8")
 
 
+@pytest.mark.parametrize("command", ["prerelease-identity", "stamp-prerelease"])
+def test_main_prerelease_stamps_only_when_requested(
+    version_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    command: str,
+) -> None:
+    monkeypatch.setattr(versioning, "REPO_ROOT", version_repo)
+    monkeypatch.setattr(versioning, "project_version", lambda: "0.4.1")
+    monkeypatch.setenv("GITHUB_RUN_NUMBER", "42")
+    monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "3")
+    before = {
+        relative: (version_repo / relative).read_text(encoding="utf-8")
+        for relative, _ in VERSION_SOURCES
+    }
+
+    assert versioning.main([command]) == 0
+
+    assert capsys.readouterr().out == "version=0.5.42\ntag=v0.5.42-pre.3\n"
+    for relative, setter in VERSION_SOURCES:
+        text = (version_repo / relative).read_text(encoding="utf-8")
+        if command == "stamp-prerelease":
+            assert setter(text, "0.5.42") == text
+        else:
+            assert text == before[relative]
+
+
+@pytest.mark.parametrize("tag", ["v0.4.1", "v.0.4.1"])
+def test_main_release_tag_matches_project(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tag: str
+) -> None:
+    monkeypatch.setattr(versioning, "project_version", lambda: "0.4.1")
+
+    assert versioning.main(["check-release-tag", tag]) == 0
+
+    assert capsys.readouterr().out == "version=0.4.1\n"
+
+
+def test_main_rejects_release_tag_project_mismatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(versioning, "project_version", lambda: "0.4.1")
+
+    with pytest.raises(RuntimeError, match="does not match project version"):
+        versioning.main(["check-release-tag", "v2.2.0"])
+
+
 def test_the_repo_itself_agrees_across_every_version_source() -> None:
-    # The whole point of the table is that these four never drift apart again.
     root = Path(__file__).resolve().parent.parent
     version = read_version((root / "pyproject.toml").read_text(encoding="utf-8"))
-    assert f'__version__ = "{version}"' in (
-        root / "src" / "hoi4cm" / "__init__.py"
-    ).read_text(encoding="utf-8")
-    major, minor, patch = parse_version(version)
-    assert f"({major}, {minor}, {patch}, 0)" in (
-        root / "build" / "version_info.txt"
-    ).read_text(encoding="utf-8")
-    assert f"Version-{version}-gold" in (root / "README.md").read_text(encoding="utf-8")
+    for relative, setter in VERSION_SOURCES:
+        text = (root / relative).read_text(encoding="utf-8")
+        assert setter(text, version) == text
+    assert "#  Version " not in (root / "hoi4_content_maker.py").read_text(
+        encoding="utf-8"
+    )
