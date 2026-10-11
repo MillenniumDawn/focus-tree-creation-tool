@@ -12,6 +12,14 @@ the version by hand. See `AGENTS.md`.
   UI mixins, initialize app-owned canvas state before use, replace the
   mod-load validation fallback with the required typed call, and use one shared
   host fake across headless mixin tests.
+- Add a Character Editor for creating and editing character files, with
+  role, trait, and portrait insertion helpers. Preserve repeated role and
+  portrait blocks and unknown fields through import/export.
+- Add arrow-key nudging for selected focuses, Escape dismissal for key dialogs,
+  and an F1 shortcut to restart the tutorial.
+- Stamp pre-release build versions into the package and Windows metadata, reject
+  stable tags that differ from the project version before building, and remove
+  the stale version banner from the launcher.
 - Confirm before unloading an extra focus tree, and make extra-tree loads and
   unloads undoable with Ctrl+Z, including their loaded-tree metadata.
 - Give each focus document its own ID allocator so separate workspaces and

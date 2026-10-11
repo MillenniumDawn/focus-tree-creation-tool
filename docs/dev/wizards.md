@@ -1,6 +1,6 @@
 # Wizards
 
-`src/hoi4cm/wizards/` holds the five modal builder dialogs, each a single
+`src/hoi4cm/wizards/` holds the modal builder dialogs, each a single
 `open_*_wizard(app)` entry point re-exported from `wizards/__init__.py`.
 
 | Wizard | Entry point | Purpose |
@@ -10,6 +10,15 @@
 | National Spirit | `open_national_spirit_wizard(app)` | Build a national spirit / idea |
 | Dynamic Modifier | `open_dyn_mod_wizard(app)` | Build a dynamic modifier |
 | Additional Income | `open_additional_income_wizard(app)` | Build an MD additional-income entry |
+| Character | `open_character_wizard(app)` | Create or edit `common/characters` script |
+
+The Character Editor uses `character_codec.py`, a pure ordered script codec.
+It retains repeated keys in their original order, including multiple role and
+portrait blocks, and leaves unrecognized assignments in place. The dialog
+reuses `MOD.character_ids` from the common/characters scanner, offers role,
+trait, and portrait insertion helpers, and saves through
+`notifying_workspace_files`. Its script editor remains available for
+version-specific character fields the UI does not model.
 
 Event dropped from its original 3,445 lines when `_open_effect_picker`
 moved into `_shared.py` as `open_effect_picker` (issue #45) — decision.py
@@ -70,7 +79,7 @@ giving the App a single invalidation point.
 
 ## Verbatim-extraction convention
 
-All five wizard files open with the same header instead of a module
+The five extracted wizard files open with the same header instead of a module
 docstring-first convention:
 
 ```python

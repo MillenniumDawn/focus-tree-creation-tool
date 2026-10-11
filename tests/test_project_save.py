@@ -337,6 +337,24 @@ def test_cancelled_replacement_retains_quick_save_destination(
     picker.assert_not_called()
 
 
+@pytest.mark.visible_tk
+def test_new_tree_escape_closes_when_called_on_plain_tk_root(tk_root):
+    app_module.App._new_tree_dialog(tk_root)
+    window = next(
+        w for w in tk_root.winfo_children() if isinstance(w, app_module.tk.Toplevel)
+    )
+    entry = next(w for w in _widgets(window) if isinstance(w, app_module.tk.Entry))
+    window.update()
+    assert entry.winfo_viewable()
+    entry.focus_force()
+    window.update()
+
+    entry.event_generate("<Escape>")
+    window.update()
+
+    assert not window.winfo_exists()
+
+
 @pytest.mark.parametrize("route", ["new", "txt"])
 def test_failed_outgoing_save_prevents_replacement(
     route, tk_root, monkeypatch, tmp_path

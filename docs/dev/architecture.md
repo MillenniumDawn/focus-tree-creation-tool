@@ -50,12 +50,14 @@
   preserves and extends sprite declarations. `workspace_files.py` is the
   single writer every mod-file save goes through (see "Writing mod files"
   below).
-- **`wizards/`**: the five `open_*_wizard(app)` entry points (decision,
-  event, national spirit, dynamic modifier, additional income) plus
+- **`wizards/`**: the `open_*_wizard(app)` entry points (decision,
+  event, national spirit, dynamic modifier, additional income, character) plus
   `_shared.py` for cross-wizard state, including shared effect/trigger pickers.
+  `character_codec.py` keeps character-file assignments as ordered
+  occurrences so duplicate roles/portraits and unknown fields survive edits.
   The package `__init__` resolves the
-  five names through a module-level `__getattr__`, so importing one wizard
-  doesn't load the other four; keep it that way when adding a sixth. See
+  six names through a module-level `__getattr__`, so importing one wizard
+  doesn't load the other five; keep it that way when adding a seventh. See
   `wizards.md`.
 - **`ui/`**: Tk-facing code: the three mixins `App` is built from —
   `CanvasMixin` (`canvas.py`), `EffectsMixin` (`effects_panel.py`, the

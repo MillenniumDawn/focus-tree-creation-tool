@@ -50,6 +50,11 @@ The additional gate
 covered, and runs without Xvfb on purpose so they can't quietly grow a
 Tk dependency.
 
+The character codec has headless round-trip tests in
+`tests/test_character_codec.py`. The dialog itself is included in
+`tests/test_wizard_smoke.py`; it is skipped by the shared Tk fixture when no
+display is available.
+
 The package number is still
 dominated by the large Tk dialog bodies, but construction is now
 smoke-tested (`tests/test_wizard_smoke.py`,
@@ -359,9 +364,13 @@ tests. Widget construction still needs a live `App` against a loaded mod:
   (including the "Recent" submenu with zero and with several mods loaded)
   and confirm each does what its tooltip says, the dropdown closes on
   outside click, and the accelerator shown next to each item still matches
-  its bound keybind (`_build_keybinds`). Confirm the error-log button still
-  turns red after a deliberately triggered error and the mod label updates
-  on load/unload.
+  its bound keybind (`_build_keybinds`). With a focus selected, press each
+  arrow key and confirm it moves one grid cell; repeat with a multi-selection
+  and confirm the group moves together, then press an arrow toward an occupied
+  cell and confirm nothing moves. Confirm Escape closes New Focus Tree, Load
+  All Trees, and Set Edit Targets, and F1 restarts the tutorial. Confirm the
+  error-log button still turns red after a deliberately triggered error and
+  the mod label updates on load/unload.
 - **First-launch tutorial**: start with `tutorial_disabled` absent, dismiss any
   autosave-recovery prompt, and confirm all eight translated steps appear in
   order. The Tools/File steps must pin the real dropdown open, highlight the

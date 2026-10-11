@@ -1,7 +1,7 @@
 # =================================================================
 #  Content Maker for Hearts of Iron 4
 #  HOI4 Content Maker
-#  Version 2.0  |  Millennium Dawn Team
+#  Millennium Dawn Team
 # =================================================================
 #
 #  COPYRIGHT NOTICE
@@ -160,6 +160,7 @@ from hoi4cm.ui.focus_list import (  # noqa: E402
     VirtualFocusList,
 )
 from hoi4cm.ui.gfx_browser import open_focus_icon_browser  # noqa: E402
+from hoi4cm.ui.keyboard import nudge_selection  # noqa: E402
 from hoi4cm.ui.loaded_trees import (  # noqa: E402
     LoadedTreeRowItem,
     VirtualLoadedTreesList,
@@ -681,10 +682,19 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         self.bind("<Control-d>", lambda e: self._duplicate_focus())
         self.bind("<Control-a>", lambda e: self._select_all_focuses())
         self.bind("<Delete>", lambda e: self._key_delete())
+        self.bind("<Left>", lambda e: self._nudge_selection(-1, 0))
+        self.bind("<Right>", lambda e: self._nudge_selection(1, 0))
+        self.bind("<Up>", lambda e: self._nudge_selection(0, -1))
+        self.bind("<Down>", lambda e: self._nudge_selection(0, 1))
+        self.bind("<F1>", lambda e: self._tutorial.start(manual=True))
         self.bind("<KeyPress-g>", _guard(self._toggle_grid))
         self.bind("<KeyPress-m>", _guard(self._toggle_minimap))
         self.bind("<KeyPress-f>", _guard(self._toggle_focus_list))
         self.bind("<KeyPress-0>", _guard(self._fit_all))
+
+    def _nudge_selection(self, dx, dy):
+        """Delegate arrow-key movement to the extracted UI action."""
+        nudge_selection(self, dx, dy)
 
     def _build_layout(self):
         """Build body: status bar, left panel, canvas, sash, sidebar."""
@@ -3038,6 +3048,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         win.geometry("480x420")
         win.resizable(False, True)
         win.grab_set()
+        win.bind("<Escape>", lambda _event: win.destroy())
 
         def _row(label):
             f = tk.Frame(win, bg=BG_DARK)
@@ -4926,6 +4937,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         win.resizable(True, True)
         win.grab_set()
         win.transient(self)
+        win.bind("<Escape>", lambda _event: win.destroy())
 
         tk.Label(
             win,
@@ -5904,6 +5916,12 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         from hoi4cm.wizards import open_event_wizard
 
         open_event_wizard(self)
+
+    def _character_wizard(self):
+        """Open the character authoring wizard."""
+        from hoi4cm.wizards import open_character_wizard
+
+        open_character_wizard(self)
 
     def _update_statusbar(self):
         """Refresh all status bar labels."""
