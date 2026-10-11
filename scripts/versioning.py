@@ -181,8 +181,10 @@ def project_version(repo_root: Path = REPO_ROOT) -> str:
 def main(argv: list[str] | None = None) -> int:
     args = sys.argv[1:] if argv is None else argv
     command = args[0] if args else ""
-    if command == "prerelease-identity":
+    if command in ("prerelease-identity", "stamp-prerelease"):
         identity = prerelease_identity(os.environ, project_version())
+        if command == "stamp-prerelease":
+            write_version_sources(REPO_ROOT, identity["version"])
         print(f"version={identity['version']}")
         print(f"tag={identity['tag']}")
     elif command == "project-version":
@@ -193,11 +195,17 @@ def main(argv: list[str] | None = None) -> int:
     elif command == "check-release-tag":
         if len(args) < 2:
             raise RuntimeError("check-release-tag needs a tag")
-        print(f"version={check_release_tag(args[1])}")
+        version = check_release_tag(args[1])
+        expected = project_version()
+        if version != expected:
+            raise RuntimeError(
+                f"release tag {args[1]!r} does not match project version {expected!r}"
+            )
+        print(f"version={version}")
     else:
         raise RuntimeError(
-            "expected one of prerelease-identity, project-version, next-version, "
-            "check-release-tag"
+            "expected one of prerelease-identity, stamp-prerelease, project-version, "
+            "next-version, check-release-tag"
         )
     return 0
 
