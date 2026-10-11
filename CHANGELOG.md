@@ -8,6 +8,8 @@ the version by hand. See `AGENTS.md`.
 
 ## Unreleased
 
+- Add arrow-key nudging for selected focuses, Escape dismissal for key dialogs,
+  and an F1 shortcut to restart the tutorial.
 - Stamp pre-release build versions into the package and Windows metadata, reject
   stable tags that differ from the project version before building, and remove
   the stale version banner from the launcher.
