@@ -71,7 +71,7 @@ substitute for that extraction.
 ## Fixture / isolation patterns
 
 Every module with import-time or process-lifetime state needs isolation, or
-state leaks between tests. Six patterns cover what's here today:
+state leaks between tests. Seven patterns cover what's here today:
 
 - **Pytest-startup HOME isolation.** `tests/conftest.py` installs a temporary
   HOME while the conftest is imported, before collection imports application
@@ -86,6 +86,14 @@ state leaks between tests. Six patterns cover what's here today:
   the error buffer. Use this shape for anything that mutates a module
   global as a side effect (see "Module-level singletons" in
   `architecture.md`).
+- **MOD singleton isolation.** Tests that mutate the process-wide `MOD`
+  context opt in to `mod_state_isolation` from `tests/conftest.py`. It restores
+  added/removed attributes and nested built-in containers, `GraphicsCatalog`
+  state, scan diagnostics, and the `sprite_imgs` LRU while retaining the
+  catalog, cache, and cached image object identities. It is deliberately not
+  autouse: modules opt in where needed and keep scenario-specific setup.
+  Tests that only use `monkeypatch.setattr` on MOD have their changes restored
+  by monkeypatch teardown; `test_dyn_mod_save.py` only reads `MOD.loc_target`.
 - **Monkeypatch of module path constants.** `tests/test_config.py` points
   `config.CONFIG_PATH` at a `tmp_path` file via `monkeypatch.setattr`
   before calling `cfg_load`/`cfg_save`, so no test ever touches the real

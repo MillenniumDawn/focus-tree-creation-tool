@@ -8,7 +8,6 @@ ship to the mod.
 
 from __future__ import annotations
 
-import copy
 import os
 
 import pytest
@@ -19,16 +18,12 @@ from hoi4cm.mod import scan_cache as scan_cache_mod
 
 
 @pytest.fixture(autouse=True)
-def isolate_mod(tmp_path, monkeypatch):
+def isolate_mod(tmp_path, monkeypatch, mod_state_isolation):
     monkeypatch.setattr(scan_cache_mod, "STATE_DIR", str(tmp_path / "scan_cache"))
-    snapshot = copy.deepcopy(MOD.__dict__)
     MOD.loaded = True
     MOD.root = str(tmp_path)
     MOD.is_md = True
     MOD.loc_language = "english"
-    yield
-    MOD.__dict__.clear()
-    MOD.__dict__.update(snapshot)
 
 
 def _write(path: str, text: str) -> None:

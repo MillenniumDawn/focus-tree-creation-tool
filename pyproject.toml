@@ -15,6 +15,10 @@ dependencies = []
 
 [project.optional-dependencies]
 image = ["Pillow>=9.0"] # GFX icon previews (.png/.tga)
+# Linux headless tests need matching Python Tk bindings, Xvfb, and xauth.
+# Debian/Ubuntu: sudo apt-get install python3-tk xvfb xauth
+# Non-default Python needs its matching Tk package (e.g. python3.14-tk).
+# In a venv: python -m pip install --require-hashes -r dev-requirements.txt
 dev = [
   "pytest>=7.0",
   "pytest-cov>=4.0", # coverage gate for wizard generators
