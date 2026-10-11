@@ -9,7 +9,7 @@ test in isolation.
 Attribute access imports the owning submodule on demand. Importing them
 all here instead would undo that: `ui/mod_loading.py` pulls `_shared` in
 at module scope, so a launch that never opens a wizard would still pay
-for all five (~12k lines between them).
+for all six (~12k lines between them).
 """
 
 import importlib
@@ -20,6 +20,7 @@ _WIZARD_MODULES = {
     "open_dyn_mod_wizard": "dyn_mod",
     "open_additional_income_wizard": "additional_income",
     "open_event_wizard": "event",
+    "open_character_wizard": "character",
 }
 
 __all__ = list(_WIZARD_MODULES)

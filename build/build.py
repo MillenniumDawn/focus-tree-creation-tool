@@ -94,7 +94,7 @@ a = Analysis(
         # so there is no static edge for PyInstaller to follow.
         'hoi4cm.wizards.national_spirit', 'hoi4cm.wizards.decision',
         'hoi4cm.wizards.dyn_mod', 'hoi4cm.wizards.additional_income',
-        'hoi4cm.wizards.event',
+        'hoi4cm.wizards.event', 'hoi4cm.wizards.character',
         'tkinter', 'tkinter.ttk', 'tkinter.messagebox',
         'tkinter.filedialog', 'tkinter.font', 'tkinter.scrolledtext',
         'PIL', 'PIL.Image', 'PIL.ImageTk',

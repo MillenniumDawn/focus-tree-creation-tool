@@ -8,6 +8,9 @@ the version by hand. See `AGENTS.md`.
 
 ## Unreleased
 
+- Add a Character Editor for creating and editing character files, with
+  role, trait, and portrait insertion helpers. Preserve repeated role and
+  portrait blocks and unknown fields through import/export.
 - Add arrow-key nudging for selected focuses, Escape dismissal for key dialogs,
   and an F1 shortcut to restart the tutorial.
 - Stamp pre-release build versions into the package and Windows metadata, reject

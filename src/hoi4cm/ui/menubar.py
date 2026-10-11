@@ -557,6 +557,16 @@ def build_menubar(app, toolbar, tutorial_command=None) -> MenuController:
                 ),
                 "event_maker",
             ),
+            (
+                tr("menu.character_editor", "Character Editor"),
+                app._character_wizard,
+                "",
+                tr(
+                    "menu.character_editor.tip",
+                    "Create and edit character definitions, roles, portraits, and traits.",
+                ),
+                "character_editor",
+            ),
             None,
             (
                 tr("menu.validate_tree", "Validate Tree"),
