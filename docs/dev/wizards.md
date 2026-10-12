@@ -145,6 +145,29 @@ exercising the non-Tk logic separately from the dialog construction itself.
 The script/loc generators, which carry the loc-export and mod-file writing
 risk the extraction was meant to de-risk, are now covered.
 
+## The saves module
+
+`_saves.py` holds what "Save to Mod" writes. It imports no Tk. Each wizard's
+save closure reads its widgets, resolves the target paths, asks any
+overwrite question, then calls one function with plain values:
+
+- national spirit: `save_spirit`
+- event: `save_events`
+- dynamic modifier: `save_dyn_mod`
+- decision: `save_decisions`
+
+The functions take the mod context as an argument, so a test passes a fresh
+`ModContext()` and a `tmp_path` tree. `tests/test_wizard_saves.py` pins what
+matters for user data: an existing file keeps its bytes, its encoding (one
+BOM) and its newline style; an ID or localisation key already in the file is
+skipped; an unreadable or missing selected file is reported and left alone.
+
+`save_events` and `save_decisions` take the wizard's renderers as callables
+and call them where the closure used to, so a failed render is still caught
+by the same handler. New save logic goes here with a test, not back into a
+closure. The character and additional-income saves are still in their
+dialogs.
+
 ## Dialog interaction coverage
 
 `test_wizard_save.py` drives national-spirit Edit -> Save Raw -> Save to Mod

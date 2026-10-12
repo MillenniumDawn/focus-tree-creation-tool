@@ -8,6 +8,10 @@ the version by hand. See `AGENTS.md`.
 
 ## Unreleased
 
+- Move the National Spirit, Event, Dynamic Modifier and Decision "Save to Mod"
+  logic out of the dialogs into `wizards/_saves.py`, with headless tests for
+  preserved bytes, encoding, newlines and skipped duplicates. No change to what
+  is written.
 - Define checked host-state protocols for the canvas, effects, and mod-loading
   UI mixins, initialize app-owned canvas state before use, replace the
   mod-load validation fallback with the required typed call, and use one shared

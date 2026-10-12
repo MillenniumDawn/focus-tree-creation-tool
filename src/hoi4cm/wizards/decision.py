@@ -17,7 +17,6 @@ import uuid
 from tkinter import filedialog, messagebox
 
 from hoi4cm.core import (
-    append_scripted_loc,
     autosave_path,
     convert_newlines,
     newline_style,
@@ -52,11 +51,11 @@ from hoi4cm.ui import (
 from hoi4cm.wizards import _generators
 from hoi4cm.wizards._graphics import find_catalog_image
 from hoi4cm.wizards._image_loader import TkImageLoader
+from hoi4cm.wizards._saves import save_decisions
 from hoi4cm.wizards._shared import (
     _app_img_caches,
     format_save_summary,
     make_scrolled_listbox,
-    notifying_workspace_files,
     open_effect_picker,
     open_trigger_picker,
     pack_action_footer,
@@ -4732,20 +4731,15 @@ def open_decision_wizard(app):
         ns = sanitize_component(
             dm_cats[0]["cat_id"].split("_")[0] if dm_cats else "TAG", fallback="TAG"
         )
-        saved = []
-        errs = []
-        wf = notifying_workspace_files(MOD, mod_root)
         # Prefer the imported/user-set edit target so we overwrite the source file in place
-        selected_dec = bool(MOD.edit_decisions_file)
-        if selected_dec:
+        if MOD.edit_decisions_file:
             dec_path = MOD.edit_decisions_file
         else:
             dec_path = os.path.join(
                 mod_root, "common", "decisions", f"{ns}_decisions.txt"
             )
         # Confirm both paired targets before writing either file.
-        selected_cat = bool(MOD.edit_decisions_cat_file)
-        if selected_cat:
+        if MOD.edit_decisions_cat_file:
             cat_path = MOD.edit_decisions_cat_file
         else:
             cat_path = os.path.join(
@@ -4769,102 +4763,8 @@ def open_decision_wizard(app):
             parent=win,
         ):
             return
-        try:
-            dec_encoding = "utf-8"
-            existing_dec = ""
-            if selected_dec:
-                existing_dec, dec_encoding = read_file_with_encoding(dec_path)
-                if existing_dec is None or dec_encoding is None:
-                    raise OSError("selected decisions file could not be read")
-            decisions_text = _gen_decisions_file()
-            if selected_dec:
-                decisions_text = convert_newlines(
-                    decisions_text, newline_style(existing_dec)
-                )
-            wf.write_text(dec_path, decisions_text, encoding=dec_encoding)
-            try:
-                saved.append(os.path.relpath(dec_path, mod_root))
-            except ValueError:
-                saved.append(dec_path)
-        except OSError as e:
-            errs.append(str(e))
-            get_logger("decision").error("save decisions failed: %s", e, exc_info=True)
-        try:
-            cat_encoding = "utf-8"
-            existing_cat = ""
-            if selected_cat:
-                existing_cat, cat_encoding = read_file_with_encoding(cat_path)
-                if existing_cat is None or cat_encoding is None:
-                    raise OSError("selected decision categories file could not be read")
-            categories_text = _gen_categories_file()
-            if selected_cat:
-                categories_text = convert_newlines(
-                    categories_text, newline_style(existing_cat)
-                )
-            wf.write_text(cat_path, categories_text, encoding=cat_encoding)
-            try:
-                saved.append(os.path.relpath(cat_path, mod_root))
-            except ValueError:
-                saved.append(cat_path)
-        except OSError as e:
-            errs.append(str(e))
-            get_logger("decision").error("save categories failed: %s", e, exc_info=True)
-        loc_target = MOD.loc_target
-        selected_loc = bool(MOD.edit_loc_file)
-        yml_path = (
-            MOD.edit_loc_file
-            if selected_loc
-            else os.path.join(
-                mod_root,
-                "localisation",
-                loc_target.dirname(),
-                loc_target.filename(f"{ns}_decisions"),
-            )
-        )
-        try:
-            # Read existing keys
-            existing_loc_keys = set()
-            yml_exists = os.path.isfile(yml_path)
-            yml_encoding = "utf-8-sig"
-            if selected_loc and not yml_exists:
-                raise OSError("selected localisation file no longer exists")
-            if yml_exists:
-                yml_text, yml_encoding = read_file_with_encoding(yml_path)
-                if yml_text is None or yml_encoding is None:
-                    raise OSError("localisation file could not be read")
-                for line in yml_text.splitlines():
-                    m = re.match(r'\s+(\S+?)(?::\d+)?\s*[=:]?\s*"', line)
-                    if m:
-                        existing_loc_keys.add(m.group(1))
-            else:
-                wf.write_text(
-                    yml_path, loc_target.header() + "\n", encoding=yml_encoding
-                )
-            new_lines = [
-                l
-                for l in _gen_yml().splitlines()
-                if l.strip() and l.strip() != loc_target.header()
-            ]
-            # Only add lines whose key isn't already in the file
-            to_write = []
-            for ln in new_lines:
-                m = re.match(r'\s+(\S+?)(?::\d+)?\s*[=:]?\s*"', ln)
-                if m and m.group(1) in existing_loc_keys:
-                    continue
-                to_write.append(ln)
-            if to_write:
-                wf.append_text(
-                    yml_path, "\n".join(to_write) + "\n", encoding=yml_encoding
-                )
-            saved.append(
-                os.path.relpath(yml_path, mod_root) + f"  (+{len(to_write)} keys)"
-            )
-        except OSError as e:
-            errs.append(str(e))
-            get_logger("decision").error("save loc failed: %s", e, exc_info=True)
-        # ── SCRIPTED LOC ─────────────────────────────────────────────────
+        sloc_blocks = []
         if MOD.edit_scripted_loc_file:
-            sloc_blocks = []
             for cat in dm_cats:
                 cid = cat["cat_id"].strip()
                 if cid:
@@ -4877,14 +4777,17 @@ def open_decision_wizard(app):
                         sloc_blocks.append(
                             {"name": f"GET_{did}_name", "texts": [], "default": did}
                         )
-            append_scripted_loc(
-                MOD.edit_scripted_loc_file,
-                sloc_blocks,
-                saved,
-                errs,
-                mod_root,
-                require_existing=True,
-            )
+        saved, errs = save_decisions(
+            MOD,
+            mod_root,
+            ns=ns,
+            dec_path=dec_path,
+            cat_path=cat_path,
+            render_decisions=_gen_decisions_file,
+            render_categories=_gen_categories_file,
+            render_yml=_gen_yml,
+            sloc_blocks=sloc_blocks,
+        )
 
         msg = format_save_summary(saved, (), errs)
         messagebox.showinfo("Saved to Mod", msg, parent=win)

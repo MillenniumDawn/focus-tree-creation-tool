@@ -17,15 +17,13 @@ from tkinter import filedialog, messagebox
 from hoi4cm.core import (
     add_error,
     autosave_path,
-    convert_newlines,
     get_logger,
-    newline_style,
     read_file_with_encoding,
     sanitize_component,
     tr,
 )
-from hoi4cm.mod import MOD, append_sprite_types, find_loc_files
-from hoi4cm.script.syntax import match_brace, parse_script, serialize_block
+from hoi4cm.mod import MOD, find_loc_files
+from hoi4cm.script.syntax import parse_script, serialize_block
 from hoi4cm.ui import (
     BG_CARD,
     BG_DARK,
@@ -43,35 +41,14 @@ from hoi4cm.wizards._generators import (
     build_dyn_mod_output,
 )
 from hoi4cm.wizards._graphics import browser_folders, collect_image_pairs
+from hoi4cm.wizards._saves import save_dyn_mod
 from hoi4cm.wizards._shared import (
     make_scrolled_listbox,
-    notifying_workspace_files,
     open_trigger_picker,
     pack_action_footer,
     svar_get,
     text_get,
 )
-
-_READ_MISSING = "missing"
-_READ_FAILED = "read-failed"
-_READ_CONTENT = "content"
-
-
-def _read_existing_file_with_encoding(path):
-    if not os.path.exists(path):
-        return _READ_MISSING, None, None
-    try:
-        content, encoding = read_file_with_encoding(path)
-    except OSError, UnicodeDecodeError, ValueError:
-        return _READ_FAILED, None, None
-    if content is None or encoding is None:
-        return _READ_FAILED, None, None
-    return _READ_CONTENT, content, encoding
-
-
-def _read_existing_file(path):
-    state, content, _encoding = _read_existing_file_with_encoding(path)
-    return state, content
 
 
 def collect_dyn_mod_state(svars, text_widgets):
@@ -750,253 +727,18 @@ def open_dyn_mod_wizard(app):
         if not mod_root:
             return
 
-        results = []  # (rel_path, action, note)
-        errors = []
-        workspace_files = notifying_workspace_files(MOD, mod_root)
-
-        # ── Helpers ───────────────────────────────────────────
-        def full(rel):
-            return os.path.join(mod_root, rel)
-
-        def record_read_error(rel):
-            message = f"Could not read existing file: {rel}"
-            add_error(message)
-            errors.append(message)
-
-        def write(rel, content, encoding="utf-8"):
-            p = full(rel)
-            try:
-                workspace_files.write_text(p, content, encoding=encoding)
-                return True
-            except (OSError, ValueError, TypeError, RuntimeError) as exc:
-                errors.append(f"{rel}: {exc}")
-                return False
-
-        # ════════════════════════════════════════════════════════
-        # FILE 1 — common/dynamic_modifiers/  (one file per modifier)
-        # Strategy: if file exists, replace the block for `mid`;
-        #           if not, create it fresh.
-        # ════════════════════════════════════════════════════════
-        dm_rel = os.path.join("common", "dynamic_modifiers", f"{mid}.txt")
-        dm_state, dm_existing, dm_encoding = _read_existing_file_with_encoding(
-            full(dm_rel)
+        results, errors = save_dyn_mod(
+            MOD,
+            mod_root,
+            mid=mid,
+            icon=icon,
+            name=name,
+            desc=desc,
+            scope=scope,
+            enable=enable,
+            mod_entries=mod_entries,
+            const_lines=const_lines,
         )
-        dm_encoding = dm_encoding or "utf-8"
-
-        # Build the new block
-        icon_gfx = (
-            (icon if icon.startswith("GFX_") else f"GFX_idea_{icon}") if icon else ""
-        )
-        dm_block_lines = [f"{mid} = {{"]
-        if scope != "country":
-            dm_block_lines.append(f"\tscope = {scope}")
-        if icon_gfx:
-            dm_block_lines.append(f"\ticon = {icon_gfx}")
-        if enable:
-            dm_block_lines.append("\tenable = {")
-            for ln in enable.splitlines():
-                if ln.strip():
-                    dm_block_lines.append(f"\t\t{ln.strip()}")
-            dm_block_lines.append("\t}")
-        dm_block_lines.append("")
-        for modifier, var, _ in mod_entries:
-            dm_block_lines.append(f"\t{modifier} = {var}")
-        if const_lines:
-            dm_block_lines.append("")
-            for ln in const_lines:
-                dm_block_lines.append(f"\t{ln}")
-        dm_block_lines.append("}")
-        dm_new_block = "\n".join(dm_block_lines)
-
-        if dm_state == _READ_FAILED:
-            record_read_error(dm_rel)
-        else:
-            if dm_state == _READ_MISSING:
-                # Fresh file
-                dm_final = dm_new_block + "\n"
-                action = "created"
-            else:
-                # Replace existing block for `mid` if present, else append
-                # Match: mid = { ... } at top level (handles nested braces)
-                def replace_or_append(src, block_id, new_block):
-                    # Find "block_id = {" and extract to matching "}"
-                    pattern = re.compile(
-                        r"^[ \t]*" + re.escape(block_id) + r"\s*=\s*\{", re.MULTILINE
-                    )
-                    m = pattern.search(src)
-                    style = newline_style(src)
-                    generated = convert_newlines(new_block, style)
-                    if not m:
-                        # Not found — append without rewriting existing bytes.
-                        return (
-                            src + convert_newlines("\n\n" + new_block + "\n", style),
-                            "appended",
-                        )
-                    i = match_brace(src, m.end() - 1)
-                    if i < len(src):
-                        replaced = src[: m.start()] + generated + src[i + 1 :]
-                        return replaced, "updated"
-                    return (
-                        src + convert_newlines("\n\n" + new_block + "\n", style),
-                        "appended",
-                    )
-
-                dm_existing = dm_existing or ""
-                dm_final, action = replace_or_append(dm_existing, mid, dm_new_block)
-
-            if write(dm_rel, dm_final, dm_encoding):
-                results.append(
-                    (dm_rel, action, f"{len(mod_entries)} variable modifiers")
-                )
-
-        # ════════════════════════════════════════════════════════
-        # FILE 2 — configured localisation language
-        # Strategy: scan all configured-language .yml files
-        # for existing keys; only add missing ones.
-        # Write to the configured target filename (create or append).
-        # ════════════════════════════════════════════════════════
-        loc_target = MOD.loc_target
-        existing_keys = set()
-
-        # Collect all keys already in any loc file
-        # Accept both modern `key: "value"` and legacy `key:0 "value"` forms
-        for loc_path in find_loc_files(mod_root, language=MOD.loc_language):
-            try:
-                content, encoding = read_file_with_encoding(loc_path)
-            except OSError, ValueError, UnicodeDecodeError:
-                continue
-            if not content:
-                continue
-            for m in re.finditer(
-                r'^\s+(\S+?)(?::\d+)?\s*[=:]?\s*"', content, re.MULTILINE
-            ):
-                existing_keys.add(m.group(1))
-
-        # Build only the missing entries
-        selected_loc = bool(MOD.edit_loc_file)
-        if selected_loc:
-            loc_rel = (
-                os.path.relpath(MOD.edit_loc_file, mod_root)
-                if mod_root
-                else MOD.edit_loc_file
-            )
-        else:
-            loc_rel = os.path.join(
-                "localisation",
-                loc_target.dirname(),
-                loc_target.filename(mid),
-            )
-        loc_state, loc_existing, loc_encoding = _read_existing_file_with_encoding(
-            full(loc_rel)
-        )
-        loc_read_failed = loc_state == _READ_FAILED
-        if selected_loc and loc_state == _READ_MISSING:
-            loc_read_failed = True
-
-        new_loc_lines = []
-
-        def add_loc(key, value):
-            if key not in existing_keys:
-                new_loc_lines.append(f" {key}: {json.dumps(value, ensure_ascii=False)}")
-
-        if not loc_read_failed:
-            add_loc(mid, name)
-            add_loc(f"{mid}_desc", desc)
-            add_loc("modifies_dynamic_modifier_tt", "Modifies $MODIFIER$")
-            for modifier, var, tooltip in mod_entries:
-                if tooltip:
-                    add_loc(tooltip, modifier.replace("_", " ").title())
-
-        if loc_read_failed:
-            record_read_error(loc_rel)
-        elif new_loc_lines:
-            loc_encoding = loc_encoding or "utf-8-sig"
-            if not loc_read_failed:
-                if loc_state == _READ_MISSING:
-                    loc_final = (
-                        loc_target.header() + "\n" + "\n".join(new_loc_lines) + "\n"
-                    )
-                    loc_action = "created"
-                else:
-                    # Append without rewriting the existing bytes.
-                    loc_source = loc_existing or ""
-                    inserted = convert_newlines(
-                        "\n\n"
-                        + f" # {mid} — added by Focus Maker\n"
-                        + "\n".join(new_loc_lines)
-                        + "\n",
-                        newline_style(loc_source),
-                    )
-                    loc_final = loc_source + inserted
-                    loc_action = f"appended {len(new_loc_lines)} new keys"
-                if write(loc_rel, loc_final, loc_encoding):
-                    results.append(
-                        (loc_rel, loc_action, f"{len(new_loc_lines)} loc keys")
-                    )
-        elif not loc_read_failed:
-            results.append((loc_rel, "skipped", "all keys already exist"))
-
-        # ════════════════════════════════════════════════════════
-        # FILE 3 — focus snippet (always overwrite — it's a helper)
-        # ════════════════════════════════════════════════════════
-        snip_rel = os.path.join("_focus_snippets", f"{mid}_focus_snippet.txt")
-        snippet = [
-            "# ============================================================",
-            f"# Focus snippet for: {mid}",
-            "# ============================================================",
-            "",
-            "# ── ACTIVATION focus (first time adding this modifier) ────────",
-            "# Use adds_dynamic_modifier_tt when the block contains add_dynamic_modifier",
-            f"\t\t\tadd_dynamic_modifier = {{ modifier = {mid} }}",
-            "\t\t\tcustom_effect_tooltip = {",
-            "\t\t\t\tlocalization_key = adds_dynamic_modifier_tt",
-            f"\t\t\t\tMODIFIER = {mid}",
-            "\t\t\t}",
-            "",
-            "# ── MODIFICATION focus (changing variables only, no add_dynamic_modifier) ─",
-            "# Use modifies_dynamic_modifier_tt when only variables are changed",
-            "\t\t\tcustom_effect_tooltip = {",
-            "\t\t\t\tlocalization_key = modifies_dynamic_modifier_tt",
-            f"\t\t\t\tMODIFIER = {mid}",
-            "\t\t\t}",
-        ]
-        for modifier, var, tooltip in mod_entries:
-            tt = f" tooltip = {tooltip}" if tooltip else ""
-            snippet.append(f"\t\t\tadd_to_variable = {{ {var} = 0.05{tt} }}")
-        if write(snip_rel, "\n".join(snippet) + "\n"):
-            results.append((snip_rel, "created", "paste into your focus file"))
-
-        # ════════════════════════════════════════════════════════
-        # FILE 4 — interface/ideas.gfx (if icon set)
-        # ════════════════════════════════════════════════════════
-        if icon_gfx:
-            icon_name = icon_gfx.replace("GFX_idea_", "").replace("GFX_", "")
-            gfx_rel = os.path.join("interface", "ideas.gfx")
-            gfx_state, gfx_existing, gfx_encoding = _read_existing_file_with_encoding(
-                full(gfx_rel)
-            )
-            if gfx_state == _READ_FAILED:
-                record_read_error(gfx_rel)
-            else:
-                gfx_source = None if gfx_state == _READ_MISSING else gfx_existing
-                gfx_final, added_count = append_sprite_types(
-                    gfx_source,
-                    [(icon_gfx, f"gfx/interface/ideas/{icon_name}.dds")],
-                )
-                if added_count:
-                    gfx_action = (
-                        "created" if gfx_state == _READ_MISSING else "appended sprite"
-                    )
-                    if write(gfx_rel, gfx_final, gfx_encoding or "utf-8"):
-                        results.append(
-                            (
-                                gfx_rel,
-                                gfx_action,
-                                f"icon: {icon_gfx} → gfx/interface/ideas/{icon_name}.dds",
-                            )
-                        )
-                else:
-                    results.append((gfx_rel, "skipped (icon already defined)", ""))
 
         # ── Summary ───────────────────────────────────────────
         if errors:
