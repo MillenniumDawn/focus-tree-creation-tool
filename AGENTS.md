@@ -18,10 +18,10 @@ A standalone Python/Tkinter desktop app for authoring Hearts of Iron IV mod cont
 python hoi4_content_maker.py    # run the app (needs a display + tkinter)
 
 pip install ".[dev]"            # tests + linters
-sudo apt-get install xvfb xauth # Linux only: pytest runs Tk on a private display
-pytest                          # full suite (src/ is on the path via pyproject)
+pytest                          # headless suite, no display needed
 pytest tests/test_config.py::test_cfg_save_merges_existing_keys   # single test
-pytest --no-tk tests/test_config.py   # pure tests only, no Xvfb needed
+sudo apt-get install xvfb xauth # Linux only: for the Tk smoke below
+xvfb-run -a pytest -m tk        # Tk smoke: builds the real App and its dialogs
 ruff check .                    # lint
 black --check .                 # formatting
 mypy                            # type check (src/hoi4cm + tests)
@@ -33,6 +33,8 @@ python build/build.py           # standalone exe (after pip install ".[build]")
 ```
 
 CI runs ruff, black, mypy, pylint and pytest, all on 3.14 (the project's floor).
+
+A test that builds a Tk root fails unless it lives in `tests/test_tk_smoke.py`. Test logic through a pure function, not a widget.
 
 ## Layout
 
