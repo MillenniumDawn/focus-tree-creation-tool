@@ -224,8 +224,8 @@ regression, so it was documented rather than reverted.
 
 The Tk smoke needs a display. On Linux run it under `xvfb-run -a` so nothing
 opens on your desktop (`sudo apt-get install xvfb xauth` on Debian/Ubuntu).
-Without `xvfb-run` it uses your real display and its windows are visible.
-CI runs it on Linux only, so a pass says nothing about Windows or macOS.
+That is the only way it is run and checked. CI runs it on Linux only, so a
+pass says nothing about Windows or macOS.
 
 The separate `windows-permissions` job runs `tests/test_cache_permissions.py`
 on native Windows. Both new-cache and existing-cache cases inspect real directory
