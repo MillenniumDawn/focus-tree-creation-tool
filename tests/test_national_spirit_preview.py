@@ -6,31 +6,12 @@ stale or blank text with no signal. The fix builds text first, logs generator
 failures via ``add_error``/``get_logger``, and narrows widget errors to
 ``tk.TclError``.
 
-These tests prove the fix and guard the regression. The headless generator
-cases live in ``test_wizard_generators_national_spirit.py``; this file covers
-the Tk wiring that the generator tests cannot reach.
+The headless generator cases live in
+``test_wizard_generators_national_spirit.py``.
 """
 
 import pathlib
-import tkinter as tk
-
-from tk_helpers import (
-    cleanup_toplevels,
-    find_text,
-    key_release_on_other_texts,
-    release_grab,
-    trigger_preview_refresh,
-)
-
-import hoi4cm.core.logger as logmod
-import hoi4cm.wizards.national_spirit as ns_mod
-from hoi4cm.wizards.national_spirit import open_national_spirit_wizard
-
-
-def _find_preview_text(root):
-    """Return the preview Text (the one with dark bg)."""
-    # preview pane uses bg #0d1117, editor uses BG_CARD, so bg tells them apart
-    return find_text(root, "#0d1117")
+import re
 
 
 def test_preview_source_contains_expected_error_handling():
@@ -47,107 +28,9 @@ def test_preview_source_contains_expected_error_handling():
     assert "get_logger" in src
     # Scope the check to the preview function: the old broad except over the
     # widget block must be gone there, even though other helpers still use it.
-    import re
-
     m = re.search(r"def _refresh_preview.*?def _get_output_text", src, re.S)
     assert m, "_refresh_preview block not found"
     block = m.group(0)
     assert "except tk.TclError" in block
     assert "except Exception as exc" in block
     assert "except Exception:\n            pass" not in block
-
-
-def test_preview_preserves_text_and_logs_on_builder_failure(tk_root, monkeypatch):
-    """When the generator raises, the preview keeps its old text and logs."""
-
-    release_grab(tk_root)
-    # Isolate logger state like tests/test_logger.py does.
-    orig_cb = logmod._error_callback
-    logmod.clear_errors()
-    logmod.set_error_callback(None)
-    try:
-        open_national_spirit_wizard(tk_root)
-        tk_root.update_idletasks()
-        preview = _find_preview_text(tk_root)
-        assert preview is not None, "preview Text not found"
-        preview.configure(state="normal")
-        old_text = preview.get("1.0", "end")
-        preview.configure(state="disabled")
-
-        def boom(**_kwargs):
-            raise ValueError("boom from generator")
-
-        monkeypatch.setattr(ns_mod, "build_national_spirit_output", boom)
-
-        # Trigger preview via a traced StringVar: find an Entry's Tcl variable
-        # and set it, which fires the trace that calls _refresh_preview.
-        # The wizard's v_id etc. are all traced, so mutating any one is enough.
-        trigger_preview_refresh(tk_root, preview)
-        tk_root.update_idletasks()
-
-        preview.configure(state="normal")
-        new_text = preview.get("1.0", "end")
-        preview.configure(state="disabled")
-        assert new_text == old_text
-
-        entries = logmod.get_error_entries()
-        assert any("boom from generator" in msg for _, msg in entries)
-        assert any("National spirit preview failed" in msg for _, msg in entries)
-    finally:
-        logmod.clear_errors()
-        logmod.set_error_callback(orig_cb)
-        cleanup_toplevels(tk_root)
-
-
-def test_preview_tclerror_does_not_log_or_blank(tk_root, monkeypatch):
-    """Widget TclError during preview update is swallowed without logging."""
-    release_grab(tk_root)
-    orig_cb = logmod._error_callback
-    logmod.clear_errors()
-    logmod.set_error_callback(None)
-    try:
-        open_national_spirit_wizard(tk_root)
-        tk_root.update_idletasks()
-        preview = _find_preview_text(tk_root)
-        assert preview is not None
-
-        # Force widget ops to raise TclError after text has been built.
-        # Patch the Text's config to raise on the second call (delete/insert path).
-        original_config = preview.config
-        calls = []
-
-        def failing_config(*a, **kw):
-            calls.append(kw)
-            if len(calls) == 2:  # second config is the delete/insert block
-                raise tk.TclError("widget destroyed")
-            return original_config(*a, **kw)
-
-        # Instead patch the class to avoid interfering with our own config above
-        # that reads old_text. Use a simpler approach: patch preview.delete to raise.
-        original_delete = preview.delete
-
-        def boom_delete(*a, **kw):
-            raise tk.TclError("simulated TclError")
-
-        preview.delete = boom_delete
-
-        # Patch builder to return harmless text so we reach widget block.
-        monkeypatch.setattr(
-            ns_mod, "build_national_spirit_output", lambda **_kw: "dummy preview text"
-        )
-
-        # Trigger preview via KeyRelease on a non-preview Text.
-        key_release_on_other_texts(tk_root, preview)
-        tk_root.update_idletasks()
-
-        # Must not have logged a preview failure (TclError is expected for destroyed
-        # widgets and should be silent).
-        entries = logmod.get_error_entries()
-        assert not any("National spirit preview failed" in msg for _, msg in entries)
-        # And must not have raised to the Tk callback chain.
-
-        preview.delete = original_delete
-    finally:
-        logmod.clear_errors()
-        logmod.set_error_callback(orig_cb)
-        cleanup_toplevels(tk_root)

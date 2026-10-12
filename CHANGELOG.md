@@ -8,6 +8,10 @@ the version by hand. See `AGENTS.md`.
 
 ## Unreleased
 
+- Make the test suite headless. `pytest` no longer needs a display, and a test
+  that builds a Tk root fails. One smoke file builds the real App and each
+  dialog in its own process (`xvfb-run -a pytest -m tk`). The package coverage
+  floor now covers the non-widget modules at 91%.
 - Release the Tk callbacks of focus cards that scroll out of view, change detail
   level, or are cleared, so long sessions on large trees stop leaking them.
 - Write both autosave recovery files from one serialization, and skip the write

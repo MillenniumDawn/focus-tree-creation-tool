@@ -9,12 +9,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-import pytest
-
 _CHILD_FLAG = "HOI4CM_HOME_ISOLATION_CHILD"
 _SENTINEL_ENV = "HOI4CM_HOME_ISOLATION_SENTINEL"
-_EXPECTED_XAUTHORITY = "HOI4CM_HOME_ISOLATION_EXPECTED_XAUTHORITY"
-_EXPECTED_DISPLAY = "HOI4CM_HOME_ISOLATION_EXPECTED_DISPLAY"
 
 
 def _assert_child_imports_are_isolated(sentinel_home: Path) -> None:
@@ -24,12 +20,6 @@ def _assert_child_imports_are_isolated(sentinel_home: Path) -> None:
     assert Path(os.environ["HOME"]).resolve() == isolated_home
     if sys.platform == "win32":
         assert Path(os.environ["USERPROFILE"]).resolve() == isolated_home
-    assert os.environ.get("XAUTHORITY") == os.environ[_EXPECTED_XAUTHORITY]
-    expected_display = os.environ.get(_EXPECTED_DISPLAY)
-    if expected_display is None:
-        assert "DISPLAY" not in os.environ
-    else:
-        assert os.environ.get("DISPLAY") == expected_display
 
     import hoi4cm.core.config as config
     import hoi4cm.core.logger as logger
@@ -65,16 +55,13 @@ def _assert_child_imports_are_isolated(sentinel_home: Path) -> None:
     assert config.cfg_load() == {}
 
 
-@pytest.mark.parametrize("auth_mode", ("implicit", "explicit"), ids=str)
-def test_import_time_paths_stay_out_of_real_home(tmp_path, auth_mode):
-    """A fresh pytest process isolates HOME without breaking X11 auth."""
+def test_import_time_paths_stay_out_of_real_home(tmp_path):
+    """A fresh pytest process keeps every import-time path out of the real HOME."""
     if os.environ.get(_CHILD_FLAG) == "1":
         _assert_child_imports_are_isolated(Path(os.environ[_SENTINEL_ENV]).resolve())
         return
 
     real_home = (tmp_path / "real-home").resolve()
-    implicit_auth = real_home / ".Xauthority"
-    explicit_auth = real_home / "explicit.Xauthority"
     sentinel_files = {
         real_home
         / ".hoi4_focus_maker.json": json.dumps(
@@ -83,32 +70,18 @@ def test_import_time_paths_stay_out_of_real_home(tmp_path, auth_mode):
         real_home / ".hoi4cm" / "app.log": b"sentinel log\n",
         real_home / ".hoi4cm" / "scan_cache" / "sentinel.db": b"sentinel cache\n",
         real_home / ".hoi4cm" / "autosave" / "sentinel.json": b"sentinel autosave\n",
-        implicit_auth: b"sentinel implicit auth\n",
-        explicit_auth: b"sentinel explicit auth\n",
     }
     for path, content in sentinel_files.items():
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(content)
 
-    expected_xauthority = explicit_auth if auth_mode == "explicit" else implicit_auth
     env = os.environ.copy()
     env["HOME"] = str(real_home)
     if sys.platform == "win32":
         env["USERPROFILE"] = str(real_home)
-    if auth_mode == "explicit":
-        env["XAUTHORITY"] = str(explicit_auth)
-    else:
-        env.pop("XAUTHORITY", None)
     env[_CHILD_FLAG] = "1"
     env[_SENTINEL_ENV] = str(real_home)
-    env[_EXPECTED_XAUTHORITY] = str(expected_xauthority)
-    if "DISPLAY" in env:
-        env[_EXPECTED_DISPLAY] = env["DISPLAY"]
-    else:
-        env.pop(_EXPECTED_DISPLAY, None)
-    nodeid = (
-        f"{Path(__file__)}::test_import_time_paths_stay_out_of_real_home[{auth_mode}]"
-    )
+    nodeid = f"{Path(__file__)}::test_import_time_paths_stay_out_of_real_home"
     result = subprocess.run(
         [sys.executable, "-m", "pytest", "-q", nodeid],
         cwd=Path(__file__).resolve().parents[1],

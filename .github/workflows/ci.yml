@@ -41,9 +41,6 @@ jobs:
       matrix:
         python-version: ["3.14"]
     env:
-      # Turns "no display" from a silent skip into a failure, so a broken
-      # Xvfb can't quietly drop every widget test (tests/conftest.py).
-      HOI4CM_REQUIRE_TK: "1"
       # The test guard fails if CI did not install the dev lock's exact
       # Pillow pin.
       HOI4CM_REQUIRE_PINNED_PILLOW: "1"
@@ -58,29 +55,33 @@ jobs:
       - name: Install dev dependencies
         run: pip install --require-hashes -r dev-requirements.txt
       - name: Run tests
-        # Xvfb gives the Tk widget tests a display; without it they skip.
+        # Headless: no display, and a test that builds a Tk root fails.
         # Coverage sources in pyproject.toml include both hoi4cm and the
         # root-level monolith; gate them independently below.
         run: >
-          xvfb-run -a pytest
+          pytest
           --cov
           --cov-report=term-missing
       - name: Coverage gate (hoi4cm package)
-        # Ratchet one point below the current measured 68% package coverage.
-        run: coverage report --include='src/hoi4cm/*' --fail-under=67
+        # Ratchet one point below the measured 92%. The Tk widget modules
+        # are omitted in pyproject.toml's [tool.coverage.report].
+        run: coverage report --include='src/hoi4cm/*' --fail-under=91
       - name: Coverage gate (monolith)
-        # Independent floor: the 31% baseline is lower, but keeps existing
+        # Independent floor, one point below the measured 35%. Keeps existing
         # shell seams covered while the monolith migration continues.
-        run: coverage report --include='hoi4_content_maker.py' --fail-under=30
+        run: coverage report --include='hoi4_content_maker.py' --fail-under=34
       - name: Coverage gate (wizard generators)
         # Per-module floor on `hoi4cm.wizards._generators` keeps new
-        # script/loc extractions tested (see docs/dev/wizards.md). No Xvfb
-        # here on purpose: these tests must stay headless.
+        # script/loc extractions tested (see docs/dev/wizards.md).
         run: >
-          pytest --no-tk tests/test_wizard_generators_*.py
+          pytest tests/test_wizard_generators_*.py
           --cov=hoi4cm.wizards._generators
           --cov-fail-under=95
           --cov-report=term-missing
+      - name: Tk smoke
+        # Builds the real App and each dialog. Its own process, so Tk objects
+        # never share an interpreter with the headless suite.
+        run: xvfb-run -a pytest -m tk
 
   windows-permissions:
     runs-on: windows-latest

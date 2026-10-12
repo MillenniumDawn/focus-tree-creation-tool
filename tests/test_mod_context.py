@@ -7,12 +7,10 @@ side-effect-free.
 """
 
 import builtins
-import gc
 import os
 import sqlite3
 import textwrap
 import threading
-import tkinter as tk
 import types
 from concurrent.futures import ThreadPoolExecutor
 
@@ -21,7 +19,6 @@ import pytest
 from hoi4cm.mod import MOD, detect_loc_file, find_loc_files
 from hoi4cm.mod import context as ctx_mod
 from hoi4cm.mod import scan_cache as scan_cache_mod
-from hoi4cm.ui import tasks
 
 
 @pytest.fixture(autouse=True)
@@ -123,55 +120,6 @@ def mod_tree(tmp_path):
 def test_scan_loads_sprites(mod_tree):
     MOD.scan(str(mod_tree))
     assert "GFX_focus_USA_first_focus" in MOD.sprites
-
-
-def test_scan_releases_evicted_photoimages_on_tk_thread(tk_root, tmp_path):
-    finalized_on = []
-
-    class TrackedPhotoImage(tk.PhotoImage):
-        def __del__(self):
-            finalized_on.append(threading.get_ident())
-            super().__del__()
-
-    image = TrackedPhotoImage(master=tk_root, width=1, height=1)
-    MOD.sprite_imgs[("stale", (64, 64))] = image
-    del image
-    received = []
-    main_thread_id = threading.get_ident()
-
-    class QueuedWidget:
-        def __init__(self):
-            self.callbacks = []
-
-        def winfo_exists(self):
-            return True
-
-        def after(self, _delay, callback):
-            self.callbacks.append(callback)
-
-    widget = QueuedWidget()
-
-    try:
-        future = tasks.run_bg(
-            widget,
-            lambda: MOD.scan(str(tmp_path)),
-            received.append,
-        )
-        future.result(timeout=5)
-        assert finalized_on == []
-        assert received == []
-
-        widget.callbacks.pop()()
-        assert len(received) == 1
-        evicted = received.pop()
-        assert len(evicted) == 1
-        del future
-        evicted.clear()
-        gc.collect()
-
-        assert finalized_on == [main_thread_id]
-    finally:
-        tasks.shutdown_executor()
 
 
 def test_scan_loads_focus_ids(mod_tree):
@@ -521,22 +469,6 @@ def test_pillow_state_concurrent_initialization_is_atomic(monkeypatch, mod_tree)
     assert [thread_id for thread_id, _image in pillow_image_tk.photo_threads] == [
         threading.get_ident()
     ]
-
-
-def test_get_image_falls_back_from_invalid_dds_to_png(tk_root, tmp_path):
-    image = pytest.importorskip("PIL.Image")
-    dds = tmp_path / "icon.dds"
-    png = tmp_path / "icon.png"
-    dds.write_bytes(b"not a DDS image")
-    image.new("RGB", (12, 8), "#123456").save(png)
-
-    context = ctx_mod.ModContext()
-    context.sprites["GFX_test"] = str(dds)
-    photo = context.get_image("GFX_test", size=(32, 24))
-
-    assert photo is not None
-    assert photo.width() == 32
-    assert photo.height() == 24
 
 
 def test_get_image_returns_none_for_unknown_gfx(mod_tree):

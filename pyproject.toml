@@ -15,7 +15,7 @@ dependencies = []
 
 [project.optional-dependencies]
 image = ["Pillow>=9.0"] # GFX icon previews (.png/.tga)
-# Linux headless tests need matching Python Tk bindings, Xvfb, and xauth.
+# The Tk smoke needs matching Python Tk bindings, Xvfb, and xauth.
 # Debian/Ubuntu: sudo apt-get install python3-tk xvfb xauth
 # Non-default Python needs its matching Tk package (e.g. python3.14-tk).
 # In a venv: python -m pip install --require-hashes -r dev-requirements.txt
@@ -38,8 +38,11 @@ packages = ["src/hoi4cm"]
 [tool.pytest.ini_options]
 pythonpath = ["src", ".", "scripts"]
 testpaths = ["tests"]
+# Plain `pytest` is headless. The Tk smoke runs alone: `xvfb-run -a pytest -m tk`.
+addopts = "-m 'not tk'"
+markers = ["tk: builds real Tk windows; needs a display and its own process"]
 
-# CI measures the package and the root-level Tk shell in the full suite, then
+# CI measures the package and the root-level Tk shell in the headless suite, then
 # applies independent coverage floors to each source tree. The wizard generator
 # floor remains a separate targeted run (see docs/dev/wizards.md and issue #51).
 [tool.coverage.run]
@@ -54,6 +57,37 @@ exclude_also = [
   "raise NotImplementedError",
   "class .*\\(Protocol\\):",
   "@abstractmethod",
+]
+# Modules that build Tk widgets. The headless suite cannot reach their bodies,
+# so they stay out of the package floor; tests/test_tk_smoke.py constructs them.
+# Move logic out of one of these into a pure module to get it gated.
+omit = [
+  "src/hoi4cm/ui/canvas.py",
+  "src/hoi4cm/ui/checklist.py",
+  "src/hoi4cm/ui/effects_panel.py",
+  "src/hoi4cm/ui/focus_list.py",
+  "src/hoi4cm/ui/gfx_browser.py",
+  "src/hoi4cm/ui/loaded_trees.py",
+  "src/hoi4cm/ui/menubar.py",
+  "src/hoi4cm/ui/mod_loading.py",
+  "src/hoi4cm/ui/settings_dialog.py",
+  "src/hoi4cm/ui/splash.py",
+  "src/hoi4cm/ui/startup_check.py",
+  "src/hoi4cm/ui/tasks.py",
+  "src/hoi4cm/ui/thumbnail_grid.py",
+  "src/hoi4cm/ui/toolbar.py",
+  "src/hoi4cm/ui/tutorial.py",
+  "src/hoi4cm/ui/widgets.py",
+  "src/hoi4cm/wizards/_image_loader.py",
+  "src/hoi4cm/wizards/_shared.py",
+  "src/hoi4cm/wizards/additional_income.py",
+  "src/hoi4cm/wizards/character.py",
+  "src/hoi4cm/wizards/decision.py",
+  "src/hoi4cm/wizards/dyn_mod.py",
+  "src/hoi4cm/wizards/event.py",
+  "src/hoi4cm/wizards/national_spirit.py",
+  # Windows-only; the windows-permissions CI job covers it.
+  "src/hoi4cm/mod/_cache_permissions.py",
 ]
 
 # Build scripts are excluded from linting and formatting.

@@ -17,7 +17,7 @@ Reproduce on baseline and branch using the same script:
 ```sh
 python scripts/bench_focus_recovery.py --repo /path/to/checkout \
   --focus-dir /path/to/Millennium-Dawn/common/national_focus --out /tmp/recovery
-pytest --no-tk tests/test_autosave_writer.py tests/test_workspace_dirty.py
+pytest tests/test_autosave_writer.py tests/test_workspace_dirty.py
 ```
 
 Public fixture revision `bcbf8ed2ef59ad58068feecaea68bff1c06c2552`, 114 files,
