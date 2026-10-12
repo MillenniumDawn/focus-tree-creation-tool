@@ -1,4 +1,3 @@
-# ruff: noqa: E501
 """Wizard writes to mod files, with no Tk.
 
 Each wizard's dialog collects its form state and resolves the target paths,
@@ -70,7 +69,8 @@ def save_spirit(
             # Check if spirit ID already defined
             if re.search(r"\b" + re.escape(sid) + r"\s*=\s*\{", existing):
                 warnings.append(
-                    f"Spirit '{sid}' already exists in file — skipped (edit the file manually to update it)."
+                    f"Spirit '{sid}' already exists in file — skipped "
+                    "(edit the file manually to update it)."
                 )
             else:
                 # Extract the spirit's own block from ideas_block
@@ -90,7 +90,8 @@ def save_spirit(
                     spirit_block = None
 
                 if spirit_block:
-                    # Find the slot section (e.g. "country = {") and insert before its closing }
+                    # Find the slot section (e.g. "country = {") and insert
+                    # before its closing }
                     slot_pat = re.compile(r"\b" + re.escape(slot) + r"\s*=\s*\{")
                     sm = slot_pat.search(existing)
                     if sm:
@@ -260,7 +261,8 @@ def save_events(mod, mod_root, ev_file, *, ns, events, render_event, render_yml)
             else:
                 lines.append("")
                 lines.append(
-                    "# ── Appended by HOI4 Content Maker ─────────────────────────────────"
+                    "# ── Appended by HOI4 Content Maker "
+                    "─────────────────────────────────"
                 )
             for ev in to_append:
                 lines.append("")
