@@ -20,19 +20,16 @@ from hoi4cm.core import (
     MODIFIER_CATS,
     MODIFIER_DEFS,
     add_error,
-    append_scripted_loc,
     autosave_path,
-    convert_newlines,
     get_logger,
     modifiers_in_cat,
-    newline_style,
     parse_loc_values,
     read_file_with_encoding,
     sanitize_component,
     tr,
 )
 from hoi4cm.mod import MOD, find_loc_files
-from hoi4cm.script.syntax import match_brace, parse_script, serialize_block
+from hoi4cm.script.syntax import parse_script, serialize_block
 from hoi4cm.ui import (
     BG_CARD,
     BG_DARK,
@@ -49,10 +46,10 @@ from hoi4cm.ui import (
 )
 from hoi4cm.wizards._generators import build_national_spirit_output
 from hoi4cm.wizards._graphics import browser_folders, collect_image_pairs
+from hoi4cm.wizards._saves import save_spirit
 from hoi4cm.wizards._shared import (
     format_save_summary,
     make_scrolled_listbox,
-    notifying_workspace_files,
     open_trigger_picker,
     pack_action_footer,
     svar_get,
@@ -1223,17 +1220,10 @@ def open_national_spirit_wizard(app):
         sid = sanitize_component(
             v_id.get().strip() or "TAG_my_spirit", fallback="TAG_my_spirit"
         )
-        slot = v_slot.get().strip() or "country"
-        loc_n = v_loc_name.get().strip()
-        loc_d = v_loc_desc.get().strip()
         full_txt = _get_output_text()
 
         split_idx = full_txt.find("# LOCALISATION")
         ideas_block = full_txt[:split_idx].strip() if split_idx > 0 else full_txt
-
-        saved = []
-        errs = []
-        warnings = []
 
         # ── Determine ideas file ──────────────────────────────────────────
         if MOD.edit_ideas_file:
@@ -1250,160 +1240,16 @@ def open_national_spirit_wizard(app):
                 return
             ideas_path = os.path.join(mod_root, "common", "ideas", f"{sid}.txt")
 
-        wf = notifying_workspace_files(MOD, mod_root)
-
-        # ── SAFE APPEND to ideas file ─────────────────────────────────────
-        try:
-            os.makedirs(os.path.dirname(ideas_path), exist_ok=True)
-            selected_ideas = bool(MOD.edit_ideas_file)
-            file_exists = os.path.isfile(ideas_path)
-            if selected_ideas and not file_exists:
-                raise OSError("selected ideas file no longer exists")
-            ideas_encoding = "utf-8"
-            if file_exists:
-                existing, ideas_encoding = read_file_with_encoding(ideas_path)
-                if existing is None or ideas_encoding is None:
-                    raise OSError("ideas file could not be read")
-                # Check if spirit ID already defined
-                if re.search(r"\b" + re.escape(sid) + r"\s*=\s*\{", existing):
-                    warnings.append(
-                        f"Spirit '{sid}' already exists in file — skipped (edit the file manually to update it)."
-                    )
-                else:
-                    # Extract the spirit's own block from ideas_block
-                    # ideas_block = "ideas { <slot> { <sid> = { ... } } }"
-                    m_spirit = re.search(
-                        r"\b" + re.escape(sid) + r"\s*=\s*\{", ideas_block
-                    )
-                    if m_spirit:
-                        spirit_start = m_spirit.start()
-                        brace_start = ideas_block.index("{", spirit_start)
-                        close_pos = match_brace(ideas_block, brace_start)
-                        spirit_end = (
-                            close_pos + 1
-                            if close_pos < len(ideas_block)
-                            else brace_start
-                        )
-                        spirit_block = "\t\t" + ideas_block[
-                            spirit_start:spirit_end
-                        ].replace("\n", "\n\t\t")
-                    else:
-                        spirit_block = None
-
-                    if spirit_block:
-                        # Find the slot section (e.g. "country = {") and insert before its closing }
-                        slot_pat = re.compile(r"\b" + re.escape(slot) + r"\s*=\s*\{")
-                        sm = slot_pat.search(existing)
-                        if sm:
-                            si2 = existing.index("{", sm.start())
-                            close_pos = match_brace(existing, si2)
-                            if close_pos >= len(existing):
-                                close_pos = si2
-                            inserted = convert_newlines(
-                                "\n\n" + spirit_block + "\n\t",
-                                newline_style(existing),
-                            )
-                            new_existing = (
-                                existing[:close_pos] + inserted + existing[close_pos:]
-                            )
-                        else:
-                            # Slot section not found — append full block at end
-                            inserted = convert_newlines(
-                                "\n\n" + ideas_block + "\n",
-                                newline_style(existing),
-                            )
-                            new_existing = existing + inserted
-                    else:
-                        inserted = convert_newlines(
-                            "\n\n" + ideas_block + "\n", newline_style(existing)
-                        )
-                        new_existing = existing + inserted
-
-                    wf.write_text(ideas_path, new_existing, encoding=ideas_encoding)
-                    rel = os.path.relpath(ideas_path, mod_root)
-                    saved.append(rel + "  (spirit appended into existing file)")
-            else:
-                # New file — write as-is
-                wf.write_text(ideas_path, ideas_block, encoding="utf-8")
-                rel = os.path.relpath(ideas_path, mod_root)
-                saved.append(rel + "  (new file created)")
-
-        except (OSError, ValueError, RuntimeError, UnicodeDecodeError) as exc:
-            errs.append("Ideas: " + str(exc))
-
-        # ── SAFE APPEND to localisation ───────────────────────────────────
-        selected_loc = bool(MOD.edit_loc_file)
-        if selected_loc:
-            loc_path = MOD.edit_loc_file
-        else:
-            loc_target = MOD.loc_target
-            loc_path = os.path.join(
-                mod_root,
-                "localisation",
-                loc_target.dirname(),
-                loc_target.filename(sid),
-            )
-        try:
-            os.makedirs(os.path.dirname(loc_path), exist_ok=True)
-            new_entries = {sid: loc_n, f"{sid}_desc": loc_d}
-            existing_keys = set()
-            loc_encoding = "utf-8-sig"
-            loc_exists = os.path.isfile(loc_path)
-            if selected_loc and not loc_exists:
-                raise OSError("selected localisation file no longer exists")
-            if loc_exists:
-                loc_text, loc_encoding = read_file_with_encoding(loc_path)
-                if loc_text is None or loc_encoding is None:
-                    raise OSError("localisation file could not be read")
-                for line in loc_text.splitlines():
-                    m = re.match(r'\s+(\S+?)(?::\d+)?\s*[=:]?\s*"', line)
-                    if m:
-                        existing_keys.add(m.group(1))
-
-            to_add = {k: v for k, v in new_entries.items() if k not in existing_keys}
-            if to_add:
-                if not loc_exists:
-                    wf.write_text(
-                        loc_path,
-                        MOD.loc_target.header() + "\n",
-                        encoding=loc_encoding,
-                    )
-                loc_body = "".join(
-                    f" {k}: {json.dumps(v, ensure_ascii=False)}\n"
-                    for k, v in to_add.items()
-                )
-                wf.append_text(loc_path, loc_body, encoding=loc_encoding)
-                rel = os.path.relpath(loc_path, mod_root)
-                saved.append(rel + f"  (+{len(to_add)} keys)")
-            else:
-                warnings.append("Localisation keys already present — skipped.")
-        except (OSError, ValueError, RuntimeError, UnicodeDecodeError) as exc:
-            errs.append("Localisation: " + str(exc))
-
-        # ── SCRIPTED LOC ─────────────────────────────────────────────────
-        if MOD.edit_scripted_loc_file:
-            sloc_blocks = []
-            if sid:
-                sloc_blocks.append(
-                    {"name": f"GET_{sid}_name", "texts": [], "default": sid}
-                )
-                if v_loc_desc.get().strip():
-                    sloc_blocks.append(
-                        {
-                            "name": f"GET_{sid}_desc",
-                            "texts": [],
-                            "default": f"{sid}_desc",
-                        }
-                    )
-            append_scripted_loc(
-                MOD.edit_scripted_loc_file,
-                sloc_blocks,
-                saved,
-                errs,
-                mod_root,
-                require_existing=True,
-            )
-
+        saved, warnings, errs = save_spirit(
+            MOD,
+            mod_root,
+            ideas_path,
+            sid=sid,
+            slot=v_slot.get().strip() or "country",
+            ideas_block=ideas_block,
+            loc_name=v_loc_name.get().strip(),
+            loc_desc=v_loc_desc.get().strip(),
+        )
         msg = format_save_summary(saved, warnings, errs)
         messagebox.showinfo("Saved to Mod", msg, parent=win)
 

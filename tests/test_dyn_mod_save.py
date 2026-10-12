@@ -6,6 +6,7 @@ import tkinter as tk
 import pytest
 
 import hoi4cm.core.logger as logmod
+import hoi4cm.wizards._saves as saves
 import hoi4cm.wizards.dyn_mod as dm_mod
 from hoi4cm.wizards.dyn_mod import open_dyn_mod_wizard
 
@@ -20,14 +21,14 @@ def _loc_rel(mid=_DEFAULT_MID):
 
 def _unread_paths(monkeypatch, *paths):
     unread = {os.path.abspath(str(path)) for path in paths}
-    original = dm_mod.read_file_with_encoding
+    original = saves.read_file_with_encoding
 
     def stub(path, *args, **kwargs):
         if os.path.abspath(str(path)) in unread:
             return None, None
         return original(path, *args, **kwargs)
 
-    monkeypatch.setattr(dm_mod, "read_file_with_encoding", stub)
+    monkeypatch.setattr(saves, "read_file_with_encoding", stub)
 
 
 def _set_icon(window, value):
@@ -100,14 +101,12 @@ def test_read_existing_file_distinguishes_missing_content_and_failure(
     existing = tmp_path / "existing.txt"
     existing.write_text("existing = {}\n", encoding="utf-8")
 
-    assert dm_mod._read_existing_file(missing) == (dm_mod._READ_MISSING, None)
-    assert dm_mod._read_existing_file(existing) == (
-        dm_mod._READ_CONTENT,
-        "existing = {}\n",
-    )
+    read = saves._read_existing_file_with_encoding
+    assert read(missing) == (saves._READ_MISSING, None, None)
+    assert read(existing) == (saves._READ_CONTENT, "existing = {}\n", "utf-8")
 
-    monkeypatch.setattr(dm_mod, "read_file_with_encoding", lambda _path: (None, None))
-    assert dm_mod._read_existing_file(existing) == (dm_mod._READ_FAILED, None)
+    monkeypatch.setattr(saves, "read_file_with_encoding", lambda _path: (None, None))
+    assert read(existing) == (saves._READ_FAILED, None, None)
 
 
 def test_save_skips_unreadable_dynamic_modifier(
@@ -117,7 +116,7 @@ def test_save_skips_unreadable_dynamic_modifier(
     target.parent.mkdir(parents=True)
     original = b"\xff\xfeexisting modifier bytes\n"
     target.write_bytes(original)
-    monkeypatch.setattr(dm_mod, "read_file_with_encoding", lambda _path: (None, None))
+    monkeypatch.setattr(saves, "read_file_with_encoding", lambda _path: (None, None))
 
     _, info_messages = _open_and_save(tk_root, tmp_path, monkeypatch)
 
