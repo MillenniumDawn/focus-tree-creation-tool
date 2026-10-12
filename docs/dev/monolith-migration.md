@@ -299,9 +299,8 @@ pinned-thumbnail image cache the sibling browser already had, in place of
 1. Extract the pure logic (parsing, building, computing) into a
    `src/hoi4cm/` module. Keep the Tk shell (widget creation, event
    bindings) in `App` or the wizard, calling into the extracted function.
-2. Pair it with a test under `tests/`. Pure modules get real coverage;
-   Tk-touching code at minimum gets an import smoke test (see
-   `testing.md`).
+2. Pair it with a headless test under `tests/`. A new dialog also gets a
+   line in `tests/test_tk_smoke.py`'s parameter list (see `testing.md`).
 3. Add the new public name to the owning subpackage's `__all__`.
 4. If the monolith (or another subpackage) needs the name via
    `hoi4cm.core`, add it to `core/__init__.py`'s import list and `__all__`.

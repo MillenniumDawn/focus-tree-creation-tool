@@ -68,6 +68,8 @@ def opened(app):
     for window in new_windows():
         window.destroy()
     app.update()
+    # Finalize dead widgets here, before a worker thread's collection can (#319).
+    gc.collect()
 
 
 def _assert_built(windows: list[tk.Toplevel]) -> None:
@@ -136,9 +138,11 @@ def test_script_picker_opens(app, opened, picker):
 
 
 def test_gfx_browsers_open(app, opened, tmp_path, monkeypatch):
+    image = pytest.importorskip("PIL.Image")
     goals = tmp_path / "gfx" / "interface" / "goals"
     goals.mkdir(parents=True)
-    (goals / "icon.png").write_bytes(b"\x89PNG\r\n")
+    # A real image: a failed decode would log from a worker thread (#319).
+    image.new("RGBA", (8, 8), "#123456").save(goals / "icon.png")
     monkeypatch.setattr("tkinter.filedialog.askdirectory", lambda **kw: str(goals))
     monkeypatch.setattr(MOD, "root", str(tmp_path))
     monkeypatch.setattr(MOD, "path_goals", os.path.join("gfx", "interface", "goals"))
