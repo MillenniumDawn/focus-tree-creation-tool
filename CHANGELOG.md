@@ -8,6 +8,10 @@ the version by hand. See `AGENTS.md`.
 
 ## Unreleased
 
+- Make the test suite headless. `pytest` no longer needs a display, and a test
+  that builds a Tk root fails. One smoke file builds the real App and each
+  dialog in its own process (`xvfb-run -a pytest -m tk`). The package coverage
+  floor now covers the non-widget modules at 91%.
 - Move the National Spirit, Event, Dynamic Modifier and Decision "Save to Mod"
   logic out of the dialogs into `wizards/_saves.py`, with headless tests for
   preserved bytes, encoding, newlines and skipped duplicates. No change to what
