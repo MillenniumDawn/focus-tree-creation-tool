@@ -3440,7 +3440,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         self._push_undo("clear all", tree_state=True)
         self._begin_document_generation()
         self.cv.delete("all")
-        self._focus_bundles.clear()
+        self._reclaim_focus_bundles(set())
         self.focuses.clear()
         self._reset_canvas_bounds()
         self.selected = None

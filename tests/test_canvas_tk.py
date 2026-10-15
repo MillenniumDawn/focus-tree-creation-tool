@@ -48,6 +48,33 @@ def test_offscreen_focus_gets_no_items(tk_root):
     assert offscreen.id not in app._focus_bundles
 
 
+def test_focus_callbacks_released_on_cull_lod_and_external_delete(tk_root):
+    cv = tk.Canvas(tk_root)
+    app = AppFake(cv=cv)
+    focus = Focus(id=1, x=1, y=1)
+    baseline = set(cv._tclCommands or ())
+    for _ in range(3):
+        app.zoom = 1.0
+        app._draw_focus(focus, FAR_RECT)
+        full_commands = set(cv._tclCommands or ()) - baseline
+        assert len(full_commands) == 70
+        app.zoom = 0.3
+        app._draw_focus(focus, FAR_RECT)
+        assert len(set(cv._tclCommands or ()) - baseline) == 15
+        # Tkinter names use Python object IDs, which can be reused by the new
+        # compact callbacks after the full callbacks have been freed.
+        retired = full_commands - set(cv._tclCommands or ())
+        assert not any(cv.tk.call("info", "commands", cmd) for cmd in retired)
+        cv.delete("all")
+        app._validate_canvas_probe()
+        assert set(cv._tclCommands or ()) == baseline
+        app.zoom = 1.0
+        app._draw_focus(focus, FAR_RECT)
+        app._reclaim_focus_bundles(set())
+        assert set(cv._tclCommands or ()) == baseline
+        app._reclaim_focus_bundles(set())  # repeated cleanup is harmless
+
+
 def test_pan_onscreen_then_offscreen_reclaims_bundle(tk_root):
     cv = tk.Canvas(tk_root, width=200, height=200)
     app = AppFake(cv=cv)
