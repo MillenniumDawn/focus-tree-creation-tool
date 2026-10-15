@@ -48,6 +48,7 @@ _FOCUS_SEMANTIC_METADATA = (
     "_rel_dy",
     "_joint_extra",
     "_script_extras",
+    "_icon_script",
 )
 _MISSING = object()
 
