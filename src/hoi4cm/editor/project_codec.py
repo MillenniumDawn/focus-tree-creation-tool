@@ -28,6 +28,7 @@ _SEMANTIC_FOCUS_ATTRS = (
     "_rel_dy",
     "_joint_extra",
     "_script_extras",
+    "_icon_script",
 )
 
 

@@ -9,11 +9,9 @@ import re
 from hoi4cm.script.effects import render_effect
 from hoi4cm.script.syntax import emit_scalar, serialize_block
 
-from .codec import render_focus_body
+from .codec import render_focus_body, render_focus_icon
 from .identifiers import checked_focus_names, focus_identifier
 from .operations import build_focus_name_lookup
-
-GFX_DEFAULT = "GFX_goal_generic_political_pressure"
 
 
 def _country_raw_lines(country_raw):
@@ -139,7 +137,7 @@ def export_focus_tree(
         for f in focuses_in_tree:
             out.append(f"{block_kw} = {{")
             out.append(f"\tid = {emit_scalar(exported_names[f.name])}")
-            out.append(f"\ticon = {emit_scalar(getattr(f, 'gfx', GFX_DEFAULT))}")
+            out.extend(render_focus_icon(f, "\t"))
             write_focus_body(f, out, "\t")
             out.append("}")
             out.append("")
@@ -179,7 +177,7 @@ def export_focus_tree(
         for f in focuses_in_tree:
             out.append("\tfocus = {")
             out.append(f"\t\tid = {emit_scalar(exported_names[f.name])}")
-            out.append(f"\t\ticon = {emit_scalar(getattr(f, 'gfx', GFX_DEFAULT))}")
+            out.extend(render_focus_icon(f, "\t\t"))
             write_focus_body(f, out, "\t\t")
             out.append("\t}")
             out.append("")
@@ -264,7 +262,7 @@ def export_main_tree(
     for f in focuses_in_tree:
         out.append("\tfocus = {")
         out.append(f"\t\tid = {emit_scalar(exported_names[f.name])}")
-        out.append(f"\t\ticon = {emit_scalar(getattr(f, 'gfx', GFX_DEFAULT))}")
+        out.extend(render_focus_icon(f, "\t\t"))
         out.extend(
             render_focus_body(
                 f,
