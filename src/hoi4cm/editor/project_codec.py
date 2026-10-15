@@ -96,7 +96,16 @@ def choose_project_save_path(
 
 def write_project(path: str | Path, workspace: EditorWorkspace) -> None:
     """Save the project atomically — a failed write leaves the old file intact."""
-    text = json.dumps(encode_project(workspace), indent=2)
+    write_project_text(path, serialize_project(workspace))
+
+
+def serialize_project(workspace: EditorWorkspace) -> str:
+    """Encode once for identical primary and sibling recovery files."""
+    return json.dumps(encode_project(workspace), indent=2)
+
+
+def write_project_text(path: str | Path, text: str) -> None:
+    """Atomically write an already serialized project."""
     WorkspaceFiles().write_text(path, text, encoding="utf-8")
 
 
