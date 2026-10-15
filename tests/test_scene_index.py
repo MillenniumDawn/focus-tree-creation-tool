@@ -174,3 +174,27 @@ def test_update_focus_falls_back_to_rebuild_for_unknown_focus():
     index.update_focus(focuses, 2)
 
     assert index.query_focus_ids((8, 8, 10, 10)) == [2]
+
+
+def test_signature_only_computed_on_validation_and_repairs_late_enable(monkeypatch):
+    focus = _focus(1, 1, 1)
+    document = FocusDocument([focus])
+    index = SceneIndex()
+    calls = []
+    signature = index.signature
+
+    def count(values):
+        calls.append(True)
+        return signature(values)
+
+    monkeypatch.setattr(index, "signature", count)
+    index.rebuild(document)
+    assert not calls
+    focus.x = 99  # Deliberately bypass revision to test validation activation.
+    assert index.ensure(document, validate=True)
+    assert index.query_focus_ids((96, 0, 104, 8)) == [1]
+    assert len(calls) == 1
+    assert not index.ensure(document, validate=True)
+    focus.y = 99
+    assert index.ensure(document, validate=True)
+    assert index.query_focus_ids((96, 96, 104, 104)) == [1]
