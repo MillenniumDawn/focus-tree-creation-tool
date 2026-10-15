@@ -1333,11 +1333,12 @@ class CanvasMixin:
         f = 1.1 if (e.num == 4 or e.delta > 0) else 0.9
         old = self.zoom
         self.zoom = max(0.10, min(4.0, self.zoom * f))
+        if self.zoom == old:
+            return
         self.offset[0] = e.x - (e.x - self.offset[0]) * (self.zoom / old)
         self.offset[1] = e.y - (e.y - self.offset[1]) * (self.zoom / old)
-        # Zoom redraws immediately (like a resize) so the wheel feels instant;
-        # the 16ms throttle stays for the other channels via _redraw().
-        self._redraw_now(RedrawChannel.VIEW, reason="wheel")
+        # Preserve every pointer-anchored transform; render the latest view once.
+        self._redraw(RedrawChannel.VIEW, reason="wheel")
 
     def _rmb(self, e):
         hits = self.cv.find_overlapping(e.x - 2, e.y - 2, e.x + 2, e.y + 2)
