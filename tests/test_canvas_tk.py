@@ -1016,3 +1016,26 @@ def test_cfp_marker_culled_when_outside_the_viewport(tk_root, monkeypatch):
     app._draw_cfp_markers()
 
     assert not cv.find_withtag("cfp_marker")
+
+
+def test_actual_scroll_burst_coalesces_and_keeps_pointer_anchor(tk_root, monkeypatch):
+    cv = tk.Canvas(tk_root)
+    app = AppFake(cv=cv)
+    app._canvas_runtime()
+    jobs = []
+    frames = []
+    monkeypatch.setattr(cv, "after", lambda delay, cb: jobs.append(cb) or "job")
+    monkeypatch.setattr(app, "_render_frame", frames.append)
+    app._redraw(RedrawChannel.SCENE, reason="edit")
+    for x, y, num, delta in [(70, 90, 4, 120), (90, 30, 5, -120)] * 6:
+        world = ((x - app.offset[0]) / app.zoom, (y - app.offset[1]) / app.zoom)
+        app._scroll(SimpleNamespace(x=x, y=y, num=num, delta=delta))
+        assert (x - app.offset[0]) / app.zoom == pytest.approx(world[0])
+        assert (y - app.offset[1]) / app.zoom == pytest.approx(world[1])
+    assert len(jobs) == 1
+    assert frames == []
+    jobs[0]()
+    assert frames == [RedrawChannel.SCENE | RedrawChannel.VIEW]
+    app.zoom = 4.0
+    app._scroll(SimpleNamespace(x=70, y=90, num=4, delta=120))
+    assert len(jobs) == 1  # No work when already clamped.
