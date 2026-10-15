@@ -202,7 +202,7 @@ class ModLoadingMixin:
         self._update_statusbar()
         # Invalidate all focus draw caches so mod images render on next frame
         self._invalidate_canvas_images()
-        self._focus_bundles.clear()
+        self._reclaim_focus_bundles(set())
         self.cv.delete("focus")
         self._redraw_now()
         # Clear all wizard image caches so new mod GFX loads fresh. The live

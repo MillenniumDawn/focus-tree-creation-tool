@@ -321,7 +321,7 @@ class CanvasMixin:
         self.cv.delete("focus")
         self.cv.delete("line")
         self.cv.delete("grid")
-        self._focus_bundles.clear()
+        self._reclaim_focus_bundles(set())
         self._lines.clear()
         self._lines_used = 0
         self._lines_key = None
@@ -838,33 +838,36 @@ class CanvasMixin:
         self._lines_key = key
 
     def _delete_focus_bundle(self, focus_id):
-        self._canvas_runtime()
         bundle = self._focus_bundles.pop(focus_id, None)
         if bundle is not None:
             for item in bundle.items:
                 self.cv.delete(item)
+            # Deleting a canvas item removes its bindings, but Tcl's registered
+            # Python commands live until explicitly released (or widget close).
+            # This also works after an external cv.delete("all").
+            for command in bundle.bindings:
+                self.cv.deletecommand(command)
         image_broker = self._image_broker
         if image_broker is not None:
             image_broker.release(("canvas", focus_id))
 
     def _reclaim_focus_bundles(self, visible_ids):
-        self._canvas_runtime()
         for focus_id in self._focus_bundles.keys() - visible_ids:
             self._delete_focus_bundle(focus_id)
 
     def _bind_focus_items(self, items, focus_id):
+        bundle = self._focus_bundles[focus_id]
+
+        def bind(item, sequence, callback):
+            command = self.cv.tag_bind(item, sequence, callback)
+            bundle.bindings.append(command)
+
         for item in items:
-            self.cv.tag_bind(
-                item, "<ButtonPress-1>", lambda e, i=focus_id: self._foc_pr(i, e)
-            )
-            self.cv.tag_bind(
-                item, "<B1-Motion>", lambda e, i=focus_id: self._foc_mv(i, e)
-            )
-            self.cv.tag_bind(
-                item, "<ButtonRelease-1>", lambda e, i=focus_id: self._foc_rl(i)
-            )
-            self.cv.tag_bind(item, "<Enter>", lambda e, i=focus_id: self._foc_en(i))
-            self.cv.tag_bind(
+            bind(item, "<ButtonPress-1>", lambda e, i=focus_id: self._foc_pr(i, e))
+            bind(item, "<B1-Motion>", lambda e, i=focus_id: self._foc_mv(i, e))
+            bind(item, "<ButtonRelease-1>", lambda e, i=focus_id: self._foc_rl(i))
+            bind(item, "<Enter>", lambda e, i=focus_id: self._foc_en(i))
+            bind(
                 item,
                 "<Leave>",
                 lambda e: self._hint(
