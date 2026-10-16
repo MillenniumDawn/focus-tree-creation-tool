@@ -8,6 +8,16 @@ the version by hand. See `AGENTS.md`.
 
 ## Unreleased
 
+- Release the Tk callbacks of focus cards that scroll out of view, change detail
+  level, or are cleared, so long sessions on large trees stop leaking them.
+- Write both autosave recovery files from one serialization, and skip the write
+  when nothing changed since the last successful pair.
+- Coalesce mouse-wheel zoom bursts into one redraw per frame while keeping each
+  zoom step anchored to the pointer.
+- Skip the scene debug fingerprint on normal canvas rebuilds. It is still built
+  when validation is on.
+- Keep conditional and repeated focus icons through project save, autosave
+  restore, undo, the Code tab, and export.
 - Move the National Spirit, Event, Dynamic Modifier and Decision "Save to Mod"
   logic out of the dialogs into `wizards/_saves.py`, with headless tests for
   preserved bytes, encoding, newlines and skipped duplicates. No change to what
