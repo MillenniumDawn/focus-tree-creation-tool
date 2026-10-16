@@ -4,6 +4,8 @@ import copy
 import math
 from collections.abc import Callable, Mapping
 
+from .focus_icon import split_focus_icon
+
 MAX_FOCUS_ID = 1_000_000
 
 
@@ -128,7 +130,9 @@ _FIELD_COERCERS: dict[str, Callable[[object], object]] = {
     "name": _as_string,
     "loc_name": _as_string,
     "icon": _as_string,
-    "gfx": _as_string,
+    "gfx": lambda value: (
+        value if isinstance(value, (dict, list)) else _as_string(value)
+    ),
     "x": _as_int,
     "y": _as_int,
     "cost": _as_number,
@@ -210,8 +214,24 @@ class Focus:
         self.offsets: list[dict[str, object]] = []
         self.tree_idx = 0  # 0 = main tree; >0 = index into _extra_trees (1-based)
 
+    @property
+    def gfx(self) -> str:
+        """Scalar image lookup key; structured script is retained separately."""
+        return self._gfx
+
+    @gfx.setter
+    def gfx(self, value: object) -> None:
+        preview, script = split_focus_icon(value)
+        if script is not None:
+            self._icon_script = script
+        elif preview != getattr(self, "_gfx", None):
+            self.__dict__.pop("_icon_script", None)
+        self._gfx = preview
+
     def to_dict(self):
-        return {k: v for k, v in self.__dict__.items() if not k.startswith("_")}
+        data = {k: v for k, v in self.__dict__.items() if not k.startswith("_")}
+        data["gfx"] = self.gfx
+        return data
 
     def duplicate(self, id: int):  # pylint: disable=redefined-builtin
         """Deep copy with an explicit fresh id and no stale imported coordinates."""
@@ -265,6 +285,14 @@ class Focus:
             coerce = _FIELD_COERCERS.get(attr)
             if coerce is not None:
                 setattr(f, attr, coerce(value))
+        # Restore semantic metadata after gfx regardless of JSON key ordering.
+        script = d.get("_icon_script")
+        if (
+            isinstance(script, dict)
+            and script.get("preview") == f.gfx
+            and isinstance(script.get("value"), (dict, list))
+        ):
+            f._icon_script = copy.deepcopy(script)
         # Legacy pre-versioning project files stored pixel coords; grid
         # coords are indistinguishable from a multiple-of-96 pixel coord, so
         # this migration must never run on current-format or snapshot data.

@@ -189,6 +189,7 @@ def _replacement_app(root, monkeypatch):
     app._lines = set()
     app._extra_trees = []
     app._focus_bundles = {}
+    app._reclaim_focus_bundles = app_module.App._reclaim_focus_bundles.__get__(app)
     app._shared_focuses = []
     app._joint_focuses = []
     app._tree_id = app_module.tk.StringVar(master=root)

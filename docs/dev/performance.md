@@ -393,3 +393,12 @@ the in-memory snapshot (dicts keyed by `PathReference`) and mark it dirty; the
 SQLite store runs at the next refresh or at shutdown (`flush_cache`), so a
 wizard save that writes an image plus a `.gfx` entry pays nothing per file and
 the decoded-image LRU is evicted per changed sprite name, not wholesale.
+
+### Callback lifetime follow-up (#322)
+
+Focus bundles now release their registered Tcl callbacks on reclamation, LOD
+changes, and canvas reset. See [the reproducible callback benchmark](perf-322-callbacks.md).
+
+Follow-up measured fixes and controls: [recovery serialization](perf-323-recovery.md),
+[wheel coalescing](perf-324-wheel.md), [optional scene fingerprints](perf-325-scene.md),
+[worker/GC investigation](perf-326-worker.md), and [structured icon correctness](perf-327-icons.md).

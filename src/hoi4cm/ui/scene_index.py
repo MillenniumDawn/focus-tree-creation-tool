@@ -33,7 +33,7 @@ class SceneIndex:
         self.cell_size = cell_size
         self.revision = 0
         self._document_revision: int | None = None
-        self._signature: tuple[object, ...] = ()
+        self._signature: tuple[object, ...] | None = None
         self._focus_cells: dict[tuple[int, int], list[int]] = {}
         self._edge_cells: dict[tuple[int, int], list[int]] = {}
         self._wide_edges: set[int] = set()
@@ -43,7 +43,7 @@ class SceneIndex:
         self._edge_bounds: list[tuple[float, float, float, float]] = []
         self._edges_by_focus: dict[int, list[int]] = {}
 
-    def rebuild(self, focuses: Mapping[int, Focus]) -> None:
+    def rebuild(self, focuses: Mapping[int, Focus], *, validate: bool = False) -> None:
         focus_cells: dict[tuple[int, int], list[int]] = defaultdict(list)
         focus_order: dict[int, int] = {}
         positions: dict[int, tuple[float, float]] = {}
@@ -83,7 +83,7 @@ class SceneIndex:
             edges_by_focus[edge.target_id].append(index)
             self._place_edge(index, edge, focuses)
         self._edges_by_focus = dict(edges_by_focus)
-        self._signature = self.signature(focuses)
+        self._signature = self.signature(focuses) if validate else None
         self._document_revision = getattr(focuses, "revision", None)
         self.revision += 1
 
@@ -130,9 +130,11 @@ class SceneIndex:
         document_revision = getattr(focuses, "revision", None)
         changed = document_revision != self._document_revision
         if validate and not changed:
-            changed = self.signature(focuses) != self._signature
+            changed = (
+                self._signature is None or self.signature(focuses) != self._signature
+            )
         if not self.revision or changed:
-            self.rebuild(focuses)
+            self.rebuild(focuses, validate=validate)
             return True
         return False
 

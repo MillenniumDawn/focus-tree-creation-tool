@@ -89,6 +89,7 @@ from hoi4cm.core import (  # noqa: E402
     worst_severity_per_focus,
 )
 from hoi4cm.editor import (  # noqa: E402
+    AutosaveWriter,
     ExtraTreeState,
     ExtraTreeUndoHistory,
     choose_project_save_path,
@@ -493,13 +494,16 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             if self._is_dirty():
                 path = workspace_autosave_path()
                 self._capture_workspace()
-                write_project(path, self.workspace)
+                writer = getattr(self, "_autosave_writer", None)
+                if writer is None:
+                    writer = self._autosave_writer = AutosaveWriter()
                 sibling = getattr(self, "_last_project_path", None)
-                if sibling:
-                    try:
-                        write_project(sibling_autosave_path(sibling), self.workspace)
-                    except Exception:
-                        log.exception("sibling autosave failed")
+                paths = (path, sibling_autosave_path(sibling)) if sibling else (path,)
+                writer.save(
+                    self.workspace,
+                    paths,
+                    lambda: log.exception("sibling autosave failed"),
+                )
             self._autosave_failing = False
         except Exception as ex:
             log.exception("workspace autosave failed")
@@ -3440,7 +3444,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         self._push_undo("clear all", tree_state=True)
         self._begin_document_generation()
         self.cv.delete("all")
-        self._focus_bundles.clear()
+        self._reclaim_focus_bundles(set())
         self.focuses.clear()
         self._reset_canvas_bounds()
         self.selected = None
