@@ -490,6 +490,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
 
     def _autosave_tick(self) -> None:
         self._autosave_job = None
+        sibling_failed = False
         try:
             if self._is_dirty():
                 path = workspace_autosave_path()
@@ -498,12 +499,25 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
                 if writer is None:
                     writer = self._autosave_writer = AutosaveWriter()
                 sibling = getattr(self, "_last_project_path", None)
-                paths = (path, sibling_autosave_path(sibling)) if sibling else (path,)
-                writer.save(
-                    self.workspace,
-                    paths,
-                    lambda: log.exception("sibling autosave failed"),
-                )
+                sibling_path = sibling_autosave_path(sibling) if sibling else None
+                paths = (path, sibling_path) if sibling_path else (path,)
+
+                def sibling_error() -> None:
+                    nonlocal sibling_failed
+                    sibling_failed = True
+                    log.exception("sibling autosave failed")
+                    if getattr(self, "_sibling_autosave_failing", None) != sibling_path:
+                        self._sibling_autosave_failing = sibling_path
+                        self._log_error(
+                            f"Sibling autosave failed for {sibling_path}: "
+                            f"{sys.exception()}"
+                        )
+
+                writer.save(self.workspace, paths, sibling_error)
+                if not sibling_failed:
+                    self._sibling_autosave_failing = None
+            else:
+                self._sibling_autosave_failing = None
             self._autosave_failing = False
         except Exception as ex:
             log.exception("workspace autosave failed")
