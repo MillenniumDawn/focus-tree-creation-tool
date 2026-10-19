@@ -10,6 +10,7 @@ import pytest
 
 import hoi4_content_maker as m
 import hoi4cm.core.logger as logmod
+import hoi4cm.editor.autosave_writer as aw
 from hoi4cm.models import (
     EditorWorkspace,
     Focus,
@@ -257,7 +258,7 @@ def test_autosave_tick_writes_when_dirty(monkeypatch, tmp_path):
     app = _fake_app()
     app.focuses.add(Focus(id=7, x=0, y=0))
     writes = []
-    monkeypatch.setattr(m, "write_project", lambda p, ws: writes.append(p))
+    monkeypatch.setattr(aw, "write_project_text", lambda p, ws: writes.append(p))
     monkeypatch.setattr(
         m, "workspace_autosave_path", lambda: str(tmp_path / "autosave.json")
     )
@@ -272,7 +273,7 @@ def test_autosave_tick_writes_when_dirty(monkeypatch, tmp_path):
 def test_autosave_tick_no_write_when_clean(monkeypatch, tmp_path):
     app = _fake_app()
     writes = []
-    monkeypatch.setattr(m, "write_project", lambda p, ws: writes.append(p))
+    monkeypatch.setattr(aw, "write_project_text", lambda p, ws: writes.append(p))
     monkeypatch.setattr(
         m, "workspace_autosave_path", lambda: str(tmp_path / "autosave.json")
     )
@@ -286,7 +287,7 @@ def test_autosave_tick_writes_sibling_when_last_path(monkeypatch, tmp_path):
     app.focuses.add(Focus(id=8, x=0, y=0))
     app._last_project_path = str(tmp_path / "project.json")
     writes = []
-    monkeypatch.setattr(m, "write_project", lambda p, ws: writes.append(p))
+    monkeypatch.setattr(aw, "write_project_text", lambda p, ws: writes.append(p))
     monkeypatch.setattr(
         m, "workspace_autosave_path", lambda: str(tmp_path / "autosave.json")
     )
@@ -306,7 +307,9 @@ def test_autosave_tick_swallows_write_error(monkeypatch, tmp_path, errors):
     app = _fake_app()
     app.focuses.add(Focus(id=9, x=0, y=0))
     monkeypatch.setattr(
-        m, "write_project", lambda p, ws: (_ for _ in ()).throw(OSError("disk full"))
+        aw,
+        "write_project_text",
+        lambda p, ws: (_ for _ in ()).throw(OSError("disk full")),
     )
     monkeypatch.setattr(
         m, "workspace_autosave_path", lambda: str(tmp_path / "autosave.json")
@@ -332,7 +335,7 @@ def test_autosave_tick_records_one_entry_per_failure_streak(
         if outcome is not None:
             raise outcome
 
-    monkeypatch.setattr(m, "write_project", write)
+    monkeypatch.setattr(aw, "write_project_text", write)
     monkeypatch.setattr(
         m, "workspace_autosave_path", lambda: str(tmp_path / "autosave.json")
     )
@@ -352,7 +355,9 @@ def test_clean_tick_ends_the_autosave_failure_streak(monkeypatch, tmp_path, erro
     app = _fake_app()
     app.focuses.add(app.focuses.new_focus(0, 0))
     monkeypatch.setattr(
-        m, "write_project", lambda p, ws: (_ for _ in ()).throw(OSError("disk full"))
+        aw,
+        "write_project_text",
+        lambda p, ws: (_ for _ in ()).throw(OSError("disk full")),
     )
     monkeypatch.setattr(
         m, "workspace_autosave_path", lambda: str(tmp_path / "autosave.json")

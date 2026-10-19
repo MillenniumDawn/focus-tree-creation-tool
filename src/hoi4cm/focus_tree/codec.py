@@ -20,7 +20,6 @@ __all__ = ["apply_focus_code", "render_focus_block", "render_focus_body"]
 EffectRenderer = Callable[[Mapping[str, object]], str]
 CoordinatePolicy = Literal["canvas", "raw"]
 CompletionRewardPolicy = Literal["main", "extra", "preview"]
-_DEFAULT_GFX = "GFX_goal_generic_political_pressure"
 
 _EDITABLE_FIELDS = (
     "name",
@@ -56,6 +55,7 @@ _PRESERVED_PARSE_FIELDS = (
     "_rel_dy",
     "_joint_extra",
     "_script_extras",
+    "_icon_script",
 )
 
 
@@ -270,6 +270,16 @@ def render_focus_body(
     return out
 
 
+def render_focus_icon(focus: Focus, indent: str) -> list[str]:
+    """Render imported conditional/repeated icons without losing their order."""
+    script = getattr(focus, "_icon_script", None)
+    if isinstance(script, dict) and script.get("preview") == focus.gfx:
+        return serialize_block(
+            {"icon": script["value"]}, indent=indent, include_bare_values=True
+        ).splitlines()
+    return [f"{indent}icon = {emit_scalar(focus.gfx)}"]
+
+
 def render_focus_block(
     focus: Focus,
     *,
@@ -282,7 +292,7 @@ def render_focus_block(
     out = [
         "focus = {",
         f"{indent}id = {focus.name}",
-        f"{indent}icon = {emit_scalar(getattr(focus, 'gfx', _DEFAULT_GFX))}",
+        *render_focus_icon(focus, indent),
     ]
     out.extend(
         render_focus_body(

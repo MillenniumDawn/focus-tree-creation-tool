@@ -124,6 +124,7 @@ def test_clear_all_undo_restores_extra_tree_registry_and_focuses(monkeypatch):
     ]
     app._shared_focuses = ["shared_tree"]
     app._focus_bundles = {}
+    app._reclaim_focus_bundles = m.App._reclaim_focus_bundles.__get__(app)
     app._reset_canvas_bounds = Mock()
     app._draw_grid = Mock()
     monkeypatch.setattr(m.messagebox, "askyesno", Mock(return_value=True))

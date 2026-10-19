@@ -220,7 +220,9 @@ def test_on_mod_loaded_invalidates_canvas_and_wizard_images_on_ui_thread(
 
     app = AppFake()
     app._mod_lbl = FakeLabel()
-    app._focus_bundles = {7: object()}
+    from hoi4cm.ui.canvas_renderer import FocusCanvasBundle
+
+    app._focus_bundles = {7: FocusCanvasBundle((), "full")}
     app.cv = FakeCanvas()
     app.visibility_updates = 0
     app.dropdown_refreshes = 0
