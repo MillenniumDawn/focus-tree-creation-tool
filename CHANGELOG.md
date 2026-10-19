@@ -8,6 +8,10 @@ the version by hand. See `AGENTS.md`.
 
 ## Unreleased
 
+---
+
+## [0.4.4] — 2026-10-19
+
 - Make the test suite headless. `pytest` no longer needs a display, and a test
   that builds a Tk root fails. One smoke file builds the real App and each
   dialog in its own process (`xvfb-run -a pytest -m tk`). The package coverage
