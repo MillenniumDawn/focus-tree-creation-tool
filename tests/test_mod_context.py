@@ -25,7 +25,7 @@ from hoi4cm.ui import tasks
 
 
 @pytest.fixture(autouse=True)
-def isolate_scan_cache(tmp_path_factory, monkeypatch):
+def isolate_scan_cache(tmp_path_factory, monkeypatch, mod_state_isolation):
     """Keep the SQLite scan cache out of the real ~/.hoi4cm during tests."""
     monkeypatch.setattr(
         scan_cache_mod, "STATE_DIR", str(tmp_path_factory.mktemp("hoi4cm_state"))

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import copy
 import threading
 import types
 from collections.abc import Callable, Iterator
@@ -18,13 +17,9 @@ from hoi4cm.ui.mod_loading import ModLoadingMixin
 
 
 @pytest.fixture(autouse=True)
-def isolate_mod():
-    snapshot = copy.deepcopy(MOD.__dict__)
+def isolate_mod(mod_state_isolation):
     MOD.loaded = False
     MOD.root = None
-    yield
-    MOD.__dict__.clear()
-    MOD.__dict__.update(snapshot)
 
 
 @pytest.fixture

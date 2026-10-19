@@ -10,7 +10,6 @@ half-built window cannot pass.
 
 from __future__ import annotations
 
-import copy
 import importlib
 import json
 import tkinter as tk
@@ -23,16 +22,12 @@ from hoi4cm.mod import scan_cache as scan_cache_mod
 
 
 @pytest.fixture(autouse=True)
-def isolate_mod(tmp_path, monkeypatch):
-    """Keep scan cache off disk and snapshot MOD between tests."""
+def isolate_mod(tmp_path, monkeypatch, mod_state_isolation):
+    """Keep scan cache off disk and initialize MOD as unloaded."""
     monkeypatch.setattr(scan_cache_mod, "STATE_DIR", str(tmp_path / "scan_cache"))
-    snapshot = copy.deepcopy(MOD.__dict__)
     MOD.loaded = False
     MOD.root = None
     MOD.is_md = False
-    yield
-    MOD.__dict__.clear()
-    MOD.__dict__.update(snapshot)
 
 
 def _stub_app(root: tk.Tk) -> tk.Tk:

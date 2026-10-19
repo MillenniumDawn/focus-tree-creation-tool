@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import copy
 import tkinter as tk
 from tkinter import ttk
 from unittest.mock import MagicMock
@@ -65,18 +64,14 @@ _PROFILE_DIMS = {"country": (420, 176), "news": (794, 330)}
 
 
 @pytest.fixture
-def isolate_mod(tmp_path, monkeypatch):
+def isolate_mod(tmp_path, monkeypatch, mod_state_isolation):
     monkeypatch.setattr(scan_cache_mod, "STATE_DIR", str(tmp_path / "scan_cache"))
     monkeypatch.setattr(
         settings_dialog, "CONFIG_PATH", str(tmp_path / "hoi4_focus_maker.json")
     )
-    snapshot = copy.deepcopy(MOD.__dict__)
     MOD.loaded = False
     MOD.root = None
     MOD.is_md = False
-    yield
-    MOD.__dict__.clear()
-    MOD.__dict__.update(snapshot)
 
 
 def _stub_mod_app(root: tk.Tk, monkeypatch: pytest.MonkeyPatch) -> tk.Tk:
