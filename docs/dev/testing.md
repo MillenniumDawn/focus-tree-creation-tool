@@ -13,14 +13,48 @@ and scopes `testpaths` to `tests/`, so `pytest` from the repo root just
 works. On import, `tests/conftest.py` replaces HOME with a temporary
 per-run home before test modules are collected, then restores the original
 environment and removes the temporary tree at session end. On Windows it also
-sets USERPROFILE because that is what `expanduser("~")` prefers. DISPLAY and
-explicit XAUTHORITY values are unchanged; when XAUTHORITY is unset, an
-existing original `~/.Xauthority` is exported by absolute path before HOME is
-replaced so X11 authentication still works. The same module provides the
-shared Tk fixtures (see "The headless constraint"). Plain helpers shared by
-several test files live in `tests/tk_helpers.py` (Toplevel bookkeeping and
-widget lookups) and `tests/builders.py` (`make_focus`, `default_decision`),
-imported by bare name. Everything else lives in the file that uses it.
+sets USERPROFILE because that is what `expanduser("~")` prefers. The same
+module forbids Tk construction (see "The headless rule"). Plain helpers
+shared by several test files live in `tests/builders.py` (`make_focus`,
+`default_decision`) and `tests/ui_fakes.py` (`AppFake`), imported by bare
+name. Everything else lives in the file that uses it.
+
+## Two suites
+
+```sh
+pytest                    # headless: logic, no display, about 5 seconds
+xvfb-run -a pytest -m tk  # Tk smoke: tests/test_tk_smoke.py, about 2 seconds
+```
+
+`pyproject.toml` deselects the `tk` marker by default, so plain `pytest` never
+runs the smoke. The two never share a process. Tk objects that a worker
+thread garbage-collects abort the interpreter (#319), and the headless suite
+uses worker threads.
+
+## The headless rule
+
+`tests/conftest.py` replaces `tk.Tk.__init__` for every test not marked `tk`.
+A test that builds a root fails with "Tk construction is forbidden". This is
+the point of the suite: put logic in a pure function and test that. Three
+shapes cover what is here:
+
+- **Pure modules** (`focus_tree/`, `models/`, `script/`, `mod/`, `data/`,
+  `core/`, `editor/`, `wizards/_generators.py`) are called directly.
+- **Pure helpers inside a widget module** are imported and called without
+  building the widget: `visible_row_range` and `row_pool_size` in
+  `ui/focus_list.py`, `is_loadable` in `ui/checklist.py`,
+  `relativize_to_mod_root` in `ui/settings_dialog.py`.
+- **App and mixin methods** run unbound against a fake host. `AppFake` in
+  `tests/ui_fakes.py` hosts the canvas, effects and mod-loading mixins with
+  mocked widgets; monolith methods are called as `App._save(fake)`.
+  `hoi4cm.ui.app_contracts` checks the real `App` against the mixin protocols.
+
+`tests/test_tk_smoke.py` is the one file marked `tk`. It builds the real `App`
+once and calls each command that opens a dialog, asserting a non-empty
+Toplevel appears. That catches the NameError-on-click class (#45). The same
+file holds the focus-callback and wheel-zoom regressions, which need a real
+canvas and must not share a process with the headless suite. Add a dialog to
+its parameter list when you add one. Do not add click-through tests.
 
 ## Coverage
 
@@ -28,57 +62,54 @@ imported by bare name. Everything else lives in the file that uses it.
 `hoi4_content_maker.py` Tk shell, with branch coverage on. The source list is
 in `[tool.coverage.run]` in `pyproject.toml`; `--cov` without a value uses
 that list. `pytest --cov --cov-report=term-missing` prints per-file gaps.
-CI follows the full test run with two filtered reports so the sources have
+CI follows the headless run with two filtered reports so the sources have
 independent floors rather than one blended percentage:
 
 ```sh
-coverage report --include='src/hoi4cm/*' --fail-under=67
-coverage report --include='hoi4_content_maker.py' --fail-under=30
+coverage report --include='src/hoi4cm/*' --fail-under=91
+coverage report --include='hoi4_content_maker.py' --fail-under=34
 ```
 
-The baseline was measured on the complete test suite against the current
-sources: package coverage was 68% and monolith coverage was 31%. CI's package
-ratchet is 67%, just below that measurement; its separate 30% monolith floor
-is deliberately lower while the shell continues to be migrated. These are
-floors, not targets: raise them as coverage climbs. The package and monolith
-must stay separately included in `pyproject.toml` so a future change cannot
-silently stop measuring either source.
+Measured on the headless suite: 92% for the package and 35% for the monolith.
+Each floor sits one point below. These are floors, not targets: raise them as
+coverage climbs. The package and monolith must stay separately included in
+`pyproject.toml` so a future change cannot silently stop measuring either
+source.
+
+The package floor leaves out the modules that build Tk widgets. They are
+listed under `omit` in `[tool.coverage.report]`: the wizard dialogs, the
+canvas, the browsers, the menubar and toolbar, and the other widget modules.
+The headless suite reaches 2% to 77% of each, so including them would turn
+the floor back into a number nobody can move. `tests/test_coverage_gates.py`
+fails if an omitted module does not import tkinter, so a pure module cannot
+be hidden there. A new pure module is gated automatically. A new widget
+module drags the floor down until it is added to `omit`.
+
+The way to raise real coverage is extraction: move logic out of a dialog
+closure into a pure module (the `_generators.py` pattern), where it is gated
+at once. Without the omit list the headless package figure is 47%. The Tk
+tests removed in the headless cut brought that to 75%, but added only 9
+statements across the non-widget modules.
+
+To see the widget modules too, override the list with a pattern that matches
+nothing: `coverage report --omit=none --include='src/hoi4cm/*'`.
 
 The additional gate
-`pytest --no-tk tests/test_wizard_generators_*.py --cov=hoi4cm.wizards._generators
+`pytest tests/test_wizard_generators_*.py --cov=hoi4cm.wizards._generators
 --cov-fail-under=95` keeps the wizard script/loc renderers near-fully
-covered, and runs without Xvfb on purpose so they can't quietly grow a
-Tk dependency.
-
-The character codec has headless round-trip tests in
-`tests/test_character_codec.py`. The dialog itself is included in
-`tests/test_wizard_smoke.py`; it is skipped by the shared Tk fixture when no
-display is available.
-
-The package number is still
-dominated by the large Tk dialog bodies, but construction is now
-smoke-tested (`tests/test_wizard_smoke.py`,
-`tests/test_ui_dialog_smoke.py`): in the measured run, `wizards/decision.py`
-was 41%, `event.py` 41%, `national_spirit.py` 26%, `dyn_mod.py` 33%,
-`additional_income.py` 53%, `ui/gfx_browser.py` 60%,
-`ui/settings_dialog.py` 68%, `ui/mod_loading.py` 53%, `ui/menubar.py` 85%,
-`ui/toolbar.py` 88% and `ui/splash.py` 98%. The pure modules remain much
-more thoroughly tested. Extracting logic out of
-those closures (the `_generators.py` pattern) is what moves the number;
-the smokes are a backstop against NameError regressions (see #45), not a
-substitute for that extraction.
+covered.
 
 ## Fixture / isolation patterns
 
 Every module with import-time or process-lifetime state needs isolation, or
-state leaks between tests. Seven patterns cover what's here today:
+state leaks between tests. Six patterns cover what's here today:
 
 - **Pytest-startup HOME isolation.** `tests/conftest.py` installs a temporary
   HOME while the conftest is imported, before collection imports application
   modules. This keeps import-time logging, config reads, scan-cache paths, and
   autosave paths out of the real user home for the entire run. A subprocess
-  regression test covers implicit and explicit X11 authentication and proves
-  that sentinel files in the initial HOME are not changed.
+  regression test (`tests/test_home_isolation.py`) proves that sentinel files
+  in the initial HOME are not changed.
 
 - **Module-state snapshot/restore.** `tests/test_logger.py`'s `log_state`
   fixture saves `sys.excepthook`, the excepthook-installed flag, and the
@@ -93,7 +124,7 @@ state leaks between tests. Seven patterns cover what's here today:
   catalog, cache, and cached image object identities. It is deliberately not
   autouse: modules opt in where needed and keep scenario-specific setup.
   Tests that only use `monkeypatch.setattr` on MOD have their changes restored
-  by monkeypatch teardown; `test_dyn_mod_save.py` only reads `MOD.loc_target`.
+  by monkeypatch teardown and do not need this fixture.
 - **Monkeypatch of module path constants.** `tests/test_config.py` points
   `config.CONFIG_PATH` at a `tmp_path` file via `monkeypatch.setattr`
   before calling `cfg_load`/`cfg_save`, so no test ever touches the real
@@ -110,27 +141,6 @@ state leaks between tests. Seven patterns cover what's here today:
   first, plus that structural fields and known content survive. Its
   related builds reuse a `BuildContext` allocator, while standalone builds use
   their own context, so IDs stay local and independent of test order.
-- **The shared Tk fixtures.** `tests/conftest.py` provides the autouse
-  `hide_tk_windows` fixture and builds a `tk.Tk()` in `tk_root`, destroying it
-  after the test and skipping when no display is reachable (see "The headless
-  constraint" below). `tests/test_canvas_tk.py`
-  overrides it to `withdraw()` the window, since it drives `CanvasMixin`
-  against a bare `tk.Canvas` through the shared `AppFake` with just that canvas
-  attached, rather than constructing the full application or needing real
-  geometry. The grid tests
-  are the exception: `_draw_grid` clips to the viewport, and a withdrawn
-  root's children never map, so `winfo_width/height` report 1 and there is
-  no viewport to clip to. Those use the module's `mapped_canvas` fixture,
-  which deiconifies and fails loudly (not skips) if the canvas still
-  doesn't map — a silently unmapped canvas would make the clipping
-  assertions vacuous. `test_unmapped_canvas_still_gets_a_grid_over_the_whole_extent`
-  pins the other side of that: with no dimensions to clip to, the grid
-  falls back to covering the canvas extent.
-
-  Headless canvas, effects, undo-call-site, and mod-loading tests share
-  `AppFake` from `tests/ui_fakes.py`; each test customizes only the callbacks
-  and widgets its scenario needs. `hoi4cm.ui.app_contracts` checks the real
-  `App` host against the three mixin protocols.
 
 ## Golden-fixture tests for the focus-tree pipeline
 
@@ -211,80 +221,33 @@ to import at all or mis-resolved positions chained through an unrecognized
 anchor. That's a pre-existing gap the new path closes rather than a
 regression, so it was documented rather than reverted.
 
-## The headless constraint
+## Platforms
 
-On Linux, plain `pytest` starts a private Xvfb server before collection and
-restores the caller's display when the session ends. Install `xvfb` first
-(`sudo apt-get install xvfb xauth` on Debian/Ubuntu). This is intentional even
-when a desktop DISPLAY is present: mapped canvas, decision-wizard, and
-`visible_tk` tests otherwise put real windows on that desktop. The former
-withdraw-only fixture did not prevent explicit `deiconify()` calls.
+The Tk smoke needs a display. On Linux run it under `xvfb-run -a` so nothing
+opens on your desktop (`sudo apt-get install xvfb xauth` on Debian/Ubuntu).
+That is the only way it is run and checked. CI runs it on Linux only, so a
+pass says nothing about Windows or macOS.
 
 The separate `windows-permissions` job runs `tests/test_cache_permissions.py`
 on native Windows. Both new-cache and existing-cache cases inspect real directory
 and database DACLs. Executable builds depend on this job as well as lint and the
 Linux test job, so a cache-permission failure blocks release artifacts.
 
-```sh
-pytest                            # full suite, private Linux display
-HOI4CM_REQUIRE_TK=1 pytest --cov    # require real Tk coverage, as in CI
-pytest --no-tk tests/test_config.py # pure tests; Tk construction fails
-HOI4CM_SHOW_TK=1 pytest -m visible_tk # explicitly show UI on your display
-```
+## What is not automated
 
-`--no-tk` needs no Xvfb and rejects in-process Tk construction instead of
-silently omitting UI assertions. Use it for the wizard-generator coverage gate.
-`--collect-only` also needs no display. A normal Linux run without Xvfb fails
-with installation instructions rather than falling back to the desktop.
+Widget behavior has no automated test: canvas drawing and culling, the
+virtualized list and thumbnail pools, dialog flows (confirm, browse, the
+button press that starts a save), keyboard focus, grabs, and the tutorial
+walk. The smoke proves each window builds. The checklists below cover the
+rest by hand, and each one is a candidate for extraction into a pure function
+with a headless test.
 
-The private server chooses a free display, disables TCP, and is inherited by
-subprocess smoke checks and nested pytest runs. Startup has a ten-second
-limit. Teardown restores DISPLAY, terminates and waits for the server, and
-kills/reaps it if it does not stop within five seconds. The entry-point smoke
-child retains its 30-second timeout. No test starts the interactive editor's
-main loop; the real entry point is tested with `--smoke-test`.
+What a wizard save writes is the worked example: the four "Save to Mod" paths
+live in `wizards/_saves.py` and `tests/test_wizard_saves.py` checks them
+against `tmp_path` trees (see `wizards.md`).
 
-Ordinary widget tests withdraw roots (including directly constructed Tk roots)
-and Toplevels and destroy leftover roots during teardown. `visible_tk` tests
-and fixtures that need mapped geometry still use real mapping, events, and
-grabs on the private display; they are not skipped or converted to mocked UI.
-Grab errors are suppressed only for unviewable windows. `HOI4CM_SHOW_TK=1`
-opts out of display isolation and withdrawal for desktop debugging.
-
-Each Tk test ends with one `gc.collect()`, so Tk objects are finalized on the Tk
-thread (#149). Pure tests do not collect. `pytest_collection_finish` freezes
-everything imported and collected up to that point, which keeps the remaining
-collections short. Collecting after every test instead took the suite from
-about 12 seconds to 46.
-
-Native Windows/macOS do not have Xvfb. Ordinary roots/dialogs are withdrawn,
-but explicit mapped UI tests can still appear there. For a completely quiet
-full suite, run it on Linux/Xvfb (including CI or a Linux VM). Linux automated
-verification does not establish behavior on a user's Windows/macOS desktop.
-`HOI4CM_REQUIRE_TK=1` still makes unavailable Tk fail instead of skip.
-
-Widget tests are still the expensive kind, so the split stands: put logic
-in a pure function and test it headlessly wherever that's possible. Every
-pure module (`focus_tree/`, `models/`, `script/`, `mod/`, `data/`, all of
-`core/`, plus `ui/viewport.py`) has real coverage, as does the wizard
-script/loc generator module `wizards/_generators.py` (via
-`tests/test_wizard_generators_*.py`, at 99%). The close-path dependencies
-the wizards lean on are covered too: the daemon executor
-(`core/concurrency.py`, `tests/test_concurrency.py`), the graphics snapshot
-cache (`mod/workspace_cache.py`, `tests/test_workspace_cache.py`), and
-`ui/widgets.py`'s `_safe_after`/`_safe_after_idle`
-(`tests/test_safe_after.py`). The virtualized list sizing is split the same
-way: `visible_row_range`/`row_pool_size` are pure and carry the
-"pool always holds every visible row" property test, while the widget
-behavior around them (`tests/test_checklist.py`,
-`tests/test_focus_list.py`, `tests/test_thumbnail_grid.py`) needs a root.
-
-Widget construction is smoke-tested: each `open_*_wizard` and each `ui/`
-dialog builds a Toplevel against `tk_root` without raising (see
-`tests/test_wizard_smoke.py` and `tests/test_ui_dialog_smoke.py`). Those
-smokes catch the NameError-on-click class (#45); deeper interaction
-(opening sub-browsers, confirming, file dialogs) remains manual-only, per
-the checklists below.
+No test starts the editor's main loop. The entry point is checked with
+`--smoke-test`, both in the Tk smoke and against the frozen executable.
 
 ## Manual verification
 
@@ -314,9 +277,9 @@ targets in `performance.md` only show up at MD's size:
 
 ### Phase 8: viewport culling checklist
 
-`test_canvas_tk.py` covers the culling logic itself against a bare canvas;
-these need the real `App` and a loaded tree to catch anything the fake host
-doesn't reproduce (event bindings, undo, mod reload, the minimap widget):
+`tests/test_viewport.py` and `tests/test_scene_index.py` cover the culling
+math. Applying it to a canvas has no automated test, so these need the real
+`App` and a loaded tree (event bindings, undo, mod reload, the minimap widget):
 
 - Pan a focus off screen and back. No ghost position (it should redraw at
   its real coordinates, not a stale one), and its selection ring (if
@@ -336,7 +299,7 @@ doesn't reproduce (event bindings, undo, mod reload, the minimap widget):
 
 ### Issue #26: render-loop bookkeeping checklist
 
-The unit tests cover each piece against a bare canvas. These need the real
+None of this has an automated test. These need the real
 `App`, since what changed is *when* per-frame work is skipped:
 
 - Pan (middle-drag / Ctrl+drag) a full viewport in each direction without

@@ -5,21 +5,33 @@ import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+PYPROJECT = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+
+# Omitted for a reason other than building Tk widgets.
+NON_TK_OMITS = {"src/hoi4cm/mod/_cache_permissions.py"}
 
 
 def test_coverage_sources_include_the_package_and_monolith():
-    pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
-
-    assert pyproject["tool"]["coverage"]["run"]["source"] == [
+    assert PYPROJECT["tool"]["coverage"]["run"]["source"] == [
         "hoi4cm",
         "hoi4_content_maker",
     ]
 
 
+def test_only_tk_modules_are_omitted_from_the_package_floor():
+    omitted = set(PYPROJECT["tool"]["coverage"]["report"]["omit"])
+
+    for path in sorted(omitted - NON_TK_OMITS):
+        source = (ROOT / path).read_text(encoding="utf-8")
+        assert re.search(
+            r"^\s*(import tkinter|from tkinter)", source, re.MULTILINE
+        ), f"{path} is omitted from coverage but does not import tkinter"
+
+
 def test_ci_measures_both_sources_and_applies_independent_floors():
     workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
 
-    full_test_run = re.search(r"xvfb-run -a pytest\s+--cov\b", workflow)
+    full_test_run = re.search(r"run: >\s+pytest\s+--cov\b", workflow)
     assert full_test_run is not None
 
     package_gate = re.search(
@@ -32,5 +44,6 @@ def test_ci_measures_both_sources_and_applies_independent_floors():
     assert package_gate is not None
     assert monolith_gate is not None
     assert full_test_run.start() < package_gate.start() < monolith_gate.start()
-    assert int(package_gate.group(1)) >= 67
-    assert int(monolith_gate.group(1)) >= 30
+    assert int(package_gate.group(1)) >= 91
+    assert int(monolith_gate.group(1)) >= 34
+    assert "xvfb-run -a pytest -m tk" in workflow

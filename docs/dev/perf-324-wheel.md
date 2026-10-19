@@ -11,7 +11,7 @@ one scheduled frame of visual latency; no claim about OS compositor FPS.
 DISPLAY=:99 python scripts/bench_focus_wheel.py --repo /path/to/checkout \
   --fixture /path/to/Millennium-Dawn/common/national_focus/05_usa.txt \
   --out /tmp/wheel.json
-pytest tests/test_canvas_tk.py
+xvfb-run -a pytest -m tk tests/test_tk_smoke.py -k scroll_burst
 ```
 
 Seven fresh-root samples, 776 USA focuses, 1200x800, 12 alternating events,

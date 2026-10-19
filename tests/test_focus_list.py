@@ -1,19 +1,12 @@
-from collections.abc import Hashable
-from types import SimpleNamespace
-
 import pytest
 
 from hoi4cm.ui.focus_list import (
-    HOVER_BG,
-    SELECTED_BG,
     FocusListCache,
     FocusListItem,
-    VirtualFocusList,
     filter_focus_items,
     row_pool_size,
     visible_row_range,
 )
-from hoi4cm.ui.theme import BG_PANEL
 
 
 def test_filter_preserves_order_and_matches_names_case_insensitively() -> None:
@@ -158,107 +151,3 @@ def test_pool_always_holds_every_visible_row(
             overscan_rows=overscan_rows,
         )
         assert len(visible) <= pool, f"top={top}"
-
-
-@pytest.mark.visible_tk
-def test_tk_list_reuses_bounded_pool_and_updates_only_selected_rows(tk_root) -> None:
-    selected: list[Hashable] = []
-    tk_root.geometry("220x180")
-    focus_list = VirtualFocusList(tk_root, on_select=selected.append)
-    focus_list.pack(fill="both", expand=True)
-    items = [FocusListItem(index, f"Focus {index}") for index in range(100_000)]
-    focus_list.invalidate_structure(items, selected_key=0)
-    tk_root.update()
-    focus_list.refresh()
-
-    pool_size = focus_list.pool_size
-    version = focus_list.structure_version
-    assert focus_list.materialized_count <= pool_size
-    assert pool_size == row_pool_size(
-        focus_list.canvas.winfo_height(),
-        focus_list.row_height,
-        overscan_rows=focus_list.overscan_rows,
-    )
-    focus_list._materialized[0].label.event_generate("<Button-1>")
-    tk_root.update()
-    assert selected == [0]
-
-    assert focus_list.update_selection(1) == 2
-    assert focus_list.structure_version == version
-    assert focus_list.filtered_count == 100_000
-
-    focus_list.canvas.yview_moveto(0.9)
-    focus_list.refresh()
-    assert focus_list.pool_size == pool_size
-    assert focus_list.materialized_count <= pool_size
-    assert focus_list.update_selection(90_000) <= 1
-    assert focus_list.structure_version == version
-
-    focus_list.invalidate_structure(items, query="Focus 99999")
-    focus_list.refresh()
-    assert focus_list.filtered_count == 1
-    assert focus_list.materialized_count == 1
-
-
-@pytest.mark.visible_tk
-def test_tk_list_configure_updates_frame_options(tk_root) -> None:
-    focus_list = VirtualFocusList(tk_root, on_select=lambda _key: None)
-
-    focus_list.configure(bg="#102030")
-
-    assert focus_list.cget("bg") == "#102030"
-
-
-def test_tk_list_reselecting_the_same_key_touches_no_rows(tk_root) -> None:
-    focus_list = VirtualFocusList(tk_root, on_select=lambda _key: None)
-    focus_list.pack(fill="both", expand=True)
-    focus_list.invalidate_structure(
-        [FocusListItem(index, f"Focus {index}") for index in range(10)],
-        selected_key=3,
-    )
-    tk_root.update()
-
-    assert focus_list.update_selection(3) == 0
-
-
-def test_tk_row_hover_restores_selection_colors_on_leave(tk_root) -> None:
-    focus_list = VirtualFocusList(tk_root, on_select=lambda _key: None)
-    focus_list.pack(fill="both", expand=True)
-    focus_list.invalidate_structure([FocusListItem(1, "Focus")], selected_key=1)
-    tk_root.update()
-    focus_list.refresh()
-    row = focus_list._materialized[1]
-
-    row.frame.event_generate("<Enter>")
-    tk_root.update()
-    # A selected row keeps its selection color under the cursor.
-    assert row.frame.cget("bg") == SELECTED_BG
-
-    focus_list.update_selection(None)
-    row.frame.event_generate("<Enter>")
-    tk_root.update()
-    assert row.frame.cget("bg") == HOVER_BG
-    row.frame.event_generate("<Leave>")
-    tk_root.update()
-    assert row.frame.cget("bg") == BG_PANEL
-
-
-def test_tk_list_multi_select_ctrl_click_and_select_all(tk_root) -> None:
-    selected: list[Hashable] = []
-    tk_root.geometry("220x180")
-    focus_list = VirtualFocusList(tk_root, on_select=selected.append, multi_select=True)
-    focus_list.pack(fill="both", expand=True)
-    items = [FocusListItem(index, f"Focus {index}") for index in range(20)]
-    focus_list.invalidate_structure(items)
-    tk_root.update()
-    focus_list.refresh()
-
-    focus_list._row_clicked(0, SimpleNamespace(state=0))
-    assert focus_list.selected_keys == (0,)
-    assert selected == [0]
-    focus_list._row_clicked(2, SimpleNamespace(state=0x0004))
-    assert focus_list.selected_keys == (0, 2)
-    focus_list.select_all()
-    assert focus_list.selected_keys == tuple(range(20))
-    focus_list.invalidate_structure(items, query="Focus 19")
-    assert focus_list.selected_keys == ()

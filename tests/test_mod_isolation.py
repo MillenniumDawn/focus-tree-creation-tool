@@ -123,7 +123,6 @@ def test_shared_fixture_restores_state_before_the_next_test(tmp_path):
             sys.executable,
             "-m",
             "pytest",
-            "--no-tk",
             "-q",
             "-c",
             str(repo / "pyproject.toml"),

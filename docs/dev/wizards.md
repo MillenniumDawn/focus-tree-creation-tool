@@ -170,16 +170,17 @@ dialogs.
 
 ## Dialog interaction coverage
 
-`test_wizard_save.py` drives national-spirit Edit -> Save Raw -> Save to Mod
-with modern and versioned localisation keys, escaped quotes, backslashes, and
-newlines. Raw overrides retain unknown script fields. The wizard and focus
-hydration share `focus_tree.loc.parse_loc_values` instead of separate decoding
-rules. Directory-creation failures are reported with the other save errors.
+None is automated. `tests/test_tk_smoke.py` opens each wizard against the real
+App and stops there. What a save writes is tested headless in
+`tests/test_wizard_saves.py`; pressing the button is not. Still dialog-only,
+and so manual checks (see `testing.md`): Save Raw applying edited text back to
+the form, Decision "Export .txt" and code-apply rollback, the overwrite
+prompts, the Character and Additional Income saves, previews, and closing. To
+get one under test, move its logic into `_saves.py`, `_generators.py` or
+another pure module first.
 
-`test_decision_canvas_preview.py` exercises mapped and withdrawn windows,
-missing and real icons, repeated Preview/Code rebuilds, and closing with a
-rebuild pending. Each case runs in a bounded child pytest process, so a native
-Tk/X11 failure cannot kill the full suite. Its separate coverage report must
-show execution of the real preview renderer. Preview text uses Tk's normal
-packing and word wrapping; deriving its requested character width from the
-parent's pixel width caused a growth loop in withdrawn windows.
+Two behaviors the removed dialog tests used to pin, kept here as design notes.
+The wizard and focus hydration share `focus_tree.loc.parse_loc_values` instead
+of separate decoding rules. Preview text uses Tk's normal packing and word
+wrapping; deriving its requested character width from the parent's pixel width
+caused a growth loop in withdrawn windows.
