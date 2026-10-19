@@ -1,8 +1,9 @@
-"""Tk smoke: the real App and every dialog it opens build without raising.
+"""Tk smoke: the real App, its dialogs, and the canvas regressions.
 
 The only file allowed to construct Tk. It guards the #45 class of bug, a
-missing name that only surfaces on click. It runs in its own process so Tk
-objects never share an interpreter with the headless suite:
+missing name that only surfaces on click, and keeps the focus-callback and
+wheel-zoom regressions that need a real canvas. It runs in its own process
+so Tk objects never share an interpreter with the headless suite:
 
     xvfb-run -a pytest -m tk
 """
@@ -15,11 +16,15 @@ import subprocess
 import sys
 import tkinter as tk
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
+from ui_fakes import AppFake
 
 import hoi4_content_maker as main_mod
 from hoi4cm.mod import MOD
+from hoi4cm.models import Focus
+from hoi4cm.ui.canvas_scheduler import RedrawChannel
 from hoi4cm.ui.gfx_browser import (
     open_focus_icon_browser,
     open_gfx_placement_editor,
@@ -171,3 +176,63 @@ def test_entry_point_smoke_check(tmp_path):
         check=True,
         timeout=30,
     )
+
+
+_FAR_RECT = (0.0, 0.0, 10.0, 10.0)
+
+
+def test_focus_callbacks_released_on_cull_lod_and_external_delete(app):
+    cv = tk.Canvas(app)
+    try:
+        fake = AppFake(cv=cv)
+        focus = Focus(id=1, x=1, y=1)
+        baseline = set(cv._tclCommands or ())
+        for _ in range(3):
+            fake.zoom = 1.0
+            fake._draw_focus(focus, _FAR_RECT)
+            full_commands = set(cv._tclCommands or ()) - baseline
+            assert len(full_commands) == 70
+            fake.zoom = 0.3
+            fake._draw_focus(focus, _FAR_RECT)
+            assert len(set(cv._tclCommands or ()) - baseline) == 15
+            # Tkinter names use Python object IDs, which can be reused after free.
+            retired = full_commands - set(cv._tclCommands or ())
+            assert not any(cv.tk.call("info", "commands", cmd) for cmd in retired)
+            cv.delete("all")
+            fake._validate_canvas_probe()
+            assert set(cv._tclCommands or ()) == baseline
+            fake.zoom = 1.0
+            fake._draw_focus(focus, _FAR_RECT)
+            fake._reclaim_focus_bundles(set())
+            assert set(cv._tclCommands or ()) == baseline
+            fake._reclaim_focus_bundles(set())
+    finally:
+        cv.destroy()
+        gc.collect()
+
+
+def test_scroll_burst_coalesces_and_keeps_pointer_anchor(app, monkeypatch):
+    cv = tk.Canvas(app)
+    try:
+        fake = AppFake(cv=cv)
+        fake._canvas_runtime()
+        jobs = []
+        frames = []
+        monkeypatch.setattr(cv, "after", lambda delay, cb: jobs.append(cb) or "job")
+        monkeypatch.setattr(fake, "_render_frame", frames.append)
+        fake._redraw(RedrawChannel.SCENE, reason="edit")
+        for x, y, num, delta in [(70, 90, 4, 120), (90, 30, 5, -120)] * 6:
+            world = ((x - fake.offset[0]) / fake.zoom, (y - fake.offset[1]) / fake.zoom)
+            fake._scroll(SimpleNamespace(x=x, y=y, num=num, delta=delta))
+            assert (x - fake.offset[0]) / fake.zoom == pytest.approx(world[0])
+            assert (y - fake.offset[1]) / fake.zoom == pytest.approx(world[1])
+        assert len(jobs) == 1
+        assert frames == []
+        jobs[0]()
+        assert frames == [RedrawChannel.SCENE | RedrawChannel.VIEW]
+        fake.zoom = 4.0
+        fake._scroll(SimpleNamespace(x=70, y=90, num=4, delta=120))
+        assert len(jobs) == 1
+    finally:
+        cv.destroy()
+        gc.collect()

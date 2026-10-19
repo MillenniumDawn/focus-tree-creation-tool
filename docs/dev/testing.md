@@ -49,11 +49,12 @@ shapes cover what is here:
   mocked widgets; monolith methods are called as `App._save(fake)`.
   `hoi4cm.ui.app_contracts` checks the real `App` against the mixin protocols.
 
-`tests/test_tk_smoke.py` is the one exception. It builds the real `App` once
-and calls each command that opens a dialog, asserting a non-empty Toplevel
-appears. That catches the NameError-on-click class (#45) and nothing deeper:
-it does not click, type, save or measure. Add a line to its parameter list
-when you add a dialog. Do not add interaction tests to it.
+`tests/test_tk_smoke.py` is the one file marked `tk`. It builds the real `App`
+once and calls each command that opens a dialog, asserting a non-empty
+Toplevel appears. That catches the NameError-on-click class (#45). The same
+file holds the focus-callback and wheel-zoom regressions, which need a real
+canvas and must not share a process with the headless suite. Add a dialog to
+its parameter list when you add one. Do not add click-through tests.
 
 ## Coverage
 
