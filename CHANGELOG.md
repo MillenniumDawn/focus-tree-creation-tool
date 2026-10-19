@@ -8,6 +8,9 @@ the version by hand. See `AGENTS.md`.
 
 ## Unreleased
 
+- Record a failed sibling autosave once in the error log, including its path.
+  Repeated ticks for the same failure do not add another entry.
+
 ---
 
 ## [0.4.4] — 2026-10-19

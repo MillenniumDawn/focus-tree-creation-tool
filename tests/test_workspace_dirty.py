@@ -351,6 +351,125 @@ def test_autosave_tick_records_one_entry_per_failure_streak(
     assert app._autosave_job == "job"
 
 
+def test_autosave_tick_sibling_failure_records_path_once(monkeypatch, tmp_path, errors):
+    app = _fake_app()
+    app.focuses.add(Focus(id=10, x=0, y=0))
+    project = tmp_path / "project.json"
+    sibling = tmp_path / "project.autosave.json"
+    app._last_project_path = str(project)
+    calls = []
+
+    def write(path, _text):
+        calls.append(path)
+        if path == str(sibling):
+            raise OSError("sibling disk full")
+
+    monkeypatch.setattr(aw, "write_project_text", write)
+    monkeypatch.setattr(
+        m, "workspace_autosave_path", lambda: str(tmp_path / "workspace.json")
+    )
+    app.workspace = EditorWorkspace(focuses=app.focuses)
+
+    app._autosave_tick()
+    app._autosave_tick()
+
+    assert len(errors) == 1
+    assert str(sibling) in errors[0][1]
+    assert "sibling disk full" in errors[0][1]
+    assert calls[0].endswith("workspace.json")
+    assert app._autosave_job == "job"
+    assert not getattr(app, "_autosave_failing", False)
+
+
+def test_autosave_tick_sibling_failure_streak_resets_after_success(
+    monkeypatch, tmp_path, errors
+):
+    app = _fake_app()
+    app.focuses.add(app.focuses.new_focus(0, 0))
+    sibling = str(tmp_path / "project.autosave.json")
+    app._last_project_path = str(tmp_path / "project.json")
+    fail = True
+
+    def write(path, _text):
+        if fail and path == sibling:
+            raise OSError("sibling disk full")
+
+    monkeypatch.setattr(aw, "write_project_text", write)
+    monkeypatch.setattr(
+        m, "workspace_autosave_path", lambda: str(tmp_path / "workspace.json")
+    )
+    app.workspace = EditorWorkspace()
+
+    app._autosave_tick()
+    app._autosave_tick()
+    assert len(errors) == 1
+
+    fail = False
+    app._autosave_tick()
+    assert len(errors) == 1
+    assert app._sibling_autosave_failing is None
+
+    fail = True
+    app._autosave_tick()
+    assert len(errors) == 2
+    assert "sibling disk full" in errors[1][1]
+
+
+def test_clean_tick_ends_the_sibling_autosave_failure_streak(
+    monkeypatch, tmp_path, errors
+):
+    app = _fake_app()
+    app.focuses.add(app.focuses.new_focus(0, 0))
+    sibling = str(tmp_path / "project.autosave.json")
+    app._last_project_path = str(tmp_path / "project.json")
+
+    def write(path, _text):
+        if path == sibling:
+            raise OSError("sibling disk full")
+
+    monkeypatch.setattr(aw, "write_project_text", write)
+    monkeypatch.setattr(
+        m, "workspace_autosave_path", lambda: str(tmp_path / "workspace.json")
+    )
+    app.workspace = EditorWorkspace()
+
+    app._autosave_tick()
+    assert len(errors) == 1
+
+    app._mark_clean()
+    app._autosave_tick()
+    app.focuses.add(app.focuses.new_focus(1, 1))
+    app._autosave_tick()
+
+    assert len(errors) == 2
+    assert str(tmp_path / "project.autosave.json") in errors[1][1]
+
+
+def test_real_sibling_write_failure_keeps_primary_recovery(
+    monkeypatch, tmp_path, errors
+):
+    app = _fake_app()
+    focus = app.focuses.new_focus(2, 3)
+    focus.name = "TST_autosaved"
+    app.focuses.add(focus)
+    app.workspace = EditorWorkspace(focuses=app.focuses)
+    app._last_project_path = str(tmp_path / "project.json")
+    primary = tmp_path / "workspace.json"
+    sibling = tmp_path / "project.autosave.json"
+    sibling.mkdir()
+    monkeypatch.setattr(m, "workspace_autosave_path", lambda: str(primary))
+
+    app._autosave_tick()
+
+    restored = m.read_project(primary)
+    assert [(item.name, item.x, item.y) for item in restored.focuses.values()] == [
+        ("TST_autosaved", 2, 3)
+    ]
+    assert sibling.is_dir()
+    assert len(errors) == 1
+    assert str(sibling) in errors[0][1]
+
+
 def test_clean_tick_ends_the_autosave_failure_streak(monkeypatch, tmp_path, errors):
     app = _fake_app()
     app.focuses.add(app.focuses.new_focus(0, 0))
