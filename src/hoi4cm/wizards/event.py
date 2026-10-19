@@ -15,7 +15,6 @@ import tkinter as tk
 from tkinter import filedialog, messagebox
 
 from hoi4cm.core import (
-    append_scripted_loc,
     autosave_path,
     get_logger,
     read_file_with_encoding,
@@ -51,12 +50,12 @@ from hoi4cm.wizards._graphics import (
     find_catalog_image,
 )
 from hoi4cm.wizards._image_loader import TkImageLoader
+from hoi4cm.wizards._saves import save_events
 from hoi4cm.wizards._shared import (
     _ev_gfx_cache,
     _ev_imgsize_cache,
     format_save_summary,
     make_scrolled_listbox,
-    notifying_workspace_files,
     open_effect_picker,
     open_trigger_picker,
     pack_action_footer,
@@ -1018,13 +1017,9 @@ def open_event_wizard(app):
             return
 
         ns = sanitize_component(events[0].eid.split(".")[0], fallback="TAG")
-        saved = []
-        errs = []
-        warnings = []
 
         # ── Determine mod root and target files ───────────────────────────
-        selected_event = bool(MOD.edit_events_file)
-        if selected_event:
+        if MOD.edit_events_file:
             ev_file = MOD.edit_events_file
             mod_root = MOD.root or os.path.dirname(os.path.dirname(ev_file))
         else:
@@ -1036,141 +1031,15 @@ def open_event_wizard(app):
                 return
             ev_file = os.path.join(mod_root, "events", f"{ns}.txt")
 
-        selected_loc = bool(MOD.edit_loc_file)
-        if selected_loc:
-            loc_file = MOD.edit_loc_file
-        else:
-            loc_target = MOD.loc_target
-            loc_file = os.path.join(
-                mod_root,
-                "localisation",
-                loc_target.dirname(),
-                loc_target.filename(ns),
-            )
-        os.makedirs(os.path.dirname(ev_file), exist_ok=True)
-        os.makedirs(os.path.dirname(loc_file), exist_ok=True)
-        wf = notifying_workspace_files(MOD, mod_root)
-
-        # ── EVENTS: safe append — never touch existing content ────────────
-        try:
-            existing_ids = set()
-            file_exists = os.path.isfile(ev_file)
-            if selected_event and not file_exists:
-                raise OSError("selected events file no longer exists")
-            event_encoding = "utf-8"
-            if file_exists:
-                raw, event_encoding = read_file_with_encoding(ev_file)
-                if raw is None or event_encoding is None:
-                    raise OSError("events file could not be read")
-                # Collect every id = X already in the file
-                for m in re.finditer(r"\bid\s*=\s*(\S+)", raw):
-                    existing_ids.add(m.group(1).strip())
-
-            to_append = [ev for ev in events if ev.eid not in existing_ids]
-            skipped = [ev.eid for ev in events if ev.eid in existing_ids]
-            if skipped:
-                warnings.append("Already in file (skipped): " + ", ".join(skipped))
-
-            if to_append:
-                lines = []
-                if not file_exists:
-                    # Brand-new file — write namespace header first
-                    lines.append(f"add_namespace = {ns}")
-                    lines.append("")
-                else:
-                    lines.append("")
-                    lines.append(
-                        "# ── Appended by HOI4 Content Maker ─────────────────────────────────"
-                    )
-                for ev in to_append:
-                    lines.append("")
-                    lines.append(_render_event_txt(ev))
-
-                ev_content = "\n".join(lines) + "\n"
-                if file_exists:
-                    wf.append_text(ev_file, ev_content, encoding=event_encoding)
-                else:
-                    wf.write_text(ev_file, ev_content, encoding=event_encoding)
-                rel = os.path.relpath(ev_file, mod_root)
-                saved.append(
-                    f"{rel}  (+{len(to_append)} event{'s' if len(to_append) != 1 else ''})"
-                )
-            else:
-                warnings.append(
-                    "No new events to append — all IDs already present in file."
-                )
-
-        except (OSError, ValueError, RuntimeError, UnicodeDecodeError) as exc:
-            errs.append("Events file: " + str(exc))
-
-        # ── LOCALISATION: safe append — skip keys already present ─────────
-        try:
-            yml_new_lines = []
-            loc_header = MOD.loc_target.header()
-            for line in _generate_yml().splitlines():
-                if not line.strip() or line.strip() == loc_header:
-                    continue
-                yml_new_lines.append(line)
-
-            existing_yml_keys = set()
-            yml_exists = os.path.isfile(loc_file)
-            if selected_loc and not yml_exists:
-                raise OSError("selected localisation file no longer exists")
-            yml_encoding = "utf-8-sig"
-            existing_yml_text = ""
-            # Regex accepts both the modern `key: "value"` form and the legacy `key:0 "value"` form
-            _YML_KEY = re.compile(r'^\s+(\S+?)(?::\d+)?\s*[=:]?\s*"')
-            if yml_exists:
-                existing_yml_text, yml_encoding = read_file_with_encoding(loc_file)
-                if existing_yml_text is None or yml_encoding is None:
-                    raise OSError("localisation file could not be read")
-                for line in existing_yml_text.splitlines():
-                    m = _YML_KEY.match(line)
-                    if m:
-                        existing_yml_keys.add(m.group(1))
-
-            to_add = []
-            for ln in yml_new_lines:
-                m = _YML_KEY.match(ln)
-                # If the line doesn't look like a loc key, keep it as-is (header/comment).
-                if not m:
-                    to_add.append(ln)
-                elif m.group(1) not in existing_yml_keys:
-                    to_add.append(ln)
-
-            if to_add:
-                if not yml_exists:
-                    wf.write_text(loc_file, loc_header + "\n", encoding=yml_encoding)
-                # Only add the section header if it's not already there
-                needs_hdr = (
-                    f"##########Events - {ns}##########" not in existing_yml_text
-                )
-                loc_body = ""
-                if needs_hdr:
-                    loc_body += f"\n ##########Events - {ns}##########\n"
-                loc_body += "\n".join(to_add) + "\n"
-                wf.append_text(loc_file, loc_body, encoding=yml_encoding)
-                rel = os.path.relpath(loc_file, mod_root)
-                saved.append(f"{rel}  (+{len(to_add)} keys)")
-            else:
-                warnings.append("No new localisation keys to append.")
-
-        except (OSError, ValueError, RuntimeError, UnicodeDecodeError) as exc:
-            errs.append("Localisation: " + str(exc))
-
-        # ── SCRIPTED LOC ─────────────────────────────────────────────────
-        if MOD.edit_scripted_loc_file:
-            sloc_blocks = _generators.build_event_scripted_loc_blocks(
-                ev.eid for ev in events
-            )
-            append_scripted_loc(
-                MOD.edit_scripted_loc_file,
-                sloc_blocks,
-                saved,
-                errs,
-                mod_root,
-                require_existing=True,
-            )
+        saved, warnings, errs = save_events(
+            MOD,
+            mod_root,
+            ev_file,
+            ns=ns,
+            events=events,
+            render_event=_render_event_txt,
+            render_yml=_generate_yml,
+        )
 
         # ── Report ────────────────────────────────────────────────────────
         msg = format_save_summary(saved, warnings, errs)
