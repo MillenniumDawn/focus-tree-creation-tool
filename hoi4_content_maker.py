@@ -325,7 +325,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         self._validation_worst = {}
         self._validation_job = None
         self._validation_win = None
-        self._saved_revision = self.focuses.revision
+        self._saved_revision = self.focuses.content_revision
         self._saved_fingerprint = self._workspace_fingerprint()
         self._autosave_job = None
         self._autosave_interval_ms = _AUTOSAVE_INTERVAL_MS
@@ -415,7 +415,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
     def _is_dirty(self) -> bool:
         if self.focuses is None:
             return False
-        if self.focuses.revision != getattr(self, "_saved_revision", 0):
+        if self.focuses.content_revision != getattr(self, "_saved_revision", 0):
             return True
         try:
             return self._workspace_fingerprint() != getattr(
@@ -425,7 +425,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             return True
 
     def _mark_clean(self) -> None:
-        self._saved_revision = self.focuses.revision
+        self._saved_revision = self.focuses.content_revision
         try:
             self._saved_fingerprint = self._workspace_fingerprint()
         except Exception as e:
@@ -1907,6 +1907,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         self._push_undo("add offset", touched_ids=(self.selected.id,))
         self._save_offsets_to_focus()
         self.selected.offsets.append({"x": 0, "y": 0, "trigger": ""})
+        self.focuses.mark_content_changed()
         self._refresh_offsets(self.selected)
 
     def _del_offset(self, idx):
@@ -1918,6 +1919,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         offs = getattr(self.selected, "offsets", [])
         if 0 <= idx < len(offs):
             offs.pop(idx)
+            self.focuses.mark_content_changed()
         self._refresh_offsets(self.selected)
 
     def _read_offsets_from_form(self):
@@ -1940,7 +1942,10 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         """Read current offset UI widgets and save to self.selected.offsets."""
         if not self.selected:
             return
-        self.selected.offsets = self._read_offsets_from_form()
+        offsets = self._read_offsets_from_form()
+        if self.selected.offsets != offsets:
+            self.selected.offsets = offsets
+            self.focuses.mark_content_changed()
 
     def _focus_flag_label(self, label):
         return {
@@ -2314,8 +2319,9 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
 
     def _set_gfx(self, name):
         self._fv_gfx.set(name)
-        if self.selected:
+        if self.selected and self.selected.gfx != name:
             self.selected.gfx = name
+            self.focuses.mark_content_changed()
             self._redraw_now()
 
     def _attach_autocomplete(self, entry_widget, var, get_choices_fn):
@@ -2459,7 +2465,11 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
     def _on_icon_change(self, *_):
         if not self.selected:
             return
-        self.selected.icon = self._fv_icon.get()
+        icon = self._fv_icon.get()
+        if self.selected.icon == icon:
+            return
+        self.selected.icon = icon
+        self.focuses.mark_content_changed()
         self._redraw_now()
 
     def _read_sidebar_values(self):
@@ -2555,12 +2565,15 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             if sidebar_values_match_focus(f, values):
                 return
             self._push_undo("edit focus", touched_ids=(f.id,))
+            content_revision = self.focuses.content_revision
             name_changed = apply_sidebar_values(f, values)
             self.focuses.move(f.id, values.x, values.y)
             # name is the only autosave field that still needs a full index rebuild;
             # x/y already go through move()'s incremental occupied_positions patch.
             if name_changed:
                 self.focuses.touch()
+            elif self.focuses.content_revision == content_revision:
+                self.focuses.mark_content_changed()
         except Exception as ex:
             log.exception("Autosave failed")
             self._log_error(
@@ -3323,6 +3336,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         if sidebar_values_match_focus(f, values):
             return
         self._push_undo("edit focus", touched_ids=(f.id,))
+        content_revision = self.focuses.content_revision
         name_changed = apply_sidebar_values(f, values)
         if not self.focuses.move(f.id, values.x, values.y):
             # Pre-checked; if indexes raced, restore name indexes at least.
@@ -3339,6 +3353,8 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             return
         if name_changed:
             self.focuses.touch()
+        elif content_revision == self.focuses.content_revision:
+            self.focuses.mark_content_changed()
         self._redraw()
         self._populate(f)
         self._invalidate_focus_list_structure()

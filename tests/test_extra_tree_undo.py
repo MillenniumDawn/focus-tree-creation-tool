@@ -57,7 +57,7 @@ def _app(focuses=()):
     app._redo = m.App._redo.__get__(app)
     app._workspace_fingerprint = m.App._workspace_fingerprint.__get__(app)
     app._is_dirty = m.App._is_dirty.__get__(app)
-    app._saved_revision = app.focuses.revision
+    app._saved_revision = app.focuses.content_revision
     app._saved_fingerprint = app._workspace_fingerprint()
     return app
 

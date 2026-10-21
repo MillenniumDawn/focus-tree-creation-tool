@@ -249,15 +249,17 @@ or state leaks across tests:
 
 ## Revision discipline
 
-`FocusDocument` owns focus geometry and bumps a `geometry_revision` counter
-whenever a focus moves (its mutating methods, or an explicit `touch()`).
-UI that caches against that counter recomputes only when it changes:
-`SceneIndex` (canvas hit-testing and culling) rebuilds when
-`FocusDocument.revision` moves, and the minimap's world-bounds cache is keyed
-on `SceneIndex.revision`. The rule: never mutate a focus's coordinates in
-place without going through `FocusDocument` / `touch()`. Skip it and those
-caches keep stale coordinates, so hit-testing and the minimap disagree with
-what's actually drawn until something else forces a rebuild.
+`FocusDocument.revision` aliases `geometry_revision`, which invalidates focus
+indexes and scene caches after geometry or topology changes. `SceneIndex`
+(canvas hit-testing and culling) rebuilds when that revision moves, and the
+minimap's world-bounds cache is keyed on `SceneIndex.revision`. The separate
+`content_revision` tracks saveable focus edits. Normal document mutations bump
+both revisions; sidebar edits that do not affect geometry or indexes call
+`mark_content_changed()` instead. Dirty tracking and autosave deduplication use
+`content_revision`, so a cost or description edit reaches recovery without
+rebuilding scene or spatial indexes. Coordinate changes still go through
+`FocusDocument.move()`, and fields that affect derived indexes use their
+mutators or `touch()`.
 
 ## Threading model (phase 5)
 

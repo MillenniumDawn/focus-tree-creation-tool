@@ -68,6 +68,7 @@ class FocusDocument(MutableMapping[int, Focus]):
         self._focuses: dict[int, Focus] = {}
         self._id_set_cache: frozenset[int] | None = None
         self.geometry_revision = 0
+        self.content_revision = 0
         self.names: dict[str, tuple[int, ...]] = {}
         self.first_by_name: dict[str, int] = {}
         self.last_by_name: dict[str, int] = {}
@@ -354,6 +355,10 @@ class FocusDocument(MutableMapping[int, Focus]):
         self._changed()
         self.rebuild_indexes()
 
+    def mark_content_changed(self) -> None:
+        """Record content edits that do not affect focus indexes or geometry."""
+        self.content_revision += 1
+
     def _put(self, focus: Focus) -> None:
         old = self._focuses.get(focus.id)
         self._focuses[focus.id] = focus
@@ -485,6 +490,7 @@ class FocusDocument(MutableMapping[int, Focus]):
 
     def _changed(self) -> None:
         self.geometry_revision += 1
+        self.content_revision += 1
 
 
 @dataclass
