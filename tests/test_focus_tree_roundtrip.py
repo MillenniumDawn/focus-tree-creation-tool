@@ -19,7 +19,7 @@ from test_focus_tree_parse import (
 
 from hoi4cm.core import read_file
 from hoi4cm.focus_tree.build import build_focuses
-from hoi4cm.focus_tree.export import export_focus_tree
+from hoi4cm.focus_tree.export import export_focus_tree, export_main_tree
 from hoi4cm.focus_tree.parse import parse_focus_tree
 from hoi4cm.models import Focus, FocusDocument
 
@@ -530,6 +530,135 @@ focus_tree = {
     assert "relative_position_id = TST_root" in text
     assert "x = 4" in text
     assert "y = -1" in text
+
+
+@pytest.mark.parametrize("tree_type", ("main", "shared", "joint"))
+def test_prefix_rename_round_trips_relative_anchors_and_raw_offsets(tree_type):
+    src = """\
+focus_tree = {
+    id = TST_tree
+    focus = {
+        id = OLD_root
+        x = 2
+        y = 3
+        completion_reward = { add_political_power = 1 }
+    }
+    focus = {
+        id = OTHER_child
+        x = 4
+        y = -1
+        relative_position_id = OLD_root
+        offset = {
+            x = 1
+            y = 0
+            trigger = { has_war = no }
+        }
+        prerequisite = { focus = OLD_root }
+        mutually_exclusive = { focus = OLD_root }
+        completion_reward = { add_political_power = 2 }
+    }
+    focus = {
+        id = THIRD_grandchild
+        x = 1
+        y = 2
+        relative_position_id = OTHER_child
+        completion_reward = { add_political_power = 3 }
+    }
+    focus = {
+        id = FOURTH_unrelated
+        x = 8
+        y = 9
+        relative_position_id = outside_tree
+        completion_reward = { add_political_power = 4 }
+    }
+}
+"""
+    parsed = parse_focus_tree(src, "/tmp/prefix-rename.txt")
+    tree_idx = 0 if tree_type == "main" else 1
+    document = FocusDocument(build_focuses(parsed, tree_idx=tree_idx))
+    root = document.find_by_name("OLD_root")
+    child = document.find_by_name("OTHER_child")
+    assert root is not None and child is not None
+    assert (child._raw_gx, child._raw_gy) == (4, -1)
+    assert (child._rel_dx, child._rel_dy) == (4, -1)
+
+    document.rename_prefix("OLD_", "RENAMED_")
+    child = document.find_by_name("OTHER_child")
+    assert child is not None
+    assert child.relative_position_id == "RENAMED_root"
+    assert child.prereqs == [[root.id]]
+    assert child.mutex == [root.id]
+    assert (child._raw_gx, child._raw_gy) == (4, -1)
+    assert (child._rel_dx, child._rel_dy) == (4, -1)
+    unrelated = document.find_by_name("FOURTH_unrelated")
+    assert unrelated is not None
+    assert unrelated.relative_position_id == "outside_tree"
+
+    if tree_type == "main":
+        text = export_main_tree(
+            list(document.values()),
+            _info(parsed, tree_type),
+            focus_lookup=document,
+            effect_renderer=raw_block_renderer,
+        )
+    else:
+        text = export_focus_tree(
+            list(document.values()),
+            _info(parsed, tree_type),
+            focus_lookup=document,
+            effect_renderer=raw_block_renderer,
+        )
+    assert "relative_position_id = RENAMED_root" in text
+    assert "relative_position_id = OTHER_child" in text
+    assert "has_war = no" in text
+
+    reimported = FocusDocument(
+        build_focuses(
+            parse_focus_tree(text, "/tmp/prefix-rename-export.txt"), tree_idx=tree_idx
+        )
+    )
+    imported_child = reimported.find_by_name("OTHER_child")
+    imported_grandchild = reimported.find_by_name("THIRD_grandchild")
+    imported_unrelated = reimported.find_by_name("FOURTH_unrelated")
+    assert imported_child is not None
+    assert imported_grandchild is not None
+    assert imported_unrelated is not None
+    assert imported_child.relative_position_id == "RENAMED_root"
+    assert imported_grandchild.relative_position_id == "OTHER_child"
+    assert (imported_child._raw_gx, imported_child._raw_gy) == (4, -1)
+    assert (imported_child._rel_dx, imported_child._rel_dy) == (4, -1)
+
+
+def test_prefix_rename_cross_tree_export_keeps_parent_anchor_and_offsets():
+    parent = Focus(id=1, x=3, y=7)
+    parent.name = "OLD_parent"
+    child = Focus(id=2, x=5, y=8)
+    child.name = "OTHER_child"
+    child.tree_idx = 2
+    child.relative_position_id = parent.name
+    child._raw_gx, child._raw_gy = 2, 1
+    child._rel_dx, child._rel_dy = 2, 1
+    document = FocusDocument((parent, child))
+    parsed = parse_focus_tree(
+        "focus_tree = { id = TST_tree focus = { id = OLD_parent x = 3 y = 7 } }",
+        "/tmp/cross-tree-prefix-rename.txt",
+    )
+
+    document.rename_prefix("OLD_", "NEW_")
+    text = export_focus_tree(
+        [document[child.id]],
+        _info(parsed, "main"),
+        focus_lookup=document,
+        effect_renderer=raw_block_renderer,
+    )
+
+    assert "relative_position_id = NEW_parent" in text
+    imported = build_focuses(
+        parse_focus_tree(text, "/tmp/cross-tree-prefix-export.txt"), tree_idx=2
+    )[0]
+    assert imported.relative_position_id == "NEW_parent"
+    assert (imported._raw_gx, imported._raw_gy) == (2, 1)
+    assert (imported._rel_dx, imported._rel_dy) == (2, 1)
 
 
 def test_extra_tree_export_empty_completion_reward_omits_todo_block():

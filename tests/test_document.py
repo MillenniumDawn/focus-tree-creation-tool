@@ -200,6 +200,33 @@ def test_rename_prefix_bumps_revision_so_cached_ui_refreshes():
     assert document.first_by_name == {"NEW_a": 1, "keep": 2}
 
 
+def test_rename_prefix_updates_exact_relative_anchors_and_preserves_indexes():
+    root = _focus(1, name="OLD_root")
+    child = _focus(2, name="child")
+    grandchild = _focus(3, name="OTHER_grandchild")
+    unrelated = _focus(4, name="OLDish_root")
+    root.prereqs = [[2]]
+    child.mutex = [3]
+    child.relative_position_id = root.name
+    grandchild.relative_position_id = child.name
+    unrelated.relative_position_id = root.name
+    document = FocusDocument((root, child, grandchild, unrelated))
+
+    renamed = document.rename_prefix("OLD_", "NEW_")
+
+    assert renamed == 1
+    assert root.name == "NEW_root"
+    assert child.relative_position_id == "NEW_root"
+    assert grandchild.relative_position_id == "child"
+    assert unrelated.name == "OLDish_root"
+    assert unrelated.relative_position_id == "NEW_root"
+    assert root.prereqs == [[2]]
+    assert child.mutex == [3]
+    assert document.find_by_name("NEW_root") is root
+    assert document.find_by_name("OLD_root") is None
+    _assert_indexes(document)
+
+
 def test_randomized_mutations_match_reference_indexes():
     rng = random.Random(4815162342)
     document = FocusDocument()

@@ -86,6 +86,29 @@ def test_undo_and_redo_refresh_selected_focus():
     assert app._refresh_effects.call_count == 2
 
 
+def test_bulk_rename_ui_undo_redo_restores_anchor_only_child():
+    root = Focus(id=40)
+    root.name = "OLD_root"
+    child = Focus(id=41)
+    child.name = "OTHER_child"
+    child.relative_position_id = root.name
+    app = AppFake([root, child])
+    app._undo_stack = UndoStack()
+    touched_ids = app.focuses.prefix_rename_touched_ids("OLD_")
+    app_module.App._push_undo(_as_app(app), "bulk_rename", touched_ids=touched_ids)
+    app.focuses.rename_prefix("OLD_", "NEW_")
+
+    assert app.focuses[root.id].name == "NEW_root"
+    assert app.focuses[child.id].relative_position_id == "NEW_root"
+    app_module.App._undo(_as_app(app))
+    assert app.focuses[root.id].name == "OLD_root"
+    assert app.focuses[child.id].relative_position_id == "OLD_root"
+
+    app_module.App._redo(_as_app(app))
+    assert app.focuses[root.id].name == "NEW_root"
+    assert app.focuses[child.id].relative_position_id == "NEW_root"
+
+
 def test_undo_clears_selected_focus_after_removal():
     app = AppFake()
     app._undo_stack = UndoStack()
