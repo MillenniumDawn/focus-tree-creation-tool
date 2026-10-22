@@ -155,7 +155,16 @@ def render_export_plan(
         added_count = 0
 
     if plan.gfx_path is not None and plan.gfx_entries:
-        existing_gfx = read_text(plan.gfx_path) if is_file(plan.gfx_path) else None
+        existing_gfx = None
+        if is_file(plan.gfx_path):
+            try:
+                existing_gfx = read_text(plan.gfx_path)
+            except OSError as error:
+                raise OSError(
+                    f"Could not read existing GFX file {plan.gfx_path}: {error}"
+                ) from error
+            if existing_gfx is None:
+                raise OSError(f"Could not read existing GFX file: {plan.gfx_path}")
         new_gfx, gfx_added = append_sprite_types(existing_gfx, plan.gfx_entries)
         if gfx_added:
             writes.append((plan.gfx_path, new_gfx, "utf-8"))
