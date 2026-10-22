@@ -88,6 +88,71 @@ def test_legacy_decode_yields_empty_file_path():
     assert workspace.main_tree.file_path == ""
 
 
+def test_unresolved_script_references_survive_project_and_script_roundtrip():
+    source = """focus_tree = {
+        id = TST_unresolved
+        focus = {
+            id = TST_child
+            x = 2
+            y = 3
+            relative_position_id = TST_missing_anchor
+            prerequisite = { focus = TST_known focus = TST_missing focus = TST_known2 }
+            prerequisite = { focus = TST_missing }
+            mutually_exclusive = { focus = TST_missing_mutex }
+        }
+        focus = { id = TST_known x = 0 y = 0 }
+        focus = { id = TST_known2 x = 1 y = 0 }
+    }"""
+    parsed = parse_focus_tree(source, "unresolved.txt")
+    focuses = build_focuses(parsed, tree_idx=0)
+    workspace = EditorWorkspace(
+        focuses=FocusDocument(focuses),
+        main_tree=TreeDocument(
+            metadata=TreeMetadata(
+                tree_id=parsed.tree_id,
+                country_tag=parsed.country_tag,
+                country_raw=parsed.country_raw,
+                cfp_x=parsed.cfp_x,
+                cfp_y=parsed.cfp_y,
+            ),
+            had_wrapper=parsed.had_wrapper,
+        ),
+    )
+    restored = decode_project(encode_project(workspace))
+    child = next(iter(restored.focuses.values()))
+    output = export_main_tree(
+        list(restored.focuses.values()),
+        {"tree_id": parsed.tree_id, "country_tag": "TST", "cfp_x": 0, "cfp_y": 0},
+        focus_lookup=dict(restored.focuses.items()),
+    )
+    reparsed = build_focuses(parse_focus_tree(output, "roundtrip.txt"), tree_idx=0)
+
+    assert child.prereqs == [
+        [
+            restored.focuses.find_by_name("TST_known").id,
+            restored.focuses.find_by_name("TST_known2").id,
+        ],
+        [],
+    ]
+    assert child._unresolved_prereqs == [["TST_missing"], ["TST_missing"]]
+    assert child._unresolved_mutex == ["TST_missing_mutex"]
+    assert child.relative_position_id == "TST_missing_anchor"
+    assert child._build_gx == 2 and child._build_gy == 3
+    prereq_line = next(
+        line
+        for line in output.splitlines()
+        if "TST_known" in line and "TST_missing" in line
+    )
+    assert {value.strip() for value in prereq_line.split("focus = ")[1:]} == {
+        "TST_known",
+        "TST_known2",
+        "TST_missing }",
+    }
+    assert reparsed[0]._unresolved_prereqs == child._unresolved_prereqs
+    assert reparsed[0]._unresolved_mutex == child._unresolved_mutex
+    assert reparsed[0].relative_position_id == child.relative_position_id
+
+
 def test_v2_decode_drops_absolute_file_paths(tmp_path):
     project = {
         "format": "hoi4cm-project",

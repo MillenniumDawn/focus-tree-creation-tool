@@ -82,7 +82,14 @@ def nudge_selection(app: KeyboardNudgeHost, dx: int, dy: int) -> None:
         if parent_id is not None and parent_id in moving_ids:
             relative_metadata[focus_id] = {
                 attribute: getattr(focus, attribute)
-                for attribute in ("_raw_gx", "_raw_gy", "_rel_dx", "_rel_dy")
+                for attribute in (
+                    "_raw_gx",
+                    "_raw_gy",
+                    "_rel_dx",
+                    "_rel_dy",
+                    "_build_gx",
+                    "_build_gy",
+                )
                 if hasattr(focus, attribute)
             }
     for x, y in targets.values():

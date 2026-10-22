@@ -54,6 +54,7 @@ if TYPE_CHECKING:
 
 from hoi4cm.core import (  # noqa: E402
     EFFECT_CATS,
+    BuildContext,
     EmptyDrawioGraphError,
     EmptyFocusTreeError,
     Focus,
@@ -4640,6 +4641,11 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             self._joint_focuses.append(parsed.tree_id)
         self._refresh_tree_meta_panel()
         self.focuses.extend(new_focuses)
+        # A later extra tree may satisfy imports in earlier trees. Reconcile
+        # on the Tk thread after adoption so the live document and its indexes
+        # observe the completed graph together.
+        BuildContext(self.focuses.values(), id_floor=self.focuses.last_allocated_id)
+        self.focuses.touch()
         self._undo_stack.preserve_on_redo({f.id: f for f in new_focuses})
         for f in new_focuses:
             tree_info["focus_ids"].add(f.id)
@@ -4712,6 +4718,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
                 country_tag=country_tag,
                 existing_focuses=existing_focuses,
                 id_floor=allocator_floor,
+                register_focuses=False,
             )
             t2 = time.perf_counter()
             log.debug(
@@ -4726,7 +4733,22 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         def on_done(result):
             modal.close()
             parsed, new_focuses = result
-            self._push_undo("load extra tree", touched_ids=(), tree_state=True)
+            incoming_names = {focus.name for focus in new_focuses}
+            touched_ids = {
+                focus.id
+                for focus in self.focuses.values()
+                if getattr(focus, "_relative_pending", False)
+                or any(
+                    name in incoming_names
+                    for group in getattr(focus, "_unresolved_prereqs", [])
+                    for name in group
+                )
+                or any(
+                    name in incoming_names
+                    for name in getattr(focus, "_unresolved_mutex", [])
+                )
+            }
+            self._push_undo("load extra tree", touched_ids=touched_ids, tree_state=True)
             count, tree_id = self._install_extra_tree(
                 parsed, new_focuses, path, tree_type
             )
@@ -5115,6 +5137,26 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
                 ok, fail = [], []
                 pending_focuses = []
                 pushed_undo = False
+                incoming_names = {
+                    focus.name
+                    for result in results
+                    if result["ok"]
+                    for focus in result["new_focuses"]
+                }
+                touched_ids = {
+                    focus.id
+                    for focus in self.focuses.values()
+                    if getattr(focus, "_relative_pending", False)
+                    or any(
+                        name in incoming_names
+                        for group in getattr(focus, "_unresolved_prereqs", [])
+                        for name in group
+                    )
+                    or any(
+                        name in incoming_names
+                        for name in getattr(focus, "_unresolved_mutex", [])
+                    )
+                }
                 for r in results:
                     fname = os.path.basename(r["path"])
                     if not r["ok"]:
@@ -5123,7 +5165,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
                     if not pushed_undo:
                         self._push_undo(
                             "load extra trees",
-                            touched_ids=(),
+                            touched_ids=touched_ids,
                             tree_state=True,
                         )
                         pushed_undo = True
@@ -5160,6 +5202,12 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
                         tree_info["focus_ids"].add(f.id)
 
                 self.focuses.extend(pending_focuses)
+                if pending_focuses:
+                    BuildContext(
+                        self.focuses.values(),
+                        id_floor=self.focuses.last_allocated_id,
+                    )
+                    self.focuses.touch()
                 self._undo_stack.preserve_on_redo(
                     {focus.id: focus for focus in pending_focuses}
                 )

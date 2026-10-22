@@ -120,6 +120,16 @@ file text
   -> loc export                             (id -> configured-language YML entries)
 ```
 
+Imported prerequisite, mutex, and relative-position names remain on the focus
+until their target is present. `BuildContext` reconciles these references when
+a batch or a later extra-tree adoption adds targets. Project saves and sparse
+undo snapshots carry this import metadata. Batch workers register a built tree only after the
+cancellation check, then reconcile the accepted batch once against its complete
+lookup. Single-tree workers use existing names for lookup but leave live focus
+objects untouched; Tk-thread adoption reconciles the completed document and
+calls `FocusDocument.touch()` so canvas and reverse-link indexes are rebuilt
+together.
+
 The selected HOI4 localisation language is persisted as `loc_language` on
 `ModContext`. UI code snapshots that string into export plans and pure wizard
 generators; worker code does not read mutable global settings. Existing edit

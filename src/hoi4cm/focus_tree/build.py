@@ -53,19 +53,116 @@ class BuildContext:
     """Cross-tree name/position indexes and the allocator shared by tree builds."""
 
     def __init__(
-        self, existing_focuses: Iterable[Focus] = (), *, id_floor: int = 0
+        self,
+        existing_focuses: Iterable[Focus] = (),
+        *,
+        id_floor: int = 0,
+        reconcile: bool = True,
     ) -> None:
         self.id_document = FocusDocument()
         self.id_document.reserve_id(id_floor)
         self._position_by_name: dict[str, Focus] = {}
         self._link_id_by_name: dict[str, int] = {}
-        self.add_focuses(existing_focuses)
+        self._focuses_by_id: dict[int, Focus] = {}
+        focuses = list(existing_focuses)
+        self.add_focuses(focuses, reconcile=reconcile and bool(focuses))
 
-    def add_focuses(self, focuses: Iterable[Focus]) -> None:
+    def add_focuses(self, focuses: Iterable[Focus], *, reconcile: bool = True) -> None:
         for focus in focuses:
             self.id_document.reserve_id(focus.id)
+            self._focuses_by_id[focus.id] = focus
             self._position_by_name.setdefault(focus.name, focus)
             self._link_id_by_name[focus.name] = focus.id
+        if reconcile:
+            self._reconcile_pending()
+
+    def _reconcile_pending(self) -> None:
+        by_id = self._focuses_by_id
+        for focus in by_id.values():
+            unresolved_groups = getattr(focus, "_unresolved_prereqs", [])
+            while len(unresolved_groups) < len(focus.prereqs):
+                unresolved_groups.append([])
+            for index, unresolved in enumerate(unresolved_groups):
+                resolved = []
+                remaining = []
+                for name in unresolved:
+                    target_id = self._link_id_by_name.get(name)
+                    if target_id is None:
+                        remaining.append(name)
+                    elif target_id not in focus.prereqs[index]:
+                        resolved.append(target_id)
+                focus.prereqs[index].extend(resolved)
+                unresolved_groups[index] = remaining
+            focus._unresolved_prereqs = unresolved_groups
+            unresolved_mutex = getattr(focus, "_unresolved_mutex", [])
+            for name in unresolved_mutex:
+                target_id = self._link_id_by_name.get(name)
+                if target_id is not None and target_id not in focus.mutex:
+                    focus.mutex.append(target_id)
+            focus._unresolved_mutex = [
+                name for name in unresolved_mutex if name not in self._link_id_by_name
+            ]
+
+        pending = [
+            focus
+            for focus in by_id.values()
+            if getattr(focus, "_relative_pending", False)
+        ]
+        done: dict[int, tuple[int, int]] = {}
+        stalled: set[int] = set()
+        for start in pending:
+            if start.id in done or start.id in stalled:
+                continue
+            path: list[tuple[Focus, Focus]] = []
+            seen: set[int] = set()
+            current = start
+            base: tuple[int, int] | None = None
+            while getattr(current, "_relative_pending", False):
+                if current.id in stalled:
+                    stalled.update(focus.id for focus, _anchor in path)
+                    break
+                if current.id in seen:
+                    stalled.update(focus.id for focus, _anchor in path)
+                    break
+                seen.add(current.id)
+                anchor_name = getattr(current, "relative_position_id", None)
+                anchor = (
+                    self._position_by_name.get(anchor_name) if anchor_name else None
+                )
+                if anchor is None:
+                    stalled.update(focus.id for focus, _anchor in path)
+                    break
+                path.append((current, anchor))
+                if anchor.id in done:
+                    base = done[anchor.id]
+                    break
+                if not getattr(anchor, "_relative_pending", False):
+                    base = anchor.x, anchor.y
+                    break
+                current = anchor
+            if not path or base is None:
+                stalled.update(focus.id for focus, _anchor in path)
+                continue
+            for focus, anchor in reversed(path):
+                raw_x = getattr(focus, "_build_gx", None)
+                raw_y = getattr(focus, "_build_gy", None)
+                if raw_x is None:
+                    raw_x = getattr(focus, "_raw_gx", None)
+                if raw_y is None:
+                    raw_y = getattr(focus, "_raw_gy", None)
+                if raw_x is None or raw_y is None:
+                    break
+                if anchor.id in done:
+                    base = done[anchor.id]
+                elif not getattr(anchor, "_relative_pending", False):
+                    base = anchor.x, anchor.y
+                base = base[0] + raw_x, base[1] + raw_y
+                done[focus.id] = base
+            for focus, _anchor in path:
+                resolved_position = done.get(focus.id)
+                if resolved_position is not None:
+                    focus.x, focus.y = resolved_position
+                    focus._relative_pending = False
 
     def _position_for(self, name: str) -> tuple[int, int] | None:
         focus = self._position_by_name.get(name)
@@ -123,6 +220,7 @@ def build_focuses(
     context: BuildContext | None = None,
     document: FocusDocument | None = None,
     id_floor: int = 0,
+    register_focuses: bool = True,
 ) -> list[Focus]:
     """Return the list of :class:`Focus` objects for one parsed tree.
 
@@ -140,9 +238,12 @@ def build_focuses(
     """
     existing_focuses = list(existing_focuses)
     if context is None:
-        context = BuildContext(existing_focuses, id_floor=id_floor)
+        context = BuildContext(
+            existing_focuses, id_floor=id_floor, reconcile=register_focuses
+        )
     else:
-        context.add_focuses(existing_focuses)
+        if existing_focuses:
+            context.add_focuses(existing_focuses)
         context.id_document.reserve_id(id_floor)
     if document is None:
         document = context.id_document
@@ -174,6 +275,9 @@ def build_focuses(
         f = document.new_focus(gx, gy)
         f._raw_gx = gx  # original file coords, preserved for export
         f._raw_gy = gy
+        f._unresolved_prereqs = []
+        f._unresolved_mutex = []
+        f._relative_pending = False
         f.tree_idx = tree_idx
         f.name = fid_str
         if rel_id:
@@ -282,6 +386,31 @@ def build_focuses(
                     break  # apply only the first matching offset per focus
 
     # Resolve relative positions — within this tree first, then cross-tree.
+    pending_by_name: dict[str, bool] = {}
+    for focus in new_focuses:
+        focus._build_gx, focus._build_gy = raw_pos[focus.name][:2]
+        if focus.name in pending_by_name:
+            focus._relative_pending = pending_by_name[focus.name]
+            continue
+        path: list[str] = []
+        seen: set[str] = set()
+        anchor_name: str | None = focus.name
+        pending = False
+        while anchor_name and anchor_name in raw_pos:
+            if anchor_name in pending_by_name:
+                pending = pending_by_name[anchor_name]
+                break
+            if anchor_name in seen:
+                break  # Relative cycles retain the parser's established fallback.
+            seen.add(anchor_name)
+            path.append(anchor_name)
+            anchor_name = raw_pos[anchor_name][2]
+        if anchor_name:
+            anchor = context._position_by_name.get(anchor_name)
+            pending = anchor is None or getattr(anchor, "_relative_pending", False)
+        for path_name in path:
+            pending_by_name[path_name] = pending
+        focus._relative_pending = pending_by_name[focus.name]
     resolved_positions = _resolve_positions(raw_pos, context)
     for fid_str, fid in name_to_id.items():
         ax, ay = resolved_positions[fid_str]
@@ -310,8 +439,8 @@ def build_focuses(
             if isinstance(pf, str):
                 pf = [pf]
             group_fids = [all_name_to_id[pn] for pn in pf if pn in all_name_to_id]
-            if group_fids:
-                f.prereqs.append(group_fids)
+            f.prereqs.append(group_fids)
+            f._unresolved_prereqs.append([pn for pn in pf if pn not in all_name_to_id])
         mutex = rf.get("mutually_exclusive", [])
         if isinstance(mutex, dict):
             mutex = [mutex]
@@ -323,6 +452,9 @@ def build_focuses(
                 mid = all_name_to_id[mf]
                 if mid not in f.mutex:
                     f.mutex.append(mid)
+            elif isinstance(mf, str):
+                f._unresolved_mutex.append(mf)
 
-    context.add_focuses(new_focuses)
+    if register_focuses:
+        context.add_focuses(new_focuses)
     return new_focuses

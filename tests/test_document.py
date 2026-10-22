@@ -62,6 +62,7 @@ def test_link_prerequisite_and_mode_validation():
     document.link_prerequisite(child.id, (parent_a.id, parent_b.id), mode="and")
 
     assert child.prereqs == [[parent_a.id], [parent_b.id]]
+    assert child._unresolved_prereqs == [[], []]
     with pytest.raises(ValueError, match="mode must be 'or' or 'and'"):
         document.link_prerequisite(child.id, (parent_a.id,), mode="invalid")
 
@@ -463,6 +464,18 @@ def test_unlink_prerequisite_group_keeps_parents_another_group_still_names():
     document.unlink_prerequisite_group(2, 0)
     assert document.reverse_prerequisites == {}
     _assert_indexes(document)
+
+
+def test_unlink_prerequisite_group_keeps_unresolved_or_group_alignment():
+    child = _focus(2)
+    child.prereqs = [[], [3]]
+    child._unresolved_prereqs = [["MISSING_A"], ["MISSING_B"]]
+    document = FocusDocument((child, _focus(3)))
+
+    document.unlink_prerequisite_group(child.id, 0)
+
+    assert child.prereqs == [[3]]
+    assert child._unresolved_prereqs == [["MISSING_B"]]
 
 
 def test_unlink_mutex_drops_emptied_buckets_even_for_a_missing_partner():

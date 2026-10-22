@@ -475,10 +475,20 @@ def test_batch_load_is_one_undo_redo_action(monkeypatch, tmp_path):
     monkeypatch.setattr(m.messagebox, "showinfo", Mock())
     monkeypatch.setattr(m.messagebox, "showwarning", Mock())
 
-    shared_focus = Focus(id=1)
+    shared_focus = Focus(id=1, x=10, y=0)
     joint_focus = Focus(id=2)
+    shared_focus.name = "TARGET"
     shared_focus.tree_idx = 1
     joint_focus.tree_idx = 2
+    pending = Focus(id=50, x=1, y=0)
+    pending.name = "PENDING"
+    pending.relative_position_id = "TARGET"
+    pending.prereqs = [[]]
+    pending._unresolved_prereqs = [["TARGET"]]
+    pending._unresolved_mutex = ["TARGET"]
+    pending._relative_pending = True
+    pending._build_gx = 1
+    pending._build_gy = 0
 
     def parsed(tree_id):
         return SimpleNamespace(
@@ -526,21 +536,33 @@ def test_batch_load_is_one_undo_redo_action(monkeypatch, tmp_path):
     monkeypatch.setattr(m, "run_bg", lambda _app, work, done, **_k: done(work()))
     monkeypatch.setattr(m.MOD, "loaded", False)
     monkeypatch.setattr(m.MOD, "root", None)
-    app = _app()
+    app = _app([pending])
     app._batch_load_trees_worker = lambda *_a, **_k: payload
 
     m.App._load_all_trees(cast(m.App, app))
     buttons[-2].command()
 
     assert loadable_calls
-    assert len(app.focuses) == 2
+    assert len(app.focuses) == 3
     assert len(app._extra_trees) == 2
+    assert (app.focuses[pending.id].x, app.focuses[pending.id].y) == (11, 0)
+    assert app.focuses[pending.id].prereqs == [[shared_focus.id]]
+    assert app.focuses[pending.id].mutex == [shared_focus.id]
+    assert app.focuses.reverse_prerequisites == {shared_focus.id: {pending.id}}
+    assert app.focuses.reverse_mutex == {shared_focus.id: {pending.id}}
     assert len(app._undo_stack) == 1
     app._undo()
-    assert not app.focuses
+    assert list(app.focuses) == [pending.id]
+    assert (app.focuses[pending.id].x, app.focuses[pending.id].y) == (1, 0)
+    assert app.focuses[pending.id].prereqs == [[]]
+    assert app.focuses[pending.id]._unresolved_prereqs == [["TARGET"]]
+    assert app.focuses.reverse_prerequisites == {}
+    assert app.focuses.reverse_mutex == {}
     assert app._extra_trees == []
     app._redo()
-    assert len(app.focuses) == 2
+    assert len(app.focuses) == 3
+    assert (app.focuses[pending.id].x, app.focuses[pending.id].y) == (11, 0)
+    assert app.focuses.reverse_prerequisites == {shared_focus.id: {pending.id}}
     assert [tree["tree_id"] for tree in app._extra_trees] == [
         "shared_tree",
         "joint_tree",

@@ -10,7 +10,7 @@ import pytest
 
 import hoi4_content_maker as m
 from hoi4cm.core.undo import UndoStack
-from hoi4cm.focus_tree.build import build_focuses
+from hoi4cm.focus_tree.build import BuildContext, build_focuses
 from hoi4cm.focus_tree.export import export_focus_tree
 from hoi4cm.focus_tree.parse import parse_focus_tree
 from hoi4cm.models import Focus, FocusDocument
@@ -229,6 +229,25 @@ def test_group_nudge_keeps_missing_import_metadata_absent_for_extra_export(dx, d
         (11 + dx, 22 + dy),
     ]
     assert (reimported[1]._rel_dx, reimported[1]._rel_dy) == (1, 2)
+
+
+def test_group_nudge_preserves_pending_multihop_offsets():
+    source = """focus_tree = { id = TST
+        focus = { id = A x = 1 y = 0 relative_position_id = M }
+        focus = { id = B x = 2 y = 0 relative_position_id = A }
+    }"""
+    imported = build_focuses(parse_focus_tree(source, "pending-tree.txt"), tree_idx=1)
+    parent, child = imported
+    assert (parent.x, child.x) == (1, 3)
+    app = _NudgeHarness(imported, multi_sel=(parent.id, child.id))
+
+    app._nudge_selection(1, 0)
+    context = BuildContext(imported, reconcile=False)
+    target = Focus(id=100, x=10, y=0)
+    target.name = "M"
+    context.add_focuses([target])
+
+    assert (parent.x, child.x) == (12, 14)
 
 
 def test_arrow_shortcuts_do_nothing_if_the_move_hits_an_unselected_focus():
