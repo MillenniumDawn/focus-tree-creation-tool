@@ -390,3 +390,50 @@ tests. Widget construction still needs a live `App` against a loaded mod:
   full folder list (decisions, ideas, goals, event pictures, flags,
   interface, custom) still all show up, unaffected by the sidebar picker's
   narrower scope.
+
+## Sidebar phase 2 verification (2026-10-22)
+
+On Windows / Python 3.14.7, the real application was launched with the existing
+`project_roundtrip.txt` fixture for before/after, empty, narrow (760×640), and
+simulated 200% DPI captures. The supplied sidebar icons were checked byte-for-byte
+against their originals. The Spotlight renderer and its six action assets are unchanged.
+
+- 35 Tk smoke tests passed, including explorer keyboard navigation without moving
+  nodes, selection synchronization, search expansion restoration, multiple trees,
+  long labels, invalid drafts, resource discovery caching/reveal, resizing/collapse,
+  simulated DPI, Spotlight and recovery regressions.
+- 40 focused headless tests passed. The full headless run had 1,651 passed,
+  7 skipped and 7 failures. Each failure also reproduced on the starting commit:
+  three graphics-catalog path assertions, one graphics-browser search assertion,
+  one image-broker path assertion, one settings path assertion and a CRLF assertion.
+- Ruff, Black's library formatting check (233 Python files), mypy and pylint on
+  changed modules/tests passed. The full pylint invocation retains existing
+  canvas return-consistency and character-editor maxsplit messages.
+- A cached query over 20,000 synthetic focus records took 3.3 ms on this machine;
+  this measures filtering and ancestor retention, not drawing 20,000 canvas nodes.
+
+Physical monitor-to-monitor DPI transitions, macOS/Linux folder-viewer launches,
+and full-scale interactive mod inventories were not manually tested. Source-folder
+launches are mocked in the Tk regression test; source discovery and real script
+import are exercised. Save/export/undo/recovery checks remain in the existing suites.
+
+### All-tree catalog follow-up
+
+The application was launched against the configured Millennium Dawn source folder:
+114 tree-definition files were listed, with the styles-only file excluded. Search
+for Germany was captured in the real application. The follow-up passed 36 Tk smoke
+tests, 12 focused catalog/import tests, Ruff, mypy and changed-module pylint. Tests
+cover recursive discovery, utility/comment/string exclusion, tolerant reads, read
+failures, loaded-file deduplication, explicit file opening, cancellation before reads,
+import undo recording, and opening the existing New Focus Tree dialog. Catalog
+selection/search do not mutate the workspace. The full headless suite was not rerun
+for this follow-up; the prior full-run baseline is recorded above.
+
+### Validation theme regression
+
+Opening Validate previously called `ttk.Style.theme_use("clam")`, replacing the
+application-wide Windows `vista` theme and losing the Project.Treeview's named
+styles. A real Tk regression reproduced this theme change before the fix. Validate
+now configures only Val.Treeview in the current theme. All 37 Tk smoke tests pass,
+including validation refresh, explorer colors/row height, scrollbar colors and
+Spotlight behavior. Existing running processes need restarting to load the fix.

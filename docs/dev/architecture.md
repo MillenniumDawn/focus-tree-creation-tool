@@ -74,7 +74,9 @@
   `settings_dialog.py` (`open_settings`), `menubar.py`/`toolbar.py`
   (`build_menubar`/`build_toolbar_row2`, the one-shot builders behind
   `App`'s top bar), `editor_chrome.py` (content navigation and save/validation
-  status), `focus_editor.py` (the persistent contextual focus editor and tree
+  status), `project_sidebar.py` (resizable/collapsible content navigation and
+  native project Treeview), `project_index.py` (read-only ownership snapshots,
+  ancestor-preserving name/ID/path filtering and resource discovery), `focus_editor.py` (the persistent contextual focus editor and tree
   settings), `focus_actions.py` (captured-target canvas actions),
   `tutorial.py` (the first-launch teaching controller
   and widget highlights; it drives preview-only dropdowns through
@@ -446,3 +448,35 @@ This compositor requires Windows Tk color-key transparency. Unsupported Tk
 window systems report the native error through the app error log and dialog;
 they do not silently substitute an opaque panel. Windows Tk smoke tests cover
 the compositor, resizing, keyboard traversal and all six existing handlers.
+
+### Project navigation (#332, phase 2)
+
+The project sidebar groups focuses by their existing `tree_idx` and retains each
+extra tree's type and source path. It never infers country ownership, edits the
+shared/joint registry or changes export paths. Single selection reveals a focus;
+Enter, double-click or Shift+F10 opens the existing Spotlight. Treeview arrow keys
+expand/select without reaching canvas nudge bindings. Selection and content-tool
+switches use the contextual editor's flush boundary; invalid drafts remain intact.
+
+The supplied transparent sidebar symbols live under `ui/assets/sidebar/` and load
+through Tk alone. Tk draws all text, backgrounds, accents and selection states.
+The project bar retains save/validate/export; canvas commands wrap above the canvas.
+Resource discovery lists existing localisation, graphics and scripted-effect source
+files on a worker. Enter on a file reveals its containing folder. Discovery reads
+no source contents and writes no files. Unloaded, empty and failed discovery states
+are explicit. Refresh beside PROJECT reruns discovery after external file changes.
+
+The Focus Trees explorer group also lists unopened `.txt` files discovered under
+`common/national_focus/`, including subdirectories. A lightweight scan of actual
+block declarations excludes utility files and ignores comments/quoted strings.
+These are source filenames,
+not guessed country ownership or parsed tree IDs. Enter/double-click delegates to
+`App._import_txt(path=...)` with the same draft/save/discard guards as File > Import.
+Loaded main/shared/joint source paths are excluded from the unopened list. A
+persistent New Focus Tree button uses the existing setup dialog after flushing
+pending edits. The inventory is cached with other mod source discovery.
+
+Validation table styling is local to Val.Treeview in
+`editor_chrome.configure_validation_style`. Its table area and heading border
+avoid native white fills without calling `theme_use`, which would invalidate the
+project explorer's styles elsewhere in the same Tk interpreter.

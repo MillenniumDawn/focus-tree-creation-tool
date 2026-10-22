@@ -3,6 +3,7 @@
 from hoi4cm.ui.editor_chrome import (
     EditorChrome,
     EditorStatus,
+    configure_validation_style,
     editor_is_dirty,
     mark_editor_changed,
     mark_editor_saved,
@@ -30,6 +31,7 @@ from hoi4cm.ui.gfx_browser import (
 from hoi4cm.ui.keyboard import nudge_selection
 from hoi4cm.ui.lifecycle import ApplicationLifecycle
 from hoi4cm.ui.menubar import build_menubar
+from hoi4cm.ui.project_sidebar import ProjectSidebar
 from hoi4cm.ui.settings_dialog import open_settings
 from hoi4cm.ui.splash import show_splash
 from hoi4cm.ui.startup_check import check_tk_startup
@@ -73,7 +75,7 @@ from hoi4cm.ui.theme import (
     YGRID,
 )
 from hoi4cm.ui.thumbnail_grid import ThumbnailItem, VirtualThumbnailGrid
-from hoi4cm.ui.toolbar import build_toolbar_row2
+from hoi4cm.ui.toolbar import build_canvas_toolbar, build_toolbar_row2
 from hoi4cm.ui.tree_badges import build_tree_badges
 from hoi4cm.ui.tutorial import TutorialController
 from hoi4cm.ui.widgets import (
@@ -85,6 +87,7 @@ from hoi4cm.ui.widgets import (
 )
 
 __all__ = [
+    "configure_validation_style",
     "FocusSpotlight",
     "SpotlightLayout",
     "spotlight_layout",
@@ -143,6 +146,8 @@ __all__ = [
     "_safe_after_idle",
     "build_menubar",
     "build_toolbar_row2",
+    "build_canvas_toolbar",
+    "ProjectSidebar",
     "build_tree_badges",
     "get_executor",
     "grab_when_visible",

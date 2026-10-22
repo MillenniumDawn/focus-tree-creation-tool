@@ -6,6 +6,7 @@ import copy
 import re
 import tkinter as tk
 from dataclasses import dataclass
+from tkinter import ttk
 
 from hoi4cm.models.sidebar_form import (
     FocusSidebarValues,
@@ -168,6 +169,53 @@ def update_editor_status(app):
         chrome.refresh()
 
 
+def configure_validation_style(app):
+    """Keep the validation table dark without changing other widgets' theme."""
+    style = ttk.Style(app)
+    style.layout("Val.Treeview", [("Treeview.treearea", {"sticky": "nswe"})])
+    border = "Validation.Treeheading.border"
+    if border not in style.element_names():
+        style.element_create(border, "from", "clam", "Treeheading.border")
+    style.layout(
+        "Val.Treeview.Heading",
+        [
+            (
+                border,
+                {
+                    "sticky": "nswe",
+                    "children": [
+                        (
+                            "Treeheading.padding",
+                            {
+                                "sticky": "nswe",
+                                "children": [
+                                    (
+                                        "Treeheading.image",
+                                        {"side": "right", "sticky": ""},
+                                    ),
+                                    ("Treeheading.text", {"sticky": "we"}),
+                                ],
+                            },
+                        ),
+                    ],
+                },
+            ),
+        ],
+    )
+    style.configure(
+        "Val.Treeview",
+        background="#050810",
+        foreground=TEXT,
+        fieldbackground="#050810",
+        borderwidth=0,
+        rowheight=22,
+    )
+    style.configure(
+        "Val.Treeview.Heading", background="#1e293b", foreground=TEXT, relief="flat"
+    )
+    style.map("Val.Treeview", background=[("selected", "#1e2d4a")])
+
+
 class EditorChrome:
     """The active content surface and selected-focus navigation commands."""
 
@@ -190,6 +238,9 @@ class EditorChrome:
 
     def navigate(self, label, command=None):
         app = self.app
+        editor = getattr(app, "_focus_editor", None)
+        if editor is not None and not editor.close():
+            return
         if label == "Focus Trees":
             for window in tuple(self.windows.values()):
                 window.grab_release()
@@ -276,6 +327,9 @@ class EditorChrome:
         for label, button in self.navigation_buttons.items():
             active = label == self.active_content
             button.config(bg=BLUE if active else BG_CARD, fg=TEXT)
+        sidebar = getattr(app, "_project_sidebar", None)
+        if sidebar is not None:
+            sidebar.refresh()
         if not hasattr(app, "_fv_name"):
             return
         saved, validation = _state(app).labels(
@@ -286,6 +340,7 @@ class EditorChrome:
 
 
 __all__ = [
+    "configure_validation_style",
     "editor_is_dirty",
     "EditorChrome",
     "EditorStatus",

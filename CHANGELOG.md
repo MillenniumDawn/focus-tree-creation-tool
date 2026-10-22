@@ -14,6 +14,15 @@ the version by hand. See `AGENTS.md`.
   add the keys the code used but the locale files lacked. The German, Spanish and
   Chinese strings added here are machine translations and need native review. A
   test now fails when a `tr()` key is missing from `en.json` or a locale drifts.
+- Keep the project explorer dark after opening Validate by preserving the app-wide
+  ttk theme and styling only the validation table.
+
+- Move content tools into a resizable navy sidebar with supplied icons and a
+  searchable project explorer; preserve tree ownership, focus selection and
+  Spotlight, and browse real source resources without changing files.
+- List all mod focus-tree source files in the project explorer and provide a
+  New Focus Tree action; open existing files through the guarded import workflow.
+
 - Float enlarged focus artwork and radial actions over the dimmed editor,
   removing the Spotlight panel and card; reflow controls for small windows.
 - Add contextual focus actions and editing, content navigation, and visible save

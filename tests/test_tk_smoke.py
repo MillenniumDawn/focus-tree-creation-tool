@@ -92,6 +92,266 @@ def test_app_builds_its_chrome(app):
     assert app._errlog_btn.winfo_exists()
     assert not app._focus_editor.window.winfo_ismapped()
     assert not hasattr(app, "_sash")
+    assert app._project_sidebar.empty.winfo_ismapped()
+    assert list(app._editor_chrome.navigation_buttons) == [
+        "Focus Trees",
+        "Decisions",
+        "Events",
+        "Ideas",
+        "Dynamic Modifiers",
+    ]
+
+
+def test_validation_preserves_sidebar_theme_and_style(app, opened):
+    from tkinter import ttk
+
+    from hoi4cm.ui.project_sidebar import NAVY
+
+    style = ttk.Style(app)
+    theme = style.theme_use()
+    properties = ("background", "fieldbackground", "foreground", "rowheight")
+    before = {name: style.lookup("Project.Treeview", name) for name in properties}
+    scrollbar = style.lookup("Project.Vertical.TScrollbar", "troughcolor")
+    assert before["background"] == NAVY
+    app._validate_tree()
+    _assert_built(opened())
+    app._refresh_validation_dialog(app._validation_win)
+    app.update()
+    assert style.theme_use() == theme
+    assert {
+        name: style.lookup("Project.Treeview", name) for name in properties
+    } == before
+    assert style.lookup("Project.Vertical.TScrollbar", "troughcolor") == scrollbar
+    assert style.lookup("Val.Treeview", "background") == "#050810"
+
+
+def test_project_explorer_search_expansion_selection_and_keyboard(app, monkeypatch):
+    sidebar = app._project_sidebar
+    app._new_focus_at(72, 72)
+    first = app.selected
+    app._new_focus_at(76, 72)
+    second = app.selected
+    first.name = "EXPLORER_first"
+    first.loc_name = ("Long readable name " * 12).strip()
+    second.name = "EXPLORER_second"
+    app._populate(second)
+    second.tree_idx = 1
+    app._extra_trees.append(
+        {
+            "tree_id": "joint_explorer",
+            "type": "joint",
+            "file_path": "joint.txt",
+            "focus_ids": {second.id},
+        }
+    )
+    app.focuses.touch()
+    app._invalidate_focus_list_structure()
+    app.update()
+    tree = sidebar.tree
+    before = [focus.to_dict() for focus in app.focuses.values()]
+    undo_count = len(app._undo_stack)
+    tree.item("tree:0", open=False)
+    app._lp_search_var.set("EXPLORER_first")
+    sidebar.render()
+    assert tree.exists(f"focus:{first.id}")
+    assert tree.exists("project")
+    assert not tree.exists(f"focus:{second.id}")
+    assert tree.item("tree:0", "open")
+    app._lp_search_var.set("")
+    sidebar.render()
+    assert not tree.item("tree:0", "open")
+    assert tree.exists(f"focus:{second.id}")
+    assert tree.selection() == (f"focus:{second.id}",)
+    tree.item("tree:0", open=True)
+    tree.selection_set(f"focus:{first.id}")
+    tree.focus(f"focus:{first.id}")
+    tree.focus_force()
+    app.update()
+    assert app.selected is first
+    assert not app._focus_actions.blocks_canvas
+    tree.event_generate("<Down>")
+    app.update()
+    assert [focus.to_dict() for focus in app.focuses.values()] == before
+    assert len(app._undo_stack) == undo_count
+    app._select(second)
+    app.update()
+    assert tree.selection() == (f"focus:{second.id}",)
+    called = []
+    monkeypatch.setattr(
+        app._focus_actions, "show", lambda fid, keyboard: called.append(fid)
+    )
+    sidebar.activate()
+    assert called == [second.id]
+    app._lp_search_var.set("no-matching-explorer-entry")
+    sidebar.render()
+    assert "No results" in sidebar.message.cget("text")
+    app._lp_search_var.set("")
+    sidebar.render()
+    app._extra_trees.pop()
+    second.tree_idx = 0
+    app.focuses.touch()
+    sidebar.refresh()
+
+
+def test_project_explorer_invalid_draft_blocks_selection_and_tools(app):
+    app._new_focus_at(80, 80)
+    first = app.selected
+    app._new_focus_at(84, 80)
+    second = app.selected
+    app._fv_cost.set("invalid draft")
+    sidebar = app._project_sidebar
+    sidebar.refresh()
+    sidebar.tree.selection_set(f"focus:{first.id}")
+    app.update()
+    assert app.selected is second
+    assert app._fv_cost.get() == "invalid draft"
+    assert sidebar.tree.selection() == (f"focus:{second.id}",)
+    app._editor_chrome.navigate("Decisions", lambda: pytest.fail("invalid draft left"))
+    assert app._editor_chrome.active_content == "Focus Trees"
+    app._fv_cost.set(str(second.cost))
+    app._focus_editor.close()
+
+
+def test_project_sidebar_collapse_resize_and_scaled_rows(app):
+    sidebar = app._project_sidebar
+    geometry = app.geometry()
+    selected = app.selected
+    query = app._lp_search_var.get()
+    sidebar.panes.sash_place(0, 310, 0)
+    app.update()
+
+    width = sidebar.panel.winfo_width()
+    sidebar.toggle()
+    app.update()
+    assert not app._left_panel_visible
+    sidebar.toggle()
+    app.update()
+    assert abs(sidebar.panel.winfo_width() - width) <= 5
+    assert app.selected is selected
+    assert app._lp_search_var.get() == query
+    app.geometry("760x640")
+    app.update()
+    assert sidebar.panel.winfo_width() >= int(230 * sidebar.scale)
+    assert app.cv.winfo_width() > 200
+    assert int(sidebar.tree.cget("height")) > 0
+    assert sidebar.tree.cget("takefocus")
+    app.geometry(geometry)
+    app.update()
+
+
+def test_project_resource_discovery_is_cached_and_reveals_existing_sources(
+    app, tmp_path, monkeypatch
+):
+    import hoi4cm.ui.project_sidebar as sidebar_module
+
+    source = tmp_path / "localisation" / "english" / "real_l_english.yml"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"l_english:\n")
+    calls = []
+
+    def immediate(_app, work, done):
+        calls.append("discover")
+        done(work())
+
+    monkeypatch.setattr(sidebar_module, "run_bg", immediate)
+    monkeypatch.setattr(MOD, "root", str(tmp_path))
+    monkeypatch.setattr(MOD, "mod_name", "Resource test")
+    sidebar = app._project_sidebar
+    sidebar.refresh()
+    assert len(calls) == 1
+    app._lp_search_var.set("real_l_english")
+    sidebar.render()
+    item = next(item for item in sidebar.resources if item.path == str(source))
+    assert sidebar.tree.exists(item.key)
+    assert sidebar.tree.exists(item.parent)
+    sidebar.refresh()
+    assert len(calls) == 1
+    revealed = []
+    monkeypatch.setattr(sidebar_module, "reveal_source", revealed.append)
+    sidebar.tree.selection_set(item.key)
+    sidebar.activate()
+    assert revealed == [str(source)]
+    assert source.read_bytes() == b"l_english:\n"
+    sidebar.reload_resources()
+    assert len(calls) == 2
+    app._lp_search_var.set("")
+    sidebar.render()
+
+
+def test_project_sidebar_at_simulated_200_percent_dpi():
+    code = """
+import hoi4_content_maker as main
+main.App._run_startup_prompts = lambda self: None
+main._apply_tk_dpi_scaling = lambda app: app.tk.call('tk', 'scaling', 192 / 72)
+app = main.App()
+try:
+    app.geometry('1440x1000')
+    app.update()
+    sidebar = app._project_sidebar
+    assert sidebar.scale > 1.9
+    assert sidebar.panel.winfo_width() >= 540
+    assert int(sidebar.tree.tk.call('ttk::style', 'configure',
+               'Project.Treeview', '-rowheight')) >= 64
+    assert sidebar.icons[0].width() >= 60
+    assert app.cv.winfo_width() > 600
+finally:
+    app.destroy()
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_all_mod_tree_files_are_cached_searchable_and_open_explicitly(
+    app, tmp_path, monkeypatch, opened
+):
+    import hoi4cm.ui.project_sidebar as sidebar_module
+
+    root = tmp_path / "common" / "national_focus"
+    root.mkdir(parents=True)
+    first = root / "alpha.txt"
+    second = root / "nested" / "beta.TXT"
+    second.parent.mkdir()
+    first.write_text("focus_tree = { id = alpha }", encoding="utf-8")
+    second.write_text("focus_tree = { id = beta }", encoding="utf-8")
+    (root / "notes.md").write_text("Not a focus tree", encoding="utf-8")
+    scans = []
+
+    def immediate(_app, work, done):
+        scans.append(True)
+        done(work())
+
+    monkeypatch.setattr(sidebar_module, "run_bg", immediate)
+    monkeypatch.setattr(MOD, "root", str(tmp_path))
+    monkeypatch.setattr(MOD, "mod_name", "Tree catalog")
+    sidebar = app._project_sidebar
+    sidebar.refresh()
+    assert {item.path for item in sidebar.catalog if item.kind == "tree_file"} == {
+        str(first),
+        str(second),
+    }
+    before = app._workspace_fingerprint()
+    imported = []
+    monkeypatch.setattr(app, "_import_txt", lambda *, path: imported.append(path))
+    app._lp_search_var.set("beta.TXT")
+    sidebar.first_result()
+    assert sidebar.tree.exists("focus-trees")
+    assert not imported  # Arrow/search selection never replaces the workspace.
+    sidebar.refresh()
+    assert len(scans) == 1
+    sidebar.activate()
+    assert imported == [str(second)]
+    assert app._workspace_fingerprint() == before
+    app._lp_search_var.set("")
+    sidebar.render()
+    sidebar.new_tree_button.invoke()
+    assert any(window.title() == "New Focus Tree" for window in opened())
+    assert first.read_text(encoding="utf-8") == "focus_tree = { id = alpha }"
 
 
 def test_context_editor_close_keeps_fields_and_undo(app):

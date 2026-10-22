@@ -137,9 +137,11 @@ from hoi4cm.ui import (  # noqa: E402
     TEXT_DIM,
     YELLOW,
     ApplicationLifecycle,
+    ProjectSidebar,
     Tooltip,
     TutorialController,
     _safe_after,
+    build_canvas_toolbar,
     grab_when_visible,
     make_progress,
     progress_modal,
@@ -157,6 +159,7 @@ from hoi4cm.ui.checklist import (  # noqa: E402
     is_loadable,
 )
 from hoi4cm.ui.editor_chrome import (  # noqa: E402
+    configure_validation_style,
     editor_is_dirty,
     mark_editor_saved,
     update_editor_status,
@@ -165,9 +168,8 @@ from hoi4cm.ui.editor_chrome import (  # noqa: E402
 )
 from hoi4cm.ui.effects_panel import EffectsMixin  # noqa: E402
 from hoi4cm.ui.focus_actions import FocusActions  # noqa: E402
-from hoi4cm.ui.focus_editor import FocusEditor, reveal_search_result  # noqa: E402
+from hoi4cm.ui.focus_editor import FocusEditor  # noqa: E402
 from hoi4cm.ui.focus_list import (  # noqa: E402
-    FocusListCache,
     FocusListItem,
     VirtualFocusList,
 )
@@ -300,6 +302,8 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         self.geometry(saved_geom if saved_geom else "1440x880")
         self.configure(bg=BG_DARK)
         self.resizable(True, True)
+        self._navigation_started = False
+        self._navigation_source = ""
         self.workspace = EditorWorkspace()
         self.focuses = self.workspace.focuses
         # Extra loaded shared/joint tree metadata, populated during UI setup.
@@ -804,94 +808,14 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         body = tk.Frame(self, bg=BG_DARK)
         body.pack(fill="both", expand=True)
 
-        # ── Left focus list panel ──────────────────────────────────
-        self._left_panel_visible = True
-        self._left_panel = tk.Frame(body, bg=BG_PANEL, width=188)
-        self._left_panel.pack(side="left", fill="y")
-        self._left_panel.pack_propagate(False)
-        tk.Frame(self._left_panel, bg="#060810", height=28).pack(fill="x")
-        # header
-        lp_hdr = tk.Frame(self._left_panel, bg="#060810")
-        lp_hdr.place(x=0, y=0, relwidth=1, height=28)
-        tk.Label(
-            lp_hdr,
-            text=tr("focus_list.header", "FOCUSES"),
-            bg="#060810",
-            fg=TEXT_DIM,
-            font=("Helvetica", 8, "bold"),
-            padx=8,
-        ).pack(side="left")
-        self._lp_collapse_btn = tk.Button(
-            lp_hdr,
-            text="◀",
-            command=self._toggle_focus_list,
-            bg="#060810",
-            fg=TEXT_DIM,
-            font=("Helvetica", 9),
-            relief="flat",
-            padx=6,
-            cursor="hand2",
-            bd=0,
+        self._project_sidebar = ProjectSidebar(self, body)
+        self._lifecycle.add_resource(self._project_sidebar.close)
+        canvas_host = self._project_sidebar.canvas_host
+        build_canvas_toolbar(self, canvas_host)
+        self.cv = tk.Canvas(
+            canvas_host, bg=CANVAS_BG, highlightthickness=0, cursor="fleur"
         )
-        self._lp_collapse_btn.pack(side="right")
-        tk.Frame(self._left_panel, bg=BORDER_G, height=1).pack(fill="x")
-        # search
-        lp_search = tk.Frame(self._left_panel, bg=BG_PANEL)
-        lp_search.pack(fill="x", padx=6, pady=4)
-        self._lp_search_var = tk.StringVar()
-        lp_ent = tk.Entry(
-            lp_search,
-            textvariable=self._lp_search_var,
-            bg=BG_CARD,
-            fg=TEXT_DIM,
-            insertbackground=BLUE,
-            font=("Helvetica", 9),
-            relief="flat",
-            highlightthickness=1,
-            highlightbackground=BORDER_G,
-        )
-        self._focus_search_entry = lp_ent
-        lp_ent.bind("<Return>", lambda _event: reveal_search_result(self))
-        lp_ent.pack(fill="x", ipady=3)
-        lp_ent.insert(0, tr("common.search_placeholder", "Search..."))
-        lp_ent.bind(
-            "<FocusIn>",
-            lambda e: (
-                (lp_ent.delete(0, "end"), lp_ent.config(fg=TEXT))
-                if lp_ent.get() == tr("common.search_placeholder", "Search...")
-                else None
-            ),
-        )
-        lp_ent.bind(
-            "<FocusOut>",
-            lambda e: (
-                (
-                    lp_ent.insert(0, tr("common.search_placeholder", "Search...")),
-                    lp_ent.config(fg=TEXT_DIM),
-                )
-                if not lp_ent.get()
-                else None
-            ),
-        )
-        self._lp_search_var.trace_add(
-            "write", lambda *_: self._refresh_focus_list_debounced()
-        )
-        # list
-        lp_list_frame = tk.Frame(self._left_panel, bg=BG_PANEL)
-        lp_list_frame.pack(fill="both", expand=True)
-        self._focus_list = VirtualFocusList(
-            lp_list_frame,
-            on_select=self._select_focus_from_list,
-            background=BG_PANEL,
-        )
-        self._focus_list_cache = FocusListCache()
-        self._focus_list.pack(fill="both", expand=True)
-        tk.Frame(self._left_panel, bg=BORDER_G, width=1).place(
-            relx=1, rely=0, relheight=1, x=-1
-        )
-
-        self.cv = tk.Canvas(body, bg=CANVAS_BG, highlightthickness=0, cursor="fleur")
-        self.cv.pack(side="left", fill="both", expand=True)
+        self.cv.pack(fill="both", expand=True)
         self._bind_canvas()
         self._focus_editor = FocusEditor(self)
         self._sb_frame = self._focus_editor.focus_panel
@@ -3282,6 +3206,8 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             self._undo_stack.clear()
 
             # Set tree ID
+            self._navigation_started = True
+            self._navigation_source = ""
             self._tree_id.set(tree_id)
             self._update_title()
 
@@ -3369,6 +3295,9 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         pfx = self._default_focus_prefix
         if pfx:
             f.name = f"{pfx}focus_{f.id:d}"
+        if not getattr(self, "_navigation_started", False):
+            self._navigation_source = ""
+        self._navigation_started = True
         self.focuses.add(f)
         self._redraw()
         self._select(f)
@@ -4502,7 +4431,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
                 parent=self,
             )
 
-    def _import_txt(self):
+    def _import_txt(self, *, path=None):
         if not self._confirm_discard(action="importing"):
             return
         # If mod is loaded, open directly in common/national_focus
@@ -4511,16 +4440,17 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             nf_dir = os.path.join(MOD.root, "common", "national_focus")
             if os.path.isdir(nf_dir):
                 init_dir = nf_dir
-        path = filedialog.askopenfilename(
-            initialdir=init_dir,
-            filetypes=[
-                (tr("filetype.hoi4_focus_tree", "HOI4 Focus Tree"), "*.txt"),
-                (tr("filetype.all", "All"), "*.*"),
-            ],
-            title=tr(
-                "filedialog.import_hoi4_focus_tree", "Import HOI4 Focus Tree .txt"
-            ),
-        )
+        if path is None:
+            path = filedialog.askopenfilename(
+                initialdir=init_dir,
+                filetypes=[
+                    (tr("filetype.hoi4_focus_tree", "HOI4 Focus Tree"), "*.txt"),
+                    (tr("filetype.all", "All"), "*.*"),
+                ],
+                title=tr(
+                    "filedialog.import_hoi4_focus_tree", "Import HOI4 Focus Tree .txt"
+                ),
+            )
         if not path:
             return
         try:
@@ -4588,6 +4518,8 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             # Commit import targets only after parse/build succeeded and this
             # generation is still current.
             MOD.edit_focus_file = path
+            self._navigation_started = True
+            self._navigation_source = path
             if detected_loc_path:
                 MOD.edit_loc_file = detected_loc_path
 
@@ -5831,6 +5763,8 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
     def _install_workspace(self, workspace):
         self._begin_document_generation()
         self.workspace = workspace
+        self._navigation_started = True
+        self._navigation_source = workspace.main_tree.file_path
         self.focuses = workspace.focuses
         self._undo_stack.clear()
         meta = workspace.main_tree.metadata
@@ -6061,17 +5995,9 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             EFFECT_CATS[:] = base_cats + sorted(md_cats)
         else:
             EFFECT_CATS[:] = base_cats
-        income_btn = getattr(self, "_additional_income_btn", None)
-        if income_btn is not None:
-            if MOD.is_md:
-                if income_btn.winfo_manager() != "pack":
-                    separator = getattr(self, "_additional_income_separator", None)
-                    pack_options = {"side": "left", "padx": 2, "pady": 3}
-                    if separator is not None:
-                        pack_options["before"] = separator
-                    income_btn.pack(**pack_options)
-            else:
-                income_btn.pack_forget()
+        refresh_commands = getattr(self, "_refresh_canvas_commands", None)
+        if refresh_commands is not None:
+            refresh_commands()
 
     def _open_settings(self):
         """Settings panel — GFX paths, MD detection, extra dirs."""
@@ -6153,65 +6079,18 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
 
     # ─────────────────── FOCUS LIST PANEL ────────────────────────
     def _refresh_focus_list_debounced(self):
-        """Coalesce rapid search-box keystrokes into one structural refresh."""
-        if getattr(self, "_lp_search_job", None):
-            try:
-                self.after_cancel(self._lp_search_job)
-            except Exception:
-                pass
-        self._lp_search_job = self.after(120, self._invalidate_focus_list_structure)
+        """Filter the existing project snapshot without rebuilding it."""
+        self._project_sidebar.schedule_filter()
 
     def _invalidate_focus_list_structure(self):
-        """Refresh list data after add/delete/rename/import or search changes."""
-        self._lp_search_job = None
-        if not hasattr(self, "_focus_list"):
-            return
-        worst = self._validation_worst
-
-        def _build_items():
-            return (
-                FocusListItem(
-                    f.id,
-                    f.name,
-                    has_effects=bool(f.effects),
-                    has_broken_prerequisite=any(
-                        pid not in self.focuses for group in f.prereqs for pid in group
-                    ),
-                    validation_severity=worst.get(f.id),
-                )
-                for f in self.focuses.values()
-            )
-
-        # Rebuild the item tuple only when the document structure changes;
-        # search keystrokes just re-filter the cached tuple.
-        self._focus_list_items = self._focus_list_cache.get(self.focuses, _build_items)
-        # patch cached items if validation changed without document revision bump
-        if self._focus_list_items:
-            needs_patch = any(
-                item.validation_severity != worst.get(item.key)
-                for item in self._focus_list_items
-            )
-            if needs_patch:
-                self._focus_list_cache.invalidate()
-                self._focus_list_items = self._focus_list_cache.get(
-                    self.focuses, _build_items
-                )
-        query = self._lp_search_var.get() if hasattr(self, "_lp_search_var") else ""
-        placeholder = tr("common.search_placeholder", "Search...")
-        selected_id = self.selected.id if self.selected else None
-        self._focus_list.invalidate_structure(
-            self._focus_list_items,
-            query=query,
-            placeholder=placeholder,
-            selected_key=selected_id,
-        )
+        """Refresh project ownership and focus labels after document changes."""
+        if hasattr(self, "_project_sidebar"):
+            self._project_sidebar.refresh()
 
     def _update_focus_list_selection(self):
-        """Update at most the old and new materialized row highlights."""
-        if not hasattr(self, "_focus_list"):
-            return
-        sel_id = self.selected.id if self.selected else None
-        self._focus_list.update_selection(sel_id)
+        """Synchronize explorer selection after a canvas selection."""
+        if hasattr(self, "_project_sidebar"):
+            self._project_sidebar.sync_selection(force=True)
 
     def _select_focus_from_list(self, focus_id):
         if focus_id in self.focuses:
@@ -6221,19 +6100,8 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             self.cv.focus_set()
 
     def _toggle_focus_list(self):
-        """Show/hide the left focus list panel."""
-        if not hasattr(self, "_left_panel"):
-            return
-        if self._left_panel_visible:
-            self._left_panel.pack_forget()
-            self._left_panel_visible = False
-            if hasattr(self, "_lp_collapse_btn"):
-                self._lp_collapse_btn.config(text="▶")
-        else:
-            self._left_panel.pack(side="left", fill="y", before=self.cv)
-            self._left_panel_visible = True
-            if hasattr(self, "_lp_collapse_btn"):
-                self._lp_collapse_btn.config(text="◀")
+        """Collapse or restore project navigation without losing its state."""
+        self._project_sidebar.toggle()
 
     # ─────────────────── DUPLICATE FOCUS ─────────────────────────
     def _duplicate_focus(self):
@@ -6645,27 +6513,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         # Treeview with scrollbar
         sb = tk.Scrollbar(frm)
         sb.pack(side="right", fill="y")
-        style = ttk.Style()
-        try:
-            style.theme_use("clam")
-            style.configure(
-                "Val.Treeview",
-                background="#050810",
-                foreground=TEXT,
-                fieldbackground="#050810",
-                borderwidth=0,
-                highlightthickness=0,
-                rowheight=22,
-            )
-            style.configure(
-                "Val.Treeview.Heading",
-                background="#1e293b",
-                foreground=TEXT,
-                relief="flat",
-            )
-            style.map("Val.Treeview", background=[("selected", "#1e2d4a")])
-        except Exception:
-            pass
+        configure_validation_style(self)
         tree = ttk.Treeview(
             frm,
             columns=("sev", "focus", "message", "code"),

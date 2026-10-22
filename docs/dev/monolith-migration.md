@@ -307,6 +307,11 @@ improvement that carries over cleanly: the bounded `LRUCache` +
 pinned-thumbnail image cache the sibling browser already had, in place of
   the old unbounded dict.
 
+- **Project navigation (#332, phase 2)**: the old left focus-list construction and
+  refresh logic now delegate to `ui/project_sidebar.py`; pure ownership/filtering
+  logic lives in `ui/project_index.py`. The deferred contextual form builders are
+  unchanged. Canvas command wrapping and MD income visibility live in `ui/toolbar.py`.
+
 ## Extraction recipe
 
 1. Extract the pure logic (parsing, building, computing) into a

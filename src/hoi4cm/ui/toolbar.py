@@ -11,7 +11,7 @@ from hoi4cm.ui.widgets import Tooltip
 def build_toolbar_row2(app, toolbar):
     """Keep content navigation separate from the active focus-tree tools."""
     background = "#090d14"
-    chrome = app._editor_chrome = EditorChrome(app)
+    app._editor_chrome = EditorChrome(app)
 
     def row():
         frame = tk.Frame(toolbar, bg=background)
@@ -31,23 +31,6 @@ def build_toolbar_row2(app, toolbar):
         widget.pack(side="left", padx=5)
         return widget
 
-    navigation = row()
-    tk.Label(navigation, text="Content", bg=background, fg=TEXT_DIM, padx=8).pack(
-        side="left"
-    )
-    for label, command in (
-        ("Focus Trees", None),
-        ("Events", app._event_wizard),
-        ("Decisions", app._decision_wizard),
-        ("Ideas", app._national_spirit_wizard),
-        ("Dynamic Modifiers", app._dyn_mod_wizard),
-    ):
-        chrome.navigation_buttons[label] = button(
-            navigation,
-            label,
-            lambda label=label, command=command: chrome.navigate(label, command),
-        )
-
     context = row()
     app._editor_context_lbl = tk.Label(
         context,
@@ -57,7 +40,6 @@ def build_toolbar_row2(app, toolbar):
         padx=8,
         font=("Helvetica", 10, "bold"),
     )
-    app._editor_context_lbl.pack(side="left")
     separator(context)
     button(context, "Save Project", app._save, bg="#163e2b")
     button(context, "Validate", app._validate_tree, bg="#26375a")
@@ -70,8 +52,39 @@ def build_toolbar_row2(app, toolbar):
         context, text="Validation: not run", bg=background, fg=TEXT_DIM, padx=4
     )
     app._editor_validation_lbl.pack(side="left")
+    app._editor_context_lbl.pack(side="right", padx=8)
+
+
+def build_canvas_toolbar(app, toolbar):
+    """Keep canvas tools beside the project sidebar."""
+    background = "#090d14"
+    chrome = app._editor_chrome
+
+    def row():
+        frame = tk.Frame(toolbar, bg=background)
+        frame.pack(fill="x")
+        return frame
+
+    def button(parent, label, command, *, bg=BG_CARD, fg=TEXT, tip=None):
+        widget = app._mk_btn(parent, label, command, bg=bg, fg=fg, padx=8, pady=3)
+        widget.configure(takefocus=True, highlightcolor=BLUE, highlightthickness=2)
+        widget.pack(side="left", padx=2, pady=3)
+        if tip:
+            Tooltip(widget, tip)
+        return widget
+
+    def separator(parent):
+        widget = tk.Frame(parent, bg=BORDER_G, width=1, height=20)
+        widget.pack(side="left", padx=5)
+        return widget
 
     tools = row()
+    app._sidebar_toggle_btn = button(
+        tools, "Sidebar", app._toggle_focus_list, tip="Collapse or restore sidebar (F)"
+    )
+    app._sidebar_toggle_btn.config(
+        image=app._project_sidebar.collapse_icon, compound="left"
+    )
     app._add_focus_btn = button(tools, "+ Focus", app._add_focus, bg="#1e3a6e")
     app._conn_btn = button(tools, "Prereq", app._pick_prereq)
     app._mutex_btn = button(tools, "Mutex", app._toggle_mutex, fg=ORANGE)
@@ -112,7 +125,41 @@ def build_toolbar_row2(app, toolbar):
         padx=4,
     )
     app._coord_lbl.pack(side="right", padx=4)
-    tk.Label(view, text="Cursor:", bg=background, fg=TEXT_DIM).pack(side="right")
+    Tooltip(app._coord_lbl, "Cursor position on the focus grid")
+    for frame in (tools, view):
+        _wrap_commands(app, frame)
 
 
-__all__ = ["build_toolbar_row2"]
+def _wrap_commands(app, frame):
+    """Wrap real controls at narrow widths, preserving keyboard access."""
+    widgets = frame.winfo_children()
+
+    previous = None
+    frame.pack_propagate(False)
+
+    def reflow(event=None):
+        nonlocal previous
+        signature = frame.winfo_width(), MOD.is_md
+        if signature == previous:
+            return
+        previous = signature
+        x, y, height = 3, 3, 0
+        for widget in widgets:
+            widget.pack_forget()
+            widget.place_forget()
+            if widget is app._additional_income_btn and not MOD.is_md:
+                continue
+            width = widget.winfo_reqwidth()
+            if x > 3 and x + width + 3 > frame.winfo_width():
+                x, y, height = 3, y + height + 6, 0
+            widget.place(x=x, y=y)
+            x += width + 6
+            height = max(height, widget.winfo_reqheight())
+        frame.configure(height=y + height + 3)
+
+    frame.bind("<Configure>", reflow)
+    if app._additional_income_btn in widgets:
+        app._refresh_canvas_commands = reflow
+
+
+__all__ = ["build_canvas_toolbar", "build_toolbar_row2"]

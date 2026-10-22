@@ -87,6 +87,36 @@ def test_bundled_focus_actions_have_png_assets():
         assert image.read_bytes().startswith(b"\x89PNG\r\n\x1a\n"), image
 
 
+def test_bundled_sidebar_symbols_have_transparent_png_assets():
+    import struct
+
+    assets = ROOT / "src" / "hoi4cm" / "ui" / "assets" / "sidebar"
+    names = (
+        "nav_focus_trees",
+        "nav_decisions",
+        "nav_events",
+        "nav_ideas",
+        "nav_dynamic_modifiers",
+        "project_folder_closed",
+        "project_folder_open",
+        "file_focus_tree",
+        "item_focus",
+        "file_localization",
+        "file_graphics",
+        "file_scripted_effects",
+        "file_generic",
+        "chevron_down",
+        "chevron_right",
+        "sidebar_collapse",
+        "sidebar_expand",
+    )
+    for name in names:
+        data = (assets / f"{name}.png").read_bytes()
+        assert data.startswith(b"\x89PNG\r\n\x1a\n")
+        assert struct.unpack(">II", data[16:24]) == (256, 256)
+        assert data[25] == 6  # RGBA; UI backgrounds are not baked into symbols.
+
+
 def test_encrypted_build_path_is_removed_and_cipher_stays_disabled():
     assert all(not path.exists() for path in DEAD_ENCRYPTED_BUILD_FILES)
 
