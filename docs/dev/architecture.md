@@ -73,7 +73,10 @@
   spirit, event and dynamic-modifier wizards' picture fields),
   `settings_dialog.py` (`open_settings`), `menubar.py`/`toolbar.py`
   (`build_menubar`/`build_toolbar_row2`, the one-shot builders behind
-  `App`'s top bar), `tutorial.py` (the first-launch teaching controller
+  `App`'s top bar), `editor_chrome.py` (content navigation and save/validation
+  status), `focus_editor.py` (the persistent contextual focus editor and tree
+  settings), `focus_actions.py` (captured-target canvas actions),
+  `tutorial.py` (the first-launch teaching controller
   and widget highlights; it drives preview-only dropdowns through
   `menubar.MenuController`), `tasks.py` (the `run_bg`/`progress_modal`
   background-worker plumbing, see "Threading model" below), theme
@@ -107,6 +110,32 @@
 - **`perf/`**: the deterministic profiling harness (`tracking.py`, stdlib
   only, no tkinter) that `scripts/track_perf.py` drives; see
   `performance.md` for the areas and how to read a report.
+
+## Contextual editing and status
+
+`FocusActions` owns the transient focus action buttons, their keyboard/list
+fallback, captured focus ID, and lifecycle cleanup. Its PNG icons live in
+`ui/assets/`, which the generated PyInstaller spec bundles beside the module.
+`FocusEditor` owns one reusable window containing the existing Properties,
+Effects, Conditions, and Code form. Advanced settings reveal the less common
+properties and the Conditions/Code tabs. Tree settings share that window and
+contain the loaded-tree controls, tree ID, and continuous-focus position.
+`flush_pending_editor` validates numeric and occupied-position drafts and applies
+unlocked code before selection, close, save, export, or undo can replace the form.
+Invalid drafts remain visible for correction. Widget builders and population
+still live in `App`; this changes their host, not their ownership.
+
+`EditorChrome` keeps content navigation separate from focus-canvas tools, shows
+the active content/tree, and exposes Save Project, Validate, Export, search,
+reveal, and grouped zoom controls. Other content types open their existing
+wizards; returning to Focus Trees preserves open wizard drafts. The status
+controller polls only the selected form and code draft. Its signature combines
+document revisions, explicit committed-edit signals, copied tree metadata, and
+observation of the selected focus's committed fields/effects. It does not
+serialize the workspace or walk all focus IDs on a status refresh. Successful
+save/load records the saved signature; validation records its dispatch-time
+signature, so a late result cannot mark newer edits current. This UI observation
+does not replace the document's geometry/index revision discipline below.
 
 ## Dataflow
 

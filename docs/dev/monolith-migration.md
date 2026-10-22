@@ -242,6 +242,14 @@ needs it via `hoi4cm.core`.
 
 ## Migration status
 
+Issue #332 adds contextual editing without extracting the remaining form
+builders. `ui/focus_editor.py` owns the reusable focus/tree-settings window,
+Advanced settings visibility, and pending-edit flush boundary;
+`ui/focus_actions.py` owns the canvas action buttons and keyboard fallback;
+`ui/editor_chrome.py` owns content navigation and save/validation status.
+`ui/toolbar.py` presents their entry points and the project actions. The
+monolith wires these controllers to its existing form and command callbacks.
+
 | Monolith function | Lines | Destination | Status |
 |---|---|---|---|
 | `_open_settings` | was ~6685-7999 (~1,315) | `ui/settings_dialog.py` (`open_settings`) | **done** (phase 9) |
@@ -323,3 +331,8 @@ pinned-thumbnail image cache the sibling browser already had, in place of
   `sidebar_values_match_focus` does the dirty check headlessly, so a missed
   field is a unit-test failure instead of a silently dropped edit. What's
   still deferred is the widget construction and `_populate` layer itself.
+  The contextual editor (#332) now hosts these same builders in a persistent
+  window and moves their visibility/flush coordination into
+  `ui/focus_editor.py`; it does not complete the deferred builder extraction.
+  Status observation in `ui/editor_chrome.py` compares only the selected focus
+  and pending form/code draft, with explicit save and validation boundaries.

@@ -391,6 +391,9 @@ class CanvasMixin:
             if channels & RedrawChannel.FOCUS_LIST:
                 self._update_focus_list_selection()
             self._draw_minimap()
+            actions = getattr(self, "_focus_actions", None)
+            if actions is not None:
+                actions.reflow()
         finally:
             self._rendering_frame = False
 
@@ -1285,6 +1288,9 @@ class CanvasMixin:
 
     def _lmb_dn(self, e):
         self.cv.focus_set()
+        actions = getattr(self, "_focus_actions", None)
+        if actions is not None:
+            actions.dismiss()
         if self.mutex_mode:
             tid = self._focus_id_at(e.x, e.y)
             if tid is not None:
@@ -1304,6 +1310,9 @@ class CanvasMixin:
         pass
 
     def _pan_pr(self, e):
+        actions = getattr(self, "_focus_actions", None)
+        if actions is not None:
+            actions.dismiss()
         self._pan_start = (e.x, e.y)
         self.cv.config(cursor="sizing")
 
@@ -1345,6 +1354,9 @@ class CanvasMixin:
         self._redraw(RedrawChannel.VIEW, reason="wheel")
 
     def _rmb(self, e):
+        actions = getattr(self, "_focus_actions", None)
+        if actions is not None:
+            actions.dismiss()
         hits = self.cv.find_overlapping(e.x - 2, e.y - 2, e.x + 2, e.y + 2)
         if any("focus" in self.cv.gettags(i) for i in hits):
             return
@@ -1373,6 +1385,9 @@ class CanvasMixin:
 
     def _foc_pr(self, fid, e):
         self.cv.focus_set()
+        actions = getattr(self, "_focus_actions", None)
+        if actions is not None:
+            actions.dismiss()
         if self.mutex_mode:
             # Completion is handled at the canvas level (_lmb_dn); swallow the
             # click here so it never starts a drag or selection.
@@ -1403,7 +1418,8 @@ class CanvasMixin:
                 if any(occupant != fid for occupant in ids)
             },
         }
-        self._select(f)
+        if self._select(f) is False:
+            self._drag = {}
 
     def _foc_mv(self, fid, e):
         d = self._drag
@@ -1447,9 +1463,14 @@ class CanvasMixin:
         self._draw_lines_throttled()
 
     def _foc_rl(self, fid):
-        if self._drag.get("moved"):
+        drag = self._drag
+        clicked = drag.get("id") == fid and not drag.get("moved")
+        if drag.get("moved"):
             self._redraw()  # final clean redraw on release
         self._drag = {}
+        actions = getattr(self, "_focus_actions", None)
+        if clicked and not self.mutex_mode and actions is not None:
+            actions.show(fid)
 
     def _foc_en(self, fid):
         f = self.focuses[fid]

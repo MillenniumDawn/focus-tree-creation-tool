@@ -1,7 +1,25 @@
 """Tkinter UI helpers for HOI4 Content Maker."""
 
+from hoi4cm.ui.editor_chrome import (
+    EditorChrome,
+    EditorStatus,
+    editor_is_dirty,
+    mark_editor_changed,
+    mark_editor_saved,
+    observe_selected_content,
+    pending_editor_changes,
+    update_editor_status,
+    validation_completed,
+    validation_signature,
+)
 from hoi4cm.ui.error_report import report_error
 from hoi4cm.ui.file_errors import report_write_failure
+from hoi4cm.ui.focus_actions import FocusActions
+from hoi4cm.ui.focus_editor import (
+    FocusEditor,
+    flush_pending_editor,
+    reveal_search_result,
+)
 from hoi4cm.ui.gfx_browser import (
     open_focus_icon_browser,
     open_folder_gfx_browser,
@@ -66,6 +84,20 @@ from hoi4cm.ui.widgets import (
 )
 
 __all__ = [
+    "editor_is_dirty",
+    "observe_selected_content",
+    "FocusActions",
+    "FocusEditor",
+    "flush_pending_editor",
+    "reveal_search_result",
+    "EditorChrome",
+    "EditorStatus",
+    "mark_editor_saved",
+    "mark_editor_changed",
+    "pending_editor_changes",
+    "update_editor_status",
+    "validation_completed",
+    "validation_signature",
     "check_tk_startup",
     "BG_CARD",
     "BG_DARK",

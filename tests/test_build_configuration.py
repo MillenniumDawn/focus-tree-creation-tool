@@ -1,7 +1,9 @@
 """Regression coverage for the generated PyInstaller spec and build pins."""
 
+import ast
 import importlib.util
 import re
+from importlib import import_module
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -60,8 +62,29 @@ def test_generated_spec_is_windowless_and_bundles_runtime_assets(tmp_path, monke
     assert "    console=False," in content
     assert "    console=True," not in content
     locales_path = str(tmp_path / "locales").replace("\\", "/")
-    assert f"datas=[({locales_path!r}, 'locales')]," in content
+    assets_path = str(tmp_path / "src" / "hoi4cm" / "ui" / "assets").replace("\\", "/")
+    analysis = next(
+        node
+        for node in ast.walk(ast.parse(content))
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "Analysis"
+    )
+    datas = next(
+        keyword.value for keyword in analysis.keywords if keyword.arg == "datas"
+    )
+    assert ast.literal_eval(datas) == [
+        (locales_path, "locales"),
+        (assets_path, "hoi4cm/ui/assets"),
+    ]
     assert all(f"'hoi4cm.wizards.{name}'" in content for name in WIZARD_MODULES)
+
+
+def test_bundled_focus_actions_have_png_assets():
+    assets = ROOT / "src" / "hoi4cm" / "ui" / "assets"
+    for action, _label in import_module("hoi4cm.ui.focus_actions").ACTIONS:
+        image = assets / f"{action}.png"
+        assert image.read_bytes().startswith(b"\x89PNG\r\n\x1a\n"), image
 
 
 def test_encrypted_build_path_is_removed_and_cipher_stays_disabled():

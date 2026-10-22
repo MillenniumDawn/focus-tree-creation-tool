@@ -22,6 +22,8 @@ import pytest
 from ui_fakes import AppFake
 
 import hoi4_content_maker as main_mod
+from hoi4cm.editor.project_codec import read_project
+from hoi4cm.editor.workspace_autosave import sibling_autosave_path
 from hoi4cm.mod import MOD
 from hoi4cm.models import Focus
 from hoi4cm.ui import settings_dialog
@@ -88,6 +90,91 @@ def test_app_builds_its_chrome(app):
     assert app.cv.winfo_exists()
     assert app._add_focus_btn.winfo_exists()
     assert app._errlog_btn.winfo_exists()
+    assert not app._focus_editor.window.winfo_ismapped()
+    assert not hasattr(app, "_sash")
+
+
+def test_context_editor_close_keeps_fields_and_undo(app):
+    app._new_focus_at(44, 44)
+    focus = app.selected
+    before = len(app._undo_stack)
+    app._focus_editor.open()
+    app._fv_desc.delete("1.0", "end")
+    app._fv_desc.insert("1.0", "Context draft survives closing")
+    app._fv_cost.set("35")
+    app._focus_editor.toggle_advanced()
+    app._focus_editor.toggle_advanced()
+    assert app._focus_editor.close()
+    assert focus.cost == 35
+    assert focus.desc == "Context draft survives closing"
+    assert len(app._undo_stack) == before + 1
+    app._undo()
+    assert app.selected.cost != 35
+    app._redo()
+    assert app.selected.cost == 35
+
+
+def test_successive_applied_fields_refresh_both_recovery_files(
+    app, tmp_path, monkeypatch
+):
+    primary = tmp_path / "workspace.json"
+    project = tmp_path / "project.json"
+    sibling = Path(sibling_autosave_path(str(project)))
+    monkeypatch.setattr(main_mod, "workspace_autosave_path", lambda: str(primary))
+    monkeypatch.setattr(app, "_last_project_path", str(project))
+    monkeypatch.setattr(app, "_schedule_autosave", lambda: None)
+    app._cancel_autosave()
+    app._new_focus_at(48, 44)
+    focus = app.selected
+    app._mark_clean()
+    for cost, description in (
+        (25, "First recovery edit"),
+        (30, "Second recovery edit"),
+    ):
+        app._fv_cost.set(str(cost))
+        app._fv_desc.delete("1.0", "end")
+        app._fv_desc.insert("1.0", description)
+        app._apply()
+        assert focus.cost == cost
+        assert focus.desc == description
+        app._autosave_tick()
+        assert not app._autosave_failing
+        for path in (primary, sibling):
+            recovered = read_project(path).focuses[focus.id]
+            assert recovered.cost == cost
+            assert recovered.desc == description
+        assert primary.read_bytes() == sibling.read_bytes()
+
+
+def test_keyboard_action_list_has_all_labels_and_escape_is_noop(app):
+    app._new_focus_at(46, 44)
+    before = len(app._undo_stack)
+    app._focus_actions.show(app.selected.id, keyboard=True)
+    app.update()
+    assert [button.cget("text") for button in app._focus_actions.buttons] == [
+        "Edit Focus",
+        "Add Prerequisite",
+        "Add Effect",
+        "Add Child",
+        "Duplicate",
+        "Delete",
+    ]
+    assert len(app._focus_actions.images) == 6
+    assert app.focus_get() is app._focus_actions.buttons[0]
+    app._focus_actions.buttons[0].event_generate("<Escape>")
+    app.update()
+    assert app._focus_actions.focus_id is None
+    assert app.focus_get() is app.cv
+    assert len(app._undo_stack) == before
+
+
+def test_tree_settings_keeps_loaded_trees_and_references_accessible(app):
+    app._focus_editor.open_tree_settings()
+    app.update()
+    assert app._focus_editor.tree_panel.winfo_ismapped()
+    assert app._tree_meta_sf_box.winfo_ismapped()
+    assert not app._focus_editor.focus_panel.winfo_ismapped()
+    assert app._focus_editor.close()
 
 
 def test_dialog_grab_is_deferred_until_mapping(app):

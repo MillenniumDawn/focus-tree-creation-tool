@@ -14,6 +14,8 @@ the version by hand. See `AGENTS.md`.
   add the keys the code used but the locale files lacked. The German, Spanish and
   Chinese strings added here are machine translations and need native review. A
   test now fails when a `tr()` key is missing from `en.json` or a locale drifts.
+- Add contextual focus actions and editing, content navigation, and visible save
+  and validation status with dedicated tree settings (#332).
 - Record a failed sibling autosave once in the error log, including its path.
   Repeated ticks for the same failure do not add another entry.
 
