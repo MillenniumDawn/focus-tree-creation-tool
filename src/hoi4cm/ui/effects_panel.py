@@ -27,6 +27,7 @@ from hoi4cm.ui.theme import (
     TEXT,
     TEXT_DIM,
 )
+from hoi4cm.ui.widgets import grab_when_visible
 
 
 def _augment_character_suggestions(suggestions, fname, *, loaded, character_ids):
@@ -496,8 +497,8 @@ class EffectsMixin:
 
         def _grab():
             try:
-                if pop.winfo_exists():
-                    pop.grab_set()
+                if pop.winfo_exists() and not grab_when_visible(pop):
+                    return
             except tk.TclError:
                 pass  # window not viewable yet — modality is a nicety, skip
 

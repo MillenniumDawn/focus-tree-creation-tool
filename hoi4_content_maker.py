@@ -139,6 +139,7 @@ from hoi4cm.ui import (  # noqa: E402
     Tooltip,
     TutorialController,
     _safe_after,
+    grab_when_visible,
     make_progress,
     progress_modal,
     report_error,
@@ -3065,7 +3066,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         win.configure(bg=BG_DARK)
         win.geometry("480x420")
         win.resizable(False, True)
-        win.grab_set()
+        grab_when_visible(win)
         win.bind("<Escape>", lambda _event: win.destroy())
 
         def _row(label):
@@ -3512,7 +3513,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         win.configure(bg=BG_DARK)
         win.geometry("580x520")
         win.resizable(True, True)
-        win.grab_set()
+        grab_when_visible(win)
         win.transient(self)
 
         tk.Label(
@@ -3882,7 +3883,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         setup.configure(bg=BG_DARK)
         setup.geometry("480x420")
         setup.resizable(False, False)
-        setup.grab_set()
+        grab_when_visible(setup)
 
         # Header
         hdr = tk.Frame(setup, bg="#1a0f2e", pady=10)
@@ -4067,7 +4068,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         prev_win.title(tr("drawio.preview.title", "Draw.io Import - Preview"))
         prev_win.configure(bg="#0d1117")
         prev_win.geometry("680x560")
-        prev_win.grab_set()
+        grab_when_visible(prev_win)
         prev_win.resizable(True, True)
 
         phdr = tk.Frame(prev_win, bg="#161b22", pady=8)
@@ -4953,7 +4954,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         win.configure(bg=BG_DARK)
         win.geometry("740x560")
         win.resizable(True, True)
-        win.grab_set()
+        grab_when_visible(win)
         win.transient(self)
         win.bind("<Escape>", lambda _event: win.destroy())
 
@@ -6109,7 +6110,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         win.configure(bg=BG_DARK)
         win.geometry("480x380")
         win.resizable(False, False)
-        win.grab_set()
+        grab_when_visible(win)
 
         tk.Label(
             win,

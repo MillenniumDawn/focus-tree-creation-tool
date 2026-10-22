@@ -28,6 +28,7 @@ from hoi4cm.ui import (
     TEXT,
     TEXT_DIM,
 )
+from hoi4cm.ui.widgets import grab_when_visible
 
 # ``notifying_workspace_files`` is imported from ``hoi4cm.mod`` here and
 # re-exported for wizard convenience.
@@ -207,7 +208,7 @@ def open_script_picker(
     pwin.configure(bg=BG_DARK)
     pwin.geometry("620x580")
     pwin.resizable(True, True)
-    pwin.grab_set()
+    grab_when_visible(pwin)
 
     # ── header ────────────────────────────────────────────────────
     hdr = tk.Frame(pwin, bg=BG_DARK)

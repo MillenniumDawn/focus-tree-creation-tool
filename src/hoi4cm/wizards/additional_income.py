@@ -22,6 +22,7 @@ from hoi4cm.ui import (
     TEXT,
     TEXT_DIM,
 )
+from hoi4cm.ui.widgets import grab_when_visible
 from hoi4cm.wizards import _generators
 from hoi4cm.wizards._shared import (
     _LOC_KEY_RE,
@@ -65,7 +66,7 @@ def open_additional_income_wizard(app):
     win.configure(bg=BG_DARK)
     win.geometry("700x740")
     win.resizable(True, True)
-    win.grab_set()
+    grab_when_visible(win)
 
     # ── Header ───────────────────────────────────────────────────────────
     hdr = tk.Frame(win, bg="#0d2b1a", pady=8)

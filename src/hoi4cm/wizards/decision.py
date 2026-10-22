@@ -48,6 +48,7 @@ from hoi4cm.ui import (
     report_error,
     report_write_failure,
 )
+from hoi4cm.ui.widgets import grab_when_visible
 from hoi4cm.wizards import _generators
 from hoi4cm.wizards._graphics import find_catalog_image
 from hoi4cm.wizards._image_loader import TkImageLoader
@@ -4215,7 +4216,7 @@ def open_decision_wizard(app):
         dlg.configure(bg=BG_DARK)
         dlg.geometry("520x440")
         dlg.resizable(True, True)
-        dlg.grab_set()
+        grab_when_visible(dlg)
         tk.Label(
             dlg,
             text=tr("decision.browse_mod_decisions.header", "BROWSE MOD DECISIONS"),

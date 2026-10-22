@@ -44,7 +44,7 @@ from hoi4cm.ui.theme import (
     TEXT_DIM,
 )
 from hoi4cm.ui.thumbnail_grid import ThumbnailItem, VirtualThumbnailGrid
-from hoi4cm.ui.widgets import _safe_after
+from hoi4cm.ui.widgets import _safe_after, grab_when_visible
 
 
 def _catalog_image_paths(catalog, *, under=None, search=""):
@@ -196,7 +196,7 @@ def open_universal_gfx_browser(
     bwin.configure(bg=BG_DARK)
     bwin.geometry("1000x640")
     bwin.resizable(True, True)
-    bwin.grab_set()
+    grab_when_visible(bwin)
 
     top_bar = tk.Frame(bwin, bg=BG_DARK)
     top_bar.pack(fill="x", padx=8, pady=(6, 0))
@@ -454,7 +454,7 @@ def open_gfx_placement_editor(win, initial_items=None, on_confirm=None):
     pwin.configure(bg=BG_DARK)
     pwin.geometry("900x620")
     pwin.resizable(True, True)
-    pwin.grab_set()
+    grab_when_visible(pwin)
 
     tk.Label(
         pwin,
@@ -1385,7 +1385,7 @@ def open_folder_gfx_browser(
     bwin.configure(bg=BG_DARK)
     bwin.geometry("900x580")
     bwin.resizable(True, True)
-    bwin.grab_set()
+    grab_when_visible(bwin)
 
     panes = tk.Frame(bwin, bg=BG_DARK)
     panes.pack(fill="both", expand=True, padx=8, pady=8)
