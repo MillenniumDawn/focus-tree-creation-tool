@@ -146,6 +146,7 @@ def test_successive_applied_fields_refresh_both_recovery_files(
         assert primary.read_bytes() == sibling.read_bytes()
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="Tk Windows color-key compositor")
 def test_keyboard_action_list_has_all_labels_and_escape_is_noop(app):
     app._new_focus_at(46, 44)
     before = len(app._undo_stack)
@@ -166,6 +167,119 @@ def test_keyboard_action_list_has_all_labels_and_escape_is_noop(app):
     assert app._focus_actions.focus_id is None
     assert app.focus_get() is app.cv
     assert len(app._undo_stack) == before
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Tk Windows color-key compositor")
+def test_spotlight_reflow_keyboard_and_dismissal_preserve_document(app):
+    from hoi4cm.ui.focus_spotlight import TRANSPARENT
+
+    app._new_focus_at(60, 44)
+    focus = app.selected
+    before = focus.to_dict()
+    undo_count = len(app._undo_stack)
+    geometry, minimum = app.geometry(), app.minsize()
+    original_view = app.zoom, tuple(app.offset)
+    try:
+        app.minsize(280, 300)
+        for zoom, size in ((0.35, "1200x820"), (2.5, "560x600"), (1.0, "320x400")):
+            app.zoom = zoom
+            app.offset[:] = [-32.5, 67.25]
+            app.geometry("1200x820")
+            app.update()
+            app._add_focus_btn.focus_force()
+            app._focus_actions.show(focus.id)
+            app.update()
+            app.geometry(size)
+            app.update()
+            spotlight = app._focus_actions.spotlight
+            assert spotlight.window.winfo_width() == app.winfo_width()
+            assert str(spotlight.window.attributes("-transparentcolor")) == TRANSPARENT
+            assert float(app.attributes("-alpha")) == 1.0
+            assert int(spotlight.preview.cget("highlightthickness")) == 0
+            assert spotlight.name_label.cget("text") == focus.name
+            assert not hasattr(spotlight, "id_label")
+            # Cycle through all actions and Close in both directions. Even in
+            # a short window, the focused action must scroll fully into view.
+            for _ in range(7):
+                spotlight.step(1)
+                app.update()
+                button = app.focus_get()
+                if button is not spotlight.close_button:
+                    assert button.winfo_rooty() >= spotlight.scroll.winfo_rooty()
+                    assert button.winfo_rooty() + button.winfo_height() <= (
+                        spotlight.scroll.winfo_rooty() + spotlight.scroll.winfo_height()
+                    )
+            spotlight.step(-1)
+            app.update()
+            assert app.focus_get() is spotlight.close_button
+            spotlight.close_button.invoke()
+            app.update()
+            assert app.focus_get() is app._add_focus_btn
+            assert app.zoom == zoom and app.offset == [-32.5, 67.25]
+            assert focus.to_dict() == before
+            assert len(app._undo_stack) == undo_count
+    finally:
+        app._focus_actions.dismiss()
+        app.geometry(geometry)
+        app.minsize(*minimum)
+        app.zoom, offset = original_view
+        app.offset[:] = offset
+        app._redraw()
+        app.cv.focus_force()
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Tk Windows color-key compositor")
+@pytest.mark.parametrize(
+    "action",
+    [
+        "edit_focus",
+        "add_effect",
+        "add_prerequisite",
+        "duplicate",
+        "add_child",
+        "delete",
+    ],
+)
+def test_spotlight_buttons_run_existing_actions(app, opened, action):
+    from hoi4cm.ui.focus_actions import ACTIONS
+
+    app._new_focus_at(80 + len(app.focuses) * 2, 44)
+    target = app.selected
+    target_id = target.id
+    before_ids = set(app.focuses)
+    undo_count = len(app._undo_stack)
+    app._focus_actions.show(target_id)
+    app.update()
+    index = [key for key, _ in ACTIONS].index(action)
+    app._focus_actions.buttons[index].invoke()
+    app.update()
+    assert app._focus_actions.focus_id is None
+    if action in {"edit_focus", "add_effect"}:
+        assert app._focus_editor.window.winfo_ismapped()
+        assert app._active_tab.get() == (
+            "Effects" if action == "add_effect" else "Properties"
+        )
+        assert app._focus_editor.close()
+    elif action == "add_prerequisite":
+        windows = opened()
+        assert len(windows) == 1
+        assert "Prerequisite" in windows[0].title()
+        assert app.grab_current() is windows[0]
+        windows[0].grab_release()
+        windows[0].destroy()
+    else:
+        assert len(app._undo_stack) == undo_count + 1
+        after_ids = set(app.focuses)
+        if action == "delete":
+            assert after_ids == before_ids - {target_id}
+        else:
+            assert len(after_ids - before_ids) == 1
+            if action == "add_child":
+                assert app.selected.prereqs == [[target_id]]
+        app._undo()
+        assert set(app.focuses) == before_ids
+        app._redo()
+        assert set(app.focuses) == after_ids
 
 
 def test_tree_settings_keeps_loaded_trees_and_references_accessible(app):

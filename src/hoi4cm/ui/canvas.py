@@ -53,6 +53,10 @@ _CFP_MARKER_MIN_ZOOM = 0.3
 _GRID_MARGIN_SCREENS = 1
 
 
+def _spotlight_blocks_input(app):
+    return getattr(getattr(app, "_focus_actions", None), "blocks_canvas", False) is True
+
+
 class CanvasMixin:
     """Canvas rendering + interaction methods for :class:`App`."""
 
@@ -1287,6 +1291,8 @@ class CanvasMixin:
         return None
 
     def _lmb_dn(self, e):
+        if _spotlight_blocks_input(self):
+            return "break"
         self.cv.focus_set()
         actions = getattr(self, "_focus_actions", None)
         if actions is not None:
@@ -1310,6 +1316,8 @@ class CanvasMixin:
         pass
 
     def _pan_pr(self, e):
+        if _spotlight_blocks_input(self):
+            return "break"
         actions = getattr(self, "_focus_actions", None)
         if actions is not None:
             actions.dismiss()
@@ -1317,6 +1325,8 @@ class CanvasMixin:
         self.cv.config(cursor="sizing")
 
     def _pan_mv(self, e):
+        if _spotlight_blocks_input(self):
+            return "break"
         if not self._pan_start:
             return
         dx = e.x - self._pan_start[0]
@@ -1337,12 +1347,16 @@ class CanvasMixin:
         self._draw_coord_labels()
 
     def _pan_rl(self, e):
+        if _spotlight_blocks_input(self):
+            return "break"
         self._pan_start = None
         self.cv.config(cursor="fleur")
         # One clean redraw on release snaps everything to exact positions.
         self._redraw_now(RedrawChannel.VIEW, reason="pan-release")
 
     def _scroll(self, e):
+        if _spotlight_blocks_input(self):
+            return "break"
         f = 1.1 if (e.num == 4 or e.delta > 0) else 0.9
         old = self.zoom
         self.zoom = max(0.10, min(4.0, self.zoom * f))
@@ -1354,6 +1368,8 @@ class CanvasMixin:
         self._redraw(RedrawChannel.VIEW, reason="wheel")
 
     def _rmb(self, e):
+        if _spotlight_blocks_input(self):
+            return "break"
         actions = getattr(self, "_focus_actions", None)
         if actions is not None:
             actions.dismiss()
@@ -1366,6 +1382,8 @@ class CanvasMixin:
         self._new_focus_at(gx, gy)
 
     def _motion(self, e):
+        if _spotlight_blocks_input(self):
+            return "break"
         if not self._drag:
             gx, gy = self.c2w(e.x, e.y)
             self._coord_lbl.config(text=f"  x={gx}  y={gy}  ")
@@ -1384,6 +1402,8 @@ class CanvasMixin:
                 self.cv.coords(self._temp_line, cx, cy, tx, ty)
 
     def _foc_pr(self, fid, e):
+        if _spotlight_blocks_input(self):
+            return "break"
         self.cv.focus_set()
         actions = getattr(self, "_focus_actions", None)
         if actions is not None:
@@ -1422,6 +1442,8 @@ class CanvasMixin:
             self._drag = {}
 
     def _foc_mv(self, fid, e):
+        if _spotlight_blocks_input(self):
+            return "break"
         d = self._drag
         if not d or d.get("id") != fid or self.mutex_mode:
             return

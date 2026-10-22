@@ -20,6 +20,7 @@ from hoi4cm.ui.focus_editor import (
     flush_pending_editor,
     reveal_search_result,
 )
+from hoi4cm.ui.focus_spotlight import FocusSpotlight, SpotlightLayout, spotlight_layout
 from hoi4cm.ui.gfx_browser import (
     open_focus_icon_browser,
     open_folder_gfx_browser,
@@ -84,6 +85,9 @@ from hoi4cm.ui.widgets import (
 )
 
 __all__ = [
+    "FocusSpotlight",
+    "SpotlightLayout",
+    "spotlight_layout",
     "editor_is_dirty",
     "observe_selected_content",
     "FocusActions",

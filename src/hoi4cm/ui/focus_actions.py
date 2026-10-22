@@ -1,12 +1,10 @@
-"""Focus action helix with native buttons and captured-target dispatch."""
+"""Captured-target focus actions presented in the centered spotlight."""
 
-import math
 import tkinter as tk
-from pathlib import Path
 from typing import Any
 
 from hoi4cm.ui.error_report import report_error
-from hoi4cm.ui.theme import BG_CARD, BLUE, TEXT
+from hoi4cm.ui.focus_spotlight import FocusSpotlight
 
 ACTIONS = (
     ("edit_focus", "Edit Focus"),
@@ -18,52 +16,29 @@ ACTIONS = (
 )
 
 
-def action_positions(
-    width, height, cx, cy, button_width, button_height, *, keyboard=False
-):
-    """Clamp the helix to the viewport; use a compact list on narrow canvases."""
-    gap = 6
-    wide = not keyboard and width >= 2 * button_width + 64
-    menu_width = 2 * button_width + 40 if wide else button_width
-    rows = 3 if wide else 6
-    menu_height = rows * (button_height + gap) - gap
-    if width < menu_width or height < menu_height:
-        return []
-    left = max(0, min(cx - menu_width / 2, width - menu_width))
-    top = max(0, min(cy - menu_height / 2, height - menu_height))
-    return [
-        (
-            left
-            + (
-                (i % 2) * (button_width + 40)
-                + (20 if i % 2 == 0 else -20) * (i // 2 != 1)
-                if wide
-                else 0
-            ),
-            top + ((i // 2 if wide else i) * (button_height + gap)),
-        )
-        for i in range(6)
-    ]
-
-
 class FocusActions:
-    """Transient action UI owned by the canvas, without a separate Tk root."""
+    """Keep presentation and input restrictions separate from existing actions."""
 
     def __init__(self, app: Any):
         self.app = app
         self.focus_id: int | None = None
-        self.keyboard = False
         self.buttons: list[tk.Button] = []
         self.images: list[tk.PhotoImage] = []
-        self.popup: tk.Menu | None = None
+        self.popup = None
+        self._view_state = None
+        self._keyboard_focus = None
+        self.spotlight = FocusSpotlight(app, ACTIONS, self.invoke, self.dismiss)
         self.bindings = []
         for sequence, callback in (
             ("<Shift-F10>", self._keyboard_show),
             ("<KeyPress-Menu>", self._keyboard_show),
             ("<Escape>", self._escape),
-            ("<Configure>", lambda event: self.reflow()),
         ):
             self.bindings.append((sequence, app.cv.bind(sequence, callback, add="+")))
+
+    @property
+    def blocks_canvas(self) -> bool:
+        return self.focus_id is not None
 
     def _keyboard_show(self, event=None):
         selected = self.app.selected
@@ -76,123 +51,69 @@ class FocusActions:
         return "break"
 
     def show(self, fid, keyboard=False):
-        """Show actions for this exact focus, never a later selection."""
         self.dismiss()
         if fid not in self.app.focuses or self.app.mutex_mode:
             return
         self.focus_id = fid
-        self.keyboard = keyboard
-        scaling = float(self.app.cv.tk.call("tk", "scaling")) / (96 / 72)
-        icon_size = max(16, round(24 * scaling))
-        for action, label in ACTIONS:
-            source = tk.PhotoImage(
-                master=self.app.cv,
-                data=(
-                    Path(__file__).with_name("assets") / f"{action}.png"
-                ).read_bytes(),
+        self._view_state = (self.app.zoom, tuple(self.app.offset))
+        self._keyboard_focus = self.app.focus_get()
+        try:
+            self.spotlight.open(self.app.focuses[fid])
+        except tk.TclError as exc:
+            self.dismiss()
+            report_error(
+                "Focus Spotlight could not create its transparent foreground. "
+                "This renderer requires Tk window color-key transparency "
+                f"(Windows -transparentcolor). Tk reported: {exc}",
+                exc,
+                parent=self.app,
             )
-            image = source.subsample(
-                max(1, math.ceil(max(source.width(), source.height()) / icon_size))
-            )
-            self.images.append(image)
-            button = tk.Button(
-                self.app.cv,
-                text=label,
-                image=image,
-                compound="left",
-                anchor="w",
-                padx=10,
-                pady=7,
-                bg=BG_CARD,
-                fg="#ef6b73" if action == "delete" else TEXT,
-                activebackground="#203442",
-                activeforeground=TEXT,
-                highlightbackground=BG_CARD,
-                highlightcolor=BLUE,
-                highlightthickness=2,
-                takefocus=True,
-                command=lambda key=action: self.invoke(key),
-            )
-            button.bind("<Escape>", self._escape)
-            button.bind(
-                "<Return>", lambda event, key=action: self.invoke(key) or "break"
-            )
-            index = len(self.buttons)
-            button.bind("<Down>", lambda event, i=index: self._step(i, 1))
-            button.bind("<Up>", lambda event, i=index: self._step(i, -1))
-            self.buttons.append(button)
-        self.reflow()
-        if keyboard and self.popup is None:
-            self.buttons[0].focus_set()
-
-    def _step(self, index, delta):
-        self.buttons[(index + delta) % len(self.buttons)].focus_set()
-        return "break"
+            return
+        self.buttons = self.spotlight.buttons
+        self.images = self.spotlight.images
 
     def reflow(self):
-        """Re-anchor after canvas zoom, resize, or document changes."""
         if self.focus_id is None:
             return
-        focus = self.app.focuses.get(self.focus_id)
-        if focus is None:
+        if self.focus_id not in self.app.focuses:
             self.dismiss()
             return
-        width, height = self.app.cv.winfo_width(), self.app.cv.winfo_height()
-        bw = max(button.winfo_reqwidth() for button in self.buttons)
-        bh = max(button.winfo_reqheight() for button in self.buttons)
-        cx, cy = self.app.w2c(focus.x, focus.y)
-        positions = action_positions(
-            width, height, cx, cy, bw, bh, keyboard=self.keyboard
-        )
-        if not positions:
-            for button in self.buttons:
-                button.place_forget()
-            self._show_popup(cx, cy)
-            return
-        if self.popup is not None:
-            self.popup.destroy()
-            self.popup = None
-        for button, (x, y) in zip(self.buttons, positions, strict=True):
-            button.place(x=round(x), y=round(y), width=bw, height=bh)
-            button.lift()
-
-    def _show_popup(self, cx, cy):
-        if self.popup is not None:
-            return
-        menu = tk.Menu(self.app.cv, tearoff=False)
-        self.popup = menu
-        for action, label in ACTIONS:
-            menu.add_command(label=label, command=lambda key=action: self.invoke(key))
-        menu.bind("<Escape>", self._escape)
-        menu.update_idletasks()
-        x = min(
-            self.app.cv.winfo_rootx() + round(cx),
-            menu.winfo_screenwidth() - menu.winfo_reqwidth(),
-        )
-        y = min(
-            self.app.cv.winfo_rooty() + round(cy),
-            menu.winfo_screenheight() - menu.winfo_reqheight(),
-        )
-        menu.post(max(0, x), max(0, y))
-        menu.activate(0)
-        menu.focus_set()
+        self.spotlight.reflow()
 
     def dismiss(self):
-        """Discard the menu without changing document state or undo history."""
         visible = self.focus_id is not None
         self.focus_id = None
-        if self.popup is not None:
-            self.popup.destroy()
-            self.popup = None
-        for button in self.buttons:
-            button.destroy()
-        self.buttons.clear()
-        self.images.clear()
+        spotlight = getattr(self, "spotlight", None)
+        if spotlight is not None:
+            spotlight.close()
+        else:
+            for button in self.buttons:
+                button.destroy()
+            self.buttons.clear()
+            self.images.clear()
+        state = getattr(self, "_view_state", None)
+        self._view_state = None
+        if state is not None:
+            zoom, offset = state
+            changed = self.app.zoom != zoom or tuple(self.app.offset) != offset
+            self.app.zoom = zoom
+            self.app.offset[:] = offset
+            if changed:
+                self.app._redraw()
         if visible:
-            self.app.cv.focus_set()
+            previous = getattr(self, "_keyboard_focus", None)
+            self._keyboard_focus = None
+            target = (
+                previous
+                if previous is not None and previous.winfo_exists()
+                else self.app.cv
+            )
+            focus = getattr(target, "focus_force", target.focus_set)
+            focus()
 
     def close(self):
         self.dismiss()
+        self.spotlight.dispose()
         for sequence, binding in self.bindings:
             self.app.cv.unbind(sequence, binding)
         self.bindings.clear()

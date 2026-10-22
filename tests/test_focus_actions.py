@@ -1,11 +1,12 @@
-from types import SimpleNamespace
+from types import MethodType, SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
 
 from hoi4cm.models.document import FocusDocument
 from hoi4cm.ui.canvas import CanvasMixin
-from hoi4cm.ui.focus_actions import ACTIONS, FocusActions, action_positions
+from hoi4cm.ui.focus_actions import ACTIONS, FocusActions
+from hoi4cm.ui.focus_spotlight import spotlight_layout
 
 
 def make_actions():
@@ -124,45 +125,91 @@ def test_canvas_without_matching_press_or_mutex_never_opens():
 
 
 @pytest.mark.parametrize(
-    ("width", "height", "keyboard"),
-    [(800, 600, False), (240, 400, False), (800, 600, True)],
+    "width,scale", [(1200, 1), (500, 1), (280, 1), (1800, 1.5), (800, 2)]
 )
-def test_menu_positions_stay_inside_viewport(width, height, keyboard):
-    positions = action_positions(width, height, 2000, -1000, 200, 44, keyboard=keyboard)
-    assert len(positions) == len(ACTIONS)
-    assert all(0 <= x <= width - 200 and 0 <= y <= height - 44 for x, y in positions)
+def test_spotlight_layout_keeps_every_action_clear_of_preview(width, scale):
+    bw, bh = round(200 * scale), round(48 * scale)
+    layout = spotlight_layout(width, bw, bh, scale)
+    assert len(layout.buttons) == len(ACTIONS)
+    cx, cy, cw, ch = layout.preview
+    assert cw >= 220 * scale - 1
+    for i, (x, y) in enumerate(layout.buttons):
+        assert 0 <= x and x + bw <= layout.width
+        assert 0 <= y and y + bh <= layout.height
+        assert x + bw <= cx or x >= cx + cw or y + bh <= cy or y >= cy + ch
+        for x2, y2 in layout.buttons[:i]:
+            assert x + bw <= x2 or x >= x2 + bw or y + bh <= y2 or y >= y2 + bh
 
 
-@pytest.mark.parametrize(("width", "height"), [(1, 1), (240, 70), (800, 100)])
-def test_tiny_canvas_uses_popup_instead_of_squeezing_buttons(width, height):
-    assert action_positions(width, height, 0, 0, 200, 44) == []
+def test_desktop_spotlight_places_actions_radially():
+    layout = spotlight_layout(1200, 200, 48)
+    cx, cy, cw, ch = layout.preview
+    edit, prerequisite, effect, child, duplicate, delete = layout.buttons
+    assert edit[0] + 100 == delete[0] + 100 == cx + cw / 2
+    assert edit[1] + 48 < cy
+    assert delete[1] > cy + ch
+    assert prerequisite[0] + 200 < cx and effect[0] > cx + cw
+    assert duplicate[0] + 200 < cx and child[0] > cx + cw
+    assert prerequisite[1] < duplicate[1] and effect[1] < child[1]
 
 
-def test_arrow_keys_traverse_buttons_and_wrap():
-    actions, _, _ = make_actions()
-    actions.buttons = [Mock() for _ in ACTIONS]
-    assert actions._step(0, -1) == "break"
-    actions.buttons[-1].focus_set.assert_called_once()
-    assert actions._step(5, 1) == "break"
-    actions.buttons[0].focus_set.assert_called_once()
-
-
-def test_short_canvas_posts_readable_native_menu():
+def test_dismiss_restores_the_original_keyboard_widget():
     actions, app, _ = make_actions()
-    actions.keyboard = False
-    actions.buttons = [Mock() for _ in ACTIONS]
-    for button in actions.buttons:
-        button.winfo_reqwidth.return_value = 200
-        button.winfo_reqheight.return_value = 44
-    app.cv.winfo_width = Mock(return_value=800)
-    app.cv.winfo_height = Mock(return_value=70)
-    app.w2c = Mock(return_value=(50, 50))
-    actions._show_popup = Mock()
-    actions.reflow()
-    actions._show_popup.assert_called_once_with(50, 50)
-    for button in actions.buttons:
-        button.place_forget.assert_called_once()
-        button.place.assert_not_called()
+    previous = Mock()
+    previous.winfo_exists.return_value = True
+    actions._keyboard_focus = previous
+    actions.dismiss()
+    previous.focus_force.assert_called_once()
+    app.cv.focus_set.assert_not_called()
+
+
+def test_unsupported_compositor_reports_error_and_releases_input(monkeypatch):
+    import tkinter as tk
+
+    actions, app, target = make_actions()
+    app.zoom, app.offset = 1.0, [0, 0]
+    app.focus_get = Mock(return_value=None)
+    actions.spotlight = Mock()
+    actions.spotlight.open.side_effect = tk.TclError("unknown -transparentcolor")
+    report = Mock()
+    monkeypatch.setattr("hoi4cm.ui.focus_actions.report_error", report)
+    actions.show(target.id)
+    assert not actions.blocks_canvas
+    assert actions._view_state is None
+    actions.spotlight.close.assert_called()
+    assert "-transparentcolor" in report.call_args.args[0]
+
+
+def test_dismiss_restores_exact_view_without_data_or_undo():
+    actions, app, target = make_actions()
+    app.zoom = 2.2
+    app.offset = [45, 200]
+    actions._view_state = (0.35, (-12.75, 99.25))
+    actions.spotlight = Mock()
+    before = target.to_dict()
+    actions.dismiss()
+    assert app.zoom == 0.35 and app.offset == [-12.75, 99.25]
+    assert target.to_dict() == before
+    app._push_undo.assert_not_called()
+    actions.spotlight.close.assert_called_once()
+
+
+@pytest.mark.parametrize(
+    "method,args",
+    [
+        ("_lmb_dn", (SimpleNamespace(),)),
+        ("_pan_pr", (SimpleNamespace(),)),
+        ("_pan_mv", (SimpleNamespace(),)),
+        ("_pan_rl", (SimpleNamespace(),)),
+        ("_scroll", (SimpleNamespace(),)),
+        ("_rmb", (SimpleNamespace(),)),
+        ("_foc_pr", (1, SimpleNamespace())),
+        ("_foc_mv", (1, SimpleNamespace())),
+    ],
+)
+def test_spotlight_blocks_canvas_input(method, args):
+    app = SimpleNamespace(_focus_actions=SimpleNamespace(blocks_canvas=True))
+    assert getattr(CanvasMixin, method)(app, *args) == "break"
 
 
 def test_extra_tree_child_registry_is_included_in_undo_and_redo():
@@ -183,7 +230,7 @@ def test_extra_tree_child_registry_is_included_in_undo_and_redo():
         "_undo",
         "_redo",
     ):
-        setattr(app, name, getattr(maker.App, name).__get__(app))
+        setattr(app, name, MethodType(getattr(maker.App, name), app))
     for name in (
         "_refresh_loaded_trees_panel",
         "_refresh_tree_meta_panel",
