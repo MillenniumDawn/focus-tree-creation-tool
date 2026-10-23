@@ -262,8 +262,11 @@ CI runs `pytest -m tk` on Linux under Xvfb and on native Windows and macOS.
 The Spotlight cases run on every platform: Windows checks color-key
 transparency; Linux and macOS check the solid dark surface. All three run
 the same action, keyboard, resizing and dismissal assertions. The 200% DPI
-smoke sets its window maximum before App construction, so a small runner
-desktop cannot clamp the requested 1440×1000 test window.
+smoke raises the window maximum before App construction and disables user
+resizing before requesting its fixed 1440×1000 client area. This prevents
+small runner desktops, including AppKit's screen-height constraint, from
+shrinking the layout viewport. The Spotlight reflow case covers resizing
+separately.
 
 The separate `windows-permissions` job runs `tests/test_cache_permissions.py`
 and then the Tk smoke in separate processes on native Windows. Both new-cache

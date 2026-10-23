@@ -291,6 +291,8 @@ def simulate_dpi(app):
 main._apply_tk_dpi_scaling = simulate_dpi
 app = main.App()
 try:
+    # AppKit otherwise fits resizable windows to the runner's small desktop.
+    app.resizable(False, False)
     app.geometry('1440x1000')
     app.update()
     sidebar = app._project_sidebar
