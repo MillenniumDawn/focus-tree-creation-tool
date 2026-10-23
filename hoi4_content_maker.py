@@ -137,9 +137,12 @@ from hoi4cm.ui import (  # noqa: E402
     TEXT_DIM,
     YELLOW,
     ApplicationLifecycle,
+    ProjectSidebar,
     Tooltip,
     TutorialController,
+    UnderlinedTabButton,
     _safe_after,
+    build_canvas_toolbar,
     grab_when_visible,
     make_progress,
     progress_modal,
@@ -156,9 +159,19 @@ from hoi4cm.ui.checklist import (  # noqa: E402
     default_tree_type,
     is_loadable,
 )
+from hoi4cm.ui.editor_chrome import (  # noqa: E402
+    EditorChrome,
+    configure_validation_style,
+    editor_is_dirty,
+    mark_editor_saved,
+    update_editor_status,
+    validation_completed,
+    validation_signature,
+)
 from hoi4cm.ui.effects_panel import EffectsMixin  # noqa: E402
+from hoi4cm.ui.focus_actions import FocusActions  # noqa: E402
+from hoi4cm.ui.focus_editor import FocusEditor  # noqa: E402
 from hoi4cm.ui.focus_list import (  # noqa: E402
-    FocusListCache,
     FocusListItem,
     VirtualFocusList,
 )
@@ -260,6 +273,15 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
     _validation_worst: dict[int, Severity]
     _focus_bundles: dict[int, FocusCanvasBundle]
     _lifecycle: ApplicationLifecycle | None
+    _eb_win: tk.Toplevel | None
+    _effects_sig: object | None
+    _cfp_x: int | None
+    _cfp_y: int | None
+    _editor_chrome: EditorChrome
+    _errlog_btn: tk.Button
+    _hint_lbl: tk.Label
+    _msel_btn: tk.Button
+    _mutex_btn: tk.Button
     _config_write_warned: bool
     _mod_image_resource_registered: bool
     _image_broker: ImageBroker | None
@@ -291,6 +313,8 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         self.geometry(saved_geom if saved_geom else "1440x880")
         self.configure(bg=BG_DARK)
         self.resizable(True, True)
+        self._navigation_started = False
+        self._navigation_source = ""
         self.workspace = EditorWorkspace()
         self.focuses = self.workspace.focuses
         # Extra loaded shared/joint tree metadata, populated during UI setup.
@@ -347,6 +371,9 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         self._tutorial.start()
 
     def _on_app_close(self):
+        editor = self.__dict__.get("_focus_editor")
+        if editor is not None and not editor.flush():
+            return
         if self._is_dirty():
             ans = messagebox.askyesnocancel(
                 tr("dialog.unsaved_changes.title", "Unsaved Changes"),
@@ -360,7 +387,9 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
                 return
             if ans and not self._save():
                 return
-        if not self._lifecycle.begin_close():
+        lifecycle = self._lifecycle
+        assert lifecycle is not None
+        if not lifecycle.begin_close():
             return
         try:
             self._cancel_autosave()
@@ -368,7 +397,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         except Exception:
             pass
         finally:
-            self._lifecycle.finish_close()
+            lifecycle.finish_close()
             self.destroy()
 
     def _workspace_fingerprint(self):
@@ -416,6 +445,8 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         )
 
     def _is_dirty(self) -> bool:
+        if self.__dict__.get("_editor_chrome") is not None:
+            return editor_is_dirty(self)
         if self.focuses is None:
             return False
         if self.focuses.content_revision != getattr(self, "_saved_revision", 0):
@@ -434,9 +465,14 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         except Exception as e:
             add_error(f"Failed to update workspace fingerprint: {e}")
             self._saved_fingerprint = None
+        if self.__dict__.get("_editor_chrome") is not None:
+            mark_editor_saved(self)
         self._update_title()
 
     def _confirm_discard(self, action: str = "close") -> bool:
+        editor = self.__dict__.get("_focus_editor")
+        if editor is not None and not editor.flush():
+            return False
         if not self._is_dirty():
             return True
         if action == "importing":
@@ -504,6 +540,9 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         self._autosave_job = None
         sibling_failed = False
         try:
+            editor = self.__dict__.get("_focus_editor")
+            if editor is not None:
+                editor.flush(autosave=True)
             if self._is_dirty():
                 path = workspace_autosave_path()
                 self._capture_workspace()
@@ -616,6 +655,10 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             cache.clear()
 
     def _begin_document_generation(self):
+        editor = self.__dict__.get("_focus_editor")
+        if editor is not None:
+            editor.reset()
+        assert self._lifecycle is not None
         self._lifecycle.begin("document")
         self._invalidate_canvas_images()
 
@@ -682,6 +725,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         self._build_keybinds()
         self._build_layout()
         self._tutorial = TutorialController(self, self._menu_controller)
+        assert self._lifecycle is not None
         self._lifecycle.add_resource(self._tutorial.close)
 
     def _build_keybinds(self):
@@ -779,117 +823,25 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         body = tk.Frame(self, bg=BG_DARK)
         body.pack(fill="both", expand=True)
 
-        # ── Left focus list panel ──────────────────────────────────
-        self._left_panel_visible = True
-        self._left_panel = tk.Frame(body, bg=BG_PANEL, width=188)
-        self._left_panel.pack(side="left", fill="y")
-        self._left_panel.pack_propagate(False)
-        tk.Frame(self._left_panel, bg="#060810", height=28).pack(fill="x")
-        # header
-        lp_hdr = tk.Frame(self._left_panel, bg="#060810")
-        lp_hdr.place(x=0, y=0, relwidth=1, height=28)
-        tk.Label(
-            lp_hdr,
-            text=tr("focus_list.header", "FOCUSES"),
-            bg="#060810",
-            fg=TEXT_DIM,
-            font=("Helvetica", 8, "bold"),
-            padx=8,
-        ).pack(side="left")
-        self._lp_collapse_btn = tk.Button(
-            lp_hdr,
-            text="◀",
-            command=self._toggle_focus_list,
-            bg="#060810",
-            fg=TEXT_DIM,
-            font=("Helvetica", 9),
-            relief="flat",
-            padx=6,
-            cursor="hand2",
-            bd=0,
+        assert self._lifecycle is not None
+        self._project_sidebar = ProjectSidebar(self, body)
+        self._lifecycle.add_resource(self._project_sidebar.close)
+        canvas_host = self._project_sidebar.canvas_host
+        build_canvas_toolbar(self, canvas_host)
+        self.cv = tk.Canvas(
+            canvas_host, bg=CANVAS_BG, highlightthickness=0, cursor="fleur"
         )
-        self._lp_collapse_btn.pack(side="right")
-        tk.Frame(self._left_panel, bg=BORDER_G, height=1).pack(fill="x")
-        # search
-        lp_search = tk.Frame(self._left_panel, bg=BG_PANEL)
-        lp_search.pack(fill="x", padx=6, pady=4)
-        self._lp_search_var = tk.StringVar()
-        lp_ent = tk.Entry(
-            lp_search,
-            textvariable=self._lp_search_var,
-            bg=BG_CARD,
-            fg=TEXT_DIM,
-            insertbackground=BLUE,
-            font=("Helvetica", 9),
-            relief="flat",
-            highlightthickness=1,
-            highlightbackground=BORDER_G,
-        )
-        lp_ent.pack(fill="x", ipady=3)
-        lp_ent.insert(0, tr("common.search_placeholder", "Search..."))
-        lp_ent.bind(
-            "<FocusIn>",
-            lambda e: (
-                (lp_ent.delete(0, "end"), lp_ent.config(fg=TEXT))
-                if lp_ent.get() == tr("common.search_placeholder", "Search...")
-                else None
-            ),
-        )
-        lp_ent.bind(
-            "<FocusOut>",
-            lambda e: (
-                (
-                    lp_ent.insert(0, tr("common.search_placeholder", "Search...")),
-                    lp_ent.config(fg=TEXT_DIM),
-                )
-                if not lp_ent.get()
-                else None
-            ),
-        )
-        self._lp_search_var.trace_add(
-            "write", lambda *_: self._refresh_focus_list_debounced()
-        )
-        # list
-        lp_list_frame = tk.Frame(self._left_panel, bg=BG_PANEL)
-        lp_list_frame.pack(fill="both", expand=True)
-        self._focus_list = VirtualFocusList(
-            lp_list_frame,
-            on_select=self._select_focus_from_list,
-            background=BG_PANEL,
-        )
-        self._focus_list_cache = FocusListCache()
-        self._focus_list.pack(fill="both", expand=True)
-        tk.Frame(self._left_panel, bg=BORDER_G, width=1).place(
-            relx=1, rely=0, relheight=1, x=-1
-        )
-
-        self.cv = tk.Canvas(body, bg=CANVAS_BG, highlightthickness=0, cursor="fleur")
-        self.cv.pack(side="left", fill="both", expand=True)
+        self.cv.pack(fill="both", expand=True)
         self._bind_canvas()
-        # ── Draggable resize handle ──────────────────────────────
-        self._sb_width = 360
-        self._sash = tk.Frame(body, bg=BG_CARD, width=5, cursor="sb_h_double_arrow")
-        self._sash.pack(side="left", fill="y")
-        # Visible drag handle with arrows
-        sash_lbl = tk.Label(
-            self._sash,
-            text="⋮",
-            bg=BG_CARD,
-            fg=TEXT_DIM,
-            font=("Helvetica", 10),
-            cursor="sb_h_double_arrow",
-        )
-        sash_lbl.place(relx=0.5, rely=0.5, anchor="center")
-        for w in (self._sash, sash_lbl):
-            w.bind("<ButtonPress-1>", self._sash_pr)
-            w.bind("<B1-Motion>", self._sash_mv)
-            w.bind("<ButtonRelease-1>", self._sash_rl)
-            w.bind("<Enter>", lambda e: self._sash.config(bg=BORDER_G))
-            w.bind("<Leave>", lambda e: self._sash.config(bg=BG_CARD))
-        self._sb_frame = tk.Frame(body, bg=BG_PANEL, width=self._sb_width)
-        self._sb_frame.pack(side="right", fill="y")
-        self._sb_frame.pack_propagate(False)
+        self._focus_editor = FocusEditor(self)
+        self._sb_frame = self._focus_editor.focus_panel
         self._build_sidebar(self._sb_frame)
+        self._focus_editor.finish_build()
+        mark_editor_saved(self)
+        self._editor_chrome.start()
+        self._lifecycle.add_resource(self._editor_chrome.close)
+        self._focus_actions = FocusActions(self)
+        self._lifecycle.add_resource(self._focus_actions.close)
 
     def _init_error_log(self):
         """Set up in-app error log — captures all Python exceptions.
@@ -1087,6 +1039,9 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
 
     def _undo(self):
         """Restore the previous state, touching only what it changed."""
+        editor = self.__dict__.get("_focus_editor")
+        if editor is not None and not editor.flush():
+            return
         history = getattr(self, "_tree_undo_history", None)
         aligned = history is not None and history.is_aligned(len(self._undo_stack))
         result = self._undo_stack.undo(self.focuses, Focus.from_dict)
@@ -1117,6 +1072,9 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
 
     def _redo(self):
         """Re-apply the most recently undone action."""
+        editor = self.__dict__.get("_focus_editor")
+        if editor is not None and not editor.flush():
+            return
         history = getattr(self, "_tree_undo_history", None)
         aligned = history is not None and history.is_aligned(len(self._undo_stack))
         result = self._undo_stack.redo(self.focuses, Focus.from_dict)
@@ -1175,9 +1133,15 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         invalidates any older result in the ``validation`` lifecycle scope.
         """
         self._validation_job = None
+        assert self._lifecycle is not None
         self._lifecycle.begin("validation")
         sprites = self._validation_sprites()
         loc_path = getattr(MOD, "edit_loc_file", "")
+        signature = (
+            validation_signature(self)
+            if self.__dict__.get("_editor_chrome") is not None
+            else None
+        )
         snapshot = capture_validation_snapshot(self.focuses)
 
         def work():
@@ -1187,7 +1151,13 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
                 loc_keys=collect_loc_keys_from_file(loc_path),
             )
 
-        run_bg(self, work, self._apply_validation_result, scope="validation")
+        def done(issues):
+            if signature is not None:
+                validation_completed(self, signature)
+            self._apply_validation_result(issues)
+            update_editor_status(self)
+
+        run_bg(self, work, done, scope="validation")
 
     def _apply_validation_result(self, issues):
         try:
@@ -1314,6 +1284,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
 
     # ── SIDEBAR ──────────────────────────────────────────────────
     def _build_sidebar(self, sb):
+        sb = self._focus_editor.tree_panel
         # ── Loaded Trees Panel ────────────────────────────────────────
         _lt_outer = tk.Frame(sb, bg=BG_PANEL)
         _lt_outer.pack(fill="x")
@@ -1396,6 +1367,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         tk.Frame(meta, bg=BORDER_G, height=1).pack(fill="x")
         self._refresh_tree_meta_panel()
 
+        sb = self._focus_editor.focus_panel
         # ── Header ───────────────────────────────────────────────────
         hdr = tk.Frame(sb, bg=BG_DARK)
         hdr.pack(fill="x")
@@ -1483,7 +1455,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         for tname, tlabel in tab_names:
             col = tk.Frame(tab_bar, bg=BG_DARK)
             col.pack(side="left", expand=True, fill="x")
-            btn = tk.Button(
+            btn = UnderlinedTabButton(
                 col,
                 text=tlabel,
                 bg=BG_DARK,
@@ -1603,6 +1575,8 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             font=("Helvetica", 8, "italic"),
         ).pack(side="left", padx=4)
 
+        basic_form = self._sb_frm
+        self._sb_frm = self._focus_editor.make_advanced_properties(basic_form)
         # ── OFFSETS section ───────────────────────────────────────────────
         tk.Frame(self._sb_frm, bg=BORDER_G, height=1).pack(
             fill="x", padx=6, pady=(6, 2)
@@ -1647,6 +1621,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             fill="x", padx=6, pady=(2, 4)
         )
 
+        self._sb_frm = basic_form
         self._fv_cost = self._sb_entry(
             tr("focus.field.cost", "Cost (1 = 7 days):"),
             "10",
@@ -1654,7 +1629,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         )
 
         # AI will_do raw block
-        f_ai = tk.Frame(self._sb_frm, bg=BG_PANEL)
+        f_ai = tk.Frame(self._focus_editor.advanced_panel, bg=BG_PANEL)
         f_ai.pack(fill="x", padx=8, pady=2)
         hdr_ai = tk.Frame(f_ai, bg=BG_PANEL)
         hdr_ai.pack(fill="x")
@@ -1959,7 +1934,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             self.selected.offsets = offsets
             self.focuses.mark_content_changed()
 
-    def _focus_flag_label(self, label):
+    def _focus_flag_label(self, label: str) -> str:
         return {
             "cancel_if_invalid": tr(
                 "focus.flag.cancel_if_invalid", "Cancel if invalid"
@@ -2338,7 +2313,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
 
     def _attach_autocomplete(self, entry_widget, var, get_choices_fn):
         """Attach a live autocomplete popup to any Entry widget."""
-        _popup = [None]
+        _popup: list[tk.Toplevel | None] = [None]
 
         def _show(*_):
             if _popup[0] and _popup[0].winfo_exists():
@@ -2593,6 +2568,13 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             )
 
     def _select(self, f):
+        editor = self.__dict__.get("_focus_editor")
+        if editor is not None:
+            if self.selected is not None and self.selected.id == f.id:
+                self._update_focus_list_selection()
+                return True
+            if not editor.close():
+                return False
         if self.selected and self.selected.id != f.id:
             self._autosave()
         self.selected = f
@@ -2601,8 +2583,12 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         self._populate(f)
         self._update_focus_list_selection()
         self._update_statusbar()
+        return True
 
     def _deselect(self):
+        editor = self.__dict__.get("_focus_editor")
+        if editor is not None and not editor.close():
+            return
         self.selected = None
         self._hide_form()
         self._redraw()
@@ -2754,7 +2740,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
                 font=("Helvetica", 9, "italic"),
             ).pack(anchor="w")
             return
-        for gi, grp in enumerate(self.selected.prereqs):
+        for gi, grp in enumerate(groups):
             names = [self._ref_name(p) for p in grp]
             row = tk.Frame(
                 self._prereq_box,
@@ -2805,7 +2791,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
                 font=("Georgia", 9, "italic"),
             ).pack(anchor="w")
             return
-        for i, mid in enumerate(self.selected.mutex):
+        for i, mid in enumerate(mutex):
             name = self._ref_name(mid)
             row = tk.Frame(
                 self._mutex_box,
@@ -3237,6 +3223,8 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             self._undo_stack.clear()
 
             # Set tree ID
+            self._navigation_started = True
+            self._navigation_source = ""
             self._tree_id.set(tree_id)
             self._update_title()
 
@@ -3312,6 +3300,9 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         self._new_focus_at(gx, gy)
 
     def _new_focus_at(self, wx, wy):
+        editor = self.__dict__.get("_focus_editor")
+        if editor is not None and not editor.flush():
+            return
         try:
             f = self.focuses.new_focus(wx, wy)
         except ValueError as e:
@@ -3321,6 +3312,9 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         pfx = self._default_focus_prefix
         if pfx:
             f.name = f"{pfx}focus_{f.id:d}"
+        if not getattr(self, "_navigation_started", False):
+            self._navigation_source = ""
+        self._navigation_started = True
         self.focuses.add(f)
         self._redraw()
         self._select(f)
@@ -3405,6 +3399,9 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
 
     def _delete_selected(self):
         """Delete all multi-selected focuses with confirmation."""
+        editor = self.__dict__.get("_focus_editor")
+        if editor is not None and not editor.flush():
+            return
         if not self._multi_sel:
             messagebox.showinfo(
                 tr("dialog.no_selection.title", "No Selection"),
@@ -3466,6 +3463,9 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             self._delete_focus()
 
     def _delete_focus(self):
+        editor = self.__dict__.get("_focus_editor")
+        if editor is not None and not editor.flush():
+            return
         if not self.selected:
             return
         fid = self.selected.id
@@ -3481,6 +3481,9 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         self._invalidate_focus_list_structure()
 
     def _clear_all(self):
+        editor = self.__dict__.get("_focus_editor")
+        if editor is not None and not editor.flush():
+            return
         if not messagebox.askyesno(
             tr("dialog.clear_all.title", "Clear All"),
             tr("dialog.clear_all.body", "Delete ALL focuses?"),
@@ -3672,7 +3675,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         btn_row.pack(fill="x", padx=10, pady=8)
 
         def _confirm_or():
-            group = list(focus_list.selected_keys)
+            group = [f.id for f in sorted_cands if f.id in focus_list.selected_keys]
             if not group:
                 messagebox.showwarning(
                     tr("dialog.no_selection.title", "No Selection"),
@@ -3689,7 +3692,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             win.destroy()
 
         def _confirm_and():
-            fids = list(focus_list.selected_keys)
+            fids = [f.id for f in sorted_cands if f.id in focus_list.selected_keys]
             if not fids:
                 messagebox.showwarning(
                     tr("dialog.no_selection.title", "No Selection"),
@@ -4445,7 +4448,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
                 parent=self,
             )
 
-    def _import_txt(self):
+    def _import_txt(self, *, path=None):
         if not self._confirm_discard(action="importing"):
             return
         # If mod is loaded, open directly in common/national_focus
@@ -4454,16 +4457,17 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             nf_dir = os.path.join(MOD.root, "common", "national_focus")
             if os.path.isdir(nf_dir):
                 init_dir = nf_dir
-        path = filedialog.askopenfilename(
-            initialdir=init_dir,
-            filetypes=[
-                (tr("filetype.hoi4_focus_tree", "HOI4 Focus Tree"), "*.txt"),
-                (tr("filetype.all", "All"), "*.*"),
-            ],
-            title=tr(
-                "filedialog.import_hoi4_focus_tree", "Import HOI4 Focus Tree .txt"
-            ),
-        )
+        if path is None:
+            path = filedialog.askopenfilename(
+                initialdir=init_dir,
+                filetypes=[
+                    (tr("filetype.hoi4_focus_tree", "HOI4 Focus Tree"), "*.txt"),
+                    (tr("filetype.all", "All"), "*.*"),
+                ],
+                title=tr(
+                    "filedialog.import_hoi4_focus_tree", "Import HOI4 Focus Tree .txt"
+                ),
+            )
         if not path:
             return
         try:
@@ -4531,6 +4535,8 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             # Commit import targets only after parse/build succeeded and this
             # generation is still current.
             MOD.edit_focus_file = path
+            self._navigation_started = True
+            self._navigation_source = path
             if detected_loc_path:
                 MOD.edit_loc_file = detected_loc_path
 
@@ -4898,6 +4904,9 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         show_dialog=True,
     ):
         """Export a single extra (shared/joint) tree to its source file."""
+        editor = self.__dict__.get("_focus_editor")
+        if editor is not None and not editor.flush():
+            return
         if focuses_in_tree is None:
             focuses_in_tree = [
                 focus
@@ -5391,6 +5400,9 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
 
     def _save_all_trees(self):
         """Export all loaded trees (main + extra) with one click."""
+        editor = self.__dict__.get("_focus_editor")
+        if editor is not None and not editor.flush():
+            return
         self._autosave()
         focuses_by_tree = group_focuses_by_tree(self.focuses.values())
         focus_lookup = dict(self.focuses)
@@ -5760,14 +5772,16 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
                     },
                 )
             )
-        self.workspace.canvas_min = tuple(self._canvas_min)
-        self.workspace.canvas_max = tuple(self._canvas_max)
+        self.workspace.canvas_min = (self._canvas_min[0], self._canvas_min[1])
+        self.workspace.canvas_max = (self._canvas_max[0], self._canvas_max[1])
         self.workspace.default_focus_prefix = self._default_focus_prefix
         return self.workspace
 
     def _install_workspace(self, workspace):
         self._begin_document_generation()
         self.workspace = workspace
+        self._navigation_started = True
+        self._navigation_source = workspace.main_tree.file_path
         self.focuses = workspace.focuses
         self._undo_stack.clear()
         meta = workspace.main_tree.metadata
@@ -5819,6 +5833,9 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         self._default_focus_prefix = workspace.default_focus_prefix
 
     def _save(self, *, save_as=False):
+        editor = self.__dict__.get("_focus_editor")
+        if editor is not None and not editor.flush():
+            return False
         path = choose_project_save_path(
             getattr(self, "_last_project_path", None),
             save_as=save_as,
@@ -5995,17 +6012,9 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             EFFECT_CATS[:] = base_cats + sorted(md_cats)
         else:
             EFFECT_CATS[:] = base_cats
-        income_btn = getattr(self, "_additional_income_btn", None)
-        if income_btn is not None:
-            if MOD.is_md:
-                if income_btn.winfo_manager() != "pack":
-                    separator = getattr(self, "_additional_income_separator", None)
-                    pack_options = {"side": "left", "padx": 2, "pady": 3}
-                    if separator is not None:
-                        pack_options["before"] = separator
-                    income_btn.pack(**pack_options)
-            else:
-                income_btn.pack_forget()
+        refresh_commands = getattr(self, "_refresh_canvas_commands", None)
+        if refresh_commands is not None:
+            refresh_commands()
 
     def _open_settings(self):
         """Settings panel — GFX paths, MD detection, extra dirs."""
@@ -6051,6 +6060,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
 
     def _update_statusbar(self):
         """Refresh all status bar labels."""
+        update_editor_status(self)
         if not hasattr(self, "_sb_focus_lbl"):
             return
         tid = self._tree_id.get() or tr("status.no_tree", "no tree")
@@ -6086,89 +6096,36 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
 
     # ─────────────────── FOCUS LIST PANEL ────────────────────────
     def _refresh_focus_list_debounced(self):
-        """Coalesce rapid search-box keystrokes into one structural refresh."""
-        if getattr(self, "_lp_search_job", None):
-            try:
-                self.after_cancel(self._lp_search_job)
-            except Exception:
-                pass
-        self._lp_search_job = self.after(120, self._invalidate_focus_list_structure)
+        """Filter the existing project snapshot without rebuilding it."""
+        self._project_sidebar.schedule_filter()
 
     def _invalidate_focus_list_structure(self):
-        """Refresh list data after add/delete/rename/import or search changes."""
-        self._lp_search_job = None
-        if not hasattr(self, "_focus_list"):
-            return
-        worst = self._validation_worst
-
-        def _build_items():
-            return (
-                FocusListItem(
-                    f.id,
-                    f.name,
-                    has_effects=bool(f.effects),
-                    has_broken_prerequisite=any(
-                        pid not in self.focuses for group in f.prereqs for pid in group
-                    ),
-                    validation_severity=worst.get(f.id),
-                )
-                for f in self.focuses.values()
-            )
-
-        # Rebuild the item tuple only when the document structure changes;
-        # search keystrokes just re-filter the cached tuple.
-        self._focus_list_items = self._focus_list_cache.get(self.focuses, _build_items)
-        # patch cached items if validation changed without document revision bump
-        if self._focus_list_items:
-            needs_patch = any(
-                item.validation_severity != worst.get(item.key)
-                for item in self._focus_list_items
-            )
-            if needs_patch:
-                self._focus_list_cache.invalidate()
-                self._focus_list_items = self._focus_list_cache.get(
-                    self.focuses, _build_items
-                )
-        query = self._lp_search_var.get() if hasattr(self, "_lp_search_var") else ""
-        placeholder = tr("common.search_placeholder", "Search...")
-        selected_id = self.selected.id if self.selected else None
-        self._focus_list.invalidate_structure(
-            self._focus_list_items,
-            query=query,
-            placeholder=placeholder,
-            selected_key=selected_id,
-        )
+        """Refresh project ownership and focus labels after document changes."""
+        if hasattr(self, "_project_sidebar"):
+            self._project_sidebar.refresh()
 
     def _update_focus_list_selection(self):
-        """Update at most the old and new materialized row highlights."""
-        if not hasattr(self, "_focus_list"):
-            return
-        sel_id = self.selected.id if self.selected else None
-        self._focus_list.update_selection(sel_id)
+        """Synchronize explorer selection after a canvas selection."""
+        if hasattr(self, "_project_sidebar"):
+            self._project_sidebar.sync_selection(force=True)
 
     def _select_focus_from_list(self, focus_id):
         if focus_id in self.focuses:
-            self._select(self.focuses[focus_id])
-            self._redraw()
+            if self._select(self.focuses[focus_id]) is False:
+                return
+            self._center_on_focus(focus_id)
+            self.cv.focus_set()
 
     def _toggle_focus_list(self):
-        """Show/hide the left focus list panel."""
-        if not hasattr(self, "_left_panel"):
-            return
-        if self._left_panel_visible:
-            self._left_panel.pack_forget()
-            self._left_panel_visible = False
-            if hasattr(self, "_lp_collapse_btn"):
-                self._lp_collapse_btn.config(text="▶")
-        else:
-            self._left_panel.pack(side="left", fill="y", before=self.cv)
-            self._left_panel_visible = True
-            if hasattr(self, "_lp_collapse_btn"):
-                self._lp_collapse_btn.config(text="◀")
+        """Collapse or restore project navigation without losing its state."""
+        self._project_sidebar.toggle()
 
     # ─────────────────── DUPLICATE FOCUS ─────────────────────────
     def _duplicate_focus(self):
         """Duplicate the currently selected focus."""
+        editor = self.__dict__.get("_focus_editor")
+        if editor is not None and not editor.flush():
+            return
         if not self.selected:
             messagebox.showinfo(
                 tr("dialog.duplicate.title", "Duplicate"),
@@ -6444,6 +6401,9 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
 
     def _validate_tree(self):
         """Validate tree via pure validator and show filterable dialog."""
+        editor = self.__dict__.get("_focus_editor")
+        if editor is not None and not editor.flush():
+            return
         from tkinter import ttk
 
         try:
@@ -6452,6 +6412,8 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             issues = validate_document(self.focuses, sprites=sprites, loc_keys=loc_keys)
             self._validation_issues = issues
             self._validation_worst = worst_severity_per_focus(issues)
+            if self.__dict__.get("_editor_chrome") is not None:
+                validation_completed(self, validation_signature(self))
             self._redraw()
             self._invalidate_focus_list_structure()
         except Exception:
@@ -6568,27 +6530,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         # Treeview with scrollbar
         sb = tk.Scrollbar(frm)
         sb.pack(side="right", fill="y")
-        style = ttk.Style()
-        try:
-            style.theme_use("clam")
-            style.configure(
-                "Val.Treeview",
-                background="#050810",
-                foreground=TEXT,
-                fieldbackground="#050810",
-                borderwidth=0,
-                highlightthickness=0,
-                rowheight=22,
-            )
-            style.configure(
-                "Val.Treeview.Heading",
-                background="#1e293b",
-                foreground=TEXT,
-                relief="flat",
-            )
-            style.map("Val.Treeview", background=[("selected", "#1e2d4a")])
-        except Exception:
-            pass
+        configure_validation_style(self)
         tree = ttk.Treeview(
             frm,
             columns=("sev", "focus", "message", "code"),
@@ -6679,6 +6621,9 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         self, *, focuses_in_tree=None, focus_name_lookup=None, show_dialog=True
     ):
         """Export the main tree through the shared background export pipeline."""
+        editor = self.__dict__.get("_focus_editor")
+        if editor is not None and not editor.flush():
+            return
         try:
             if self.selected:
                 self._autosave()
@@ -6709,6 +6654,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             if failures or not show_dialog:
                 return
             result = results[0]
+            assert plan.loc_path is not None
             if result.localisation_added:
                 loc_saved = "\n" + tr(
                     "export.localisation_added",

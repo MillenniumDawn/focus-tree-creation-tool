@@ -11,7 +11,7 @@ import re
 import tkinter as tk
 from collections.abc import Callable
 from tkinter import filedialog, messagebox
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from hoi4cm.core import (
     convert_newlines,
@@ -41,6 +41,11 @@ from hoi4cm.ui.theme import (
 from hoi4cm.ui.widgets import grab_when_visible
 from hoi4cm.wizards import _shared as _wiz_shared
 
+if TYPE_CHECKING:
+    from _tkinter import TkappType
+
+    from hoi4cm.models import Focus
+
 log = get_logger("mod_loading")
 
 # Alias used by the moved methods (matches the monolith's alias).
@@ -53,10 +58,40 @@ class ModLoadingMixin:
     _mod_lbl: tk.Label
     cv: tk.Canvas
     _focus_bundles: dict[int, FocusCanvasBundle]
-    _lifecycle: ApplicationLifecycle | None
     _mod_image_resource_registered: bool
     _config_write_warned: bool
-    _schedule_validation: Callable[[], None]
+
+    _lifecycle: ApplicationLifecycle | None
+
+    if TYPE_CHECKING:
+        selected: Focus | None
+        tk: TkappType
+
+        def _schedule_validation(self) -> None: ...
+
+        def _apply_md_visibility(self) -> None: ...
+
+        def _update_statusbar(self) -> None: ...
+
+        def _invalidate_canvas_images(self) -> None: ...
+
+        def _reclaim_focus_bundles(self, live_ids: set[int], /) -> None: ...
+
+        def _redraw_now(self) -> None: ...
+
+        def _refresh_effects(self, force: bool = False) -> None: ...
+
+        def after[**P](
+            self,
+            ms: int | Literal["idle"],
+            func: Callable[P, object],
+            *args: P.args,
+            **kwargs: P.kwargs,
+        ) -> str: ...
+
+        def after_cancel(self, id: str) -> None: ...
+
+        def winfo_exists(self) -> int: ...
 
     def _warn_config_write_failed(self) -> None:
         """Show a one-time-per-session warning when a config write fails."""
@@ -140,7 +175,11 @@ class ModLoadingMixin:
         )
         if lifecycle is not None and not self._mod_image_resource_registered:
             self._mod_image_resource_registered = True
-            lifecycle.add_resource(lambda: MOD.sprite_imgs.clear())
+
+            def clear_sprite_images() -> None:
+                MOD.sprite_imgs.clear()
+
+            lifecycle.add_resource(clear_sprite_images)
 
         def progress(i, total, label):
             pw.set_text(

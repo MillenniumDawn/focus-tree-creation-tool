@@ -14,15 +14,16 @@ log = get_logger("lifecycle")
 
 
 class TclInterpreter(Protocol):
-    def call(self, *args: object) -> object: ...
+    def call(self, command: object, /, *args: object) -> object: ...
 
 
 class TkOwner(Protocol):
-    tk: TclInterpreter
+    @property
+    def tk(self) -> TclInterpreter: ...
 
-    def after(self, milliseconds: int, callback: Callable[[], None]) -> object: ...
+    def after(self, milliseconds: int, callback: Callable[[], None], /) -> str: ...
 
-    def after_cancel(self, identifier: object) -> None: ...
+    def after_cancel(self, identifier: str, /) -> None: ...
 
     def winfo_exists(self) -> int: ...
 
@@ -51,7 +52,7 @@ class ApplicationLifecycle:
         self._finished = False
         self._generations: dict[str, int] = {}
         self._scope_futures: dict[str, set[Future]] = {}
-        self._after_jobs: list[tuple[TkOwner, object]] = []
+        self._after_jobs: list[tuple[TkOwner, str]] = []
         self._resources: list[Callable[[], None]] = []
         self._lock = threading.RLock()
 
@@ -128,12 +129,12 @@ class ApplicationLifecycle:
         callback: Callable[[], None],
         *,
         token: GenerationToken | None = None,
-    ) -> object | None:
+    ) -> str | None:
         with self._lock:
             if not self._accepting:
                 return None
         active_token = token or self.token()
-        job: object | None = None
+        job: str | None = None
 
         def guarded() -> None:
             if job is not None:
@@ -197,7 +198,7 @@ class ApplicationLifecycle:
         self.begin_close()
         self.finish_close()
 
-    def _forget_after(self, owner: TkOwner, job: object) -> None:
+    def _forget_after(self, owner: TkOwner, job: str) -> None:
         with self._lock:
             try:
                 self._after_jobs.remove((owner, job))
@@ -220,7 +221,7 @@ class ApplicationLifecycle:
             return False
 
     @staticmethod
-    def _cancel_after(owner: TkOwner, job: object) -> None:
+    def _cancel_after(owner: TkOwner, job: str) -> None:
         try:
             owner.after_cancel(job)
         except AttributeError, RuntimeError, tk.TclError:

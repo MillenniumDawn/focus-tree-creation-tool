@@ -8,12 +8,33 @@ the version by hand. See `AGENTS.md`.
 
 ## Unreleased
 
+- Enable Spotlight on Linux and macOS with a solid dark background while
+  preserving Windows color-key transparency.
+- Measure project-sidebar coverage in the isolated Tk smoke without lowering
+  the package floor, and run the Windows Spotlight smoke in CI. Preserve
+  translations for moved controls and add the Add Child undo label.
+- Correct UI host and Tk timer types, stop polling a released image broker,
+  and check event-import text and optional Pillow preview handling.
+
 - Add a UI language by dropping `locales/<code>.json` into the folder: the
   language list is read from the files, each naming itself in `_meta`. Wrap the
   wizard, settings, undo, canvas and validation text that bypassed `tr()`, and
   add the keys the code used but the locale files lacked. The German, Spanish and
   Chinese strings added here are machine translations and need native review. A
   test now fails when a `tr()` key is missing from `en.json` or a locale drifts.
+- Keep the project explorer dark after opening Validate by preserving the app-wide
+  ttk theme and styling only the validation table.
+
+- Move content tools into a resizable navy sidebar with supplied icons and a
+  searchable project explorer; preserve tree ownership, focus selection and
+  Spotlight, and browse real source resources without changing files.
+- List all mod focus-tree source files in the project explorer and provide a
+  New Focus Tree action; open existing files through the guarded import workflow.
+
+- Float enlarged focus artwork and radial actions over the dimmed editor,
+  removing the Spotlight panel and card; reflow controls for small windows.
+- Add contextual focus actions and editing, content navigation, and visible save
+  and validation status with dedicated tree settings (#332).
 - Record a failed sibling autosave once in the error log, including its path.
   Repeated ticks for the same failure do not add another entry.
 

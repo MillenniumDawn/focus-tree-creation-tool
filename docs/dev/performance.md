@@ -402,3 +402,17 @@ changes, and canvas reset. See [the reproducible callback benchmark](perf-322-ca
 Follow-up measured fixes and controls: [recovery serialization](perf-323-recovery.md),
 [wheel coalescing](perf-324-wheel.md), [optional scene fingerprints](perf-325-scene.md),
 [worker/GC investigation](perf-326-worker.md), and [structured icon correctness](perf-327-icons.md).
+
+### Project explorer snapshots
+
+`project_index.py` precomputes case-folded display names, identifiers and paths.
+The sidebar rebuilds this snapshot only at document-revision or project/tree-metadata
+boundaries. Search is debounced by 120 ms and filters the existing snapshot; it does
+not walk mod directories or parse focus scripts on a keystroke. Resource inventories
+are discovered off the Tk thread once per mod root or explicit PROJECT refresh.
+Native Treeview rows avoid creating a Tk widget per focus. Search temporarily opens
+matching ancestors and restores the pre-search expansion state when cleared.
+
+The unopened focus-tree file catalog uses the same worker inventory and refresh
+boundary. Filtering does not rescan files or parse every tree in the mod. Inventory
+results carry a generation token so a stale refresh cannot replace a newer result.

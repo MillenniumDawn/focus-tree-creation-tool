@@ -4,6 +4,8 @@ from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import Mock
 
+import pytest
+
 import hoi4_content_maker as m
 from hoi4cm.core.undo import UndoStack
 from hoi4cm.models import Focus, FocusDocument
@@ -28,7 +30,19 @@ def test_import_txt_cancel_stops_before_file_dialog(monkeypatch):
     askopenfilename.assert_not_called()
 
 
-def test_import_txt_pushes_undo_before_replacing_document(monkeypatch, tmp_path):
+def test_explorer_import_cancel_preserves_draft_before_reading_path(monkeypatch):
+    app = SimpleNamespace(_confirm_discard=Mock(return_value=False))
+    reader = Mock(side_effect=AssertionError("cancelled import must not read files"))
+    monkeypatch.setattr(m, "read_file_with_encoding", reader)
+    m.App._import_txt(cast(m.App, app), path="existing_tree.txt")
+    app._confirm_discard.assert_called_once_with(action="importing")
+    reader.assert_not_called()
+
+
+@pytest.mark.parametrize("from_explorer", [False, True])
+def test_import_txt_pushes_undo_before_replacing_document(
+    monkeypatch, tmp_path, from_explorer
+):
     source = tmp_path / "tree.txt"
     source.write_text("focus_tree = { id = imported }")
     old_focus = Focus(id=1)
@@ -105,7 +119,15 @@ def test_import_txt_pushes_undo_before_replacing_document(monkeypatch, tmp_path)
     monkeypatch.setattr(m.MOD, "root", None)
     monkeypatch.setattr(m.MOD, "edit_focus_file", "", raising=False)
 
-    m.App._import_txt(cast(m.App, app))
+    if from_explorer:
+        monkeypatch.setattr(
+            m.filedialog,
+            "askopenfilename",
+            Mock(side_effect=AssertionError("explorer path already chosen")),
+        )
+        m.App._import_txt(cast(m.App, app), path=str(source))
+    else:
+        m.App._import_txt(cast(m.App, app))
 
     assert calls and calls[0]["scope"] == "document"
     assert list(app.focuses.values()) == [new_focus]

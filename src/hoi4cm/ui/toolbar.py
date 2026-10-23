@@ -1,274 +1,219 @@
-# ruff: noqa: E501
-"""Toolbar row 2: canvas action buttons, wizard shortcuts, coord display."""
+"""Content navigation, project actions, and focus canvas tools."""
 
 import tkinter as tk
 
 from hoi4cm.core.i18n import tr
 from hoi4cm.mod import MOD
+from hoi4cm.ui.editor_chrome import EditorChrome
 from hoi4cm.ui.theme import BG_CARD, BLUE, BORDER_G, ORANGE, TEXT, TEXT_DIM
 from hoi4cm.ui.widgets import Tooltip
 
 
 def build_toolbar_row2(app, toolbar):
-    """Build toolbar row 2: canvas action buttons and coord display."""
-    # ROW 2 — canvas tools (clean grouped toolbar)
-    row2 = tk.Frame(toolbar, bg="#090d14", height=36)
-    row2.pack(fill="x")
-    row2.pack_propagate(False)
+    """Keep content navigation separate from the active focus-tree tools."""
+    background = "#090d14"
+    app._editor_chrome = EditorChrome(app)
 
-    def _tb_sep():
-        separator = tk.Frame(row2, bg=BORDER_G, width=1, height=20)
-        separator.pack(side="left", padx=5)
-        return separator
+    def row():
+        frame = tk.Frame(toolbar, bg=background)
+        frame.pack(fill="x")
+        return frame
 
-    def _tb_lbl(t):
-        tk.Label(
-            row2,
-            text=t,
-            bg="#090d14",
-            fg=TEXT_DIM,
-            font=("Helvetica", 8, "bold"),
-            padx=4,
-        ).pack(side="left")
+    def button(parent, label, command, *, bg=BG_CARD, fg=TEXT, tip=None):
+        widget = app._mk_btn(parent, label, command, bg=bg, fg=fg, padx=8, pady=3)
+        widget.configure(takefocus=True, highlightcolor=BLUE, highlightthickness=2)
+        widget.pack(side="left", padx=2, pady=3)
+        if tip:
+            Tooltip(widget, tip)
+        return widget
 
-    def _tb_btn(lbl, cmd, fg, bg, tip, padx=2):
-        b = tk.Button(
-            row2,
-            text=lbl,
-            command=cmd,
-            bg=bg,
-            fg=fg,
-            activebackground=BORDER_G,
-            activeforeground=TEXT,
-            font=("Helvetica", 9, "bold"),
-            relief="flat",
-            padx=9,
-            pady=2,
-            cursor="hand2",
-            highlightthickness=1,
-            highlightbackground=BORDER_G,
-        )
-        b.pack(side="left", padx=padx, pady=3)
-        Tooltip(b, tip)
-        return b
+    def separator(parent):
+        widget = tk.Frame(parent, bg=BORDER_G, width=1, height=20)
+        widget.pack(side="left", padx=5)
+        return widget
 
-    _tb_lbl(tr("toolbar.section.canvas", "Canvas"))
-    app._add_focus_btn = _tb_btn(
+    context = row()
+    app._editor_context_lbl = tk.Label(
+        context,
+        text="Focus Trees",
+        bg=background,
+        fg=TEXT,
+        padx=8,
+        font=("Helvetica", 10, "bold"),
+    )
+    separator(context)
+    button(context, "Save Project", app._save, bg="#163e2b")
+    button(context, "Validate", app._validate_tree, bg="#26375a")
+    button(context, "Export", app._export, bg="#503818")
+    app._editor_save_lbl = tk.Label(
+        context, text="Saved", bg=background, fg=TEXT_DIM, padx=8
+    )
+    app._editor_save_lbl.pack(side="left")
+    app._editor_validation_lbl = tk.Label(
+        context, text="Validation: not run", bg=background, fg=TEXT_DIM, padx=4
+    )
+    app._editor_validation_lbl.pack(side="left")
+    app._editor_context_lbl.pack(side="right", padx=8)
+
+
+def build_canvas_toolbar(app, toolbar):
+    """Keep canvas tools beside the project sidebar."""
+    background = "#090d14"
+    chrome = app._editor_chrome
+
+    def row():
+        frame = tk.Frame(toolbar, bg=background)
+        frame.pack(fill="x")
+        return frame
+
+    def button(parent, label, command, *, bg=BG_CARD, fg=TEXT, tip=None):
+        widget = app._mk_btn(parent, label, command, bg=bg, fg=fg, padx=8, pady=3)
+        widget.configure(takefocus=True, highlightcolor=BLUE, highlightthickness=2)
+        widget.pack(side="left", padx=2, pady=3)
+        if tip:
+            Tooltip(widget, tip)
+        return widget
+
+    def separator(parent):
+        widget = tk.Frame(parent, bg=BORDER_G, width=1, height=20)
+        widget.pack(side="left", padx=5)
+        return widget
+
+    tools = row()
+    app._sidebar_toggle_btn = button(
+        tools, "Sidebar", app._toggle_focus_list, tip="Collapse or restore sidebar (F)"
+    )
+    app._sidebar_toggle_btn.config(
+        image=app._project_sidebar.collapse_icon, compound="left"
+    )
+    app._add_focus_btn = button(
+        tools,
         tr("toolbar.add_focus", "+ Focus"),
         app._add_focus,
-        TEXT,
-        "#1e3a6e",
-        tr(
-            "toolbar.add_focus.tip",
-            "Add a new focus.\nAlso: right-click the canvas.",
+        bg="#1e3a6e",
+        tip=tr(
+            "toolbar.add_focus.tip", "Add a new focus.\nAlso: right-click the canvas."
         ),
     )
-    app._conn_btn = _tb_btn(
+    app._conn_btn = button(
+        tools,
         tr("toolbar.prereq", "Prereq"),
         app._pick_prereq,
-        TEXT,
-        BG_CARD,
-        tr(
-            "toolbar.prereq.tip",
-            "Open the prerequisite picker for the selected focus.",
+        tip=tr(
+            "toolbar.prereq.tip", "Open the prerequisite picker for the selected focus."
         ),
     )
-    app._mutex_btn = _tb_btn(
+    app._mutex_btn = button(
+        tools,
         tr("toolbar.mutex", "Mutex"),
         app._toggle_mutex,
-        ORANGE,
-        BG_CARD,
-        tr("toolbar.mutex.tip", "Draw a mutually exclusive link."),
+        fg=ORANGE,
+        tip=tr("toolbar.mutex.tip", "Draw a mutually exclusive link."),
     )
-    _tb_sep()
-    _tb_lbl(tr("toolbar.section.tools", "Tools"))
-    _tb_btn(
-        tr("toolbar.ideas", "Ideas"),
-        app._national_spirit_wizard,
-        TEXT,
-        "#1a2040",
-        tr("toolbar.ideas.tip", "Build National Spirits / Ideas."),
+    separator(tools)
+    button(
+        tools,
+        "Search Focuses",
+        chrome.search,
+        tip="Open the focus list and search by focus ID or name.",
     )
-    _tb_btn(
-        tr("toolbar.dyn_mod", "Dyn Mod"),
-        app._dyn_mod_wizard,
-        TEXT,
-        BG_CARD,
-        tr("toolbar.dyn_mod.tip", "Dynamic Modifier wizard."),
-    )
-    _tb_btn(
-        tr("toolbar.decisions", "Decisions"),
-        app._decision_wizard,
-        TEXT,
-        BG_CARD,
-        tr("toolbar.decisions.tip", "Decision / Decision Category maker."),
-    )
-    _tb_btn(
-        tr("toolbar.events", "Events"),
-        app._event_wizard,
-        TEXT,
-        BG_CARD,
-        tr("toolbar.events.tip", "Event Maker wizard."),
-    )
-    app._additional_income_btn = _tb_btn(
+    button(tools, "Reveal Selected", chrome.reveal)
+    button(tools, "Focus Actions", chrome.actions)
+    separator(tools)
+    button(tools, "Tree Settings", lambda: app._focus_editor.open_tree_settings())
+    app._additional_income_btn = button(
+        tools,
         tr("toolbar.add_income", "Add Income"),
         app._additional_income_wizard,
-        "#4ade80",
-        "#0d2b1a",
-        tr(
+        fg="#4ade80",
+        bg="#0d2b1a",
+        tip=tr(
             "toolbar.add_income.tip",
-            "MD Additional Income Wizard - creates/links a spirit and wires up all money system files automatically.",
+            "MD Additional Income Wizard - creates/links a spirit and wires up "
+            "all money system files automatically.",
         ),
     )
-    app._additional_income_separator = _tb_sep()
+    app._additional_income_separator = separator(tools)
     if not MOD.is_md:
         app._additional_income_btn.pack_forget()
-    _tb_lbl(tr("toolbar.section.select", "Select"))
-    app._msel_btn = _tb_btn(
+
+    view = row()
+    button(view, "Fit", app._fit_all)
+    button(view, "−", lambda: chrome.zoom(1 / 1.2), tip="Zoom out")
+    app._editor_zoom_lbl = tk.Label(view, text="100%", width=5, bg=background, fg=TEXT)
+    app._editor_zoom_lbl.pack(side="left")
+    button(view, "+", lambda: chrome.zoom(1.2), tip="Zoom in")
+    separator(view)
+    app._msel_btn = button(
+        view,
         tr("toolbar.multi", "Multi"),
         app._toggle_multisel,
-        TEXT,
-        "#1a1a2e",
-        tr(
+        bg="#1a1a2e",
+        tip=tr(
             "toolbar.multi.tip",
             "Toggle multi-select mode.\nCtrl+click focuses, then Delete.",
         ),
     )
-    _tb_btn(
+    button(
+        view,
         tr("toolbar.delete_selected", "Del Selected"),
         app._delete_selected,
-        TEXT,
-        "#4a1010",
-        tr("toolbar.delete_selected.tip", "Delete all selected focuses."),
+        bg="#4a1010",
+        tip=tr("toolbar.delete_selected.tip", "Delete all selected focuses."),
     )
-    _tb_sep()
-    _tb_btn(
+    button(
+        view,
         tr("toolbar.clear_all", "Clear All"),
         app._clear_all,
-        TEXT,
-        "#7f1d1d",
-        tr(
-            "toolbar.clear_all.tip",
-            "Delete ALL focuses from the canvas.\nSave first!",
+        bg="#7f1d1d",
+        tip=tr(
+            "toolbar.clear_all.tip", "Delete ALL focuses from the canvas.\nSave first!"
         ),
     )
-    _tb_sep()
-    _tb_lbl(tr("toolbar.section.multi_tree", "Multi-Tree"))
-    _tb_btn(
-        tr("toolbar.shared", "+ Shared"),
-        lambda: app._load_extra_tree("shared"),
-        TEXT,
-        "#2d1c08",
-        tr(
-            "toolbar.shared.tip",
-            "Load a shared_focus tree alongside the main tree.\nIts focuses appear on canvas with amber [S] badges.",
-        ),
-    )
-    _tb_btn(
-        tr("toolbar.joint", "+ Joint"),
-        lambda: app._load_extra_tree("joint"),
-        TEXT,
-        "#1a0d40",
-        tr(
-            "toolbar.joint.tip",
-            "Load a joint_focus tree alongside the main tree.\nIts focuses appear on canvas with purple [J] badges.",
-        ),
-    )
-    _tb_btn(
-        tr("toolbar.load_all", "Load All"),
-        app._load_all_trees,
-        TEXT,
-        "#0d1a2e",
-        tr(
-            "toolbar.load_all.tip",
-            "Scan the mod's national_focus folder and load selected trees from a checklist.",
-        ),
-    )
-    _tb_btn(
-        tr("toolbar.save_all", "Save All"),
-        app._save_all_trees,
-        "#4ade80",
-        "#0d1a0a",
-        tr(
-            "toolbar.save_all.tip",
-            "Export all loaded trees (main + shared + joint) at once.",
-        ),
-    )
-
-    # Coord display right side
     app._coord_lbl = tk.Label(
-        row2,
+        view,
         text="  x=0  y=0  ",
-        bg="#090d14",
+        bg=background,
         fg=TEXT_DIM,
         font=("Courier", 9),
         padx=4,
     )
     app._coord_lbl.pack(side="right", padx=4)
-    tk.Label(
-        row2,
-        text=tr("toolbar.cursor", "Cursor:"),
-        bg="#090d14",
-        fg=TEXT_DIM,
-        font=("Helvetica", 8),
-    ).pack(side="right")
-
-    # Continuous Focus Position inputs (tree-level setting)
-    tk.Frame(row2, bg=BORDER_G, width=1, height=20).pack(side="right", padx=5)
-
-    def _cfp_commit(*_):
-        try:
-            app._cfp_x = int(app._cfp_x_var.get())
-        except ValueError, TypeError, tk.TclError, AttributeError:
-            pass
-        try:
-            app._cfp_y = int(app._cfp_y_var.get())
-        except ValueError, TypeError, tk.TclError, AttributeError:
-            pass
-
-    _cfp_y_ent = tk.Entry(
-        row2,
-        textvariable=app._cfp_y_var,
-        width=6,
-        bg=BG_CARD,
-        fg=TEXT,
-        insertbackground=BLUE,
-        font=("Courier", 9),
-        relief="flat",
-        highlightthickness=1,
-        highlightbackground=BORDER_G,
-    )
-    _cfp_y_ent.pack(side="right", ipady=1, padx=(0, 2))
-    _cfp_y_ent.bind("<FocusOut>", _cfp_commit)
-    _cfp_y_ent.bind("<Return>", _cfp_commit)
-    tk.Label(row2, text="y:", bg="#090d14", fg=TEXT_DIM, font=("Courier", 9)).pack(
-        side="right"
-    )
-    _cfp_x_ent = tk.Entry(
-        row2,
-        textvariable=app._cfp_x_var,
-        width=6,
-        bg=BG_CARD,
-        fg=TEXT,
-        insertbackground=BLUE,
-        font=("Courier", 9),
-        relief="flat",
-        highlightthickness=1,
-        highlightbackground=BORDER_G,
-    )
-    _cfp_x_ent.pack(side="right", ipady=1, padx=(0, 2))
-    _cfp_x_ent.bind("<FocusOut>", _cfp_commit)
-    _cfp_x_ent.bind("<Return>", _cfp_commit)
-    tk.Label(row2, text="x:", bg="#090d14", fg=TEXT_DIM, font=("Courier", 9)).pack(
-        side="right"
-    )
-    tk.Label(
-        row2,
-        text=tr("toolbar.continuous_focus_pos", "Continuous Focus Pos:"),
-        bg="#090d14",
-        fg=TEXT_DIM,
-        font=("Helvetica", 8),
-    ).pack(side="right")
+    Tooltip(app._coord_lbl, f"{tr('toolbar.cursor', 'Cursor:')} x / y")
+    for frame in (tools, view):
+        _wrap_commands(app, frame)
 
 
-__all__ = ["build_toolbar_row2"]
+def _wrap_commands(app, frame):
+    """Wrap real controls at narrow widths, preserving keyboard access."""
+    widgets = frame.winfo_children()
+
+    previous = None
+    frame.pack_propagate(False)
+
+    def reflow(event=None):
+        nonlocal previous
+        signature = frame.winfo_width(), MOD.is_md
+        if signature == previous:
+            return
+        previous = signature
+        x, y, height = 3, 3, 0
+        for widget in widgets:
+            widget.pack_forget()
+            widget.place_forget()
+            if widget is app._additional_income_btn and not MOD.is_md:
+                continue
+            width = widget.winfo_reqwidth()
+            if x > 3 and x + width + 3 > frame.winfo_width():
+                x, y, height = 3, y + height + 6, 0
+            widget.place(x=x, y=y)
+            x += width + 6
+            height = max(height, widget.winfo_reqheight())
+        frame.configure(height=y + height + 3)
+
+    frame.bind("<Configure>", reflow)
+    if app._additional_income_btn in widgets:
+        app._refresh_canvas_commands = reflow
+
+
+__all__ = ["build_canvas_toolbar", "build_toolbar_row2"]

@@ -65,7 +65,9 @@
   parameter form), and `ModLoadingMixin` (`mod_loading.py`). Their shared
   host-state requirements are recorded as `CanvasHost`, `EffectsHost`, and
   `ModLoadingHost` protocols in `app_contracts.py`, checked against `App`
-  without adding runtime inheritance — plus
+  without adding runtime inheritance. Canvas and mod-loading host methods
+  are declared under `TYPE_CHECKING`; lifecycle timer IDs and the headless
+  host use Tk's string IDs. The package also holds
   `gfx_browser.py` (the universal GFX picker, the drag-to-place GFX
   editor, and the sidebar's narrower focus-icon picker, see
   `monolith-migration.md` for why there are two GFX browsers instead of
@@ -73,11 +75,17 @@
   spirit, event and dynamic-modifier wizards' picture fields),
   `settings_dialog.py` (`open_settings`), `menubar.py`/`toolbar.py`
   (`build_menubar`/`build_toolbar_row2`, the one-shot builders behind
-  `App`'s top bar), `tutorial.py` (the first-launch teaching controller
+  `App`'s top bar), `editor_chrome.py` (content navigation and save/validation
+  status), `project_sidebar.py` (resizable/collapsible content navigation and
+  native project Treeview), `project_index.py` (read-only ownership snapshots,
+  ancestor-preserving name/ID/path filtering and resource discovery), `focus_editor.py` (the persistent contextual focus editor and tree
+  settings), `focus_actions.py` (captured-target canvas actions),
+  `tutorial.py` (the first-launch teaching controller
   and widget highlights; it drives preview-only dropdowns through
   `menubar.MenuController`), `tasks.py` (the `run_bg`/`progress_modal`
   background-worker plumbing, see "Threading model" below), theme
-  constants, and small shared widgets (`Tooltip`, `_safe_after`).
+  constants, and small shared widgets (`Tooltip`, `_safe_after`,
+  `UnderlinedTabButton`).
   The virtualized pooled-row lists live here too: `focus_list.py`'s
   `VirtualFocusList` over `_PooledList`, reused by `checklist.py`'s
   `VirtualChecklist` and `loaded_trees.py` (the sidebar's Loaded Trees
@@ -107,6 +115,32 @@
 - **`perf/`**: the deterministic profiling harness (`tracking.py`, stdlib
   only, no tkinter) that `scripts/track_perf.py` drives; see
   `performance.md` for the areas and how to read a report.
+
+## Contextual editing and status
+
+`FocusActions` owns the transient focus action buttons, their keyboard/list
+fallback, captured focus ID, and lifecycle cleanup. Its PNG icons live in
+`ui/assets/`, which the generated PyInstaller spec bundles beside the module.
+`FocusEditor` owns one reusable window containing the existing Properties,
+Effects, Conditions, and Code form. Advanced settings reveal the less common
+properties and the Conditions/Code tabs. Tree settings share that window and
+contain the loaded-tree controls, tree ID, and continuous-focus position.
+`flush_pending_editor` validates numeric and occupied-position drafts and applies
+unlocked code before selection, close, save, export, or undo can replace the form.
+Invalid drafts remain visible for correction. Widget builders and population
+still live in `App`; this changes their host, not their ownership.
+
+`EditorChrome` keeps content navigation separate from focus-canvas tools, shows
+the active content/tree, and exposes Save Project, Validate, Export, search,
+reveal, and grouped zoom controls. Other content types open their existing
+wizards; returning to Focus Trees preserves open wizard drafts. The status
+controller polls only the selected form and code draft. Its signature combines
+document revisions, explicit committed-edit signals, copied tree metadata, and
+observation of the selected focus's committed fields/effects. It does not
+serialize the workspace or walk all focus IDs on a status refresh. Successful
+save/load records the saved signature; validation records its dispatch-time
+signature, so a late result cannot mark newer edits current. This UI observation
+does not replace the document's geometry/index revision discipline below.
 
 ## Dataflow
 
@@ -393,3 +427,58 @@ snapshots its state before submission, then reports results and calls
 `performance.md`'s GIL guidance still applies: threads here buy UI
 responsiveness, not parse concurrency, which is why multi-file work processes
 files sequentially rather than fanning out across workers.
+
+### Focus Spotlight presentation
+
+`ui/focus_spotlight.py` owns presentation; `ui/focus_actions.py` keeps the
+captured target and delegates to the existing editor/action handlers. On
+Windows, a translucent owned Toplevel dims the application's client area and
+another Toplevel uses `-transparentcolor` for the space between the artwork,
+labels and rounded buttons. Linux and macOS use the same controls on a solid
+dark surface without requesting the Windows-only Tk attribute. Both windows
+are transient to the app; the foreground is raised and focused after the veil
+to preserve Windows stacking order.
+
+`spotlight_layout` computes zoom-independent radial geometry and reflows to
+rows on narrow windows. A scroll viewport and keyboard traversal
+keep every action reachable in short windows. The image broker loads the
+selected GFX at 140–168 logical pixels, preserving aspect ratio and alpha;
+missing artwork retains the focus's own fallback symbol. Closing releases the
+broker owner and modal grab, then restores the original view and keyboard
+widget without a document edit or undo entry. Background clicks dismiss
+without passing through to the editor, including Windows color-key holes.
+
+CI runs the same Spotlight smoke on Linux, Windows and macOS, covering
+resizing, keyboard traversal, dismissal and all six existing handlers.
+
+### Project navigation (#332, phase 2)
+
+The project sidebar groups focuses by their existing `tree_idx` and retains each
+extra tree's type and source path. It never infers country ownership, edits the
+shared/joint registry or changes export paths. Single selection reveals a focus;
+Enter, double-click or Shift+F10 opens the existing Spotlight. Treeview arrow keys
+expand/select without reaching canvas nudge bindings. Selection and content-tool
+switches use the contextual editor's flush boundary; invalid drafts remain intact.
+
+The supplied transparent sidebar symbols live under `ui/assets/sidebar/` and load
+through Tk alone. Tk draws all text, backgrounds, accents and selection states.
+The project bar retains save/validate/export; canvas commands wrap above the canvas.
+Resource discovery lists existing localisation, graphics and scripted-effect source
+files on a worker. Enter on a file reveals its containing folder. Discovery reads
+no source contents and writes no files. Unloaded, empty and failed discovery states
+are explicit. Refresh beside PROJECT reruns discovery after external file changes.
+
+The Focus Trees explorer group also lists unopened `.txt` files discovered under
+`common/national_focus/`, including subdirectories. A lightweight scan of actual
+block declarations excludes utility files and ignores comments/quoted strings.
+These are source filenames,
+not guessed country ownership or parsed tree IDs. Enter/double-click delegates to
+`App._import_txt(path=...)` with the same draft/save/discard guards as File > Import.
+Loaded main/shared/joint source paths are excluded from the unopened list. A
+persistent New Focus Tree button uses the existing setup dialog after flushing
+pending edits. The inventory is cached with other mod source discovery.
+
+Validation table styling is local to Val.Treeview in
+`editor_chrome.configure_validation_style`. Its table area and heading border
+avoid native white fills without calling `theme_use`, which would invalidate the
+project explorer's styles elsewhere in the same Tk interpreter.
