@@ -96,6 +96,24 @@ def _as_prereqs(value: object) -> list[list[int]]:
     return [_as_id_list(group) for group in value if isinstance(group, list)]
 
 
+def _as_name_groups(value: object) -> list[list[str]]:
+    if not isinstance(value, list):
+        return []
+    return [
+        [item for item in group if isinstance(item, str)]
+        for group in value
+        if isinstance(group, list)
+    ]
+
+
+def _as_names(value: object) -> list[str]:
+    return (
+        [item for item in value if isinstance(item, str)]
+        if isinstance(value, list)
+        else []
+    )
+
+
 def _as_offsets(value: object) -> list[dict[str, object]]:
     if not isinstance(value, list):
         return []
@@ -164,6 +182,11 @@ _FIELD_COERCERS: dict[str, Callable[[object], object]] = {
     "_rel_dy": _as_optional_int,
     "_joint_extra": _as_string,
     "_script_extras": _as_dict,
+    "_unresolved_prereqs": _as_name_groups,
+    "_unresolved_mutex": _as_names,
+    "_build_gx": _as_optional_int,
+    "_build_gy": _as_optional_int,
+    "_relative_pending": _as_bool,
 }
 
 
@@ -180,6 +203,11 @@ class Focus:
     _rel_dy: int | None
     _joint_extra: str
     _script_extras: dict[str, object] | None
+    _unresolved_prereqs: list[list[str]]
+    _unresolved_mutex: list[str]
+    _build_gx: int | None
+    _build_gy: int | None
+    _relative_pending: bool
 
     def __init__(self, *, id: int, x=0, y=0):  # pylint: disable=redefined-builtin
         self.id = _bounded_id(id)
@@ -240,6 +268,14 @@ class Focus:
         for attr in ("_raw_gx", "_raw_gy", "_rel_dx", "_rel_dy"):
             if attr in nf.__dict__:
                 del nf.__dict__[attr]
+        for attr in (
+            "_build_gx",
+            "_build_gy",
+            "_relative_pending",
+            "_unresolved_prereqs",
+            "_unresolved_mutex",
+        ):
+            nf.__dict__.pop(attr, None)
         return nf
 
     @staticmethod

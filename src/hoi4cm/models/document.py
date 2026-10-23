@@ -211,6 +211,9 @@ class FocusDocument(MutableMapping[int, Focus]):
         if getattr(focus, "_rel_dx", None) is not None:
             focus._rel_dx += dgx
             focus._rel_dy += dgy
+        if getattr(focus, "_build_gx", None) is not None:
+            focus._build_gx += dgx
+            focus._build_gy += dgy
         focus.x, focus.y = x, y
         # Only occupied_positions depends on x/y, so update it in place rather
         # than rebuilding every index. This keeps a drag cheap on a big tree.
@@ -230,12 +233,18 @@ class FocusDocument(MutableMapping[int, Focus]):
         if not parents:
             return
         child = self._focuses[child_id]
+        unresolved = getattr(child, "_unresolved_prereqs", [])
+        while len(unresolved) < len(child.prereqs):
+            unresolved.append([])
         if mode == "or":
             child.prereqs.append(parents)
+            unresolved.append([])
         elif mode == "and":
             child.prereqs.extend([parent_id] for parent_id in parents)
+            unresolved.extend([] for _parent_id in parents)
         else:
             raise ValueError("mode must be 'or' or 'and'")
+        child._unresolved_prereqs = unresolved
         for parent_id in parents:
             self.reverse_prerequisites.setdefault(parent_id, set()).add(child_id)
         self._changed()
@@ -245,6 +254,12 @@ class FocusDocument(MutableMapping[int, Focus]):
         for parent_id in child.prereqs.pop(group_index):
             if not any(parent_id in group for group in child.prereqs):
                 _discard(self.reverse_prerequisites, parent_id, child_id)
+        unresolved = getattr(child, "_unresolved_prereqs", [])
+        while len(unresolved) < len(child.prereqs):
+            unresolved.append([])
+        if group_index < len(unresolved):
+            unresolved.pop(group_index)
+        child._unresolved_prereqs = unresolved
         self._changed()
 
     def link_mutex(self, left_id: int, right_id: int) -> None:
@@ -409,11 +424,17 @@ class FocusDocument(MutableMapping[int, Focus]):
             focus = self._focuses.get(focus_id)
             if focus is None:
                 continue
-            focus.prereqs = [
-                [parent for parent in group if parent not in deleted]
-                for group in focus.prereqs
-            ]
-            focus.prereqs = [group for group in focus.prereqs if group]
+            unresolved = getattr(focus, "_unresolved_prereqs", [])
+            retained_groups = []
+            retained_unresolved = []
+            for index, group in enumerate(focus.prereqs):
+                filtered = [parent for parent in group if parent not in deleted]
+                names = unresolved[index] if index < len(unresolved) else []
+                if filtered or names:
+                    retained_groups.append(filtered)
+                    retained_unresolved.append(names)
+            focus.prereqs = retained_groups
+            focus._unresolved_prereqs = retained_unresolved
             focus.mutex = [other for other in focus.mutex if other not in deleted]
 
     def _unindex(self, removed: Iterable[Focus]) -> None:
