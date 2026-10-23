@@ -65,7 +65,9 @@
   parameter form), and `ModLoadingMixin` (`mod_loading.py`). Their shared
   host-state requirements are recorded as `CanvasHost`, `EffectsHost`, and
   `ModLoadingHost` protocols in `app_contracts.py`, checked against `App`
-  without adding runtime inheritance — plus
+  without adding runtime inheritance. Canvas and mod-loading host methods
+  are declared under `TYPE_CHECKING`; lifecycle timer IDs and the headless
+  host use Tk's string IDs. The package also holds
   `gfx_browser.py` (the universal GFX picker, the drag-to-place GFX
   editor, and the sidebar's narrower focus-icon picker, see
   `monolith-migration.md` for why there are two GFX browsers instead of
@@ -82,7 +84,8 @@
   and widget highlights; it drives preview-only dropdowns through
   `menubar.MenuController`), `tasks.py` (the `run_bg`/`progress_modal`
   background-worker plumbing, see "Threading model" below), theme
-  constants, and small shared widgets (`Tooltip`, `_safe_after`).
+  constants, and small shared widgets (`Tooltip`, `_safe_after`,
+  `UnderlinedTabButton`).
   The virtualized pooled-row lists live here too: `focus_list.py`'s
   `VirtualFocusList` over `_PooledList`, reused by `checklist.py`'s
   `VirtualChecklist` and `loaded_trees.py` (the sidebar's Loaded Trees

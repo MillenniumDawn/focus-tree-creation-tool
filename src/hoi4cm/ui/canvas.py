@@ -8,14 +8,16 @@ lines out of ``hoi4_content_maker.py``.
 
 import math
 import tkinter as tk
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from hoi4cm.core.i18n import tr
 from hoi4cm.focus_tree.validate import Severity
 from hoi4cm.mod import MOD
+from hoi4cm.models import Focus, FocusDocument
 from hoi4cm.ui.canvas_renderer import FocusCanvasBundle
 from hoi4cm.ui.canvas_scheduler import DirtyRedrawState, RedrawChannel
 from hoi4cm.ui.image_broker import ImageBroker
+from hoi4cm.ui.lifecycle import ApplicationLifecycle
 from hoi4cm.ui.scene_index import DEBUG_VALIDATE, SceneIndex
 from hoi4cm.ui.tasks import get_executor
 from hoi4cm.ui.theme import (
@@ -62,6 +64,23 @@ class CanvasMixin:
 
     # App-owned attributes accessed through the mixin. Declared here so
     # type-checkers know they exist on the concrete App instance.
+    cv: tk.Canvas
+    focuses: FocusDocument
+    offset: list[float]
+    zoom: float
+    selected: Focus | None
+    _canvas_min: list[int]
+    _canvas_max: list[int]
+    _extra_trees: list[dict[str, Any]]
+    _lifecycle: ApplicationLifecycle | None
+    _image_broker: ImageBroker | None
+    _fv_x: tk.StringVar
+    _fv_y: tk.StringVar
+    _coord_lbl: tk.Label
+    _cfp_x: int | None
+    _cfp_y: int | None
+    CANVAS_MIN_SIZE: int
+    CANVAS_EXPAND_STEP: int
     _multi_sel: set[int]
     _multisel_mode: bool
     mutex_src: Any  # type: ignore[no-redef]
@@ -95,6 +114,27 @@ class CanvasMixin:
     _grid_on: bool
     _image_poll_job: Any  # type: ignore[no-redef]
     _validation_worst: dict[int, Severity]
+
+    if TYPE_CHECKING:
+
+        def _update_statusbar(self) -> None: ...
+
+        def _update_focus_list_selection(self) -> None: ...
+
+        def _make_mutex(self, source: Focus, target: Focus, /) -> None: ...
+
+        def _end_mutex(self) -> None: ...
+
+        def _deselect(self) -> None: ...
+
+        def _new_focus_at(self, x: int, y: int, /) -> None: ...
+
+        def _select(self, focus: Focus, /) -> bool | None: ...
+
+        def _hint(self, message: str, /) -> None: ...
+
+        def _get_tree_badge(self, tree_idx: int, /) -> tuple[str, str]:
+            raise NotImplementedError
 
     # Above this many loaded focuses, the minimap buckets dots to one per
     # occupied pixel cell and skips prereq lines (see _draw_minimap).
@@ -132,10 +172,11 @@ class CanvasMixin:
     def _poll_images(self):
         self._image_poll_job = None
         lifecycle = self._lifecycle
-        if lifecycle is not None and not lifecycle.accepting:
+        broker = self._image_broker
+        if broker is None or (lifecycle is not None and not lifecycle.accepting):
             return
-        self._image_broker.drain()
-        if self._image_broker.pending:
+        broker.drain()
+        if broker.pending:
             self._image_poll_job = self.cv.after(16, self._poll_images)
 
     def _start_image_poll(self):
@@ -143,6 +184,7 @@ class CanvasMixin:
         if (
             (lifecycle is None or lifecycle.accepting)
             and self._image_poll_job is None
+            and self._image_broker is not None
             and self._image_broker.pending
         ):
             self._image_poll_job = self.cv.after(16, self._poll_images)
@@ -1304,10 +1346,11 @@ class CanvasMixin:
                 if src and tid != src.id:
                     self._make_mutex(src, self.focuses[tid])
                 self._end_mutex()
-            return
+            return None
         hits = self.cv.find_overlapping(e.x - 2, e.y - 2, e.x + 2, e.y + 2)
         if not any("focus" in self.cv.gettags(i) for i in hits):
             self._deselect()
+        return None
 
     def _lmb_mv(self, e):
         pass
@@ -1323,12 +1366,13 @@ class CanvasMixin:
             actions.dismiss()
         self._pan_start = (e.x, e.y)
         self.cv.config(cursor="sizing")
+        return None
 
     def _pan_mv(self, e):
         if _spotlight_blocks_input(self):
             return "break"
         if not self._pan_start:
-            return
+            return None
         dx = e.x - self._pan_start[0]
         dy = e.y - self._pan_start[1]
         self.offset[0] += dx
@@ -1345,6 +1389,7 @@ class CanvasMixin:
         # these two is cheap (a handful of items) and keeps them crisp.
         self._draw_canvas_bounds()
         self._draw_coord_labels()
+        return None
 
     def _pan_rl(self, e):
         if _spotlight_blocks_input(self):
@@ -1353,6 +1398,7 @@ class CanvasMixin:
         self.cv.config(cursor="fleur")
         # One clean redraw on release snaps everything to exact positions.
         self._redraw_now(RedrawChannel.VIEW, reason="pan-release")
+        return None
 
     def _scroll(self, e):
         if _spotlight_blocks_input(self):
@@ -1361,11 +1407,12 @@ class CanvasMixin:
         old = self.zoom
         self.zoom = max(0.10, min(4.0, self.zoom * f))
         if self.zoom == old:
-            return
+            return None
         self.offset[0] = e.x - (e.x - self.offset[0]) * (self.zoom / old)
         self.offset[1] = e.y - (e.y - self.offset[1]) * (self.zoom / old)
         # Preserve every pointer-anchored transform; render the latest view once.
         self._redraw(RedrawChannel.VIEW, reason="wheel")
+        return None
 
     def _rmb(self, e):
         if _spotlight_blocks_input(self):
@@ -1375,11 +1422,12 @@ class CanvasMixin:
             actions.dismiss()
         hits = self.cv.find_overlapping(e.x - 2, e.y - 2, e.x + 2, e.y + 2)
         if any("focus" in self.cv.gettags(i) for i in hits):
-            return
+            return None
         gx, gy = self.c2w(e.x, e.y)
         if not self.focuses.position_free(gx, gy):
-            return
+            return None
         self._new_focus_at(gx, gy)
+        return None
 
     def _motion(self, e):
         if _spotlight_blocks_input(self):
@@ -1400,6 +1448,7 @@ class CanvasMixin:
                 else:
                     tx, ty = e.x, e.y
                 self.cv.coords(self._temp_line, cx, cy, tx, ty)
+        return None
 
     def _foc_pr(self, fid, e):
         if _spotlight_blocks_input(self):
@@ -1411,7 +1460,7 @@ class CanvasMixin:
         if self.mutex_mode:
             # Completion is handled at the canvas level (_lmb_dn); swallow the
             # click here so it never starts a drag or selection.
-            return
+            return None
         f = self.focuses[fid]
         # Ctrl+click = toggle multi-select
         if self._multisel_mode or (e.state & 0x0004):  # 0x0004 = Ctrl held
@@ -1420,7 +1469,7 @@ class CanvasMixin:
             else:
                 self._multi_sel.add(fid)
             self._redraw()
-            return
+            return None
         self._drag = {
             "id": fid,
             "sx": f.x,
@@ -1440,26 +1489,27 @@ class CanvasMixin:
         }
         if self._select(f) is False:
             self._drag = {}
+        return None
 
     def _foc_mv(self, fid, e):
         if _spotlight_blocks_input(self):
             return "break"
         d = self._drag
         if not d or d.get("id") != fid or self.mutex_mode:
-            return
+            return None
         dx = e.x - d["cx"]
         dy = e.y - d["cy"]
         if abs(dx) > 4 or abs(dy) > 4:
             d["moved"] = True
         if not d["moved"]:
-            return
+            return None
         f = self.focuses[fid]
         ngx = round(d["sx"] + dx / (XGRID * self.zoom))
         ngy = round(d["sy"] + dy / (YGRID * self.zoom))
         if (ngx, ngy) == d["last_snap"]:
-            return
+            return None
         if (ngx, ngy) in d.get("occupied", ()):
-            return
+            return None
         if not d["undo_pushed"]:
             self._push_undo("move focus", touched_ids=(fid,))
             d["undo_pushed"] = True
@@ -1483,6 +1533,7 @@ class CanvasMixin:
             )
         )
         self._draw_lines_throttled()
+        return None
 
     def _foc_rl(self, fid):
         drag = self._drag
@@ -1658,13 +1709,12 @@ class CanvasMixin:
             )
 
         # Main tree CFP
-        if (
-            getattr(self, "_cfp_x", None) is not None
-            and getattr(self, "_cfp_y", None) is not None
-        ):
+        cfp_x = getattr(self, "_cfp_x", None)
+        cfp_y = getattr(self, "_cfp_y", None)
+        if cfp_x is not None and cfp_y is not None:
             _draw_box(
-                self._cfp_x / XGRID,
-                self._cfp_y / YGRID,
+                cfp_x / XGRID,
+                cfp_y / YGRID,
                 "#22d3ee",
                 tr("canvas.cfp_label", "Continuous\nFocus Position"),
             )
@@ -1860,19 +1910,21 @@ class CanvasMixin:
         MM_H = mm.winfo_height() or 150
         margin = 10
 
+        cfp_x = getattr(self, "_cfp_x", None)
+        cfp_y = getattr(self, "_cfp_y", None)
         cfp_key = (
-            getattr(self, "_cfp_x", None),
-            getattr(self, "_cfp_y", None),
+            cfp_x,
+            cfp_y,
             tuple((et.get("cfp_x"), et.get("cfp_y")) for et in self._extra_trees),
         )
         bounds_key = (self._scene_index.revision, cfp_key)
         if getattr(self, "_mm_bounds_key", None) != bounds_key:
-            all_xs = [f.x for f in self.focuses.values()]
-            all_ys = [f.y for f in self.focuses.values()]
-            if getattr(self, "_cfp_x", None) is not None:
-                all_xs.append(self._cfp_x / XGRID)
-            if getattr(self, "_cfp_y", None) is not None:
-                all_ys.append(self._cfp_y / YGRID)
+            all_xs: list[float] = [f.x for f in self.focuses.values()]
+            all_ys: list[float] = [f.y for f in self.focuses.values()]
+            if cfp_x is not None:
+                all_xs.append(cfp_x / XGRID)
+            if cfp_y is not None:
+                all_ys.append(cfp_y / YGRID)
             for et in self._extra_trees:
                 if et.get("cfp_x") is not None:
                     all_xs.append(et["cfp_x"] / XGRID)
@@ -1933,11 +1985,8 @@ class CanvasMixin:
                 tags="mm_overlay",
             )
 
-        if (
-            getattr(self, "_cfp_x", None) is not None
-            and getattr(self, "_cfp_y", None) is not None
-        ):
-            _mm_cfp(self._cfp_x / XGRID, self._cfp_y / YGRID, "#22d3ee")
+        if cfp_x is not None and cfp_y is not None:
+            _mm_cfp(cfp_x / XGRID, cfp_y / YGRID, "#22d3ee")
         for idx, et in enumerate(self._extra_trees, start=1):
             if et.get("cfp_x") is not None and et.get("cfp_y") is not None:
                 _, col = self._get_tree_badge(idx)

@@ -13,6 +13,7 @@ from hoi4cm.core.i18n import tr
 
 UNDO_LABEL_KEYS: Mapping[str, str] = {
     "action": "undo.action",
+    "add child": "undo.add_child",
     "add effect": "undo.add_effect",
     "add focus": "undo.add_focus",
     "add mutex": "undo.add_mutex",

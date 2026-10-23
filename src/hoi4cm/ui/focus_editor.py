@@ -6,9 +6,11 @@ import tkinter as tk
 from tkinter import messagebox
 from typing import Any
 
+from hoi4cm.core.i18n import tr
 from hoi4cm.models.sidebar_form import parse_focus_cost, sidebar_values_match_focus
 from hoi4cm.ui.focus_list import filter_focus_items
 from hoi4cm.ui.theme import BG_CARD, BG_DARK, BG_PANEL, BLUE, TEXT
+from hoi4cm.ui.widgets import Tooltip
 
 
 def reveal_search_result(app: Any) -> None:
@@ -207,13 +209,44 @@ class FocusEditor:
             entry.pack(fill="x", pady=(0, 5))
             entry.bind("<FocusOut>", self._commit_tree_settings)
             entry.bind("<Return>", self._commit_tree_settings)
-        for label, command in (
-            ("Load Shared Tree", lambda: self.app._load_extra_tree("shared")),
-            ("Load Joint Tree", lambda: self.app._load_extra_tree("joint")),
-            ("Load Trees…", self.app._load_all_trees),
-            ("Export All Trees", self.app._save_all_trees),
+        for label, command, tip in (
+            (
+                tr("toolbar.shared", "+ Shared"),
+                lambda: self.app._load_extra_tree("shared"),
+                tr(
+                    "toolbar.shared.tip",
+                    "Load a shared_focus tree alongside the main tree.\n"
+                    "Its focuses appear on canvas with amber [S] badges.",
+                ),
+            ),
+            (
+                tr("toolbar.joint", "+ Joint"),
+                lambda: self.app._load_extra_tree("joint"),
+                tr(
+                    "toolbar.joint.tip",
+                    "Load a joint_focus tree alongside the main tree.\n"
+                    "Its focuses appear on canvas with purple [J] badges.",
+                ),
+            ),
+            (
+                tr("toolbar.load_all", "Load All"),
+                self.app._load_all_trees,
+                tr(
+                    "toolbar.load_all.tip",
+                    "Scan the mod's national_focus folder and load selected trees "
+                    "from a checklist.",
+                ),
+            ),
+            (
+                tr("toolbar.save_all", "Save All"),
+                self.app._save_all_trees,
+                tr(
+                    "toolbar.save_all.tip",
+                    "Export all loaded trees (main + shared + joint) at once.",
+                ),
+            ),
         ):
-            tk.Button(
+            button = tk.Button(
                 controls,
                 text=label,
                 command=command,
@@ -221,7 +254,9 @@ class FocusEditor:
                 fg=TEXT,
                 highlightcolor=BLUE,
                 highlightthickness=2,
-            ).pack(fill="x", pady=2)
+            )
+            button.pack(fill="x", pady=2)
+            Tooltip(button, tip)
         self.advanced_button = tk.Button(
             self.focus_panel,
             text="Advanced settings ▸",

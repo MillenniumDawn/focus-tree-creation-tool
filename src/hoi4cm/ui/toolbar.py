@@ -2,6 +2,7 @@
 
 import tkinter as tk
 
+from hoi4cm.core.i18n import tr
 from hoi4cm.mod import MOD
 from hoi4cm.ui.editor_chrome import EditorChrome
 from hoi4cm.ui.theme import BG_CARD, BLUE, BORDER_G, ORANGE, TEXT, TEXT_DIM
@@ -85,9 +86,30 @@ def build_canvas_toolbar(app, toolbar):
     app._sidebar_toggle_btn.config(
         image=app._project_sidebar.collapse_icon, compound="left"
     )
-    app._add_focus_btn = button(tools, "+ Focus", app._add_focus, bg="#1e3a6e")
-    app._conn_btn = button(tools, "Prereq", app._pick_prereq)
-    app._mutex_btn = button(tools, "Mutex", app._toggle_mutex, fg=ORANGE)
+    app._add_focus_btn = button(
+        tools,
+        tr("toolbar.add_focus", "+ Focus"),
+        app._add_focus,
+        bg="#1e3a6e",
+        tip=tr(
+            "toolbar.add_focus.tip", "Add a new focus.\nAlso: right-click the canvas."
+        ),
+    )
+    app._conn_btn = button(
+        tools,
+        tr("toolbar.prereq", "Prereq"),
+        app._pick_prereq,
+        tip=tr(
+            "toolbar.prereq.tip", "Open the prerequisite picker for the selected focus."
+        ),
+    )
+    app._mutex_btn = button(
+        tools,
+        tr("toolbar.mutex", "Mutex"),
+        app._toggle_mutex,
+        fg=ORANGE,
+        tip=tr("toolbar.mutex.tip", "Draw a mutually exclusive link."),
+    )
     separator(tools)
     button(
         tools,
@@ -100,7 +122,16 @@ def build_canvas_toolbar(app, toolbar):
     separator(tools)
     button(tools, "Tree Settings", lambda: app._focus_editor.open_tree_settings())
     app._additional_income_btn = button(
-        tools, "Add Income", app._additional_income_wizard, fg="#4ade80", bg="#0d2b1a"
+        tools,
+        tr("toolbar.add_income", "Add Income"),
+        app._additional_income_wizard,
+        fg="#4ade80",
+        bg="#0d2b1a",
+        tip=tr(
+            "toolbar.add_income.tip",
+            "MD Additional Income Wizard - creates/links a spirit and wires up "
+            "all money system files automatically.",
+        ),
     )
     app._additional_income_separator = separator(tools)
     if not MOD.is_md:
@@ -113,9 +144,32 @@ def build_canvas_toolbar(app, toolbar):
     app._editor_zoom_lbl.pack(side="left")
     button(view, "+", lambda: chrome.zoom(1.2), tip="Zoom in")
     separator(view)
-    app._msel_btn = button(view, "Multi", app._toggle_multisel, bg="#1a1a2e")
-    button(view, "Delete Selected", app._delete_selected, bg="#4a1010")
-    button(view, "Clear All", app._clear_all, bg="#7f1d1d")
+    app._msel_btn = button(
+        view,
+        tr("toolbar.multi", "Multi"),
+        app._toggle_multisel,
+        bg="#1a1a2e",
+        tip=tr(
+            "toolbar.multi.tip",
+            "Toggle multi-select mode.\nCtrl+click focuses, then Delete.",
+        ),
+    )
+    button(
+        view,
+        tr("toolbar.delete_selected", "Del Selected"),
+        app._delete_selected,
+        bg="#4a1010",
+        tip=tr("toolbar.delete_selected.tip", "Delete all selected focuses."),
+    )
+    button(
+        view,
+        tr("toolbar.clear_all", "Clear All"),
+        app._clear_all,
+        bg="#7f1d1d",
+        tip=tr(
+            "toolbar.clear_all.tip", "Delete ALL focuses from the canvas.\nSave first!"
+        ),
+    )
     app._coord_lbl = tk.Label(
         view,
         text="  x=0  y=0  ",
@@ -125,7 +179,7 @@ def build_canvas_toolbar(app, toolbar):
         padx=4,
     )
     app._coord_lbl.pack(side="right", padx=4)
-    Tooltip(app._coord_lbl, "Cursor position on the focus grid")
+    Tooltip(app._coord_lbl, f"{tr('toolbar.cursor', 'Cursor:')} x / y")
     for frame in (tools, view):
         _wrap_commands(app, frame)
 

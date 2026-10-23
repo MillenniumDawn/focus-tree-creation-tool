@@ -9,6 +9,7 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import ttk
 
+from hoi4cm.core.i18n import tr
 from hoi4cm.core.logger import add_error
 from hoi4cm.mod import MOD
 from hoi4cm.ui.project_index import (
@@ -113,13 +114,33 @@ class ProjectSidebar:
         chrome = app._editor_chrome
         self.accents = {}
         self.icons = []
-        for index, (label, command) in enumerate(
+        for index, (label, display, command, tip) in enumerate(
             (
-                ("Focus Trees", None),
-                ("Decisions", app._decision_wizard),
-                ("Events", app._event_wizard),
-                ("Ideas", app._national_spirit_wizard),
-                ("Dynamic Modifiers", app._dyn_mod_wizard),
+                ("Focus Trees", "Focus Trees", None, "Focus Trees"),
+                (
+                    "Decisions",
+                    tr("toolbar.decisions", "Decisions"),
+                    app._decision_wizard,
+                    tr("toolbar.decisions.tip", "Decision / Decision Category maker."),
+                ),
+                (
+                    "Events",
+                    tr("toolbar.events", "Events"),
+                    app._event_wizard,
+                    tr("toolbar.events.tip", "Event Maker wizard."),
+                ),
+                (
+                    "Ideas",
+                    tr("toolbar.ideas", "Ideas"),
+                    app._national_spirit_wizard,
+                    tr("toolbar.ideas.tip", "Build National Spirits / Ideas."),
+                ),
+                (
+                    "Dynamic Modifiers",
+                    tr("toolbar.dyn_mod", "Dyn Mod"),
+                    app._dyn_mod_wizard,
+                    tr("toolbar.dyn_mod.tip", "Dynamic Modifier wizard."),
+                ),
             )
         ):
             row = tk.Frame(self.panel, bg=NAVY)
@@ -137,7 +158,7 @@ class ProjectSidebar:
             self.icons.append(icon)
             button = tk.Button(
                 row,
-                text=f"   {label}",
+                text=f"   {display}",
                 image=icon,
                 compound="left",
                 anchor="w",
@@ -160,7 +181,7 @@ class ProjectSidebar:
                 cursor="hand2",
             )
             button.pack(fill="x", padx=(0, 8))
-            Tooltip(button, label)
+            Tooltip(button, tip)
             chrome.navigation_buttons[label] = button
             self.accents[label] = accent
         tk.Frame(self.panel, bg=DIVIDER, height=1).pack(
@@ -222,7 +243,7 @@ class ProjectSidebar:
         self.search_hint_icon = sidebar_icon(app, "search", 20, scale)
         self.search_hint = tk.Label(
             search,
-            text="Search project…",
+            text=tr("common.search_placeholder", "Search..."),
             image=self.search_hint_icon,
             compound="left",
             bg=NAVY,

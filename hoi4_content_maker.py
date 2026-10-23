@@ -140,6 +140,7 @@ from hoi4cm.ui import (  # noqa: E402
     ProjectSidebar,
     Tooltip,
     TutorialController,
+    UnderlinedTabButton,
     _safe_after,
     build_canvas_toolbar,
     grab_when_visible,
@@ -159,6 +160,7 @@ from hoi4cm.ui.checklist import (  # noqa: E402
     is_loadable,
 )
 from hoi4cm.ui.editor_chrome import (  # noqa: E402
+    EditorChrome,
     configure_validation_style,
     editor_is_dirty,
     mark_editor_saved,
@@ -271,6 +273,15 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
     _validation_worst: dict[int, Severity]
     _focus_bundles: dict[int, FocusCanvasBundle]
     _lifecycle: ApplicationLifecycle | None
+    _eb_win: tk.Toplevel | None
+    _effects_sig: object | None
+    _cfp_x: int | None
+    _cfp_y: int | None
+    _editor_chrome: EditorChrome
+    _errlog_btn: tk.Button
+    _hint_lbl: tk.Label
+    _msel_btn: tk.Button
+    _mutex_btn: tk.Button
     _config_write_warned: bool
     _mod_image_resource_registered: bool
     _image_broker: ImageBroker | None
@@ -376,7 +387,9 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
                 return
             if ans and not self._save():
                 return
-        if not self._lifecycle.begin_close():
+        lifecycle = self._lifecycle
+        assert lifecycle is not None
+        if not lifecycle.begin_close():
             return
         try:
             self._cancel_autosave()
@@ -384,7 +397,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         except Exception:
             pass
         finally:
-            self._lifecycle.finish_close()
+            lifecycle.finish_close()
             self.destroy()
 
     def _workspace_fingerprint(self):
@@ -645,6 +658,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         editor = self.__dict__.get("_focus_editor")
         if editor is not None:
             editor.reset()
+        assert self._lifecycle is not None
         self._lifecycle.begin("document")
         self._invalidate_canvas_images()
 
@@ -711,6 +725,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         self._build_keybinds()
         self._build_layout()
         self._tutorial = TutorialController(self, self._menu_controller)
+        assert self._lifecycle is not None
         self._lifecycle.add_resource(self._tutorial.close)
 
     def _build_keybinds(self):
@@ -808,6 +823,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         body = tk.Frame(self, bg=BG_DARK)
         body.pack(fill="both", expand=True)
 
+        assert self._lifecycle is not None
         self._project_sidebar = ProjectSidebar(self, body)
         self._lifecycle.add_resource(self._project_sidebar.close)
         canvas_host = self._project_sidebar.canvas_host
@@ -1117,6 +1133,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         invalidates any older result in the ``validation`` lifecycle scope.
         """
         self._validation_job = None
+        assert self._lifecycle is not None
         self._lifecycle.begin("validation")
         sprites = self._validation_sprites()
         loc_path = getattr(MOD, "edit_loc_file", "")
@@ -1438,7 +1455,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         for tname, tlabel in tab_names:
             col = tk.Frame(tab_bar, bg=BG_DARK)
             col.pack(side="left", expand=True, fill="x")
-            btn = tk.Button(
+            btn = UnderlinedTabButton(
                 col,
                 text=tlabel,
                 bg=BG_DARK,
@@ -1917,7 +1934,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             self.selected.offsets = offsets
             self.focuses.mark_content_changed()
 
-    def _focus_flag_label(self, label):
+    def _focus_flag_label(self, label: str) -> str:
         return {
             "cancel_if_invalid": tr(
                 "focus.flag.cancel_if_invalid", "Cancel if invalid"
@@ -2296,7 +2313,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
 
     def _attach_autocomplete(self, entry_widget, var, get_choices_fn):
         """Attach a live autocomplete popup to any Entry widget."""
-        _popup = [None]
+        _popup: list[tk.Toplevel | None] = [None]
 
         def _show(*_):
             if _popup[0] and _popup[0].winfo_exists():
@@ -2723,7 +2740,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
                 font=("Helvetica", 9, "italic"),
             ).pack(anchor="w")
             return
-        for gi, grp in enumerate(self.selected.prereqs):
+        for gi, grp in enumerate(groups):
             names = [self._ref_name(p) for p in grp]
             row = tk.Frame(
                 self._prereq_box,
@@ -2774,7 +2791,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
                 font=("Georgia", 9, "italic"),
             ).pack(anchor="w")
             return
-        for i, mid in enumerate(self.selected.mutex):
+        for i, mid in enumerate(mutex):
             name = self._ref_name(mid)
             row = tk.Frame(
                 self._mutex_box,
@@ -3658,7 +3675,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         btn_row.pack(fill="x", padx=10, pady=8)
 
         def _confirm_or():
-            group = list(focus_list.selected_keys)
+            group = [f.id for f in sorted_cands if f.id in focus_list.selected_keys]
             if not group:
                 messagebox.showwarning(
                     tr("dialog.no_selection.title", "No Selection"),
@@ -3675,7 +3692,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             win.destroy()
 
         def _confirm_and():
-            fids = list(focus_list.selected_keys)
+            fids = [f.id for f in sorted_cands if f.id in focus_list.selected_keys]
             if not fids:
                 messagebox.showwarning(
                     tr("dialog.no_selection.title", "No Selection"),
@@ -5755,8 +5772,8 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
                     },
                 )
             )
-        self.workspace.canvas_min = tuple(self._canvas_min)
-        self.workspace.canvas_max = tuple(self._canvas_max)
+        self.workspace.canvas_min = (self._canvas_min[0], self._canvas_min[1])
+        self.workspace.canvas_max = (self._canvas_max[0], self._canvas_max[1])
         self.workspace.default_focus_prefix = self._default_focus_prefix
         return self.workspace
 
@@ -6637,6 +6654,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             if failures or not show_dialog:
                 return
             result = results[0]
+            assert plan.loc_path is not None
             if result.localisation_added:
                 loc_saved = "\n" + tr(
                     "export.localisation_added",

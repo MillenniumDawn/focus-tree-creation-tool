@@ -189,6 +189,20 @@ def test_english_locale_has_no_orphaned_keys():
 
 
 @pytest.mark.parametrize("path", LOCALE_PATHS, ids=lambda path: path.stem)
+def test_locale_has_no_duplicate_keys(path: Path):
+    duplicates = []
+
+    def collect_keys(pairs):
+        counts = Counter(key for key, _value in pairs)
+        duplicates.extend(key for key, count in counts.items() if count > 1)
+        return dict(pairs)
+
+    json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=collect_keys)
+
+    assert duplicates == []
+
+
+@pytest.mark.parametrize("path", LOCALE_PATHS, ids=lambda path: path.stem)
 def test_locale_has_exactly_the_english_keys(path: Path):
     english = set(_strings(ENGLISH_PATH))
     keys = set(_strings(path))

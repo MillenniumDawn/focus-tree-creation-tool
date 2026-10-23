@@ -13,7 +13,8 @@ from hoi4cm.models import Focus
 class NudgeDocument(Protocol):
     """Document operations needed to nudge one or more focuses."""
 
-    occupied_positions: dict[tuple[int, int], set[int]]
+    @property
+    def occupied_positions(self) -> dict[tuple[int, int], set[int]]: ...
 
     def __getitem__(self, focus_id: int) -> Focus: ...
 
@@ -29,9 +30,15 @@ class KeyboardNudgeHost(Protocol):
 
     selected: Focus | None
     _multi_sel: set[int]
-    _fv_x: StringValue
-    _fv_y: StringValue
-    focuses: NudgeDocument
+
+    @property
+    def _fv_x(self) -> StringValue: ...
+
+    @property
+    def _fv_y(self) -> StringValue: ...
+
+    @property
+    def focuses(self) -> NudgeDocument: ...
 
     def focus_get(self) -> tk.Misc | None: ...
 
@@ -39,13 +46,13 @@ class KeyboardNudgeHost(Protocol):
 
     def _redraw(self) -> None: ...
 
-    def _hint(self, message: str) -> None: ...
+    def _hint(self, message: str, /) -> None: ...
 
 
 class StringValue(Protocol):
     """String-backed Tk value interface used for the two coordinate fields."""
 
-    def set(self, value: str) -> None: ...
+    def set(self, value: str, /) -> None: ...
 
 
 def nudge_selection(app: KeyboardNudgeHost, dx: int, dy: int) -> None:

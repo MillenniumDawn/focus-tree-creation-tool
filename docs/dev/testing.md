@@ -62,28 +62,32 @@ its parameter list when you add one. Do not add click-through tests.
 `hoi4_content_maker.py` Tk shell, with branch coverage on. The source list is
 in `[tool.coverage.run]` in `pyproject.toml`; `--cov` without a value uses
 that list. `pytest --cov --cov-report=term-missing` prints per-file gaps.
-CI follows the headless run with two filtered reports so the sources have
-independent floors rather than one blended percentage:
+CI then runs Tk smoke in a separate process and appends coverage for
+`ui/project_sidebar.py` only. The sidebar stays in the package floor; Tk
+execution does not raise the headless monolith measurement. The filtered
+reports keep independent floors rather than one blended percentage:
 
 ```sh
+xvfb-run -a pytest -m tk --cov=hoi4cm.ui.project_sidebar --cov-append
 coverage report --include='src/hoi4cm/*' --fail-under=91
 coverage report --include='hoi4_content_maker.py' --fail-under=34
 ```
 
-Measured on the headless suite: 92% for the package and 35% for the monolith.
-Each floor sits one point below. These are floors, not targets: raise them as
-coverage climbs. The package and monolith must stay separately included in
+Measured with sidebar Tk coverage appended: 92% for the package and 38% for
+the headless monolith. The floors remain 91% and 34%. These are floors, not
+targets: raise them as coverage climbs. The package and monolith must stay separately included in
 `pyproject.toml` so a future change cannot silently stop measuring either
 source.
 
-The package floor leaves out the modules that build Tk widgets. They are
+The package floor leaves out most modules that build Tk widgets. They are
 listed under `omit` in `[tool.coverage.report]`: the wizard dialogs, the
 canvas, the browsers, the menubar and toolbar, and the other widget modules.
 The headless suite reaches 2% to 77% of each, so including them would turn
 the floor back into a number nobody can move. `tests/test_coverage_gates.py`
 fails if an omitted module does not import tkinter, so a pure module cannot
 be hidden there. A new pure module is gated automatically. A new widget
-module drags the floor down until it is added to `omit`.
+module needs either real Tk coverage, as the project sidebar has, or an
+entry in `omit` if its logic is already covered through extracted helpers.
 
 The way to raise real coverage is extraction: move logic out of a dialog
 closure into a pure module (the `_generators.py` pattern), where it is gated
@@ -113,6 +117,8 @@ never fails at run time. `tests/test_i18n_keys.py` is the guard. It reads every
 `tr()` call in `src/hoi4cm` and `hoi4_content_maker.py` with `ast` and checks
 that:
 
+- each JSON key is unique, so a repeated entry cannot silently replace a
+  translation;
 - every literal key is in `locales/en.json`, and every key in `en.json` is used
   by some call (orphans fail);
 - every locale file has exactly the keys of `en.json`, apart from `_meta`, with
@@ -252,12 +258,13 @@ regression, so it was documented rather than reverted.
 
 The Tk smoke needs a display. On Linux run it under `xvfb-run -a` so nothing
 opens on your desktop (`sudo apt-get install xvfb xauth` on Debian/Ubuntu).
-That is the only way it is run and checked. CI runs it on Linux only, so a
-pass says nothing about Windows or macOS.
+CI also runs `pytest -m tk` on native Windows, where the color-key Spotlight
+compositor tests can run instead of being skipped. Linux skips those eight
+Windows-specific cases. Neither job verifies macOS UI behavior.
 
 The separate `windows-permissions` job runs `tests/test_cache_permissions.py`
-on native Windows. Both new-cache and existing-cache cases inspect real directory
-and database DACLs. Executable builds depend on this job as well as lint and the
+and then the Tk smoke in separate processes on native Windows. Both new-cache
+and existing-cache cases inspect real directory and database DACLs. Executable builds depend on this job as well as lint and the
 Linux test job, so a cache-permission failure blocks release artifacts.
 
 ## What is not automated

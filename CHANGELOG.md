@@ -8,6 +8,12 @@ the version by hand. See `AGENTS.md`.
 
 ## Unreleased
 
+- Measure project-sidebar coverage in the isolated Tk smoke without lowering
+  the package floor, and run the Windows Spotlight smoke in CI. Preserve
+  translations for moved controls and add the Add Child undo label.
+- Correct UI host and Tk timer types, stop polling a released image broker,
+  and check event-import text and optional Pillow preview handling.
+
 - Add a UI language by dropping `locales/<code>.json` into the folder: the
   language list is read from the files, each naming itself in `_meta`. Wrap the
   wizard, settings, undo, canvas and validation text that bypassed `tr()`, and

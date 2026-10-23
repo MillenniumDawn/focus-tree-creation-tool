@@ -262,6 +262,7 @@ class EditorChrome:
         self.active_content = label
         self.refresh()
         try:
+            assert command is not None
             command()
         finally:
             opened = [

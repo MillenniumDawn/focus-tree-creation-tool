@@ -81,6 +81,7 @@ from hoi4cm.ui.tutorial import TutorialController
 from hoi4cm.ui.widgets import (
     ScrollableDropdown,
     Tooltip,
+    UnderlinedTabButton,
     _safe_after,
     _safe_after_idle,
     grab_when_visible,
@@ -137,6 +138,7 @@ __all__ = [
     "ThumbnailItem",
     "Tooltip",
     "TutorialController",
+    "UnderlinedTabButton",
     "VirtualThumbnailGrid",
     "XGRID",
     "YELLOW",

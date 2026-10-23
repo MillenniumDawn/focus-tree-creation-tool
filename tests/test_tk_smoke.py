@@ -92,6 +92,7 @@ def test_app_builds_its_chrome(app):
     assert app._errlog_btn.winfo_exists()
     assert not app._focus_editor.window.winfo_ismapped()
     assert not hasattr(app, "_sash")
+    assert all(button._line.winfo_exists() for button, _panel in app._tab_btns.values())
     assert app._project_sidebar.empty.winfo_ismapped()
     assert list(app._editor_chrome.navigation_buttons) == [
         "Focus Trees",
@@ -703,30 +704,34 @@ def test_entry_point_smoke_check(tmp_path):
 _FAR_RECT = (0.0, 0.0, 10.0, 10.0)
 
 
+def _registered_commands(widget: tk.Misc) -> set[str]:
+    return set(vars(widget)["_tclCommands"] or ())
+
+
 def test_focus_callbacks_released_on_cull_lod_and_external_delete(app):
     cv = tk.Canvas(app)
     try:
         fake = AppFake(cv=cv)
         focus = Focus(id=1, x=1, y=1)
-        baseline = set(cv._tclCommands or ())
+        baseline = _registered_commands(cv)
         for _ in range(3):
             fake.zoom = 1.0
             fake._draw_focus(focus, _FAR_RECT)
-            full_commands = set(cv._tclCommands or ()) - baseline
+            full_commands = _registered_commands(cv) - baseline
             assert len(full_commands) == 70
             fake.zoom = 0.3
             fake._draw_focus(focus, _FAR_RECT)
-            assert len(set(cv._tclCommands or ()) - baseline) == 15
+            assert len(_registered_commands(cv) - baseline) == 15
             # Tkinter names use Python object IDs, which can be reused after free.
-            retired = full_commands - set(cv._tclCommands or ())
+            retired = full_commands - _registered_commands(cv)
             assert not any(cv.tk.call("info", "commands", cmd) for cmd in retired)
             cv.delete("all")
             fake._validate_canvas_probe()
-            assert set(cv._tclCommands or ()) == baseline
+            assert _registered_commands(cv) == baseline
             fake.zoom = 1.0
             fake._draw_focus(focus, _FAR_RECT)
             fake._reclaim_focus_bundles(set())
-            assert set(cv._tclCommands or ()) == baseline
+            assert _registered_commands(cv) == baseline
             fake._reclaim_focus_bundles(set())
     finally:
         cv.destroy()

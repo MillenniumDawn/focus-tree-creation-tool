@@ -47,3 +47,27 @@ def test_ci_measures_both_sources_and_applies_independent_floors():
     assert int(package_gate.group(1)) >= 91
     assert int(monolith_gate.group(1)) >= 34
     assert "xvfb-run -a pytest -m tk" in workflow
+
+
+def test_ci_collects_sidebar_tk_coverage_before_the_package_gate():
+    workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    smoke = re.search(
+        r"run: >\s+xvfb-run -a pytest -m tk\s+"
+        r"--cov=hoi4cm\.ui\.project_sidebar\s+--cov-append\b",
+        workflow,
+    )
+
+    assert smoke is not None
+    assert smoke.start() < workflow.index("Coverage gate (hoi4cm package)")
+    assert "src/hoi4cm/ui/project_sidebar.py" not in (
+        PYPROJECT["tool"]["coverage"]["report"]["omit"]
+    )
+
+
+def test_windows_runs_the_native_spotlight_smoke():
+    workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    windows_job = workflow.split("  windows-permissions:\n", 1)[1].split(
+        "\n  build:", 1
+    )[0]
+
+    assert "run: pytest -m tk" in windows_job
