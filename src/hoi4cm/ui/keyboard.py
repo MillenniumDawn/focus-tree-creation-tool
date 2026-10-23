@@ -106,13 +106,12 @@ def nudge_selection(app: KeyboardNudgeHost, dx: int, dy: int) -> None:
         app._fv_x.set(str(app.selected.x))
         app._fv_y.set(str(app.selected.y))
     app._hint(
-        tr(
-            "hint.focus_nudged",
-            "Moved selection {direction}.",
-            direction={(-1, 0): "left", (1, 0): "right", (0, -1): "up", (0, 1): "down"}[
-                (dx, dy)
-            ],
-        )
+        {
+            (-1, 0): tr("hint.focus_nudged_left", "Moved selection left."),
+            (1, 0): tr("hint.focus_nudged_right", "Moved selection right."),
+            (0, -1): tr("hint.focus_nudged_up", "Moved selection up."),
+            (0, 1): tr("hint.focus_nudged_down", "Moved selection down."),
+        }[(dx, dy)]
     )
 
 

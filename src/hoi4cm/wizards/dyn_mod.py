@@ -237,8 +237,11 @@ def open_dyn_mod_wizard(app):
         folders = browser_folders(ideas_root, "[ideas root]", catalog=catalog)
         if not folders:
             messagebox.showinfo(
-                "No Folders",
-                "No image files or subfolders found in the ideas GFX path.",
+                tr("dialog.no_folders.title", "No Folders"),
+                tr(
+                    "dialog.no_ideas_gfx_folders",
+                    "No image files or subfolders found in the ideas GFX path.",
+                ),
                 parent=win,
             )
             return
@@ -525,7 +528,13 @@ def open_dyn_mod_wizard(app):
                     new_id = m.group(1)
                     if new_id != v_id.get():
                         v_id.set(new_id)
-                        changes.append(f"Modifier ID → {new_id!r}")
+                        changes.append(
+                            tr(
+                                "dynamic_modifier.change.modifier_id",
+                                "Modifier ID → {value}",
+                                value=repr(new_id),
+                            )
+                        )
                     in_block = True
                 continue
 
@@ -548,7 +557,12 @@ def open_dyn_mod_wizard(app):
                             v_enable.delete("1.0", "end")
                             if content:
                                 v_enable.insert("1.0", content)
-                            changes.append("enable trigger updated")
+                            changes.append(
+                                tr(
+                                    "dynamic_modifier.change.enable_updated",
+                                    "enable trigger updated",
+                                )
+                            )
                         enable_buf = []
                         continue
                 enable_buf.append(ln)
@@ -558,13 +572,25 @@ def open_dyn_mod_wizard(app):
             if m:
                 if m.group(1) != v_scope.get():
                     v_scope.set(m.group(1))
-                    changes.append(f"Scope → {m.group(1)!r}")
+                    changes.append(
+                        tr(
+                            "dynamic_modifier.change.scope",
+                            "Scope → {value}",
+                            value=repr(m.group(1)),
+                        )
+                    )
                 continue
             m = re.match(r"icon\s*=\s*(\S+)", s)
             if m:
                 if m.group(1) != v_icon.get():
                     v_icon.set(m.group(1))
-                    changes.append(f"Icon GFX → {m.group(1)!r}")
+                    changes.append(
+                        tr(
+                            "dynamic_modifier.change.icon_gfx",
+                            "Icon GFX → {value}",
+                            value=repr(m.group(1)),
+                        )
+                    )
                 continue
             if re.match(r"enable\s*=\s*\{", s):
                 in_enable = True
@@ -581,11 +607,23 @@ def open_dyn_mod_wizard(app):
                 try:
                     float(val)
                     warnings.append(
-                        f"Constant modifier {key} = {val} — check Constant Modifiers field"
+                        tr(
+                            "dynamic_modifier.warning.constant_modifier",
+                            "Constant modifier {modifier} = {value} "
+                            "— check Constant Modifiers field",
+                            modifier=key,
+                            value=val,
+                        )
                     )
                 except ValueError:
                     warnings.append(
-                        f"Variable modifier {key} = {val} — check Variable Modifiers field"
+                        tr(
+                            "dynamic_modifier.warning.variable_modifier",
+                            "Variable modifier {modifier} = {value} "
+                            "— check Variable Modifiers field",
+                            modifier=key,
+                            value=val,
+                        )
                     )
 
         # Localisation — accept both `key: "value"` and legacy `key:0 "value"`
@@ -600,11 +638,23 @@ def open_dyn_mod_wizard(app):
                     if key.endswith("_desc"):
                         if val != v_loc_desc.get():
                             v_loc_desc.set(val)
-                            changes.append(f"Description → {val!r}")
+                            changes.append(
+                                tr(
+                                    "dynamic_modifier.change.description",
+                                    "Description → {value}",
+                                    value=repr(val),
+                                )
+                            )
                     elif "_tt" not in key:
                         if val != v_loc_name.get():
                             v_loc_name.set(val)
-                            changes.append(f"Display name → {val!r}")
+                            changes.append(
+                                tr(
+                                    "dynamic_modifier.change.display_name",
+                                    "Display name → {value}",
+                                    value=repr(val),
+                                )
+                            )
 
         _dm_lock_lbl.config(
             text=tr("common.raw_override_active", "raw override active"), fg=ORANGE
@@ -613,19 +663,42 @@ def open_dyn_mod_wizard(app):
         parts = []
         if changes:
             parts.append(
-                "Fields updated from your code:\n"
+                tr(
+                    "dynamic_modifier.review.fields_updated",
+                    "Fields updated from your code:",
+                )
+                + "\n"
                 + "\n".join(f"  • {c}" for c in changes)
             )
         if warnings:
             parts.append(
-                "Please check these fields manually:\n"
+                tr(
+                    "dynamic_modifier.review.check_fields",
+                    "Please check these fields manually:",
+                )
+                + "\n"
                 + "\n".join(f"  ⚠ {w}" for w in warnings)
             )
         if not changes and not warnings:
-            parts.append("No field changes detected. Raw override saved.")
-        parts.append("\nThe output will export exactly as shown in the preview.")
+            parts.append(
+                tr(
+                    "dynamic_modifier.review.no_changes",
+                    "No field changes detected. Raw override saved.",
+                )
+            )
+        parts.append(
+            "\n"
+            + tr(
+                "dynamic_modifier.review.exports_as_shown",
+                "The output will export exactly as shown in the preview.",
+            )
+        )
 
-        messagebox.showinfo("Saved — Review Changes", "\n\n".join(parts), parent=win)
+        messagebox.showinfo(
+            tr("dialog.saved_review.title", "Saved — Review Changes"),
+            "\n\n".join(parts),
+            parent=win,
+        )
 
     def _dm_show_preview():
         try:
@@ -722,7 +795,11 @@ def open_dyn_mod_wizard(app):
 
         # ── Ask for mod root ──────────────────────────────────
         mod_root = filedialog.askdirectory(
-            title="Select your MOD ROOT folder (the folder that contains common/, localisation/, …)"
+            title=tr(
+                "filedialog.dynamic_modifier_mod_root",
+                "Select your MOD ROOT folder "
+                "(the folder that contains common/, localisation/, …)",
+            )
         )
         if not mod_root:
             return
@@ -742,37 +819,72 @@ def open_dyn_mod_wizard(app):
 
         # ── Summary ───────────────────────────────────────────
         if errors:
-            report_error("\n".join(errors), title="Errors during file generation")
+            report_error(
+                "\n".join(errors),
+                title=tr(
+                    "dynamic_modifier.dialog.generation_errors.title",
+                    "Errors during file generation",
+                ),
+            )
 
-        lines = [f"Mod root: {mod_root}\n"]
+        lines = [
+            tr("dynamic_modifier.summary.mod_root", "Mod root: {path}", path=mod_root)
+            + "\n"
+        ]
         for rel, action, note in results:
             note_str = f"  ({note})" if note else ""
             lines.append(f"  [{action}]  {rel}{note_str}")
         lines += [
             "",
-            "Next steps:",
-            "  1. Copy snippet from _focus_snippets/ into your focus .txt",
-            "  2. Add add_dynamic_modifier effect to activate the modifier",
-            "  3. Add icon .dds to gfx/interface/ideas/ if needed",
-            "  4. Restart HOI4 (dynamic modifiers require full restart)",
+            tr("dynamic_modifier.summary.next_steps", "Next steps:"),
+            tr(
+                "dynamic_modifier.summary.step_copy_snippet",
+                "  1. Copy snippet from _focus_snippets/ into your focus .txt",
+            ),
+            tr(
+                "dynamic_modifier.summary.step_add_effect",
+                "  2. Add add_dynamic_modifier effect to activate the modifier",
+            ),
+            tr(
+                "dynamic_modifier.summary.step_add_icon",
+                "  3. Add icon .dds to gfx/interface/ideas/ if needed",
+            ),
+            tr(
+                "dynamic_modifier.summary.step_restart",
+                "  4. Restart HOI4 (dynamic modifiers require full restart)",
+            ),
         ]
         messagebox.showinfo(
-            "Done" if not errors else "Done (with errors)", "\n".join(lines)
+            (
+                tr("dynamic_modifier.dialog.done.title", "Done")
+                if not errors
+                else tr(
+                    "dynamic_modifier.dialog.done_with_errors.title",
+                    "Done (with errors)",
+                )
+            ),
+            "\n".join(lines),
         )
 
     def _browse_mod_dynmods():
         if not MOD.loaded or not MOD.root:
             messagebox.showinfo(
-                "No Mod Loaded",
-                "Load a mod first to browse existing dynamic modifiers.",
+                tr("dialog.no_mod_loaded.title", "No Mod Loaded"),
+                tr(
+                    "dynamic_modifier.dialog.load_mod_to_browse",
+                    "Load a mod first to browse existing dynamic modifiers.",
+                ),
                 parent=win,
             )
             return
         dm_dir = os.path.join(MOD.root, "common", "dynamic_modifiers")
         if not os.path.isdir(dm_dir):
             messagebox.showinfo(
-                "Not Found",
-                "No common/dynamic_modifiers/ directory found in mod.",
+                tr("dialog.not_found.title", "Not Found"),
+                tr(
+                    "dynamic_modifier.dialog.no_directory",
+                    "No common/dynamic_modifiers/ directory found in mod.",
+                ),
                 parent=win,
             )
             return
@@ -793,14 +905,17 @@ def open_dyn_mod_wizard(app):
 
         if not mods:
             messagebox.showinfo(
-                "No Modifiers Found",
-                "No dynamic modifier definitions found.",
+                tr("dynamic_modifier.dialog.no_modifiers.title", "No Modifiers Found"),
+                tr(
+                    "dynamic_modifier.dialog.no_modifiers.body",
+                    "No dynamic modifier definitions found.",
+                ),
                 parent=win,
             )
             return
 
         dlg = tk.Toplevel(win)
-        dlg.title("Browse Mod Dynamic Modifiers")
+        dlg.title(tr("dynamic_modifier.browse.title", "Browse Mod Dynamic Modifiers"))
         dlg.configure(bg=BG_DARK)
         dlg.geometry("560x440")
         dlg.resizable(True, True)
@@ -843,22 +958,35 @@ def open_dyn_mod_wizard(app):
                 src, encoding = read_file_with_encoding(fp)
                 if src is None or encoding is None:
                     report_error(
-                        f"Could not read modifier '{modifier_id}'",
+                        tr(
+                            "dynamic_modifier.error.read_modifier",
+                            "Could not read modifier '{name}'",
+                            name=modifier_id,
+                        ),
                         parent=dlg,
-                        title="Read Error",
+                        title=tr("dialog.read_error.title", "Read Error"),
                     )
                     return
                 parsed = parse_script(src)
                 blk = parsed.get(modifier_id, {})
                 if not isinstance(blk, dict):
                     report_error(
-                        f"Could not parse modifier '{modifier_id}'",
+                        tr(
+                            "dynamic_modifier.error.parse_modifier",
+                            "Could not parse modifier '{name}'",
+                            name=modifier_id,
+                        ),
                         parent=dlg,
-                        title="Parse Error",
+                        title=tr("dialog.parse_error.title", "Parse Error"),
                     )
                     return
             except (OSError, ValueError, TypeError, RuntimeError) as exc:
-                report_error(str(exc), exc, parent=dlg, title="Parse Error")
+                report_error(
+                    str(exc),
+                    exc,
+                    parent=dlg,
+                    title=tr("dialog.parse_error.title", "Parse Error"),
+                )
                 return
 
             # Populate identity fields
@@ -920,7 +1048,12 @@ def open_dyn_mod_wizard(app):
             _preview()
             dlg.destroy()
             app._hint(
-                f"Loaded dynamic modifier '{modifier_id}' from {os.path.basename(fp)}"
+                tr(
+                    "dynamic_modifier.hint.loaded",
+                    "Loaded dynamic modifier '{name}' from {file}",
+                    name=modifier_id,
+                    file=os.path.basename(fp),
+                )
             )
 
         lb.bind("<Double-Button-1>", lambda e: _load_selected())

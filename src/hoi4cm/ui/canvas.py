@@ -10,6 +10,7 @@ import math
 import tkinter as tk
 from typing import Any
 
+from hoi4cm.core.i18n import tr
 from hoi4cm.focus_tree.validate import Severity
 from hoi4cm.mod import MOD
 from hoi4cm.ui.canvas_renderer import FocusCanvasBundle
@@ -871,8 +872,11 @@ class CanvasMixin:
                 item,
                 "<Leave>",
                 lambda e: self._hint(
-                    "Right-click canvas to place focus  •  "
-                    "Ctrl+drag to pan  •  Scroll to zoom"
+                    tr(
+                        "hint.canvas_controls",
+                        "Right-click canvas to place a focus  -  Ctrl+drag to pan  -  "
+                        "Scroll to zoom",
+                    )
                 ),
             )
 
@@ -1431,7 +1435,15 @@ class CanvasMixin:
         d["last_snap"] = (ngx, ngy)
         self._fv_x.set(str(ngx))
         self._fv_y.set(str(ngy))
-        self._hint(f"Dragging {self.focuses[fid].name}  →  x={ngx}  y={ngy}")
+        self._hint(
+            tr(
+                "hint.dragging",
+                "Dragging {name}  →  x={x}  y={y}",
+                name=self.focuses[fid].name,
+                x=ngx,
+                y=ngy,
+            )
+        )
         self._draw_lines_throttled()
 
     def _foc_rl(self, fid):
@@ -1441,9 +1453,13 @@ class CanvasMixin:
 
     def _foc_en(self, fid):
         f = self.focuses[fid]
-        base = (
-            f"{f.name}  •  Cost:{f.cost}  •  Effects:{len(f.effects)}  •  "
-            f"Prereqs:{sum(len(g) for g in f.prereqs)}"
+        base = tr(
+            "hint.focus_summary",
+            "{name}  •  Cost:{cost}  •  Effects:{effects}  •  Prereqs:{prereqs}",
+            name=f.name,
+            cost=f.cost,
+            effects=len(f.effects),
+            prereqs=sum(len(g) for g in f.prereqs),
         )
         offs = getattr(f, "offsets", [])
         if offs:
@@ -1451,7 +1467,11 @@ class CanvasMixin:
                 f"x={o['x']} y={o['y']} [{o.get('trigger', '').strip()[:30]}]"
                 for o in offs
             ]
-            base += f"  •  Offsets: {'; '.join(off_strs)}"
+            base += tr(
+                "hint.focus_summary_offsets",
+                "  •  Offsets: {offsets}",
+                offsets="; ".join(off_strs),
+            )
         self._hint(base)
 
     def _draw_canvas_legend(self):
@@ -1603,7 +1623,7 @@ class CanvasMixin:
                 self._cfp_x / XGRID,
                 self._cfp_y / YGRID,
                 "#22d3ee",
-                "Continuous\nFocus Position",
+                tr("canvas.cfp_label", "Continuous\nFocus Position"),
             )
 
         # Extra tree CFPs
@@ -1619,7 +1639,11 @@ class CanvasMixin:
                     et["cfp_x"] / XGRID,
                     et["cfp_y"] / YGRID,
                     col,
-                    f"Continuous\nFocus Position\n[{badge}]",
+                    tr(
+                        "canvas.cfp_label_extra_tree",
+                        "Continuous\nFocus Position\n[{badge}]",
+                        badge=badge,
+                    ),
                 )
 
     def _toggle_grid(self):
@@ -1904,7 +1928,7 @@ class CanvasMixin:
         mm.create_text(
             4,
             MM_H - 4,
-            text="M — minimap",
+            text=tr("canvas.minimap_label", "M — minimap"),
             fill="#1e3048",
             anchor="sw",
             font=("Helvetica", 7),

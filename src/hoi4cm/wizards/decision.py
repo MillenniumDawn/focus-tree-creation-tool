@@ -884,7 +884,14 @@ def open_decision_wizard(app):
                     dlbar.bind("<Button-1>", _on_dec)
 
         total_d = sum(len(_decs_for(c["uid"])) for c in dm_cats)
-        tree_status.config(text=f"  {total_d} decisions  ·  {len(dm_cats)} categories")
+        tree_status.config(
+            text=tr(
+                "decision.status.tree_counts",
+                "  {decisions} decisions  ·  {categories} categories",
+                decisions=total_d,
+                categories=len(dm_cats),
+            )
+        )
 
     def _tag(parent, text, fg, bg, bd):
         f = tk.Frame(parent, bg=bg, highlightthickness=1, highlightbackground=bd)
@@ -907,7 +914,11 @@ def open_decision_wizard(app):
         else:
             cat_uid = dm_cats[0]["uid"] if dm_cats else None
         if not cat_uid:
-            messagebox.showwarning("No Category", "Add a category first.", parent=win)
+            messagebox.showwarning(
+                tr("decision.dialog.no_category.title", "No Category"),
+                tr("decision.dialog.no_category.body", "Add a category first."),
+                parent=win,
+            )
             return
         d = new_decision_record(cat_uid)
         dm_decs.append(d)
@@ -1386,12 +1397,24 @@ def open_decision_wizard(app):
         if not c:
             return
         n = len(_decs_for(uid))
-        msg = f"Delete category '{c['cat_id']}'"
         if n:
-            msg += f" and its {n} decision{'s' if n != 1 else ''}?"
+            msg = tr(
+                "decision.dialog.delete_category.with_decisions",
+                "Delete category '{name}' and its {count} decision(s)?",
+                name=c["cat_id"],
+                count=n,
+            )
         else:
-            msg += "?"
-        if not messagebox.askyesno("Delete Category", msg, parent=win):
+            msg = tr(
+                "decision.dialog.delete_category.empty",
+                "Delete category '{name}'?",
+                name=c["cat_id"],
+            )
+        if not messagebox.askyesno(
+            tr("decision.dialog.delete_category.title", "Delete Category"),
+            msg,
+            parent=win,
+        ):
             return
         _collect()
         _snapshot()
@@ -1435,7 +1458,13 @@ def open_decision_wizard(app):
         if not d:
             return
         if not messagebox.askyesno(
-            "Delete Decision", f"Delete decision '{d['dec_id']}'?", parent=win
+            tr("decision.dialog.delete_decision.title", "Delete Decision"),
+            tr(
+                "decision.dialog.delete_decision.body",
+                "Delete decision '{name}'?",
+                name=d["dec_id"],
+            ),
+            parent=win,
         ):
             return
         _collect()
@@ -1515,17 +1544,26 @@ def open_decision_wizard(app):
             tr("decision.field.category_id", "Category ID"),
             _sv("cat_id", cat["cat_id"]),
             mono=True,
-            hint="Used in decisions files:  my_category = { ... }",
+            hint=tr(
+                "decision.hint.category_id",
+                "Used in decisions files:  my_category = { ... }",
+            ),
         )
         _field(
             tr("decision.field.display_name_loc", "Display Name (localisation)"),
             _sv("loc_name", cat["loc_name"]),
-            hint="Loc key shown in-game. Use §Y...§! for colour.",
+            hint=tr(
+                "decision.hint.loc_key_colour",
+                "Loc key shown in-game. Use §Y...§! for colour.",
+            ),
         )
         _field(
             tr("decision.field.description_loc", "Description (localisation)"),
             _sv("loc_desc", cat["loc_desc"]),
-            hint="Tooltip text shown when hovering the category.",
+            hint=tr(
+                "decision.hint.category_tooltip",
+                "Tooltip text shown when hovering the category.",
+            ),
         )
 
         _sec(tr("decision.section.gfx_icon_picture", "GFX - Icon + Picture"), PURPLE)
@@ -1533,7 +1571,11 @@ def open_decision_wizard(app):
             tr("common.icon", "Icon"),
             "icon",
             cat["icon"],
-            prefix_note="Auto-prefixed → GFX_decision_category_<n>  (or use full GFX_ name directly)",
+            prefix_note=tr(
+                "decision.note.category_icon_prefix",
+                "Auto-prefixed → GFX_decision_category_<n>  "
+                "(or use full GFX_ name directly)",
+            ),
         )
         _gfx_field(
             tr(
@@ -1542,7 +1584,10 @@ def open_decision_wizard(app):
             ),
             "picture",
             cat["picture"],
-            warn="Picture only renders if a localisation description is set above",
+            warn=tr(
+                "decision.warn.category_picture",
+                "Picture only renders if a localisation description is set above",
+            ),
         )
         # Visual placement button
         prow = tk.Frame(mid_frm, bg=BG_PANEL)
@@ -1564,16 +1609,19 @@ def open_decision_wizard(app):
 
         _sec(tr("decision.section.triggers", "Triggers"), TEAL)
         _triggerblock(
-            "allowed  (checked ONCE at game start)",
+            tr(
+                "decision.field.allowed_category",
+                "allowed  (checked ONCE at game start)",
+            ),
             "allowed",
             cat["allowed"],
-            hint="once-only",
+            hint=tr("decision.tag.once_only", "once-only"),
         )
         _triggerblock(
-            "visible  (checked every frame)",
+            tr("decision.field.visible_category", "visible  (checked every frame)"),
             "visible",
             cat["visible"],
-            hint="per-frame",
+            hint=tr("decision.tag.per_frame", "per-frame"),
         )
 
         _sec(tr("decision.section.options", "Options"), BLUE)
@@ -1581,16 +1629,31 @@ def open_decision_wizard(app):
             tr("decision.field.priority", "Priority"),
             _sv("priority", cat["priority"]),
             mono=True,
-            hint="Higher = closer to top.  Default = 1",
+            hint=tr(
+                "decision.hint.category_priority",
+                "Higher = closer to top.  Default = 1",
+            ),
         )
         _toggle(
-            "visible_when_empty — show category even with no visible decisions",
+            tr(
+                "decision.toggle.visible_when_empty",
+                "visible_when_empty — show category even with no visible decisions",
+            ),
             _bv("visible_when_empty", cat["visible_when_empty"]),
         )
         on_map_v = _bv("on_map_area", cat["on_map_area"])
-        _toggle("on_map_area — camera move button at top of list", on_map_v)
         _toggle(
-            "scripted_gui — embed custom GUI panel in category",
+            tr(
+                "decision.toggle.on_map_area",
+                "on_map_area — camera move button at top of list",
+            ),
+            on_map_v,
+        )
+        _toggle(
+            tr(
+                "decision.toggle.scripted_gui",
+                "scripted_gui — embed custom GUI panel in category",
+            ),
             _bv("scripted_gui", False),
         )
 
@@ -1608,7 +1671,7 @@ def open_decision_wizard(app):
             cf.pack(fill="x", padx=14, pady=4)
             tk.Label(
                 cf,
-                text="  ON MAP AREA CONFIG",
+                text=tr("decision.section.on_map_area_config", "  ON MAP AREA CONFIG"),
                 bg=BG_CARD,
                 fg=TEAL,
                 font=("Courier", 9, "bold"),
@@ -1728,12 +1791,15 @@ def open_decision_wizard(app):
             tr("decision.field.decision_id", "Decision ID"),
             _sv("dec_id", dec["dec_id"]),
             mono=True,
-            hint="Unique key, e.g. TAG_my_decision",
+            hint=tr("decision.hint.decision_id", "Unique key, e.g. TAG_my_decision"),
         )
         _field(
             tr("decision.field.display_name_loc", "Display Name (localisation)"),
             _sv("loc_name", dec["loc_name"]),
-            hint="Loc key shown in-game. Use §Y...§! for colour.",
+            hint=tr(
+                "decision.hint.loc_key_colour",
+                "Loc key shown in-game. Use §Y...§! for colour.",
+            ),
         )
         _field(
             tr(
@@ -1746,7 +1812,11 @@ def open_decision_wizard(app):
             tr("common.icon", "Icon"),
             "icon",
             dec["icon"],
-            prefix_note="Auto-prefixed → GFX_decision_<n>  (or full GFX_ name). Supports conditional icon blocks.",
+            prefix_note=tr(
+                "decision.note.decision_icon_prefix",
+                "Auto-prefixed → GFX_decision_<n>  (or full GFX_ name). "
+                "Supports conditional icon blocks.",
+            ),
         )
         _field(
             tr("decision.field.chain_group", "Chain / group tag (visual only)"),
@@ -1756,28 +1826,41 @@ def open_decision_wizard(app):
 
         _sec(tr("decision.section.triggers", "Triggers"), TEAL)
         _triggerblock(
-            "allowed  (once-only at game start)",
+            tr(
+                "decision.field.allowed_decision",
+                "allowed  (once-only at game start)",
+            ),
             "allowed",
             dec["allowed"],
-            hint="once-only",
+            hint=tr("decision.tag.once_only", "once-only"),
         )
         _triggerblock(
-            "visible  (per-frame — makes decision show)",
+            tr(
+                "decision.field.visible_decision",
+                "visible  (per-frame — makes decision show)",
+            ),
             "visible",
             dec["visible"],
-            hint="per-frame",
+            hint=tr("decision.tag.per_frame", "per-frame"),
         )
         _triggerblock(
-            "available  (per-frame — enables or greys out)",
+            tr(
+                "decision.field.available_decision",
+                "available  (per-frame — enables or greys out)",
+            ),
             "available",
             dec["available"],
-            hint="per-frame",
+            hint=tr("decision.tag.per_frame", "per-frame"),
         )
 
         _sec(tr("decision.section.cost", "Cost"), BLUE)
         use_custom_v = tk.BooleanVar(value=(dec["cost_type"] != "pp"))
         _evars["_use_custom"] = use_custom_v
-        _toggle("Use custom cost (non-PP cost)", use_custom_v, hint_tag="visual only")
+        _toggle(
+            tr("decision.toggle.custom_cost", "Use custom cost (non-PP cost)"),
+            use_custom_v,
+            hint_tag=tr("decision.tag.visual_only", "visual only"),
+        )
 
         cost_host = tk.Frame(mid_frm, bg=BG_PANEL)
         cost_host.pack(fill="x")
@@ -1852,7 +1935,10 @@ def open_decision_wizard(app):
                 _reg_text("custom_cost_trigger", ct, dec["custom_cost_trigger"])
                 for lbl2, k2, dflt2, ht2 in [
                     (
-                        "custom_cost_text (loc key)",
+                        tr(
+                            "decision.field.custom_cost_text",
+                            "custom_cost_text (loc key)",
+                        ),
                         "custom_cost_text",
                         dec["custom_cost_text"],
                         "",
@@ -1861,7 +1947,10 @@ def open_decision_wizard(app):
                         "ai_hint_pp_cost",
                         "ai_hint_pp_cost",
                         dec["ai_hint_pp_cost"],
-                        "Tell AI how much PP to save (optional)",
+                        tr(
+                            "decision.hint.ai_hint_pp_cost",
+                            "Tell AI how much PP to save (optional)",
+                        ),
                     ),
                 ]:
                     r2 = tk.Frame(cf, bg=BG_CARD)
@@ -1902,7 +1991,11 @@ def open_decision_wizard(app):
                 wb.pack(fill="x", padx=4, pady=(2, 6))
                 tk.Label(
                     wb,
-                    text="⚠ Custom cost does NOT deduct anything automatically —\nadd hidden_effect in complete_effect to subtract manually",
+                    text=tr(
+                        "decision.warn.custom_cost",
+                        "⚠ Custom cost does NOT deduct anything automatically —\n"
+                        "add hidden_effect in complete_effect to subtract manually",
+                    ),
                     bg=ORAN_TAG_BG,
                     fg=ORANGE,
                     font=("Helvetica", 8),
@@ -1932,11 +2025,17 @@ def open_decision_wizard(app):
             mono=True,
         )
         _toggle(
-            "fire_only_once — disappears after first use",
+            tr(
+                "decision.toggle.fire_only_once",
+                "fire_only_once — disappears after first use",
+            ),
             _bv("fire_only_once", dec["fire_only_once"]),
         )
         _toggle(
-            "fixed_random_seed — same random result each use (default ON)",
+            tr(
+                "decision.toggle.fixed_random_seed",
+                "fixed_random_seed — same random result each use (default ON)",
+            ),
             _bv("fixed_random_seed", dec["fixed_random_seed"]),
         )
 
@@ -2057,7 +2156,10 @@ def open_decision_wizard(app):
             wb2.pack(fill="x", padx=6, pady=(0, 2))
             tk.Label(
                 wb2,
-                text="⚠ visible = {} does NOTHING in missions — use activation instead",
+                text=tr(
+                    "decision.warn.mission_visible",
+                    "⚠ visible = {} does NOTHING in missions — use activation instead",
+                ),
                 bg=ORAN_TAG_BG,
                 fg=ORANGE,
                 font=("Helvetica", 8),
@@ -2218,7 +2320,7 @@ def open_decision_wizard(app):
                         rr2.pack(fill="x", pady=1)
                         tk.Label(
                             rr2,
-                            text="TARGET TAG",
+                            text=tr("decision.field.target_tag", "TARGET TAG"),
                             bg=BG_CARD,
                             fg=TEXT_DIM,
                             font=("Courier", 8),
@@ -2322,12 +2424,18 @@ def open_decision_wizard(app):
                     ).pack(side="left")
 
                 _mtog3(
-                    "targets_dynamic — include civil war / dynamic countries",
+                    tr(
+                        "decision.toggle.targets_dynamic",
+                        "targets_dynamic — include civil war / dynamic countries",
+                    ),
                     "targets_dynamic",
                     dec["targets_dynamic"],
                 )
                 _mtog3(
-                    "target_non_existing — allow non-existing countries",
+                    tr(
+                        "decision.toggle.target_non_existing",
+                        "target_non_existing — allow non-existing countries",
+                    ),
                     "target_non_existing",
                     dec["target_non_existing"],
                 )
@@ -2336,7 +2444,9 @@ def open_decision_wizard(app):
                 r2.pack(fill="x", padx=6, pady=2)
                 tk.Label(
                     r2,
-                    text="TARGET_ARRAY (GAME ARRAY NAME)",
+                    text=tr(
+                        "decision.field.target_array", "TARGET_ARRAY (GAME ARRAY NAME)"
+                    ),
                     bg=BG_CARD,
                     fg=TEXT_DIM,
                     font=("Courier", 8),
@@ -2354,7 +2464,10 @@ def open_decision_wizard(app):
                 ).pack(fill="x", ipady=3, pady=(2, 4))
                 tk.Label(
                     r2,
-                    text="e.g. enemies, allies, controlled_states",
+                    text=tr(
+                        "decision.hint.target_array",
+                        "e.g. enemies, allies, controlled_states",
+                    ),
                     bg=BG_CARD,
                     fg=TEXT_DIM,
                     font=("Helvetica", 8, "italic"),
@@ -2362,7 +2475,10 @@ def open_decision_wizard(app):
             else:  # trigger
                 tk.Label(
                     cf,
-                    text="TARGET_TRIGGER  (ROOT = DECIDER, FROM = TARGET)",
+                    text=tr(
+                        "decision.field.target_trigger",
+                        "TARGET_TRIGGER  (ROOT = DECIDER, FROM = TARGET)",
+                    ),
                     bg=BG_CARD,
                     fg=TEXT_DIM,
                     font=("Courier", 8),
@@ -2385,7 +2501,11 @@ def open_decision_wizard(app):
             # target_root_trigger always visible
             tk.Label(
                 cf,
-                text="TARGET_ROOT_TRIGGER  (ROOT ONLY — RUNS BEFORE TARGET_TRIGGER FOR PERFORMANCE)",
+                text=tr(
+                    "decision.field.target_root_trigger",
+                    "TARGET_ROOT_TRIGGER  "
+                    "(ROOT ONLY — RUNS BEFORE TARGET_TRIGGER FOR PERFORMANCE)",
+                ),
                 bg=BG_CARD,
                 fg=TEXT_DIM,
                 font=("Courier", 7),
@@ -2411,7 +2531,7 @@ def open_decision_wizard(app):
                 r3.pack(fill="x", padx=6, pady=2)
                 tk.Label(
                     r3,
-                    text="STATE_TARGET SCOPE",
+                    text=tr("decision.field.state_target_scope", "STATE_TARGET SCOPE"),
                     bg=BG_CARD,
                     fg=TEXT_DIM,
                     font=("Courier", 8),
@@ -2499,12 +2619,18 @@ def open_decision_wizard(app):
                 ).pack(side="left")
 
             _wt(
-                "war_with_target_on_complete — warn FROM on complete",
+                tr(
+                    "decision.toggle.war_with_target_on_complete",
+                    "war_with_target_on_complete — warn FROM on complete",
+                ),
                 "war_target_complete",
                 dec["war_target_complete"],
             )
             _wt(
-                "war_with_target_on_remove — warn FROM on remove",
+                tr(
+                    "decision.toggle.war_with_target_on_remove",
+                    "war_with_target_on_remove — warn FROM on remove",
+                ),
                 "war_target_remove",
                 dec["war_target_remove"],
             )
@@ -2731,7 +2857,9 @@ def open_decision_wizard(app):
             tr("decision.field.priority_raw", "priority"),
             _sv("priority", dec["priority"]),
             mono=True,
-            hint="Higher = shown earlier in AI evaluation",
+            hint=tr(
+                "decision.hint.ai_priority", "Higher = shown earlier in AI evaluation"
+            ),
         )
 
     # ── rebuild_editor  (clears mid_frm and dispatches) ──────────────────────
@@ -3294,7 +3422,11 @@ def open_decision_wizard(app):
                         font=("Helvetica", 9),
                     )
                     m.add_command(
-                        label=f"Copy GFX key: {k}",
+                        label=tr(
+                            "decision.menu.copy_gfx_key",
+                            "Copy GFX key: {gfx_key}",
+                            gfx_key=k,
+                        ),
                         command=lambda: [
                             win.clipboard_clear(),
                             win.clipboard_append(k),
@@ -3413,7 +3545,11 @@ def open_decision_wizard(app):
                             font=("Helvetica", 9),
                         )
                         m.add_command(
-                            label=f"Copy GFX key: {k}",
+                            label=tr(
+                                "decision.menu.copy_gfx_key",
+                                "Copy GFX key: {gfx_key}",
+                                gfx_key=k,
+                            ),
                             command=lambda: [
                                 win.clipboard_clear(),
                                 win.clipboard_append(k),
@@ -3567,7 +3703,12 @@ def open_decision_wizard(app):
             cc = CCOLORS.get(chain, [BLUE, TEAL, ORANGE, PURPLE, GREEN][ci % 5])
             tk.Label(
                 frm,
-                text=f"  ── {chain.upper()} CHAIN  ({len(decs)} decisions)",
+                text=tr(
+                    "decision.chain.header",
+                    "  ── {chain} CHAIN  ({count} decisions)",
+                    chain=chain.upper(),
+                    count=len(decs),
+                ),
                 bg=BG_DARK,
                 fg=cc,
                 font=("Courier", 9, "bold"),
@@ -3850,11 +3991,18 @@ def open_decision_wizard(app):
                             encoding=encoding,
                         )
                         _dm_status.config(
-                            text=f"  ✓  Scripted loc saved to {os.path.basename(MOD.edit_scripted_loc_file)}"
+                            text=tr(
+                                "decision.status.scripted_loc_saved",
+                                "  ✓  Scripted loc saved to {file}",
+                                file=os.path.basename(MOD.edit_scripted_loc_file),
+                            )
                         )
                     except (OSError, ValueError, TypeError, RuntimeError) as _ex:
                         report_write_failure(
-                            win, MOD.edit_scripted_loc_file, _ex, title="Save Error"
+                            win,
+                            MOD.edit_scripted_loc_file,
+                            _ex,
+                            title=tr("dialog.save_error.title", "Save Error"),
                         )
                 else:
                     win.clipboard_clear()
@@ -4021,13 +4169,22 @@ def open_decision_wizard(app):
                     pass
                 _autosave()
                 _dm_status.config(
-                    text=f"  ✓  Applied — {len(dm_cats)} categories, {imported} decisions parsed from code"
+                    text=tr(
+                        "decision.status.code_applied",
+                        "  ✓  Applied — {categories} categories, "
+                        "{decisions} decisions parsed from code",
+                        categories=len(dm_cats),
+                        decisions=imported,
+                    )
                 )
             except Exception as _ex:  # noqa: BLE001
                 dm_cats[:] = old_cats
                 dm_decs[:] = old_decs
                 report_error(
-                    f"Parse error: {_ex}", _ex, parent=win, title="Parse Error"
+                    tr("decision.error.parse", "Parse error: {error}", error=_ex),
+                    _ex,
+                    parent=win,
+                    title=tr("dialog.parse_error.title", "Parse Error"),
                 )
                 traceback.print_exc()
 
@@ -4094,7 +4251,14 @@ def open_decision_wizard(app):
             txt = code_t.get("1.0", "end-1c")
             lines = txt.count("\n") + 1
             chars = len(txt)
-            _line_lbl.config(text=f"{lines} lines · {chars} chars")
+            _line_lbl.config(
+                text=tr(
+                    "decision.code.line_count",
+                    "{lines} lines · {chars} chars",
+                    lines=lines,
+                    chars=chars,
+                )
+            )
 
         code_t.bind(
             "<KeyRelease>",
@@ -4301,7 +4465,10 @@ def open_decision_wizard(app):
 
         paths = _paths or filedialog.askopenfilenames(
             parent=win,
-            title="Import decisions .txt (+ optionally loc .yml)",
+            title=tr(
+                "filedialog.import_decisions",
+                "Import decisions .txt (+ optionally loc .yml)",
+            ),
             filetypes=[
                 ("HOI4 files", "*.txt *.yml"),
                 ("TXT", "*.txt"),
@@ -4390,7 +4557,12 @@ def open_decision_wizard(app):
                 if raw is None or encoding is None:
                     raise OSError("decision file could not be read")
             except OSError as e:
-                report_error(str(e), e, parent=win, title="Import Error")
+                report_error(
+                    str(e),
+                    e,
+                    parent=win,
+                    title=tr("dialog.import_error.title", "Import Error"),
+                )
                 continue
 
             if _is_category_path(path):
@@ -4582,14 +4754,26 @@ def open_decision_wizard(app):
             _category_import_source = imported_category_paths[0]
 
         _autosave()
-        _dm_status.config(text=f"  ✓  Imported {imported} decisions — rebuilding...")
+        _dm_status.config(
+            text=tr(
+                "decision.status.imported_rebuilding",
+                "  ✓  Imported {count} decisions — rebuilding...",
+                count=imported,
+            )
+        )
         win.update_idletasks()
         _rebuild_tree()
         win.after(
             50,
             lambda: (
                 _rebuild_editor(),
-                _dm_status.config(text=f"  ✓  Imported {imported} decisions"),
+                _dm_status.config(
+                    text=tr(
+                        "decision.status.imported",
+                        "  ✓  Imported {count} decisions",
+                        count=imported,
+                    )
+                ),
             ),
         )
 
@@ -4597,7 +4781,10 @@ def open_decision_wizard(app):
         """Load a scripted_localisation .txt and apply loc keys to existing decisions/cats."""
         paths = filedialog.askopenfilenames(
             parent=win,
-            title="Import scripted_localisation .txt files",
+            title=tr(
+                "filedialog.import_scripted_localisation",
+                "Import scripted_localisation .txt files",
+            ),
             filetypes=[("HOI4 txt", "*.txt"), ("All", "*.*")],
         )
         if not paths:
@@ -4621,7 +4808,12 @@ def open_decision_wizard(app):
                     "scripted loc read failed %s: %s", path, exc
                 )
         if not sloc_map:
-            _dm_status.config(text="  ⚠  No defined_text blocks found")
+            _dm_status.config(
+                text=tr(
+                    "decision.status.no_defined_text",
+                    "  ⚠  No defined_text blocks found",
+                )
+            )
             return
         updated = 0
         # Match GET_{id}_name -> loc_name key, GET_{id}_desc -> loc_desc key
@@ -4643,14 +4835,22 @@ def open_decision_wizard(app):
             key_desc = f"GET_{did}_desc"
             if key_desc in sloc_map:
                 d["loc_desc"] = sloc_map[key_desc]
-        _dm_status.config(text=f"  ✓  Scripted loc applied — {updated} entries matched")
+        _dm_status.config(
+            text=tr(
+                "decision.status.scripted_loc_applied",
+                "  ✓  Scripted loc applied — {count} entries matched",
+                count=updated,
+            )
+        )
         win.after(30, lambda: (_rebuild_tree(), _rebuild_editor()))
 
     def _import_yml_loc():
         """Load a localisation .yml and apply names/descs to existing decisions/cats."""
         paths = filedialog.askopenfilenames(
             parent=win,
-            title="Import localisation .yml files",
+            title=tr(
+                "filedialog.import_localisation_yml", "Import localisation .yml files"
+            ),
             filetypes=[("YML localisation", "*.yml"), ("All", "*.*")],
         )
         if not paths:
@@ -4666,7 +4866,12 @@ def open_decision_wizard(app):
                     if lm:
                         loc2[lm.group(1)] = lm.group(2)
             except OSError as e:
-                report_error(str(e), e, parent=win, title="YML Error")
+                report_error(
+                    str(e),
+                    e,
+                    parent=win,
+                    title=tr("dialog.yml_error.title", "YML Error"),
+                )
                 return
         updated = 0
         for c in dm_cats:
@@ -4681,14 +4886,20 @@ def open_decision_wizard(app):
                 updated += 1
             if d["dec_id"] + "_desc" in loc2:
                 d["loc_desc"] = loc2[d["dec_id"] + "_desc"]
-        _dm_status.config(text=f"  ✓  Localisation applied — {updated} entries matched")
+        _dm_status.config(
+            text=tr(
+                "decision.status.localisation_applied",
+                "  ✓  Localisation applied — {count} entries matched",
+                count=updated,
+            )
+        )
         win.after(30, lambda: (_rebuild_tree(), _rebuild_editor()))
 
     def _export_txt():
         _collect()
         path = filedialog.asksaveasfilename(
             parent=win,
-            title="Export decisions .txt",
+            title=tr("filedialog.export_decisions", "Export decisions .txt"),
             defaultextension=".txt",
             filetypes=[("HOI4 decisions", "*.txt"), ("All", "*.*")],
         )
@@ -4703,9 +4914,14 @@ def open_decision_wizard(app):
                     (cat_path, _gen_categories_file(), "utf-8"),
                 ]
             )
-            _dm_status.config(text="  ✓  Exported")
+            _dm_status.config(text=tr("decision.status.exported", "  ✓  Exported"))
         except (OSError, ValueError, TypeError, RuntimeError) as e:
-            report_error(str(e), e, parent=win, title="Export Error")
+            report_error(
+                str(e),
+                e,
+                parent=win,
+                title=tr("dialog.export_error.title", "Export Error"),
+            )
 
     def _copy_yml():
         _collect()
@@ -4718,13 +4934,18 @@ def open_decision_wizard(app):
     def _save_to_mod():
         _collect()
         if not dm_cats:
-            messagebox.showwarning("Empty", "No categories to save.", parent=win)
+            messagebox.showwarning(
+                tr("decision.dialog.empty.title", "Empty"),
+                tr("decision.dialog.empty.body", "No categories to save."),
+                parent=win,
+            )
             return
         if MOD.root and os.path.isdir(MOD.root):
             mod_root = MOD.root
         else:
             mod_root = filedialog.askdirectory(
-                parent=win, title="Select MOD ROOT folder"
+                parent=win,
+                title=tr("filedialog.decision_mod_root", "Select MOD ROOT folder"),
             )
             if not mod_root:
                 return
@@ -4748,18 +4969,30 @@ def open_decision_wizard(app):
         if decision_save_needs_confirmation(
             dec_path, _decision_import_source, os.path.isfile(dec_path)
         ) and not messagebox.askyesno(
-            "Overwrite Existing Decisions",
-            "This decisions file was not imported by the wizard.\n"
-            "Overwrite its existing contents?",
+            tr(
+                "decision.dialog.overwrite_decisions.title",
+                "Overwrite Existing Decisions",
+            ),
+            tr(
+                "decision.dialog.overwrite_decisions.body",
+                "This decisions file was not imported by the wizard.\n"
+                "Overwrite its existing contents?",
+            ),
             parent=win,
         ):
             return
         if decision_save_needs_confirmation(
             cat_path, _category_import_source, os.path.isfile(cat_path)
         ) and not messagebox.askyesno(
-            "Overwrite Existing Decision Categories",
-            "This decision categories file was not imported by the wizard.\n"
-            "Overwrite its existing contents?",
+            tr(
+                "decision.dialog.overwrite_categories.title",
+                "Overwrite Existing Decision Categories",
+            ),
+            tr(
+                "decision.dialog.overwrite_categories.body",
+                "This decision categories file was not imported by the wizard.\n"
+                "Overwrite its existing contents?",
+            ),
             parent=win,
         ):
             return
@@ -4790,7 +5023,9 @@ def open_decision_wizard(app):
         )
 
         msg = format_save_summary(saved, (), errs)
-        messagebox.showinfo("Saved to Mod", msg, parent=win)
+        messagebox.showinfo(
+            tr("dialog.saved_to_mod.title", "Saved to Mod"), msg, parent=win
+        )
         _dm_status.config(text=tr("common.status.saved_to_mod", "  ok  Saved to mod"))
 
     # ── init ─────────────────────────────────────────────────────────────────
@@ -4809,8 +5044,14 @@ def open_decision_wizard(app):
             return
         cats, decs = saved
         if messagebox.askyesno(
-            "Restore autosave",
-            f"An autosave was found with {len(cats)} categories and {len(decs)} decisions.\nRestore it?",
+            tr("decision.dialog.restore_autosave.title", "Restore autosave"),
+            tr(
+                "decision.dialog.restore_autosave.body",
+                "An autosave was found with {categories} categories "
+                "and {decisions} decisions.\nRestore it?",
+                categories=len(cats),
+                decisions=len(decs),
+            ),
             parent=win,
         ):
             restore_decision_state(dm_cats, dm_decs, saved)
