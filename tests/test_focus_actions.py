@@ -103,7 +103,7 @@ def test_canvas_opens_only_after_click_release(moved):
     app._focus_actions = Mock()
     redraw = Mock()
     app.__dict__["_redraw"] = redraw
-    CanvasMixin._foc_rl(app, 1)
+    app._foc_rl(1)
     assert app._drag == {}
     if moved:
         app._focus_actions.show.assert_not_called()
@@ -116,10 +116,10 @@ def test_canvas_opens_only_after_click_release(moved):
 def test_canvas_without_matching_press_or_mutex_never_opens():
     app = AppFake()
     app._focus_actions = Mock()
-    CanvasMixin._foc_rl(app, 1)
+    app._foc_rl(1)
     app._drag = {"id": 1, "moved": False}
     app.mutex_mode = True
-    CanvasMixin._foc_rl(app, 1)
+    app._foc_rl(1)
     app._focus_actions.show.assert_not_called()
 
 
