@@ -1,3 +1,5 @@
+import copy
+from collections.abc import Callable
 from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import Mock
@@ -548,3 +550,247 @@ def test_new_focus_at_keeps_indexes_exact_without_a_rebuild():
     assert app.focuses.first_by_name[created.name] == created.id
     app.focuses.rebuild_indexes.assert_not_called()
     assert app.focuses.validate_indexes()
+
+
+class _TextFake:
+    def __init__(self, text: str) -> None:
+        self.text = text
+
+    def get(self, _start: str, _end: str) -> str:
+        return self.text
+
+
+class _TraceVar:
+    """A StringVar stand-in whose set() fires the write trace, as Tk does."""
+
+    def __init__(self, value: str, on_write: Callable[[], None]) -> None:
+        self._value = value
+        self._on_write = on_write
+
+    def get(self) -> str:
+        return self._value
+
+    def set(self, value: str) -> None:
+        self._value = value
+        self._on_write()
+
+
+def _live_undo_app(focus: Focus, *others: Focus) -> AppFake:
+    """A host that selects ``focus`` and pushes onto a real UndoStack."""
+    app = AppFake([focus, *others])
+    cast(Any, app).selected = focus
+    app._undo_stack = UndoStack()
+    app._push_undo = lambda *args, **kwargs: app_module.App._push_undo(
+        _as_app(app), *args, **kwargs
+    )
+    return app
+
+
+def _raw_focus(raw: str) -> Focus:
+    focus = Focus(id=40)
+    focus.effects = [{"type": "_raw_block", "fields": {"raw": raw}}]
+    return focus
+
+
+def _fields_of(app: AppFake, focus_id: int) -> dict[str, str]:
+    return cast(dict[str, str], app.focuses[focus_id].effects[0]["fields"])
+
+
+def _raw_of(app: AppFake) -> str:
+    return _fields_of(app, 40)["raw"]
+
+
+def test_raw_edit_pushes_before_writing_and_undo_restores_the_imported_text():
+    imported = "add_political_power = 5  \n"
+    app = _live_undo_app(_raw_focus(imported))
+
+    app._live_raw_block(0, _TextFake("add_political_power = 50\n"))
+
+    assert _raw_of(app) == "add_political_power = 50"
+    assert len(app._undo_stack) == 1
+    app_module.App._undo(_as_app(app))
+    assert _raw_of(app) == imported
+
+
+def test_raw_edit_typing_coalesces_into_one_entry():
+    imported = "a = 1\n"
+    app = _live_undo_app(_raw_focus(imported))
+
+    for text in ("a = 1x", "a = 1xy", "a = 1xyz"):
+        app._live_raw_block(0, _TextFake(text))
+
+    assert _raw_of(app) == "a = 1xyz"
+    assert len(app._undo_stack) == 1
+    app_module.App._undo(_as_app(app))
+    assert _raw_of(app) == imported
+
+
+def test_raw_edit_bare_key_release_pushes_nothing_and_keeps_redo():
+    app = _live_undo_app(_raw_focus("a = 1  \n"))
+    app._live_raw_block(0, _TextFake("a = 2"))
+    app_module.App._undo(_as_app(app))
+    imported = _raw_of(app)
+
+    app._live_raw_block(0, _TextFake(imported))
+
+    assert imported == "a = 1  \n"
+    assert _raw_of(app) == imported
+    assert len(app._undo_stack) == 0
+    app_module.App._redo(_as_app(app))
+    assert _raw_of(app) == "a = 2"
+
+
+def test_rename_effect_key_pushes_and_undo_restores_the_key():
+    focus = Focus(id=41)
+    focus.effects = [{"type": "mine", "fields": {"amount": "1", "tag": "GER"}}]
+    app = _live_undo_app(focus)
+    app._effects_sig = "built"
+
+    app._rename_effect_key(0, "amount", "value")
+
+    assert _fields_of(app, 41) == {"value": "1", "tag": "GER"}
+    assert app._effects_sig is None
+    assert len(app._undo_stack) == 1
+    app_module.App._undo(_as_app(app))
+    assert _fields_of(app, 41) == {"amount": "1", "tag": "GER"}
+
+
+def test_rename_effect_key_onto_an_existing_key_is_undoable():
+    focus = Focus(id=41)
+    focus.effects = [{"type": "mine", "fields": {"amount": "1", "tag": "GER"}}]
+    app = _live_undo_app(focus)
+
+    app._rename_effect_key(0, "amount", "tag")
+
+    assert _fields_of(app, 41) == {"tag": "1"}
+    app_module.App._undo(_as_app(app))
+    assert _fields_of(app, 41) == {"amount": "1", "tag": "GER"}
+
+
+@pytest.mark.parametrize(
+    ("old", "new"), [("amount", "amount"), ("missing", "value")], ids=["same", "gone"]
+)
+def test_rename_effect_key_without_a_change_pushes_nothing(old, new):
+    focus = Focus(id=41)
+    focus.effects = [{"type": "mine", "fields": {"amount": "1", "tag": "GER"}}]
+    app = _live_undo_app(focus)
+    app._effects_sig = "built"
+
+    app._rename_effect_key(0, old, new)
+
+    assert list(_fields_of(app, 41).items()) == [("amount", "1"), ("tag", "GER")]
+    assert app._effects_sig == "built"
+    assert len(app._undo_stack) == 0
+
+
+@pytest.mark.parametrize(
+    ("effect", "added"),
+    [
+        ({"type": "mine", "fields": {"a": "1"}}, {"a": "1", "key1": "value"}),
+        ({"type": "mine"}, {"key0": "value"}),
+    ],
+    ids=["with-fields", "no-fields"],
+)
+def test_add_raw_field_pushes_and_undo_removes_it(effect, added):
+    focus = Focus(id=42)
+    focus.effects = [effect]
+    before = copy.deepcopy(effect)
+    app = _live_undo_app(focus)
+
+    app._add_raw_effect_field(0)
+
+    assert _fields_of(app, 42) == added
+    assert len(app._undo_stack) == 1
+    cast(Any, app)._refresh_effects.assert_called_once_with()
+    app_module.App._undo(_as_app(app))
+    assert app.focuses[42].effects == [before]
+
+
+@pytest.mark.parametrize(
+    ("selected", "index"), [(False, 0), (True, 3)], ids=["no-selection", "stale-index"]
+)
+def test_raw_effect_edits_ignore_a_missing_selection_or_stale_index(selected, index):
+    focus = _raw_focus("a = 1")
+    app = _live_undo_app(focus)
+    if not selected:
+        cast(Any, app).selected = None
+
+    app._live_raw_block(index, _TextFake("b"))
+    app._rename_effect_key(index, "raw", "other")
+    app._add_raw_effect_field(index)
+
+    assert focus.effects == [{"type": "_raw_block", "fields": {"raw": "a = 1"}}]
+    assert len(app._undo_stack) == 0
+
+
+def _icon_app(focus: Focus, *others: Focus) -> tuple[AppFake, _TraceVar]:
+    """A host wired like the sidebar: the icon var's trace calls the handler."""
+    app = _live_undo_app(focus, *others)
+    host = cast(Any, app)
+    host._redraw_now = Mock()
+    icon_var = _TraceVar(
+        focus.icon, lambda: app_module.App._on_icon_change(_as_app(app))
+    )
+    host._fv_icon = icon_var
+    app._populate = Mock(side_effect=lambda f: icon_var.set(f.icon))
+    return app, icon_var
+
+
+def _icon_focus(focus_id: int, icon: str) -> Focus:
+    focus = Focus(id=focus_id)
+    focus.icon = icon
+    return focus
+
+
+def test_icon_change_pushes_before_writing_and_round_trips_through_undo_redo():
+    focus = _icon_focus(43, "A")
+    app, icon_var = _icon_app(focus)
+
+    icon_var.set("B")
+
+    assert focus.icon == "B"
+    assert len(app._undo_stack) == 1
+    cast(Any, app)._redraw_now.assert_called_once_with()
+    app_module.App._undo(_as_app(app))
+    assert app.focuses[43].icon == "A"
+    assert len(app._undo_stack) == 0
+    app_module.App._redo(_as_app(app))
+    assert app.focuses[43].icon == "B"
+
+
+def test_icon_repick_of_the_current_icon_pushes_nothing():
+    focus = _icon_focus(43, "A")
+    app, icon_var = _icon_app(focus)
+
+    icon_var.set("A")
+
+    assert focus.icon == "A"
+    assert len(app._undo_stack) == 0
+    cast(Any, app)._redraw_now.assert_called_once_with()
+
+
+def test_icon_change_without_a_selected_focus_writes_nothing():
+    focus = _icon_focus(43, "A")
+    app, icon_var = _icon_app(focus)
+    cast(Any, app).selected = None
+
+    icon_var.set("B")
+
+    assert focus.icon == "A"
+    assert len(app._undo_stack) == 0
+
+
+def test_select_populates_the_icon_without_pushing_or_writing_the_previous_focus():
+    first = _icon_focus(44, "A")
+    second = _icon_focus(45, "B")
+    app, icon_var = _icon_app(first, second)
+    host = cast(Any, app)
+    host._autosave = Mock()
+    host._show_form = Mock()
+    host._update_focus_list_selection = Mock()
+
+    app_module.App._select(_as_app(app), second)
+
+    assert icon_var.get() == "B"
+    assert (first.icon, second.icon) == ("A", "B")
+    assert len(app._undo_stack) == 0

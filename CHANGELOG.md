@@ -10,6 +10,9 @@ the version by hand. See `AGENTS.md`.
 
 - Record a failed sibling autosave once in the error log, including its path.
   Repeated ticks for the same failure do not add another entry.
+- Make the raw effect block editor, raw key rename, raw field add and the icon
+  picker undoable. Typing in a raw block is one undo step, and a key release or
+  icon pick that changes nothing adds no entry.
 
 ---
 

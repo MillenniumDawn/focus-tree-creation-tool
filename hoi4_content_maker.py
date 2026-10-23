@@ -2457,9 +2457,13 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
 
     # ── SELECTION ───────────────────────────────────────────────
     def _on_icon_change(self, *_):
-        if not self.selected:
+        f = self.selected
+        if not f:
             return
-        self.selected.icon = self._fv_icon.get()
+        icon = self._fv_icon.get()
+        if icon != f.icon:
+            self._push_undo("change icon", touched_ids=(f.id,))
+            f.icon = icon
         self._redraw_now()
 
     def _read_sidebar_values(self):
