@@ -62,9 +62,7 @@ class FocusActions:
         except tk.TclError as exc:
             self.dismiss()
             report_error(
-                "Focus Spotlight could not create its transparent foreground. "
-                "This renderer requires Tk window color-key transparency "
-                f"(Windows -transparentcolor). Tk reported: {exc}",
+                f"Focus Spotlight could not open. Tk reported: {exc}",
                 exc,
                 parent=self.app,
             )
@@ -160,7 +158,7 @@ class FocusActions:
         child.prereqs = [[parent.id]]
         if app._default_focus_prefix:
             child.name = f"{app._default_focus_prefix}focus_{child.id}"
-        trees = getattr(app, "_extra_trees", ())
+        trees: list[dict[str, Any]] = getattr(app, "_extra_trees", [])
         tree = trees[parent.tree_idx - 1] if 0 < parent.tree_idx <= len(trees) else None
         if tree is not None:
             app._push_undo("add child", touched_ids=(), tree_state=True)

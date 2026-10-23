@@ -2,6 +2,7 @@ from types import MethodType, SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
+from ui_fakes import AppFake
 
 from hoi4cm.models.document import FocusDocument
 from hoi4cm.ui.canvas import CanvasMixin
@@ -97,26 +98,24 @@ def test_invalid_pending_editor_draft_prevents_action():
 
 @pytest.mark.parametrize("moved", [True, False])
 def test_canvas_opens_only_after_click_release(moved):
-    app = SimpleNamespace(
-        _drag={"id": 1, "moved": moved},
-        mutex_mode=False,
-        _redraw=Mock(),
-        _focus_actions=Mock(),
-    )
+    app = AppFake()
+    app._drag = {"id": 1, "moved": moved}
+    app._focus_actions = Mock()
+    redraw = Mock()
+    app.__dict__["_redraw"] = redraw
     CanvasMixin._foc_rl(app, 1)
     assert app._drag == {}
     if moved:
         app._focus_actions.show.assert_not_called()
-        app._redraw.assert_called_once()
+        redraw.assert_called_once()
     else:
         app._focus_actions.show.assert_called_once_with(1)
-        app._redraw.assert_not_called()
+        redraw.assert_not_called()
 
 
 def test_canvas_without_matching_press_or_mutex_never_opens():
-    app = SimpleNamespace(
-        _drag={}, mutex_mode=False, _redraw=Mock(), _focus_actions=Mock()
-    )
+    app = AppFake()
+    app._focus_actions = Mock()
     CanvasMixin._foc_rl(app, 1)
     app._drag = {"id": 1, "moved": False}
     app.mutex_mode = True
@@ -163,7 +162,7 @@ def test_dismiss_restores_the_original_keyboard_widget():
     app.cv.focus_set.assert_not_called()
 
 
-def test_unsupported_compositor_reports_error_and_releases_input(monkeypatch):
+def test_spotlight_open_error_reports_and_releases_input(monkeypatch):
     import tkinter as tk
 
     actions, app, target = make_actions()
@@ -177,7 +176,9 @@ def test_unsupported_compositor_reports_error_and_releases_input(monkeypatch):
     assert not actions.blocks_canvas
     assert actions._view_state is None
     actions.spotlight.close.assert_called()
-    assert "-transparentcolor" in report.call_args.args[0]
+    assert report.call_args.args[0] == (
+        "Focus Spotlight could not open. Tk reported: unknown -transparentcolor"
+    )
 
 
 def test_dismiss_restores_exact_view_without_data_or_undo():

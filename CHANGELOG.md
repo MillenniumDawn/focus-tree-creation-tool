@@ -8,6 +8,8 @@ the version by hand. See `AGENTS.md`.
 
 ## Unreleased
 
+- Enable Spotlight on Linux and macOS with a solid dark background while
+  preserving Windows color-key transparency.
 - Measure project-sidebar coverage in the isolated Tk smoke without lowering
   the package floor, and run the Windows Spotlight smoke in CI. Preserve
   translations for moved controls and add the Add Child undo label.

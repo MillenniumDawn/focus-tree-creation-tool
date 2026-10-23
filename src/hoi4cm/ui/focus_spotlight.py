@@ -197,17 +197,24 @@ class RoundedAction(tk.Canvas):
 
 
 class FocusSpotlight:
-    """A color-keyed foreground keeps the tree visible between every control.
+    """Shared Spotlight controls with Windows color-key transparency."""
 
-    Windows Tk supplies native color-key transparency; unsupported window
-    systems report the compositor limitation instead of showing an opaque panel.
-    """
+    scroll: tk.Canvas
+    vbar: tk.Scrollbar
+    hbar: tk.Scrollbar
+    content: tk.Frame
+    preview: tk.Canvas
+    close_button: tk.Button
+    name_label: tk.Label
+    duration_label: tk.Label
+    _art_item: int
+    _fallback: int
 
     def __init__(self, app: Any, actions, invoke, dismiss):
         self.app, self.actions = app, actions
         self.invoke, self.dismiss = invoke, dismiss
-        self.backdrop = None
-        self.window = None
+        self.backdrop: tk.Toplevel | None = None
+        self.window: tk.Toplevel | None = None
         self.focus_id = None
         self.buttons: list[tk.Button] = []
         self.images: list[tk.PhotoImage] = []
@@ -216,10 +223,6 @@ class FocusSpotlight:
         self._art_size = None
         self._layout_key = None
         self._previous_grab = None
-        self.scroll = self.vbar = self.hbar = None
-        self.content = self.preview = None
-        self.close_button = self.name_label = self.duration_label = None
-        self._art_item = self._fallback = None
         self._owner = ("spotlight", id(self))
         self._configure_binding = app.bind("<Configure>", self._configured, add="+")
 
@@ -241,10 +244,12 @@ class FocusSpotlight:
         self.window.withdraw()
         self.window.overrideredirect(True)
         self.window.transient(self.app)
-        self.window.attributes("-transparentcolor", TRANSPARENT)
+        if self.app.tk.call("tk", "windowingsystem") == "win32":
+            self.window.attributes("-transparentcolor", TRANSPARENT)
         self.window.configure(bg=TRANSPARENT)
         self.window.bind("<Escape>", lambda _: self.dismiss() or "break")
-        self.window.bind("<Tab>", lambda e: self.step(-1 if e.state & 1 else 1))
+        self.window.bind("<Tab>", lambda _: self.step(1))
+        self.window.bind("<Shift-Tab>", lambda _: self.step(-1))
         self.window.bind("<ISO_Left_Tab>", lambda _: self.step(-1))
         self.window.bind("<ButtonRelease-1>", self._outside)
         self.window.bind("<KeyPress>", self._key)
@@ -348,6 +353,7 @@ class FocusSpotlight:
         if key == self._layout_key:
             return
         self._layout_key = key
+        assert self.backdrop is not None
         self.backdrop.geometry(f"{width}x{height}+{x}+{y}")
         font = tkfont.Font(root=app, font=("Segoe UI", 11))
         bw = max(
@@ -463,7 +469,7 @@ class FocusSpotlight:
         current = self.app.focus_get()
         index = items.index(current) if current in items else 0
         target = items[(index + direction) % len(items)]
-        target.focus_set()
+        target.focus_force()
         if target is self.close_button:
             return "break"
         # Compact layouts scroll the focused native control into view.
@@ -486,6 +492,7 @@ class FocusSpotlight:
             self.app._image_broker.release(self._owner)
         self.window.grab_release()
         self.window.destroy()
+        assert self.backdrop is not None
         self.backdrop.destroy()
         self.window = self.backdrop = None
         self.focus_id = None

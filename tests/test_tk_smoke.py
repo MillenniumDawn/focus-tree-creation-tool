@@ -420,7 +420,6 @@ def test_successive_applied_fields_refresh_both_recovery_files(
         assert primary.read_bytes() == sibling.read_bytes()
 
 
-@pytest.mark.skipif(sys.platform != "win32", reason="Tk Windows color-key compositor")
 def test_keyboard_action_list_has_all_labels_and_escape_is_noop(app):
     app._new_focus_at(46, 44)
     before = len(app._undo_stack)
@@ -436,6 +435,12 @@ def test_keyboard_action_list_has_all_labels_and_escape_is_noop(app):
     ]
     assert len(app._focus_actions.images) == 6
     assert app.focus_get() is app._focus_actions.buttons[0]
+    app._focus_actions.buttons[0].event_generate("<Tab>")
+    app.update()
+    assert app.focus_get() is app._focus_actions.buttons[1]
+    app._focus_actions.buttons[1].event_generate("<Shift-Tab>")
+    app.update()
+    assert app.focus_get() is app._focus_actions.buttons[0]
     app._focus_actions.buttons[0].event_generate("<Escape>")
     app.update()
     assert app._focus_actions.focus_id is None
@@ -443,7 +448,6 @@ def test_keyboard_action_list_has_all_labels_and_escape_is_noop(app):
     assert len(app._undo_stack) == before
 
 
-@pytest.mark.skipif(sys.platform != "win32", reason="Tk Windows color-key compositor")
 def test_spotlight_reflow_keyboard_and_dismissal_preserve_document(app):
     from hoi4cm.ui.focus_spotlight import TRANSPARENT
 
@@ -467,7 +471,13 @@ def test_spotlight_reflow_keyboard_and_dismissal_preserve_document(app):
             app.update()
             spotlight = app._focus_actions.spotlight
             assert spotlight.window.winfo_width() == app.winfo_width()
-            assert str(spotlight.window.attributes("-transparentcolor")) == TRANSPARENT
+            if app.tk.call("tk", "windowingsystem") == "win32":
+                assert (
+                    str(spotlight.window.attributes("-transparentcolor")) == TRANSPARENT
+                )
+            else:
+                assert spotlight.window.cget("background") == TRANSPARENT
+                assert float(spotlight.window.attributes("-alpha")) == 1.0
             assert float(app.attributes("-alpha")) == 1.0
             assert int(spotlight.preview.cget("highlightthickness")) == 0
             assert spotlight.name_label.cget("text") == focus.name
@@ -478,6 +488,13 @@ def test_spotlight_reflow_keyboard_and_dismissal_preserve_document(app):
                 spotlight.step(1)
                 app.update()
                 button = app.focus_get()
+                assert button is not None, (
+                    zoom,
+                    size,
+                    spotlight.window.state(),
+                    spotlight.buttons[0].winfo_viewable(),
+                    app.grab_current(),
+                )
                 if button is not spotlight.close_button:
                     assert button.winfo_rooty() >= spotlight.scroll.winfo_rooty()
                     assert button.winfo_rooty() + button.winfo_height() <= (
@@ -502,7 +519,6 @@ def test_spotlight_reflow_keyboard_and_dismissal_preserve_document(app):
         app.cv.focus_force()
 
 
-@pytest.mark.skipif(sys.platform != "win32", reason="Tk Windows color-key compositor")
 @pytest.mark.parametrize(
     "action",
     [
@@ -554,6 +570,26 @@ def test_spotlight_buttons_run_existing_actions(app, opened, action):
         assert set(app.focuses) == before_ids
         app._redo()
         assert set(app.focuses) == after_ids
+
+
+def test_spotlight_background_click_dismisses_without_editing(app):
+    x = max((item.x for item in app.focuses.values()), default=0) + 1
+    app._new_focus_at(x, 44)
+    focus = app.selected
+    assert (focus.x, focus.y) == (x, 44)
+    before = focus.to_dict()
+    undo_count = len(app._undo_stack)
+    previous_grab = app.grab_current()
+    app._focus_actions.show(focus.id)
+    app.update()
+    spotlight = app._focus_actions.spotlight
+    assert app.grab_current() is spotlight.window
+    spotlight.scroll.event_generate("<ButtonRelease-1>", x=0, y=0)
+    app.update()
+    assert not app._focus_actions.blocks_canvas
+    assert app.grab_current() is previous_grab
+    assert focus.to_dict() == before
+    assert len(app._undo_stack) == undo_count
 
 
 def test_tree_settings_keeps_loaded_trees_and_references_accessible(app):

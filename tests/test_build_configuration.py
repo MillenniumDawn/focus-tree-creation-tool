@@ -161,3 +161,15 @@ def test_stable_build_checks_tag_against_project_before_compiling():
     assert "shell: bash" in check_step
     assert '"$RELEASE_TAG"' in check_step
     assert build.index(check) < build.index("python build/build.py")
+
+
+def test_build_waits_for_native_macos_tk_smoke():
+    workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    macos = workflow.split("\n  macos-tk:\n", 1)[1].split("\n  build:\n", 1)[0]
+    build = workflow.split("\n  build:\n", 1)[1].split("\n  release:\n", 1)[0]
+
+    assert "runs-on: macos-latest" in macos
+    assert 'python-version: "3.14"' in macos
+    assert "pip install --require-hashes -r dev-requirements.txt" in macos
+    assert "run: pytest -m tk" in macos
+    assert "needs: [lint, test, windows-permissions, macos-tk]" in build

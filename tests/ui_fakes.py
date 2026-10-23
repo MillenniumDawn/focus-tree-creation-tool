@@ -29,6 +29,7 @@ class AppFake(CanvasMixin, ModLoadingMixin, EffectsMixin):
     cv: Any
     _mod_lbl: Any
     _lifecycle: Any
+    _focus_actions: Mock
     selected: Focus | None
     _refresh_effects: Mock
     _select: Mock

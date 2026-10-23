@@ -258,24 +258,28 @@ regression, so it was documented rather than reverted.
 
 The Tk smoke needs a display. On Linux run it under `xvfb-run -a` so nothing
 opens on your desktop (`sudo apt-get install xvfb xauth` on Debian/Ubuntu).
-CI also runs `pytest -m tk` on native Windows, where the color-key Spotlight
-compositor tests can run instead of being skipped. Linux skips those eight
-Windows-specific cases. Neither job verifies macOS UI behavior. The 200% DPI
+CI runs `pytest -m tk` on Linux under Xvfb and on native Windows and macOS.
+The Spotlight cases run on every platform: Windows checks color-key
+transparency; Linux and macOS check the solid dark surface. All three run
+the same action, keyboard, resizing and dismissal assertions. The 200% DPI
 smoke sets its window maximum before App construction, so a small runner
 desktop cannot clamp the requested 1440×1000 test window.
 
 The separate `windows-permissions` job runs `tests/test_cache_permissions.py`
 and then the Tk smoke in separate processes on native Windows. Both new-cache
-and existing-cache cases inspect real directory and database DACLs. Executable builds depend on this job as well as lint and the
-Linux test job, so a cache-permission failure blocks release artifacts.
+and existing-cache cases inspect real directory and database DACLs. The
+`macos-tk` job runs the Tk smoke on native macOS. Executable builds depend on
+both jobs as well as lint and the Linux test job, so native Tk or cache-permission
+failures block release artifacts.
 
 ## What is not automated
 
-Widget behavior has no automated test: canvas drawing and culling, the
+Most widget behavior still needs manual checks: canvas drawing and culling, the
 virtualized list and thumbnail pools, dialog flows (confirm, browse, the
 button press that starts a save), keyboard focus, grabs, and the tutorial
-walk. The smoke proves each window builds. The checklists below cover the
-rest by hand, and each one is a candidate for extraction into a pure function
+walk. The smoke proves each window builds and exercises Spotlight actions,
+keyboard navigation and dismissal. The checklists below cover the rest by
+hand, and each one is a candidate for extraction into a pure function
 with a headless test.
 
 What a wizard save writes is the worked example: the four "Save to Mod" paths

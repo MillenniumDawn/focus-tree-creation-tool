@@ -103,10 +103,25 @@ jobs:
       - name: Tk smoke (native Spotlight compositor)
         run: pytest -m tk
 
+  macos-tk:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        # v6.3.0
+        with:
+          python-version: "3.14"
+      - name: Install dev dependencies
+        run: pip install --require-hashes -r dev-requirements.txt
+      - name: Tk smoke (native macOS)
+        run: pytest -m tk
+
   # Runs on PRs and v* tags, not on pushes to main (pre-release.yml builds and
   # smoke-tests those), so a PyInstaller break shows up in the PR that caused it.
   build:
-    needs: [lint, test, windows-permissions]
+    needs: [lint, test, windows-permissions, macos-tk]
     if: github.event_name == 'pull_request' || startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: read

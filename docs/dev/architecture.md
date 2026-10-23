@@ -431,26 +431,25 @@ files sequentially rather than fanning out across workers.
 ### Focus Spotlight presentation
 
 `ui/focus_spotlight.py` owns presentation; `ui/focus_actions.py` keeps the
-captured target and delegates to the existing editor/action handlers. A
-translucent owned Toplevel dims only the application's client area. A second,
-fully opaque Toplevel uses Windows Tk's `-transparentcolor` for the empty
-space between the artwork, labels and rounded buttons. There is no enclosing
-panel or preview card. Both windows are transient to the app; the foreground
-is raised and focused after the veil to preserve Windows stacking order.
+captured target and delegates to the existing editor/action handlers. On
+Windows, a translucent owned Toplevel dims the application's client area and
+another Toplevel uses `-transparentcolor` for the space between the artwork,
+labels and rounded buttons. Linux and macOS use the same controls on a solid
+dark surface without requesting the Windows-only Tk attribute. Both windows
+are transient to the app; the foreground is raised and focused after the veil
+to preserve Windows stacking order.
 
 `spotlight_layout` computes zoom-independent radial geometry and reflows to
-rows on narrow windows. A transparent scroll viewport and keyboard traversal
+rows on narrow windows. A scroll viewport and keyboard traversal
 keep every action reachable in short windows. The image broker loads the
 selected GFX at 140–168 logical pixels, preserving aspect ratio and alpha;
 missing artwork retains the focus's own fallback symbol. Closing releases the
 broker owner and modal grab, then restores the original view and keyboard
-widget without a document edit or undo entry. Color-key holes route backdrop
-clicks to the grabbed window, which consumes dismissal without click-through.
+widget without a document edit or undo entry. Background clicks dismiss
+without passing through to the editor, including Windows color-key holes.
 
-This compositor requires Windows Tk color-key transparency. Unsupported Tk
-window systems report the native error through the app error log and dialog;
-they do not silently substitute an opaque panel. Windows Tk smoke tests cover
-the compositor, resizing, keyboard traversal and all six existing handlers.
+CI runs the same Spotlight smoke on Linux, Windows and macOS, covering
+resizing, keyboard traversal, dismissal and all six existing handlers.
 
 ### Project navigation (#332, phase 2)
 
