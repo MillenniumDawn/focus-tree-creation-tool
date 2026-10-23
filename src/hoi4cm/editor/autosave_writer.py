@@ -23,7 +23,7 @@ class AutosaveWriter:
         sibling_error: Callable[[], None],
     ) -> bool:
         metadata = {k: v for k, v in vars(workspace).items() if k != "focuses"}
-        token = (workspace.focuses.revision, metadata, paths)
+        token = (workspace.focuses.content_revision, metadata, paths)
         if (
             self._document is workspace.focuses
             and self._token == token

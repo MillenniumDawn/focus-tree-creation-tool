@@ -517,6 +517,7 @@ class EffectsMixin:
         if fields is None:
             fields = {fn: dv for fn, _, dv, _ in defn.get("fields", [])}
         self.selected.effects.append({"type": etype, "fields": dict(fields)})
+        self.focuses.mark_content_changed()
         self._refresh_effects()
         self._focus_list_cache.invalidate()
         self._invalidate_focus_list_structure()
@@ -643,8 +644,10 @@ class EffectsMixin:
                 def _on_key_change(*a, old=key, kv=kvar, efidx=idx):
                     if self.selected and efidx < len(self.selected.effects):
                         fields = self.selected.effects[efidx].setdefault("fields", {})
-                        if old in fields:
-                            fields[kv.get()] = fields.pop(old)
+                        new = kv.get()
+                        if old in fields and new != old:
+                            fields[new] = fields.pop(old)
+                            self.focuses.mark_content_changed()
 
                 kvar.trace_add("write", _on_key_change)
             else:
@@ -827,9 +830,11 @@ class EffectsMixin:
                     # (Redrawing mid-edit causes zoom resets and phantom arrow lines
                     # because prerequisite data may be in a partially edited state.)
                     if self.selected and efidx < len(self.selected.effects):
-                        self.selected.effects[efidx]["fields"]["raw"] = tw.get(
-                            "1.0", "end"
-                        ).strip()
+                        value = tw.get("1.0", "end").strip()
+                        fields = self.selected.effects[efidx]["fields"]
+                        if fields.get("raw") != value:
+                            fields["raw"] = value
+                            self.focuses.mark_content_changed()
 
                 raw_txt.bind("<KeyRelease>", _on_raw_edit)
             elif not fields:
@@ -854,6 +859,7 @@ class EffectsMixin:
                     fields = self.selected.effects[efidx].setdefault("fields", {})
                     nk = f"key{len(fields)}"
                     fields[nk] = "value"
+                    self.focuses.mark_content_changed()
                     self._refresh_effects()
 
             tk.Button(
@@ -873,6 +879,7 @@ class EffectsMixin:
             return
         self._push_undo("remove effect", touched_ids=(self.selected.id,))
         self.selected.effects.pop(idx)
+        self.focuses.mark_content_changed()
         self._refresh_effects()
         self._focus_list_cache.invalidate()
         self._invalidate_focus_list_structure()
@@ -895,5 +902,6 @@ class EffectsMixin:
             "edit effect", touched_ids=(focus.id,), run=(focus.id, idx, fname)
         )
         fields[fname] = value
+        self.focuses.mark_content_changed()
         # The cards no longer match the signature taken when they were built.
         self._effects_sig = None
