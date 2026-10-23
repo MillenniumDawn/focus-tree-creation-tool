@@ -283,12 +283,18 @@ def test_project_sidebar_at_simulated_200_percent_dpi():
     code = """
 import hoi4_content_maker as main
 main.App._run_startup_prompts = lambda self: None
-main._apply_tk_dpi_scaling = lambda app: app.tk.call('tk', 'scaling', 192 / 72)
+
+def simulate_dpi(app):
+    app.tk.call('tk', 'scaling', 192 / 72)
+    app.maxsize(1440, 1000)
+
+main._apply_tk_dpi_scaling = simulate_dpi
 app = main.App()
 try:
     app.geometry('1440x1000')
     app.update()
     sidebar = app._project_sidebar
+    assert (app.winfo_width(), app.winfo_height()) == (1440, 1000)
     assert sidebar.scale > 1.9
     assert sidebar.panel.winfo_width() >= 540, {
         'window': app.geometry(),

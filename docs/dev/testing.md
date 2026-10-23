@@ -260,7 +260,9 @@ The Tk smoke needs a display. On Linux run it under `xvfb-run -a` so nothing
 opens on your desktop (`sudo apt-get install xvfb xauth` on Debian/Ubuntu).
 CI also runs `pytest -m tk` on native Windows, where the color-key Spotlight
 compositor tests can run instead of being skipped. Linux skips those eight
-Windows-specific cases. Neither job verifies macOS UI behavior.
+Windows-specific cases. Neither job verifies macOS UI behavior. The 200% DPI
+smoke sets its window maximum before App construction, so a small runner
+desktop cannot clamp the requested 1440×1000 test window.
 
 The separate `windows-permissions` job runs `tests/test_cache_permissions.py`
 and then the Tk smoke in separate processes on native Windows. Both new-cache
