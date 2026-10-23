@@ -294,9 +294,7 @@ try:
     app.geometry('1440x1000')
     app.update()
     sidebar = app._project_sidebar
-    assert (app.winfo_width(), app.winfo_height()) == (1440, 1000)
-    assert sidebar.scale > 1.9
-    assert sidebar.panel.winfo_width() >= 540, {
+    layout = {
         'window': app.geometry(),
         'maximum': app.maxsize(),
         'screen': (app.winfo_screenwidth(), app.winfo_screenheight()),
@@ -304,6 +302,9 @@ try:
         'panel_width': sidebar.panel.winfo_width(),
         'panes_width': sidebar.panes.winfo_width(),
     }
+    assert (app.winfo_width(), app.winfo_height()) == (1440, 1000), layout
+    assert sidebar.scale > 1.9, layout
+    assert sidebar.panel.winfo_width() >= 540, layout
     assert int(sidebar.tree.tk.call('ttk::style', 'configure',
                'Project.Treeview', '-rowheight')) >= 64
     assert sidebar.icons[0].width() >= 60
