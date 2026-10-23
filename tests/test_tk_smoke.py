@@ -290,7 +290,14 @@ try:
     app.update()
     sidebar = app._project_sidebar
     assert sidebar.scale > 1.9
-    assert sidebar.panel.winfo_width() >= 540
+    assert sidebar.panel.winfo_width() >= 540, {
+        'window': app.geometry(),
+        'maximum': app.maxsize(),
+        'screen': (app.winfo_screenwidth(), app.winfo_screenheight()),
+        'scale': sidebar.scale,
+        'panel_width': sidebar.panel.winfo_width(),
+        'panes_width': sidebar.panes.winfo_width(),
+    }
     assert int(sidebar.tree.tk.call('ttk::style', 'configure',
                'Project.Treeview', '-rowheight')) >= 64
     assert sidebar.icons[0].width() >= 60
