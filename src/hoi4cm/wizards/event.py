@@ -43,6 +43,7 @@ from hoi4cm.ui import (
     open_folder_gfx_browser,
     report_error,
 )
+from hoi4cm.ui.widgets import grab_when_visible
 from hoi4cm.wizards import _generators
 from hoi4cm.wizards._graphics import (
     browser_folders,
@@ -201,7 +202,7 @@ def open_event_wizard(app):
     win.configure(bg=BG_DARK)
     win.geometry("1320x820")
     win.resizable(True, True)
-    win.grab_set()
+    grab_when_visible(win)
     win.protocol("WM_DELETE_WINDOW", _on_event_win_close)
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1075,7 +1076,7 @@ def open_event_wizard(app):
         dlg.configure(bg=BG_DARK)
         dlg.geometry("520x440")
         dlg.resizable(True, True)
-        dlg.grab_set()
+        grab_when_visible(dlg)
         tk.Label(
             dlg,
             text=tr("event.browser.header", "BROWSE MOD EVENTS"),

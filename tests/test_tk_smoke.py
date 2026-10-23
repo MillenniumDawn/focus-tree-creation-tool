@@ -24,12 +24,14 @@ from ui_fakes import AppFake
 import hoi4_content_maker as main_mod
 from hoi4cm.mod import MOD
 from hoi4cm.models import Focus
+from hoi4cm.ui import settings_dialog
 from hoi4cm.ui.canvas_scheduler import RedrawChannel
 from hoi4cm.ui.gfx_browser import (
     open_focus_icon_browser,
     open_gfx_placement_editor,
     open_universal_gfx_browser,
 )
+from hoi4cm.ui.widgets import grab_when_visible
 from hoi4cm.wizards._shared import open_effect_picker, open_trigger_picker
 
 pytestmark = pytest.mark.tk
@@ -86,6 +88,65 @@ def test_app_builds_its_chrome(app):
     assert app.cv.winfo_exists()
     assert app._add_focus_btn.winfo_exists()
     assert app._errlog_btn.winfo_exists()
+
+
+def test_dialog_grab_is_deferred_until_mapping(app):
+    dialog = tk.Toplevel(app)
+    dialog.after(300, lambda: dialog.destroy() if dialog.winfo_exists() else None)
+
+    assert grab_when_visible(dialog)
+    if not dialog.winfo_viewable():
+        assert app.grab_current() is not dialog
+    app.update()
+    assert dialog.winfo_viewable()
+    assert app.grab_current() is dialog
+
+
+def test_withdrawn_before_mapping_does_not_block_or_grab(app):
+    dialog = tk.Toplevel(app)
+    dialog.after_idle(dialog.withdraw)
+    dialog.after(300, lambda: dialog.destroy() if dialog.winfo_exists() else None)
+
+    assert grab_when_visible(dialog)
+    app.update()
+    assert dialog.winfo_exists()
+    assert dialog.state() == "withdrawn"
+    assert app.grab_current() is not dialog
+
+
+def test_destroy_before_mapping_cancels_deferred_grab(app):
+    app.tk.eval(
+        "set ::dialog_map_bgerrors {}; "
+        "proc bgerror {message} {lappend ::dialog_map_bgerrors $message}"
+    )
+    dialog = tk.Toplevel(app)
+    dialog.after_idle(dialog.destroy)
+    dialog.after(300, lambda: dialog.destroy() if dialog.winfo_exists() else None)
+
+    assert grab_when_visible(dialog)
+    app.update()
+    assert not dialog.winfo_exists()
+    assert app.tk.eval("llength $::dialog_map_bgerrors") == "0"
+
+
+def test_settings_builder_survives_dialog_destroy_during_idle(app, monkeypatch):
+    original_toplevel = tk.Toplevel
+    created = []
+
+    def destroy_after_idle(parent):
+        dialog = original_toplevel(parent)
+        dialog.after_idle(dialog.destroy)
+        dialog.after(300, lambda: dialog.destroy() if dialog.winfo_exists() else None)
+        created.append(dialog)
+        return dialog
+
+    monkeypatch.setattr(settings_dialog.tk, "Toplevel", destroy_after_idle)
+
+    settings_dialog.open_settings(app)
+    app.update()
+
+    assert len(created) == 1
+    assert not created[0].winfo_exists()
 
 
 @pytest.mark.parametrize(

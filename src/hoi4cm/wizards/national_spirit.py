@@ -44,6 +44,7 @@ from hoi4cm.ui import (
     open_folder_gfx_browser,
     report_error,
 )
+from hoi4cm.ui.widgets import grab_when_visible
 from hoi4cm.wizards._generators import build_national_spirit_output
 from hoi4cm.wizards._graphics import browser_folders, collect_image_pairs
 from hoi4cm.wizards._saves import save_spirit
@@ -126,7 +127,7 @@ def open_national_spirit_wizard(app):
     win.configure(bg=BG_DARK)
     win.geometry("820x860")
     win.resizable(True, True)
-    win.grab_set()
+    grab_when_visible(win)
 
     # ── Auto-save on close ─────────────────────────────────────────────
     # Snapshot (detached copy) and the JSON write live in the module-level
@@ -1309,7 +1310,7 @@ def open_national_spirit_wizard(app):
         dlg.configure(bg=BG_DARK)
         dlg.geometry("600x520")
         dlg.resizable(True, True)
-        dlg.grab_set()
+        grab_when_visible(dlg)
 
         tk.Label(
             dlg,

@@ -22,6 +22,7 @@ from hoi4cm.ui.theme import (
     TEXT,
     TEXT_DIM,
 )
+from hoi4cm.ui.widgets import grab_when_visible
 
 # Built-in vanilla HOI4 tag names, used as the "Load Vanilla HOI4 Tags" quick-fill.
 VANILLA_COUNTRY_TAGS = {
@@ -116,7 +117,7 @@ def open_settings(app):
     win.configure(bg=BG_DARK)
     win.geometry("600x580")
     win.resizable(True, True)
-    win.grab_set()
+    grab_when_visible(win)
 
     save_warning_shown = False
 

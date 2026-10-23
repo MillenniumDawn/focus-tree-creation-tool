@@ -36,6 +36,7 @@ from hoi4cm.ui import (
     open_folder_gfx_browser,
     report_error,
 )
+from hoi4cm.ui.widgets import grab_when_visible
 from hoi4cm.wizards._generators import (
     _parse_dyn_mod_line,
     build_dyn_mod_output,
@@ -85,7 +86,7 @@ def open_dyn_mod_wizard(app):
     win.configure(bg=BG_DARK)
     win.geometry("640x720")
     win.resizable(True, True)
-    win.grab_set()
+    grab_when_visible(win)
     _dm_autosave_p = autosave_path("dyn_mod.json")
 
     def _dynmod_close():
@@ -804,7 +805,7 @@ def open_dyn_mod_wizard(app):
         dlg.configure(bg=BG_DARK)
         dlg.geometry("560x440")
         dlg.resizable(True, True)
-        dlg.grab_set()
+        grab_when_visible(dlg)
         tk.Label(
             dlg,
             text=tr("dynamic_modifier.browser.header", "BROWSE DYNAMIC MODIFIERS"),
