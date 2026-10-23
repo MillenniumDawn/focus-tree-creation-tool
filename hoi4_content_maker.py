@@ -6242,9 +6242,9 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
                     tr("bulk_rename.from_empty", "From prefix cannot be empty."),
                 )
                 return
-            renamed_ids = {f.id for f in self.focuses.values() if f.name.startswith(fr)}
-            self._push_undo("bulk_rename", touched_ids=renamed_ids)
             n = len({f.name for f in self.focuses.values() if f.name.startswith(fr)})
+            touched_ids = self.focuses.prefix_rename_touched_ids(fr)
+            self._push_undo("bulk_rename", touched_ids=touched_ids)
             self.focuses.rename_prefix(fr, to)
             win.destroy()
             self._redraw()

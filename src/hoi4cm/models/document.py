@@ -305,14 +305,40 @@ class FocusDocument(MutableMapping[int, Focus]):
             self._changed()
         self.rebuild_indexes()
 
+    def prefix_rename_touched_ids(self, old: str) -> set[int]:
+        """Return focuses whose names or relative-position anchors would change."""
+        if not old:
+            raise ValueError("old prefix cannot be empty")
+        renamed_names = {
+            focus.name for focus in self._focuses.values() if focus.name.startswith(old)
+        }
+        return {
+            focus.id
+            for focus in self._focuses.values()
+            if focus.name.startswith(old)
+            or getattr(focus, "relative_position_id", None) in renamed_names
+        }
+
     def rename_prefix(self, old: str, new: str) -> int:
         if not old:
             raise ValueError("old prefix cannot be empty")
-        renamed = 0
+        name_map: dict[str, str] = {}
         for focus in self._focuses.values():
             if focus.name.startswith(old):
-                focus.name = new + focus.name[len(old) :]
+                name_map.setdefault(focus.name, new + focus.name[len(old) :])
+        if not name_map:
+            return 0
+
+        renamed = 0
+        for focus in self._focuses.values():
+            replacement = name_map.get(focus.name)
+            if replacement is not None:
+                focus.name = replacement
                 renamed += 1
+            relative_position_id = getattr(focus, "relative_position_id", None)
+            if relative_position_id in name_map:
+                focus.relative_position_id = name_map[relative_position_id]
+
         if renamed:
             # Bump the revision too: names don't affect the SceneIndex
             # signature, so without this the canvas keeps the old labels until
