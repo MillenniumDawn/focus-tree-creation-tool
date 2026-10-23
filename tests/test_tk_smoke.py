@@ -291,8 +291,8 @@ def simulate_dpi(app):
 main._apply_tk_dpi_scaling = simulate_dpi
 app = main.App()
 try:
-    # AppKit otherwise fits resizable windows to the runner's small desktop.
-    app.resizable(False, False)
+    # Keep the fixed layout viewport outside native window-manager constraints.
+    app.overrideredirect(True)
     app.geometry('1440x1000')
     app.update()
     sidebar = app._project_sidebar
@@ -604,11 +604,14 @@ def test_tree_settings_keeps_loaded_trees_and_references_accessible(app):
     assert app._focus_editor.close()
 
 
-def test_dialog_grab_is_deferred_until_mapping(app):
+def test_dialog_grab_is_deferred_until_mapping(app, opened):
     dialog = tk.Toplevel(app)
-    dialog.after(300, lambda: dialog.destroy() if dialog.winfo_exists() else None)
+    guard = dialog.after(
+        300, lambda: dialog.destroy() if dialog.winfo_exists() else None
+    )
 
     assert grab_when_visible(dialog)
+    dialog.after_cancel(guard)
     if not dialog.winfo_viewable():
         assert app.grab_current() is not dialog
     app.update()
@@ -616,12 +619,15 @@ def test_dialog_grab_is_deferred_until_mapping(app):
     assert app.grab_current() is dialog
 
 
-def test_withdrawn_before_mapping_does_not_block_or_grab(app):
+def test_withdrawn_before_mapping_does_not_block_or_grab(app, opened):
     dialog = tk.Toplevel(app)
     dialog.after_idle(dialog.withdraw)
-    dialog.after(300, lambda: dialog.destroy() if dialog.winfo_exists() else None)
+    guard = dialog.after(
+        300, lambda: dialog.destroy() if dialog.winfo_exists() else None
+    )
 
     assert grab_when_visible(dialog)
+    dialog.after_cancel(guard)
     app.update()
     assert dialog.winfo_exists()
     assert dialog.state() == "withdrawn"
@@ -635,9 +641,12 @@ def test_destroy_before_mapping_cancels_deferred_grab(app):
     )
     dialog = tk.Toplevel(app)
     dialog.after_idle(dialog.destroy)
-    dialog.after(300, lambda: dialog.destroy() if dialog.winfo_exists() else None)
+    guard = dialog.after(
+        300, lambda: dialog.destroy() if dialog.winfo_exists() else None
+    )
 
     assert grab_when_visible(dialog)
+    dialog.after_cancel(guard)
     app.update()
     assert not dialog.winfo_exists()
     assert app.tk.eval("llength $::dialog_map_bgerrors") == "0"
