@@ -291,15 +291,14 @@ def simulate_dpi(app):
 main._apply_tk_dpi_scaling = simulate_dpi
 app = main.App()
 try:
-    # Finish native window creation before setting the fixed layout viewport.
-    app.overrideredirect(True)
-    app.update()
+    app.minsize(1440, 1000)
     app.geometry('1440x1000')
     app.update()
     sidebar = app._project_sidebar
     layout = {
         'tk': app.tk.call('package', 'provide', 'Tk'),
         'window': app.geometry(),
+        'minimum': app.minsize(),
         'maximum': app.maxsize(),
         'screen': (app.winfo_screenwidth(), app.winfo_screenheight()),
         'scale': sidebar.scale,
