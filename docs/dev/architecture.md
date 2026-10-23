@@ -240,7 +240,9 @@ or state leaks across tests:
   module globals, loaded once at import time and reassigned by
   `set_language()`. Read them through `get_language()`/`tr()`, not by
   importing the globals directly (an imported name goes stale after a
-  language switch).
+  language switch). `I18N_LANGS` is built once at import from the
+  `locales/*.json` files (see "UI translations" in `testing.md`), so adding a
+  language needs no code change.
 - **Logger state** (`hoi4cm.core.logger`): the error buffer, the
   registered error callback, and whether the excepthook is installed are
   all module globals. `test_logger.py`'s `log_state` fixture snapshots and

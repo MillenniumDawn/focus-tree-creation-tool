@@ -381,7 +381,9 @@ def open_universal_gfx_browser(
         if not pairs:
             status_lbl.config(text=tr("gfx.images_count", "{count} images", count=0))
             return
-        status_lbl.config(text=f"{len(pairs)} images")
+        status_lbl.config(
+            text=tr("gfx.images_count", "{count} images", count=len(pairs))
+        )
 
     def _collect_images(folder_path, prefix):
         ft = search_var.get().strip().lower()
@@ -508,7 +510,7 @@ def open_gfx_placement_editor(win, initial_items=None, on_confirm=None):
     cv_place.create_text(
         30,
         18,
-        text="📁  Category Name",
+        text=tr("gfx_placement.category_name", "📁  Category Name"),
         fill="#c8d4e0",
         font=("Palatino Linotype", 11, "bold"),
         anchor="w",
@@ -517,7 +519,10 @@ def open_gfx_placement_editor(win, initial_items=None, on_confirm=None):
     cv_place.create_text(
         12,
         55,
-        text="Category description text goes here...",
+        text=tr(
+            "gfx_placement.category_description",
+            "Category description text goes here...",
+        ),
         fill="#6a7a8a",
         font=("Palatino Linotype", 9),
         anchor="w",
@@ -748,7 +753,7 @@ def open_gfx_placement_editor(win, initial_items=None, on_confirm=None):
         open_universal_gfx_browser(
             pwin,
             _on_sel,
-            title=f"Pick GFX for {role}",
+            title=tr("gfx_placement.pick_for_role", "Pick GFX for {role}", role=role),
             gfx_hints=(
                 ["decisions", "ideas"]
                 if role == "icon"
@@ -1320,10 +1325,7 @@ def open_focus_icon_browser(win, on_select, current_gfx="", mod=None):
     def _rebuild(pairs):
         selected_var.set("")
         grid.set_items([ThumbnailItem(key, path) for key, path in pairs])
-        if not pairs:
-            status_lbl.config(text=tr("gfx.icons_count", "{count} icons", count=0))
-            return
-        status_lbl.config(text=f"{len(pairs)} icons")
+        status_lbl.config(text=tr("gfx.icons_count", "{count} icons", count=len(pairs)))
 
     def _collect_files(folder_path):
         ft = search_var.get().lower()
@@ -1525,10 +1527,7 @@ def open_folder_gfx_browser(
             [ThumbnailItem(key, path) for key, path in pairs],
             selected_key=selected_var.get(),
         )
-        if pairs:
-            status_lbl.config(text=f"{len(pairs)} icons")
-        else:
-            status_lbl.config(text=tr("gfx.icons_count", "{count} icons", count=0))
+        status_lbl.config(text=tr("gfx.icons_count", "{count} icons", count=len(pairs)))
 
     def _on_folder_select(_event=None) -> None:
         selection = folder_lb.curselection()

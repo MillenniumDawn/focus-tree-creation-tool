@@ -534,7 +534,7 @@ def open_event_wizard(app):
         cv.create_text(
             x0 + ev_w // 2,
             title_y,
-            text=(ev.title_text or "Event Title").upper(),
+            text=(ev.title_text or tr("event.preview.title", "Event Title")).upper(),
             fill=HOI_TITLE,
             font=("Georgia", fs_t, "bold"),
             anchor="n",
@@ -547,7 +547,7 @@ def open_event_wizard(app):
         cv.create_text(
             x0 + 14,
             desc_y,
-            text=ev.desc_text or "Event description.",
+            text=ev.desc_text or tr("event.preview.description", "Event description."),
             fill=HOI_BODY,
             font=("Georgia", fs_d),
             anchor="nw",
@@ -622,7 +622,7 @@ def open_event_wizard(app):
             cv.create_text(
                 x0 + ev_w - 6,
                 y0 - bh // 2,
-                text="★  MAJOR EVENT",
+                text=tr("event.preview.major", "★  MAJOR EVENT"),
                 fill="#f0c040",
                 font=("Courier", fs_b, "bold"),
                 anchor="e",
@@ -721,7 +721,9 @@ def open_event_wizard(app):
         ev.immediate = t_immediate.get("1.0", "end-1c").strip()
         _refresh_list()
         _render_preview()
-        status_lbl.config(text=f"  ✓  Applied {ev.eid}")
+        status_lbl.config(
+            text=tr("event.status.applied", "  ✓  Applied {id}", id=ev.eid)
+        )
 
     def _on_type_change():
         if sel[0]:
@@ -779,7 +781,7 @@ def open_event_wizard(app):
         hdr.pack(fill="x")
         tk.Label(
             hdr,
-            text=f"  Option {idx + 1}",
+            text=tr("event.option.header", "  Option {number}", number=idx + 1),
             bg=BG_DARK,
             fg=TEXT_DIM,
             font=("Helvetica", 8, "bold"),
@@ -934,7 +936,12 @@ def open_event_wizard(app):
             return
         if len(sel[0].options) <= 1:
             messagebox.showwarning(
-                "Options", "An event must have at least one option.", parent=win
+                tr("event.dialog.options.title", "Options"),
+                tr(
+                    "event.dialog.options.body",
+                    "An event must have at least one option.",
+                ),
+                parent=win,
             )
             return
         sel[0].options.pop(idx)
@@ -961,12 +968,18 @@ def open_event_wizard(app):
         events.append(ev)
         _select(ev)
         _refresh_list()
-        status_lbl.config(text=f"  ✓  New event: {ev.eid}")
+        status_lbl.config(
+            text=tr("event.status.new", "  ✓  New event: {id}", id=ev.eid)
+        )
 
     def _delete_event():
         if not sel[0]:
             return
-        if not messagebox.askyesno("Delete", f"Delete '{sel[0].eid}'?", parent=win):
+        if not messagebox.askyesno(
+            tr("common.delete", "Delete"),
+            tr("event.dialog.delete.body", "Delete '{id}'?", id=sel[0].eid),
+            parent=win,
+        ):
             return
         events.remove(sel[0])
         sel[0] = None
@@ -978,26 +991,43 @@ def open_event_wizard(app):
 
     def _export_txt():
         if not events:
-            messagebox.showwarning("Export", "No events.", parent=win)
+            messagebox.showwarning(
+                tr("dialog.export.title", "Export"),
+                tr("event.dialog.no_events", "No events."),
+                parent=win,
+            )
             return
         path = filedialog.asksaveasfilename(
             parent=win,
             defaultextension=".txt",
             filetypes=[("HOI4 Events", "*.txt"), ("All", "*.*")],
-            title="Export Events .txt",
+            title=tr("filedialog.export_events", "Export Events .txt"),
         )
         if not path:
             return
         try:
             WorkspaceFiles().write_text(path, _generate_all_txt(), encoding="utf-8")
         except (OSError, ValueError, TypeError, RuntimeError) as exc:
-            report_error(str(exc), exc, parent=win, title="Export Error")
+            report_error(
+                str(exc),
+                exc,
+                parent=win,
+                title=tr("dialog.export_error.title", "Export Error"),
+            )
             return
-        status_lbl.config(text=f"  ✓  Exported {len(events)} events")
+        status_lbl.config(
+            text=tr(
+                "event.status.exported",
+                "  ✓  Exported {count} events",
+                count=len(events),
+            )
+        )
 
     def _copy_yml():
         if not events:
-            messagebox.showwarning("YML", "No events.", parent=win)
+            messagebox.showwarning(
+                "YML", tr("event.dialog.no_events", "No events."), parent=win
+            )
             return
         win.clipboard_clear()
         win.clipboard_append(_generate_yml())
@@ -1005,16 +1035,24 @@ def open_event_wizard(app):
             text=tr("common.status.loc_yml_copied", "  ok  Localisation YML copied!")
         )
         messagebox.showinfo(
-            "Copied",
-            "Localisation YML copied to clipboard.\n\nPaste into:\n"
-            f"  localisation/{MOD.loc_target.dirname()}/"
-            f"{MOD.loc_target.filename('[modname]')}",
+            tr("event.dialog.copied.title", "Copied"),
+            tr(
+                "event.dialog.copied.body",
+                "Localisation YML copied to clipboard.\n\nPaste into:\n"
+                "  localisation/{directory}/{filename}",
+                directory=MOD.loc_target.dirname(),
+                filename=MOD.loc_target.filename("[modname]"),
+            ),
             parent=win,
         )
 
     def _save_to_mod():
         if not events:
-            messagebox.showwarning("Save", "No events to save.", parent=win)
+            messagebox.showwarning(
+                tr("common.save", "Save"),
+                tr("event.dialog.no_events_to_save", "No events to save."),
+                parent=win,
+            )
             return
 
         ns = sanitize_component(events[0].eid.split(".")[0], fallback="TAG")
@@ -1026,7 +1064,10 @@ def open_event_wizard(app):
         else:
             mod_root = filedialog.askdirectory(
                 parent=win,
-                title="Select MOD ROOT folder (events appended to events/<ns>.txt)",
+                title=tr(
+                    "filedialog.event_mod_root",
+                    "Select MOD ROOT folder (events appended to events/<ns>.txt)",
+                ),
             )
             if not mod_root:
                 return
@@ -1044,7 +1085,9 @@ def open_event_wizard(app):
 
         # ── Report ────────────────────────────────────────────────────────
         msg = format_save_summary(saved, warnings, errs)
-        messagebox.showinfo("Saved to Mod", msg, parent=win)
+        messagebox.showinfo(
+            tr("dialog.saved_to_mod.title", "Saved to Mod"), msg, parent=win
+        )
         if saved:
             status_lbl.config(
                 text=tr("common.status.saved_to_mod", "  ok  Saved to mod")
@@ -1053,26 +1096,33 @@ def open_event_wizard(app):
     def _browse_mod_events():
         if not MOD.loaded or not MOD.root:
             messagebox.showinfo(
-                "No Mod Loaded",
-                "Load a mod first to browse existing events.",
+                tr("dialog.no_mod_loaded.title", "No Mod Loaded"),
+                tr(
+                    "event.dialog.load_mod_to_browse",
+                    "Load a mod first to browse existing events.",
+                ),
                 parent=win,
             )
             return
         ev_dir = os.path.join(MOD.root, "events")
         if not os.path.isdir(ev_dir):
             messagebox.showinfo(
-                "Not Found", "No events/ directory found in mod.", parent=win
+                tr("dialog.not_found.title", "Not Found"),
+                tr("event.dialog.no_events_dir", "No events/ directory found in mod."),
+                parent=win,
             )
             return
         files = sorted(glob.glob(os.path.join(ev_dir, "*.txt")))
         if not files:
             messagebox.showinfo(
-                "No Files Found", "No .txt files found in events/.", parent=win
+                tr("dialog.no_files_found.title", "No Files Found"),
+                tr("event.dialog.no_event_files", "No .txt files found in events/."),
+                parent=win,
             )
             return
 
         dlg = tk.Toplevel(win)
-        dlg.title("Browse Mod Events")
+        dlg.title(tr("event.browse.title", "Browse Mod Events"))
         dlg.configure(bg=BG_DARK)
         dlg.geometry("520x440")
         dlg.resizable(True, True)
@@ -1124,9 +1174,13 @@ def open_event_wizard(app):
             if dupes:
                 d_str = ", ".join(sorted(set(dupes))[:8])
                 if not messagebox.askyesno(
-                    "Duplicate IDs",
-                    f"These event IDs already exist:\n{d_str}\n\n"
-                    "Import anyway? (duplicates will be added as new entries)",
+                    tr("event.dialog.duplicate_ids.title", "Duplicate IDs"),
+                    tr(
+                        "event.dialog.duplicate_ids.body",
+                        "These event IDs already exist:\n{ids}\n\n"
+                        "Import anyway? (duplicates will be added as new entries)",
+                        ids=d_str,
+                    ),
                     parent=dlg,
                 ):
                     return
@@ -1140,7 +1194,7 @@ def open_event_wizard(app):
         path = _path or filedialog.askopenfilename(
             parent=win,
             filetypes=[("HOI4 Events", "*.txt"), ("All", "*.*")],
-            title="Import HOI4 Events .txt",
+            title=tr("filedialog.import_events", "Import HOI4 Events .txt"),
         )
         if not path:
             return
@@ -1149,7 +1203,12 @@ def open_event_wizard(app):
             if raw is None or encoding is None:
                 raise OSError("event file could not be read")
         except (OSError, UnicodeDecodeError, ValueError) as exc:
-            report_error(str(exc), exc, parent=win, title="Import Error")
+            report_error(
+                str(exc),
+                exc,
+                parent=win,
+                title=tr("dialog.import_error.title", "Import Error"),
+            )
             return
 
         def _str_val(v, default=""):
@@ -1226,12 +1285,22 @@ def open_event_wizard(app):
             else:
                 i += 1
         if not imported:
-            messagebox.showwarning("Import", "No events found.", parent=win)
+            messagebox.showwarning(
+                tr("dialog.import.title", "Import"),
+                tr("event.dialog.no_events_found", "No events found."),
+                parent=win,
+            )
             return
         events.extend(imported)
         _select(imported[0])
         _refresh_list()
-        status_lbl.config(text=f"  ✓  Imported {len(imported)} events")
+        status_lbl.config(
+            text=tr(
+                "event.status.imported",
+                "  ✓  Imported {count} events",
+                count=len(imported),
+            )
+        )
 
     def _show_tab(which):
         if which == "preview":
@@ -1264,7 +1333,11 @@ def open_event_wizard(app):
                 catalog = MOD.graphics_catalog
         if not ev_root:
             ev_root = filedialog.askdirectory(
-                title="Select event pictures folder  (gfx/event_pictures/)", parent=win
+                title=tr(
+                    "filedialog.select_event_pictures",
+                    "Select event pictures folder  (gfx/event_pictures/)",
+                ),
+                parent=win,
             )
             if not ev_root:
                 return
@@ -1624,14 +1697,24 @@ def open_event_wizard(app):
         pname = getattr(MOD, "event_dim_active_profile", "vanilla")
         if ev_type == "news_event":
             gfx_dim_lbl.config(
-                text="news_event: %dx%d  profile: %s  GFX_news_event_*"
-                % (nw, nh, pname),
+                text=tr(
+                    "event.gfx.dims_news",
+                    "news_event: {w}x{h}  profile: {profile}  GFX_news_event_*",
+                    w=nw,
+                    h=nh,
+                    profile=pname,
+                ),
                 fg=GREEN,
             )
         else:
             gfx_dim_lbl.config(
-                text="country_event: %dx%d  profile: %s  GFX_report_event_*"
-                % (cw, ch, pname),
+                text=tr(
+                    "event.gfx.dims_country",
+                    "country_event: {w}x{h}  profile: {profile}  GFX_report_event_*",
+                    w=cw,
+                    h=ch,
+                    profile=pname,
+                ),
                 fg=TEXT_DIM,
             )
         if MOD.loaded and MOD.root:
@@ -1658,11 +1741,7 @@ def open_event_wizard(app):
                     selected_key=_gfx_selected,
                 )
                 gfx_status_lbl.config(
-                    text=(
-                        f"{len(pairs)} icons"
-                        if pairs
-                        else tr("gfx.icons_count", "{count} icons", count=0)
-                    )
+                    text=tr("gfx.icons_count", "{count} icons", count=len(pairs))
                 )
                 return
         gfx_status_lbl.config(
@@ -1686,46 +1765,71 @@ def open_event_wizard(app):
                 fw, fh = dims
                 if fw == exp_w and fh == exp_h:
                     gfx_compat_lbl.config(
-                        text="  ok  %dx%d matches %s %s" % (fw, fh, pname, ev_type),
+                        text=tr(
+                            "event.gfx.compat_ok",
+                            "  ok  {w}x{h} matches {profile} {type}",
+                            w=fw,
+                            h=fh,
+                            profile=pname,
+                            type=ev_type,
+                        ),
                         fg=GREEN,
                     )
                 else:
                     gfx_compat_lbl.config(
-                        text="  warn  %dx%d expected %dx%d (%s)"
-                        % (fw, fh, exp_w, exp_h, pname),
+                        text=tr(
+                            "event.gfx.compat_size_mismatch",
+                            "  warn  {w}x{h} expected {expected_w}x{expected_h} "
+                            "({profile})",
+                            w=fw,
+                            h=fh,
+                            expected_w=exp_w,
+                            expected_h=exp_h,
+                            profile=pname,
+                        ),
                         fg=ORANGE,
                     )
                 return
         is_r = gfx_name.startswith("GFX_report_event_")
         is_n = gfx_name.startswith("GFX_news_event_")
+        prefix_ok = tr(
+            "event.gfx.compat_prefix_ok",
+            "  ok  correct prefix (expected {w}x{h})",
+            w=exp_w,
+            h=exp_h,
+        )
+        load_mod = tr(
+            "event.gfx.compat_load_mod",
+            "  load mod to validate ({w}x{h})",
+            w=exp_w,
+            h=exp_h,
+        )
         if ev_type == "country_event":
             if is_r:
-                gfx_compat_lbl.config(
-                    text="  ok  correct prefix (expected %dx%d)" % (exp_w, exp_h),
-                    fg=GREEN,
-                )
+                gfx_compat_lbl.config(text=prefix_ok, fg=GREEN)
             elif is_n:
                 gfx_compat_lbl.config(
-                    text="  warn  GFX_news_event_* is for news_event", fg=ORANGE
+                    text=tr(
+                        "event.gfx.compat_news_prefix",
+                        "  warn  GFX_news_event_* is for news_event",
+                    ),
+                    fg=ORANGE,
                 )
             else:
-                gfx_compat_lbl.config(
-                    text="  load mod to validate (%dx%d)" % (exp_w, exp_h), fg=TEXT_DIM
-                )
+                gfx_compat_lbl.config(text=load_mod, fg=TEXT_DIM)
         else:
             if is_n:
-                gfx_compat_lbl.config(
-                    text="  ok  correct prefix (expected %dx%d)" % (exp_w, exp_h),
-                    fg=GREEN,
-                )
+                gfx_compat_lbl.config(text=prefix_ok, fg=GREEN)
             elif is_r:
                 gfx_compat_lbl.config(
-                    text="  warn  GFX_report_event_* is for country_event", fg=ORANGE
+                    text=tr(
+                        "event.gfx.compat_report_prefix",
+                        "  warn  GFX_report_event_* is for country_event",
+                    ),
+                    fg=ORANGE,
                 )
             else:
-                gfx_compat_lbl.config(
-                    text="  load mod to validate (%dx%d)" % (exp_w, exp_h), fg=TEXT_DIM
-                )
+                gfx_compat_lbl.config(text=load_mod, fg=TEXT_DIM)
 
     v_gfx_search.trace_add("write", lambda *_: _safe_after(win, 300, _refresh_gfx_list))
 

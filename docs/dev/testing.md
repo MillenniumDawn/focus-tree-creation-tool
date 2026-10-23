@@ -99,6 +99,33 @@ The additional gate
 --cov-fail-under=95` keeps the wizard script/loc renderers near-fully
 covered.
 
+## UI translations
+
+Every `locales/*.json` file is a language. `hoi4cm.core.i18n.discover_languages()`
+builds `I18N_LANGS` from the directory at import, English first, and each file
+names itself in Settings through `_meta.display_name`. To add a language, copy
+`locales/en.json`, translate the values, and set `_meta.display_name`. A file
+with no display name is listed under its code. A file that cannot be read is
+skipped with a warning. `_meta` is never a translation: `tr()` cannot return it.
+
+`tr(key, default)` falls back to the inline English default, so a missing key
+never fails at run time. `tests/test_i18n_keys.py` is the guard. It reads every
+`tr()` call in `src/hoi4cm` and `hoi4_content_maker.py` with `ast` and checks
+that:
+
+- every literal key is in `locales/en.json`, and every key in `en.json` is used
+  by some call (orphans fail);
+- every locale file has exactly the keys of `en.json`, apart from `_meta`, with
+  the same named placeholders;
+- every call supplies the placeholders its English text names, and none passes
+  `key=` or `default=`, which collide with the parameters of `tr()`.
+
+A call whose key is built at run time (an f-string or a variable) is invisible
+to the scan. Each one is listed in `DYNAMIC_KEYS` in the test with every key it
+can produce, and a new or changed dynamic call fails until it is listed. Undo
+labels work the same way: the stack keeps English identifiers, and
+`hoi4cm.ui.undo_labels` maps them to keys when the toast is shown.
+
 ## Fixture / isolation patterns
 
 Every module with import-time or process-lifetime state needs isolation, or

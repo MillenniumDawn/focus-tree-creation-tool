@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import re
 from collections import defaultdict
-from collections.abc import Collection, Iterator, Mapping
+from collections.abc import Callable, Collection, Iterator, Mapping
 from dataclasses import dataclass
 from typing import Literal, NamedTuple
 
+from hoi4cm.core.i18n import tr
 from hoi4cm.core.paths import read_file_with_encoding
 from hoi4cm.models import Focus
 
@@ -29,7 +30,130 @@ class Issue:
     field: str | None = None
 
     def sort_key(self):
-        return (SEVERITY_RANK.get(self.severity, 99), self.focus_name or "", self.code)
+        return _sort_key(self.severity, self.focus_name, self.code)
+
+
+def _sort_key(severity: str, focus_name: str | None, code: str):
+    return (SEVERITY_RANK.get(severity, 99), focus_name or "", code)
+
+
+class _Pending(NamedTuple):
+    """An issue whose message is rendered only if it survives the cap.
+
+    A document can raise far more issues than ``max_issues``, and translating
+    every message is the slowest part of building them. ``message`` is one of
+    the ``_msg_*`` functions below and ``args`` are its arguments.
+    """
+
+    severity: Severity
+    code: str
+    focus_id: int | None
+    focus_name: str | None
+    message: Callable[..., str]
+    args: tuple[object, ...]
+    field: str | None = None
+
+    def sort_key(self):
+        return _sort_key(self.severity, self.focus_name, self.code)
+
+    def render(self) -> Issue:
+        return Issue(
+            self.severity,
+            self.code,
+            self.focus_id,
+            self.focus_name,
+            self.message(*self.args),
+            self.field,
+        )
+
+
+def _msg_duplicate_name(name: str, ids: list[int]) -> str:
+    return tr(
+        "validation.issue.duplicate_name",
+        "duplicate focus name '{name}' used by {count} focuses (ids {ids})",
+        name=name,
+        count=len(ids),
+        ids=sorted(ids),
+    )
+
+
+def _msg_position_collision(x: int, y: int, names: list[str], ids: list[int]) -> str:
+    return tr(
+        "validation.issue.position_collision",
+        "position collision at x={x} y={y}: {names} (ids {ids}) share the same cell",
+        x=x,
+        y=y,
+        names=", ".join(names),
+        ids=ids,
+    )
+
+
+def _msg_broken_prereq(name: str, pid: int, group: int) -> str:
+    return tr(
+        "validation.issue.broken_prereq",
+        "[{name}] broken prereq → id:{id} (group {group})",
+        name=name,
+        id=pid,
+        group=group,
+    )
+
+
+def _msg_broken_mutex(name: str, mid: int) -> str:
+    return tr(
+        "validation.issue.broken_mutex",
+        "[{name}] broken mutex → id:{id}",
+        name=name,
+        id=mid,
+    )
+
+
+def _msg_relative_position_unresolved(name: str, target: str) -> str:
+    return tr(
+        "validation.issue.relative_position_unresolved",
+        "[{name}] relative_position_id '{target}' does not match any focus",
+        name=name,
+        target=target,
+    )
+
+
+def _msg_empty_effects(name: str) -> str:
+    return tr(
+        "validation.issue.empty_effects",
+        "[{name}] no effects in completion_reward",
+        name=name,
+    )
+
+
+def _msg_default_icon(name: str) -> str:
+    return tr(
+        "validation.issue.default_icon",
+        "[{name}] using default/missing icon GFX",
+        name=name,
+    )
+
+
+def _msg_gfx_missing(name: str, gfx: str) -> str:
+    return tr(
+        "validation.issue.gfx_missing",
+        "[{name}] icon '{gfx}' not found in loaded sprites",
+        name=name,
+        gfx=gfx,
+    )
+
+
+def _msg_loc_missing(name: str, loc_key: str) -> str:
+    return tr(
+        "validation.issue.loc_missing",
+        "[{name}] missing localisation key '{loc_key}'",
+        name=name,
+        loc_key=loc_key,
+    )
+
+
+def _msg_prereq_cycle(names: str) -> str:
+    return tr(
+        "validation.issue.prereq_cycle", "prerequisite cycle: {names}", names=names
+    )
 
 
 def _extract_loc_keys(text: str) -> set[str]:
@@ -71,9 +195,9 @@ def validate_document(
     max_issues: cap on the returned list; excess issues are dropped and
         replaced with one trailing "issues_truncated" info issue.
     """
-    issues: list[Issue] = []
+    pending: list[_Pending] = []
     if not doc:
-        return issues
+        return []
 
     id_set = set(doc.keys())
     # name -> list of ids
@@ -84,17 +208,15 @@ def validate_document(
     # duplicate names (game IDs)
     for name, ids in name_to_ids.items():
         if len(ids) > 1:
-            issues.append(
-                Issue(
+            pending.append(
+                _Pending(
                     "error",
                     "duplicate_name",
                     ids[0],
                     name,
-                    (
-                        f"duplicate focus name '{name}' used by "
-                        f"{len(ids)} focuses (ids {sorted(ids)})"
-                    ),
-                    field="name",
+                    _msg_duplicate_name,
+                    (name, ids),
+                    "name",
                 )
             )
 
@@ -120,17 +242,15 @@ def validate_document(
                 continue
             sorted_ids = sorted(tree_occupants)
             names = [doc[i].name for i in sorted_ids]
-            issues.append(
-                Issue(
+            pending.append(
+                _Pending(
                     "error",
                     "position_collision",
                     sorted_ids[0],
                     doc[sorted_ids[0]].name,
-                    (
-                        f"position collision at x={x} y={y}: "
-                        f"{', '.join(names)} (ids {sorted_ids}) share the same cell"
-                    ),
-                    field="x",
+                    _msg_position_collision,
+                    (x, y, names, sorted_ids),
+                    "x",
                 )
             )
 
@@ -142,72 +262,71 @@ def validate_document(
         for grp_idx, grp in enumerate(getattr(focus, "prereqs", [])):
             for pid in grp:
                 if pid not in id_set:
-                    issues.append(
-                        Issue(
+                    pending.append(
+                        _Pending(
                             "error",
                             "broken_prereq",
                             fid,
                             focus.name,
-                            (
-                                f"[{focus.name}] broken prereq "
-                                f"→ id:{pid} (group {grp_idx})"
-                            ),
-                            field="prereqs",
+                            _msg_broken_prereq,
+                            (focus.name, pid, grp_idx),
+                            "prereqs",
                         )
                     )
         # broken mutex
         for mid in getattr(focus, "mutex", []):
             if mid not in id_set:
-                issues.append(
-                    Issue(
+                pending.append(
+                    _Pending(
                         "error",
                         "broken_mutex",
                         fid,
                         focus.name,
-                        f"[{focus.name}] broken mutex → id:{mid}",
-                        field="mutex",
+                        _msg_broken_mutex,
+                        (focus.name, mid),
+                        "mutex",
                     )
                 )
         # relative_position_id
         rel = getattr(focus, "relative_position_id", None)
         if rel:
             if rel not in name_to_one_id:
-                issues.append(
-                    Issue(
+                pending.append(
+                    _Pending(
                         "error",
                         "relative_position_unresolved",
                         fid,
                         focus.name,
-                        (
-                            f"[{focus.name}] relative_position_id "
-                            f"'{rel}' does not match any focus"
-                        ),
-                        field="relative_position_id",
+                        _msg_relative_position_unresolved,
+                        (focus.name, rel),
+                        "relative_position_id",
                     )
                 )
         # empty effects
         if not getattr(focus, "effects", []):
-            issues.append(
-                Issue(
+            pending.append(
+                _Pending(
                     "warning",
                     "empty_effects",
                     fid,
                     focus.name,
-                    f"[{focus.name}] no effects in completion_reward",
-                    field="effects",
+                    _msg_empty_effects,
+                    (focus.name,),
+                    "effects",
                 )
             )
         # default/missing icon
         gfx = getattr(focus, "gfx", "")
         if include_default_icon_warning and (not gfx or gfx == DEFAULT_GFX):
-            issues.append(
-                Issue(
+            pending.append(
+                _Pending(
                     "warning",
                     "default_icon",
                     fid,
                     focus.name,
-                    f"[{focus.name}] using default/missing icon GFX",
-                    field="gfx",
+                    _msg_default_icon,
+                    (focus.name,),
+                    "gfx",
                 )
             )
         # GFX not in sprites
@@ -216,39 +335,42 @@ def validate_document(
             # worth surfacing for custom GFX. If include_default_icon_warning,
             # default already emitted above; skip duplicate missing for default.
             if gfx != DEFAULT_GFX or not include_default_icon_warning:
-                issues.append(
-                    Issue(
+                pending.append(
+                    _Pending(
                         "warning",
                         "gfx_missing",
                         fid,
                         focus.name,
-                        f"[{focus.name}] icon '{gfx}' not found in loaded sprites",
-                        field="gfx",
+                        _msg_gfx_missing,
+                        (focus.name, gfx),
+                        "gfx",
                     )
                 )
         # missing loc keys
         if loc_keys is not None:
             if focus.name not in loc_keys:
-                issues.append(
-                    Issue(
+                pending.append(
+                    _Pending(
                         "warning",
                         "loc_missing",
                         fid,
                         focus.name,
-                        f"[{focus.name}] missing localisation key '{focus.name}'",
-                        field="name",
+                        _msg_loc_missing,
+                        (focus.name, focus.name),
+                        "name",
                     )
                 )
             desc_key = f"{focus.name}_desc"
             if desc_key not in loc_keys:
-                issues.append(
-                    Issue(
+                pending.append(
+                    _Pending(
                         "warning",
                         "loc_missing_desc",
                         fid,
                         focus.name,
-                        f"[{focus.name}] missing localisation key '{desc_key}'",
-                        field="desc",
+                        _msg_loc_missing,
+                        (focus.name, desc_key),
+                        "desc",
                     )
                 )
 
@@ -282,14 +404,15 @@ def validate_document(
                 if key not in cycles_reported:
                     cycles_reported.add(key)
                     names = " → ".join(doc[c].name for c in stack[idx:] + [parent])
-                    issues.append(
-                        Issue(
+                    pending.append(
+                        _Pending(
                             "error",
                             "prereq_cycle",
                             node,
                             doc[node].name,
-                            f"prerequisite cycle: {names}",
-                            field="prereqs",
+                            _msg_prereq_cycle,
+                            (names,),
+                            "prereqs",
                         )
                     )
             elif state == 0:
@@ -301,17 +424,22 @@ def validate_document(
         if visited.get(nid, 0) == 0:
             dfs(nid)
 
-    issues.sort(key=lambda issue: issue.sort_key())
-    if len(issues) > max_issues:
-        hidden = len(issues) - max_issues
-        issues = issues[:max_issues]
+    pending.sort(key=_Pending.sort_key)
+    hidden = len(pending) - max_issues
+    issues = [item.render() for item in pending[:max_issues]]
+    if hidden > 0:
         issues.append(
             Issue(
                 "info",
                 "issues_truncated",
                 None,
                 None,
-                f"{hidden} more issue(s) not shown (showing first {max_issues})",
+                tr(
+                    "validation.issue.issues_truncated",
+                    "{hidden} more issue(s) not shown (showing first {limit})",
+                    hidden=hidden,
+                    limit=max_issues,
+                ),
             )
         )
     return issues

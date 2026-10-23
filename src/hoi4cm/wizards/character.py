@@ -187,7 +187,7 @@ class CharacterWizard:
     def _open_file(self) -> None:
         path = filedialog.askopenfilename(
             parent=self.win,
-            title=tr("wizard.character.open", "Open character file"),
+            title=tr("wizard.character.open_title", "Open character file"),
             initialdir=os.path.join(self.mod_root, "common", "characters"),
             filetypes=(("HOI4 script", "*.txt"), ("All files", "*")),
         )
@@ -319,7 +319,7 @@ class CharacterWizard:
         open_universal_gfx_browser(
             self.win,
             selected,
-            title=tr("wizard.character.portrait", "Select portrait"),
+            title=tr("wizard.character.select_portrait", "Select portrait"),
             gfx_hints=["interface"],
             mod=MOD,
         )

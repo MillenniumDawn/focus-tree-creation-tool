@@ -1,16 +1,14 @@
 """Spanish (es) UI locale — issue #24.
 
-``locales/es.json`` must mirror the English locale exactly: same keys, same
-named format placeholders with the same multiplicity, and the same literal
-brace/script tokens. ``es`` must be selectable as ``Español`` and persist like
+``locales/es.json`` must keep the English locale's literal brace/script tokens
+and translate its prose. Key and placeholder parity for every locale is in
+``test_i18n_keys.py``. ``es`` must be selectable as ``Español`` and persist like
 the other UI languages, while keeping the Spanish HOI4 localisation target
 (``spanish`` / ``l_spanish``) and its generator/discovery behaviour working.
 Fixture style mirrors ``test_i18n.py`` (isolated module state + config).
 """
 
 import json
-import re
-from collections import Counter
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -67,8 +65,6 @@ _IDENTICAL_KEYS = frozenset(
     }
 )
 
-_PLACEHOLDER_RE = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}")
-
 
 @pytest.fixture
 def restore_i18n_state():
@@ -102,22 +98,9 @@ def fake_config(tmp_path, monkeypatch):
 def _locales():
     english = json.loads((LOCALE_DIR / "en.json").read_text(encoding="utf-8"))
     spanish = json.loads((LOCALE_DIR / "es.json").read_text(encoding="utf-8"))
+    english.pop("_meta")
+    spanish.pop("_meta")
     return english, spanish
-
-
-def test_spanish_locale_has_exact_english_key_parity():
-    english, spanish = _locales()
-    assert set(spanish) == set(english)
-
-
-def test_spanish_locale_preserves_named_placeholders():
-    """Every named {placeholder} survives with identical multiplicity."""
-    english, spanish = _locales()
-
-    for key, english_text in english.items():
-        assert Counter(_PLACEHOLDER_RE.findall(spanish[key])) == Counter(
-            _PLACEHOLDER_RE.findall(english_text)
-        ), key
 
 
 def test_spanish_locale_keeps_literal_brace_tokens():
