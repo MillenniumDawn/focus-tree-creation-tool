@@ -1,5 +1,8 @@
 """Tests for the Tk-free focus-tree export planning pipeline."""
 
+import hashlib
+
+from hoi4cm.core.paths import MAX_READ_BYTES, read_file
 from hoi4cm.focus_tree.export_plan import (
     execute_export_plans,
     make_extra_export_plan,
@@ -110,6 +113,21 @@ def test_main_plan_writes_focus_gfx_declarations(tmp_path):
     assert 'name = "GFX_focus_custom"' in gfx_path.read_text()
 
 
+def test_missing_focus_gfx_file_is_created_with_declarations(tmp_path):
+    gfx_path = tmp_path / "interface" / "TST_focus.gfx"
+    plan = _main_plan(
+        tmp_path,
+        gfx_path=str(gfx_path),
+        gfx_entries=(("GFX_focus_custom", "gfx/interface/goals/custom.dds"),),
+    )
+
+    results = execute_export_plans([plan], WorkspaceFiles().write_texts)
+
+    assert results[0].ok
+    assert gfx_path.is_file()
+    assert 'name = "GFX_focus_custom"' in gfx_path.read_text()
+
+
 def test_main_plan_does_not_duplicate_existing_focus_gfx_declarations(tmp_path):
     gfx_path = tmp_path / "interface" / "TST_focus.gfx"
     gfx_path.parent.mkdir()
@@ -131,6 +149,73 @@ def test_main_plan_does_not_duplicate_existing_focus_gfx_declarations(tmp_path):
     assert results[0].ok
     assert str(gfx_path) not in results[0].written_paths
     assert gfx_path.read_text() == existing
+
+
+def test_unreadable_existing_gfx_fails_plan_without_changing_any_files(tmp_path):
+    gfx_path = tmp_path / "interface" / "TST_focus.gfx"
+    gfx_path.parent.mkdir()
+    with gfx_path.open("wb") as gfx_file:
+        gfx_file.truncate(MAX_READ_BYTES + 1)
+    plan = _main_plan(
+        tmp_path,
+        gfx_path=str(gfx_path),
+        gfx_entries=(("GFX_focus_custom", "gfx/interface/goals/custom.dds"),),
+    )
+    focus_path = tmp_path / "05_TST.txt"
+    loc_path = tmp_path / "MD_focus_TST_l_english.yml"
+    focus_path.write_bytes(b"existing focus bytes")
+    loc_path.write_bytes(b"existing localisation bytes")
+    original_bytes = {path: path.read_bytes() for path in (focus_path, loc_path)}
+    gfx_digest = hashlib.sha256(gfx_path.read_bytes()).digest()
+    second_plan = _extra_plan(tmp_path, "TST_second")
+    writer_calls = []
+
+    def write_texts(entries):
+        writer_calls.append(tuple(entries))
+        WorkspaceFiles().write_texts(entries)
+
+    results = execute_export_plans(
+        [plan, second_plan],
+        write_texts,
+    )
+
+    assert isinstance(results[0].error, OSError)
+    assert not results[0].ok
+    assert str(gfx_path) in str(results[0].error)
+    assert results[1].ok
+    assert len(writer_calls) == 1
+    assert writer_calls[0][0][0] == second_plan.focus_path
+    assert {path: path.read_bytes() for path in original_bytes} == original_bytes
+    assert hashlib.sha256(gfx_path.read_bytes()).digest() == gfx_digest
+
+
+def test_gfx_read_oserror_fails_before_writer_and_preserves_bytes(tmp_path):
+    gfx_path = tmp_path / "interface" / "TST_focus.gfx"
+    gfx_path.parent.mkdir()
+    gfx_path.write_bytes(b"existing gfx bytes")
+    plan = _main_plan(
+        tmp_path,
+        gfx_path=str(gfx_path),
+        gfx_entries=(("GFX_focus_custom", "gfx/interface/goals/custom.dds"),),
+    )
+    writes = []
+
+    def read_text(path):
+        if path == str(gfx_path):
+            raise PermissionError("access denied")
+        return read_file(path)
+
+    results = execute_export_plans(
+        [plan],
+        lambda entries: writes.extend(entries),
+        read_text=read_text,
+    )
+
+    assert isinstance(results[0].error, OSError)
+    assert not results[0].ok
+    assert str(gfx_path) in str(results[0].error)
+    assert writes == []
+    assert gfx_path.read_bytes() == b"existing gfx bytes"
 
 
 def test_main_plan_with_unresolved_focus_icon_has_no_gfx_write(tmp_path):
