@@ -9,7 +9,7 @@ methods here call it via ``self``.
 import os
 import re
 import tkinter as tk
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from tkinter import filedialog, messagebox
 from typing import Any, cast
 
@@ -47,10 +47,39 @@ log = get_logger("mod_loading")
 _default_hoi4_mod_dir = default_hoi4_mod_dir
 
 
+def _basename(path: str) -> str:
+    return os.path.basename(path.strip())
+
+
+def format_mod_label(base: str, targets: Mapping[str, str]) -> str:
+    """Append edit targets to the stored base, without parsing the label."""
+    parts = []
+    ideas = _basename(targets.get("ideas", ""))
+    if ideas:
+        parts.append(tr("edit_targets.short.ideas", "ideas: {file}", file=ideas))
+    events = _basename(targets.get("events", ""))
+    if events:
+        parts.append(tr("edit_targets.short.events", "events: {file}", file=events))
+    focus = _basename(targets.get("focus", ""))
+    if focus:
+        parts.append(tr("edit_targets.short.focus", "focus: {file}", file=focus))
+    loc = _basename(targets.get("loc", ""))
+    if loc:
+        parts.append(tr("edit_targets.short.loc", "loc: {file}", file=loc))
+    sloc = _basename(targets.get("sloc", ""))
+    if sloc:
+        parts.append(tr("edit_targets.short.sloc", "sloc: {file}", file=sloc))
+    if not parts:
+        return base
+    suffix = tr("status.edit_targets", "  |  edit: {parts}", parts="  +  ".join(parts))
+    return base + suffix
+
+
 class ModLoadingMixin:
     """Mod picking/scanning, post-load prompt and MD additional-income setup."""
 
     _mod_lbl: tk.Label
+    _mod_label_base: str
     cv: tk.Canvas
     _focus_bundles: dict[int, FocusCanvasBundle]
     _lifecycle: ApplicationLifecycle | None
@@ -194,8 +223,9 @@ class ModLoadingMixin:
     def _on_mod_loaded(self, root):
         mod_name = os.path.basename(root)
         md_badge = "  ⚡MD" if MOD.is_md else ""
+        self._mod_label_base = f"📂 {mod_name}{md_badge}  |  {MOD.summary()}"
         self._mod_lbl.config(
-            text=f"📂 {mod_name}{md_badge}  |  {MOD.summary()}",
+            text=self._mod_label_base,
             fg="#a78bfa" if MOD.is_md else GREEN,
         )
         self._apply_md_visibility()
@@ -715,21 +745,24 @@ class ModLoadingMixin:
                     add_error(
                         f"Could not read events file {MOD.edit_events_file}: {exc}"
                     )
-            # Update mod label
-            parts = []
-            if MOD.edit_ideas_file:
-                parts.append("ideas: " + os.path.basename(MOD.edit_ideas_file))
-            if MOD.edit_events_file:
-                parts.append("events: " + os.path.basename(MOD.edit_events_file))
-            if MOD.edit_focus_file:
-                parts.append("focus: " + os.path.basename(MOD.edit_focus_file))
-            if MOD.edit_loc_file:
-                parts.append("loc: " + os.path.basename(MOD.edit_loc_file))
-            if MOD.edit_scripted_loc_file:
-                parts.append("sloc: " + os.path.basename(MOD.edit_scripted_loc_file))
-            if parts and hasattr(self, "_mod_lbl"):
-                base = self._mod_lbl.cget("text").split("  |  edit:")[0]
-                self._mod_lbl.config(text=base + "  |  edit: " + "  +  ".join(parts))
+            # Stored base, not a split of the label: "edit:" is translated.
+            if hasattr(self, "_mod_lbl"):
+                base = getattr(self, "_mod_label_base", None)
+                if not isinstance(base, str):
+                    base = str(self._mod_lbl.cget("text"))
+                    self._mod_label_base = base
+                self._mod_lbl.config(
+                    text=format_mod_label(
+                        base,
+                        {
+                            "ideas": MOD.edit_ideas_file,
+                            "events": MOD.edit_events_file,
+                            "focus": MOD.edit_focus_file,
+                            "loc": MOD.edit_loc_file,
+                            "sloc": MOD.edit_scripted_loc_file,
+                        },
+                    )
+                )
             dlg.grab_release()
             dlg.destroy()
 

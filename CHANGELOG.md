@@ -8,6 +8,12 @@ the version by hand. See `AGENTS.md`.
 
 ## Unreleased
 
+- Finish the UI strings left in English after language discovery: the effects
+  hover hint, the edit-target menubar label, the event-picture profile line,
+  and the wizard and Draw.io file-type filters. Inline `tr()` defaults now
+  match `en.json`, and the key-drift test checks that. The German, Spanish
+  and Chinese strings added here are machine translations and need native
+  review.
 - Add a UI language by dropping `locales/<code>.json` into the folder: the
   language list is read from the files, each naming itself in `_meta`. Wrap the
   wizard, settings, undo, canvas and validation text that bypassed `tr()`, and

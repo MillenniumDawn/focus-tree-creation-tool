@@ -97,7 +97,7 @@ class EffectsMixin:
         # itself stays focused on the effects you've already added.
         self._mk_btn(
             eff_frm_outer,
-            tr("focus.effects.add", "＋  Add Effect"),
+            tr("focus.effects.add", "+ Add Effect"),
             self._open_effect_browser,
             fg="#4ade80",
             bg="#14532d",
@@ -111,7 +111,7 @@ class EffectsMixin:
         )
         tk.Label(
             eff_frm_outer,
-            text=tr("focus.effects.added", "ADDED EFFECTS"),
+            text=tr("focus.effects.added", "  ADDED EFFECTS"),
             bg=BG_PANEL,
             fg=TEXT_DIM,
             font=("Helvetica", 8, "bold"),
@@ -258,7 +258,7 @@ class EffectsMixin:
             if total == 0:
                 tk.Label(
                     card_holder,
-                    text=tr("focus.effects.none_found", "No effects match."),
+                    text=tr("focus.effects.none_found", "No effects found"),
                     bg=BG_PANEL,
                     fg=TEXT_DIM,
                     font=("Helvetica", 10, "italic"),
@@ -791,8 +791,11 @@ class EffectsMixin:
                     hl.bind(
                         "<Leave>",
                         lambda e: self._hint(
-                            "Right-click canvas to place focus  •  "
-                            "Ctrl+drag to pan  •  Scroll to zoom"
+                            tr(
+                                "hint.canvas_controls",
+                                "Right-click canvas to place a focus  -  "
+                                "Ctrl+drag to pan  -  Scroll to zoom",
+                            )
                         ),
                     )
         else:

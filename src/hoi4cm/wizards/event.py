@@ -902,7 +902,7 @@ def open_event_wizard(app):
         )
         tk.Button(
             eff_hdr_r,
-            text=tr("effect_picker.button_search", "Search Effect Picker"),
+            text=tr("effect_picker.button_search", "Effect Picker"),
             bg=BG_CARD,
             fg=BLUE,
             relief="flat",
@@ -1000,7 +1000,10 @@ def open_event_wizard(app):
         path = filedialog.asksaveasfilename(
             parent=win,
             defaultextension=".txt",
-            filetypes=[("HOI4 Events", "*.txt"), ("All", "*.*")],
+            filetypes=[
+                (tr("filetype.hoi4_events", "HOI4 Events"), "*.txt"),
+                (tr("filetype.all", "All"), "*.*"),
+            ],
             title=tr("filedialog.export_events", "Export Events .txt"),
         )
         if not path:
@@ -1193,7 +1196,10 @@ def open_event_wizard(app):
     def _import_txt(_path=None):
         path = _path or filedialog.askopenfilename(
             parent=win,
-            filetypes=[("HOI4 Events", "*.txt"), ("All", "*.*")],
+            filetypes=[
+                (tr("filetype.hoi4_events", "HOI4 Events"), "*.txt"),
+                (tr("filetype.all", "All"), "*.*"),
+            ],
             title=tr("filedialog.import_events", "Import HOI4 Events .txt"),
         )
         if not path:
@@ -2103,7 +2109,7 @@ def open_event_wizard(app):
     ).pack(side="left")
     tk.Button(
         imm_hdr,
-        text=tr("effect_picker.button_search", "Search Effect Picker"),
+        text=tr("effect_picker.button_search", "Effect Picker"),
         bg=BG_CARD,
         fg=BLUE,
         relief="flat",
