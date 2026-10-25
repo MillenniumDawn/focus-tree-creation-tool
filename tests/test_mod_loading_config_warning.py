@@ -2,17 +2,9 @@
 
 from __future__ import annotations
 
-import pytest
 from ui_fakes import AppFake
 
-from hoi4cm.mod import MOD
 from hoi4cm.ui import mod_loading
-
-
-@pytest.fixture(autouse=True)
-def isolate_mod(mod_state_isolation):
-    MOD.loaded = False
-    MOD.root = None
 
 
 def test_stale_recent_mod_removal_warns_once_on_failed_save(monkeypatch):
@@ -23,14 +15,14 @@ def test_stale_recent_mod_removal_warns_once_on_failed_save(monkeypatch):
         lambda *args, **kwargs: warnings.append((args, kwargs)),
     )
     monkeypatch.setattr(mod_loading, "report_error", lambda *args, **kwargs: None)
-    monkeypatch.setattr(MOD, "save_config", lambda *args, **kwargs: False)
-    MOD._recent_mods = ["/gone-one", "/gone-two"]  # type: ignore[attr-defined]
 
     app = AppFake()
+    app.app_config.recent_mods = ["/gone-one", "/gone-two"]
+    monkeypatch.setattr(app, "save_user_config", lambda window_geometry="": False)
     app._load_mod_path("/gone-one")
     app._load_mod_path("/gone-two")
 
-    assert MOD._recent_mods == []  # type: ignore[attr-defined]
+    assert app.app_config.recent_mods == []
     assert len(warnings) == 1
     assert "save settings" in warnings[0][0][1].lower()
 
@@ -43,9 +35,10 @@ def test_successful_recent_mod_save_shows_no_warning(monkeypatch):
         lambda *args, **kwargs: warnings.append((args, kwargs)),
     )
     monkeypatch.setattr(mod_loading, "report_error", lambda *args, **kwargs: None)
-    monkeypatch.setattr(MOD, "save_config", lambda *args, **kwargs: True)
-    MOD._recent_mods = ["/gone"]  # type: ignore[attr-defined]
 
-    AppFake()._load_mod_path("/gone")
+    app = AppFake()
+    app.app_config.recent_mods = ["/gone"]
+    monkeypatch.setattr(app, "save_user_config", lambda window_geometry="": True)
+    app._load_mod_path("/gone")
 
     assert warnings == []

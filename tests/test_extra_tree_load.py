@@ -12,11 +12,13 @@ from hoi4cm.focus_tree.parse import (
     EmptyFocusTreeError,
     FocusTreeParseBudgetExceeded,
 )
+from hoi4cm.mod.index import ModIndex
 from hoi4cm.models import Focus, FocusDocument
 
 
-def _shell():
+def _shell() -> SimpleNamespace:
     app = SimpleNamespace(
+        index=ModIndex(),
         _extra_trees=[],
         _shared_focuses=[],
         _joint_focuses=[],
@@ -82,8 +84,7 @@ def test_load_extra_tree_parses_off_the_tk_thread(tmp_path, monkeypatch):
         "progress_modal",
         lambda *_a, **_k: SimpleNamespace(close=lambda: None),
     )
-    monkeypatch.setattr(m.MOD, "loaded", False)
-    monkeypatch.setattr(m.MOD, "root", None)
+
     app = _shell()
 
     m.App._load_extra_tree(cast(m.App, app), "shared")
@@ -145,8 +146,6 @@ def test_later_extra_tree_adoption_reconciles_live_indexes_and_undo_redo(
         "progress_modal",
         lambda *_a, **_k: SimpleNamespace(close=lambda: None),
     )
-    monkeypatch.setattr(m.MOD, "loaded", False)
-    monkeypatch.setattr(m.MOD, "root", None)
 
     m.App._load_extra_tree(cast(m.App, app), "shared")
 
@@ -206,8 +205,7 @@ def test_load_extra_tree_after_undo_does_not_reuse_redo_id(tmp_path, monkeypatch
         "progress_modal",
         lambda *_a, **_k: SimpleNamespace(close=lambda: None),
     )
-    monkeypatch.setattr(m.MOD, "loaded", False)
-    monkeypatch.setattr(m.MOD, "root", None)
+
     app = _shell()
     app.focuses.add(Focus(id=1))
     app._undo_stack = UndoStack()
@@ -246,9 +244,8 @@ def test_import_tree_rejects_oversized_file(tmp_path, monkeypatch):
     errors = []
     monkeypatch.setattr(m.filedialog, "askopenfilename", lambda **_k: str(tree))
     monkeypatch.setattr(m, "report_error", lambda *args, **_k: errors.append(args))
-    monkeypatch.setattr(m.MOD, "loaded", False)
-    monkeypatch.setattr(m.MOD, "root", None)
-    app = SimpleNamespace(_confirm_discard=Mock(return_value=True))
+
+    app = SimpleNamespace(index=ModIndex(), _confirm_discard=Mock(return_value=True))
 
     m.App._import_txt(cast(m.App, app))
 
@@ -262,8 +259,7 @@ def test_load_extra_tree_rejects_oversized_file(tmp_path, monkeypatch):
     errors = []
     monkeypatch.setattr(m.filedialog, "askopenfilename", lambda **_k: str(tree))
     monkeypatch.setattr(m, "report_error", lambda *args, **_k: errors.append(args))
-    monkeypatch.setattr(m.MOD, "loaded", False)
-    monkeypatch.setattr(m.MOD, "root", None)
+
     app = _shell()
 
     m.App._load_extra_tree(cast(m.App, app), "joint")
@@ -289,8 +285,7 @@ def test_load_extra_tree_budget_failure_warns(tmp_path, monkeypatch):
         "progress_modal",
         lambda *_a, **_k: SimpleNamespace(close=lambda: None),
     )
-    monkeypatch.setattr(m.MOD, "loaded", False)
-    monkeypatch.setattr(m.MOD, "root", None)
+
     monkeypatch.setattr(parse_module, "MAX_RAW_BLOCK_RESCANS", 0)
     app = _shell()
 
@@ -317,8 +312,7 @@ def test_load_extra_tree_empty_file_warns(tmp_path, monkeypatch):
         "progress_modal",
         lambda *_a, **_k: SimpleNamespace(close=lambda: None),
     )
-    monkeypatch.setattr(m.MOD, "loaded", False)
-    monkeypatch.setattr(m.MOD, "root", None)
+
     app = _shell()
 
     m.App._load_extra_tree(cast(m.App, app), "shared")

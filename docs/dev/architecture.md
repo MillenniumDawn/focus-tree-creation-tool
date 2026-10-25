@@ -12,7 +12,9 @@
   and a bounded LRU mapping (`lru.py`, `LRUCache`) backing the in-memory
   `PhotoImage` caches. Re-exported flat through `core/__init__.py` (the
   "facade", see below). Everything else in the package can depend on `core`;
-  core submodules other than the facade depend on nothing else in `hoi4cm`.
+  `app_config.py` owns persisted preferences and builds immutable scan inputs;
+  it uses the mod scan settings and localisation target types. Other core
+  submodules outside the facade depend on nothing else in `hoi4cm`.
 - **`data/`**: static tables: `EFFECT_DEFS`/`MODIFIER_DEFS`/`TRIGGER_DEFS` and
   the MD building/resource cost tables. No logic beyond lookup helpers.
 - **`models/`**: `Focus`, the plain-data class behind every canvas item,
@@ -40,7 +42,7 @@
   a sequential worker. `validate.py` is the pure validator (#132):
   `validate_document` takes the focus map plus caller-supplied sprite and
   loc-key sets, no Tk and no `MOD` globals.
-- **`mod/`**: `ModContext` (the `MOD` singleton): walks a mod's directory
+- **`mod/`**: `ModIndex` (`index.py`): walks a mod's directory
   tree once and indexes sprites, focus/event/idea/decision IDs, scripted
   effects, scripted triggers, on-action hooks, dyn-mod IDs, country tags, and
   MD money-system paths. MD mode is detected from the mod identity or
@@ -72,7 +74,8 @@
   and is initialized exactly once by `CanvasMixin._init_canvas_state`
   (production via `_bind_canvas`, tests via `AppFake`); render paths read
   the typed `None`-optional handles (minimap) directly instead of probing
-  for attribute presence — plus
+  for attribute presence. `sprite_images.py` owns the separate synchronous
+  PhotoImage LRU. Also
   `gfx_browser.py` (the universal GFX picker, the drag-to-place GFX
   editor, and the sidebar's narrower focus-icon picker, see
   `monolith-migration.md` for why there are two GFX browsers instead of
@@ -138,7 +141,8 @@ calls `FocusDocument.touch()` so canvas and reverse-link indexes are rebuilt
 together.
 
 The selected HOI4 localisation language is persisted as `loc_language` on
-`ModContext`. UI code snapshots that string into export plans and pure wizard
+`App.app_config` (`core.app_config.AppConfig`). UI code snapshots that string
+into export plans and pure wizard
 generators; worker code does not read mutable global settings. Existing edit
 targets remain explicit overrides, while automatic discovery recursively
 filters `localisation/` for the configured language. Focus exports default to
@@ -175,10 +179,11 @@ truncate-in-place write destroys it if the process dies mid-write (issue #46).
 - **`append_text(...)`** — a plain append (nothing to truncate), used by the
   loc/scripted-loc paths that only ever add entries.
 
-`notifying_workspace_files(MOD, mod_root)` (same module, re-exported from
-`hoi4cm.wizards._shared` for the wizards) builds a writer whose `on_written`
-hook pokes the graphics catalog — but only when the save target is the
-currently loaded mod, so writing elsewhere never touches live state.
+`notifying_workspace_files(index, mod_root, on_written=None)` (same module,
+re-exported from `hoi4cm.wizards._shared`) builds a writer that updates only
+its loaded mod. UI callers pass `App.note_mod_file_written`, which updates
+that index and evicts affected names from the App's image cache on Tk.
+Writing elsewhere never touches live state.
 
 `mod.gfx_writer.append_sprite_types` renders declarations into new or existing
 `spriteTypes` wrappers without replacing user content. Callers still pass the
@@ -233,16 +238,29 @@ from the monolith. One survivor remains, but it moved with its only caller:
 references the underscore name. `settings_dialog.py`'s `open_settings`
 calls `default_hoi4_mod_dir()` directly and never needed the alias.
 
+## Mod ownership
+
+Each App owns three separate objects, with no process-wide `MOD` facade:
+
+- `index`: a Tk-free `ModIndex` containing scan results and the graphics catalog.
+- `app_config`: an `AppConfig` holding saved preferences, including scan paths,
+  localisation language, MD override, geometry, and recent mods. The config
+  path remains `~/.hoi4_focus_maker.json`; unknown keys survive saves.
+- `images`: a `SpriteImageCache` holding the 512-entry synchronous PhotoImage
+  LRU and image errors. It does not hold the index. `ImageBroker` still owns
+  the canvas and thumbnail pipeline; these caches have different keys and uses.
+
+The `edit_*` targets are session fields on App, not scan results or saved
+preferences. Wizards and GFX browsers receive the owning index and config
+explicitly. Workers receive a candidate index and frozen `ScanSettings`, not
+live settings or an image cache.
+
 ## Module-level singletons
 
 A handful of modules hold process-lifetime state instead of being
 instantiated per use. Know these before writing a test that touches them,
 or state leaks across tests:
 
-- **`MOD`** (`hoi4cm.mod.context.ModContext`, instantiated once in
-  `mod/__init__.py`): the discovered-mod-assets object every wizard and
-  the App read from. Rebuilt in place by `MOD.scan(root)` on mod load, not
-  replaced.
 - **i18n state** (`hoi4cm.core.i18n`): `I18N_LANG`/`I18N_STRINGS` are
   module globals, loaded once at import time and reassigned by
   `set_language()`. Read them through `get_language()`/`tr()`, not by
@@ -284,9 +302,9 @@ mutators or `touch()`.
 
 Mod scans, image loads, batch tree loading, and `.txt`/`.drawio` import
 parsing use `ui/tasks.py`'s shared `run_bg` worker pool. A mod load snapshots
-its scan settings into a separate `ModContext` on Tk, then scans that
-candidate off-thread; the `MOD` singleton is only changed by the Tk completion
-callback.
+its settings into frozen `ScanSettings` and creates a separate `ModIndex`
+on Tk, then scans that candidate off-thread. Only the Tk completion callback
+adopts the candidate into `App.index`.
 
 ### The `run_bg` contract
 
@@ -307,7 +325,7 @@ cannot stop an already running parse.
 
 The hard rule for anything inside `work`: **never touch Tk** (widgets,
 `StringVar`/`BooleanVar`, canvas items, dialogs; Tkinter isn't
-thread-safe), **never call `MOD.get_image`** (`PhotoImage` construction is
+thread-safe), **never call `SpriteImageCache.get_image`** (`PhotoImage` construction is
 Tk-thread-only), and **never mutate `App` state** (`self.focuses`,
 `self._extra_trees`, ...). The pattern every call site follows: take a
 snapshot of whatever `self` state the computation needs *on the Tk thread*
@@ -359,12 +377,12 @@ mod installed. `run_bg` does not take a cancel token: `work` stays a zero-arg
 callable that closes over the event. `Future.cancel()` only drops queued jobs,
 and skipping `on_done` would throw away a completed result.
 
-The mod-load candidate has a fresh empty image LRU and graphics catalog. Its
-worker never reads, receives, or mutates the live `MOD.sprite_imgs` cache, so
+The mod-load candidate has a fresh graphics catalog and no image cache. Its
+worker never reads, receives, or mutates `App.images`, so
 cancelled, failed, or superseded scans preserve the loaded mod and its warm
 PhotoImages. A scan step that raises a file or parse error is logged and
 skipped, and the remaining steps still run. A current successful completion
-adopts candidate scan data on Tk (`ModContext.adopt_scan`), evicts old cached
+adopts candidate scan data on Tk (`ModIndex.adopt_scan`), evicts old cached
 images there, and retains those references until the completion callback
 finishes. The candidate catalog continues the loaded catalog's generation
 count, which image brokers compare to drop stale results. A lifecycle resource
@@ -396,7 +414,7 @@ off the Tk thread for `_load_all_trees`, `_import_txt`, `_import_drawio`, and
 all focus-tree exports. `focus_tree/export_plan.py` owns the plain-data export
 plans and sequential worker execution. The Tk shell resolves dialogs and
 snapshots its state before submission, then reports results and calls
-`MOD.note_file_written` on the Tk thread after each successful atomic write.
+`App.note_mod_file_written` on the Tk thread after each successful atomic write.
 `performance.md`'s GIL guidance still applies: threads here buy UI
 responsiveness, not parse concurrency, which is why multi-file work processes
 files sequentially rather than fanning out across workers.

@@ -6,6 +6,7 @@ from unittest.mock import Mock
 import hoi4_content_maker as app_module
 from hoi4cm.core.undo import UndoStack
 from hoi4cm.editor.extra_tree_undo import ExtraTreeUndoHistory
+from hoi4cm.mod.index import ModIndex
 from hoi4cm.models import (
     EditorWorkspace,
     Focus,
@@ -80,6 +81,9 @@ class _DocumentApp:
     def __init__(self, focuses=()):
         app = self
         self.focuses = FocusDocument(focuses)
+        self.index = ModIndex()
+        self.edit_focus_file = ""
+        self.edit_loc_file = ""
         self.workspace = EditorWorkspace(focuses=self.focuses)
         self.selected = None
         self.cv = Mock()
@@ -136,7 +140,6 @@ class _DocumentApp:
 
 
 def _headless_app(monkeypatch, focuses=()):
-    monkeypatch.setattr(app_module.MOD, "root", None)
     return _DocumentApp(focuses)
 
 

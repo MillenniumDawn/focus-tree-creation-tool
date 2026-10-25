@@ -77,9 +77,11 @@ def _fake_app(**overrides):
         "_autosave_tick",
         "_maybe_offer_autosave_restore",
         "_update_title",
+        "_export",
     ):
         setattr(fake, name, getattr(m.App, name).__get__(fake))
     # Required attributes for fingerprint
+    fake.edit_focus_file = ""
     fake._tree_id = _Var("TAG_focus_tree")
     fake._tree_country_tag = ""
     fake._tree_country_name = ""
@@ -112,7 +114,6 @@ def _fake_app(**overrides):
     fake._capture_workspace = lambda: None
     fake.workspace = EditorWorkspace()
     fake._hint = lambda msg: setattr(fake, "_hint_msg", msg)
-    # Provide minimal MOD edit_focus_file
     for k, v in overrides.items():
         setattr(fake, k, v)
     return fake
@@ -163,7 +164,7 @@ def test_is_dirty_after_tree_extras_change():
 
 def test_is_dirty_after_edit_focus_file_change(monkeypatch):
     app = _fake_app()
-    monkeypatch.setattr(m.MOD, "edit_focus_file", "new/path.txt", raising=False)
+    app.edit_focus_file = "new/path.txt"
     assert app._is_dirty() is True
 
 
@@ -874,7 +875,7 @@ def test_export_records_failed_autosave_flush_and_proceeds(errors):
         _make_main_export_plan=make_plan,
     )
 
-    assert m.App._export(app, focuses_in_tree=[]) is None
+    assert app._export(focuses_in_tree=[]) is None
 
     make_plan.assert_called_once()
     assert len(errors) == 1

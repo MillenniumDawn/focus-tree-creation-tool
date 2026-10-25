@@ -1,7 +1,10 @@
 import os
 from pathlib import Path
 
+import pytest
+
 from hoi4cm.mod.graphics_catalog import AssetRef, FileStamp
+from hoi4cm.ui import gfx_browser
 from hoi4cm.ui.gfx_browser import (
     _catalog_folder_groups,
     _catalog_image_paths,
@@ -77,6 +80,28 @@ def test_pairs_from_paths_preserves_first_stem_after_sorting(tmp_path):
         ("GFX_other", str(tmp_path / "a" / "other.tga")),
         ("GFX_same", str(tmp_path / "a" / "same.dds")),
     ]
+
+
+@pytest.mark.parametrize("error_type", [PermissionError, FileNotFoundError])
+def test_flat_folder_browser_reports_unreadable_folder(
+    tmp_path, monkeypatch, error_type
+):
+    error = error_type(13, "cannot read folder", str(tmp_path))
+    reports = []
+    window = object()
+
+    def fail_listdir(_folder):
+        raise error
+
+    def report(message, exc, *, parent):
+        reports.append((message, exc, parent))
+
+    monkeypatch.setattr(gfx_browser.os, "listdir", fail_listdir)
+    monkeypatch.setattr(gfx_browser, "report_error", report)
+
+    gfx_browser._browse_flat_folder(window, str(tmp_path), lambda _key: None, "")
+
+    assert reports == [(str(error), error, window)]
 
 
 def test_uncatalogued_custom_groups_survive_catalog_refresh(tmp_path):

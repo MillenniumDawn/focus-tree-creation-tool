@@ -25,7 +25,7 @@ def test_clear_all_pushes_full_snapshot_after_confirmation(monkeypatch):
 
     app_module.App._clear_all(_as_app(app))
 
-    app._push_undo.assert_called_once_with("clear all", tree_state=True)
+    app.mock("_push_undo").assert_called_once_with("clear all", tree_state=True)
     assert not app.focuses
 
 
@@ -36,7 +36,7 @@ def test_clear_all_cancel_keeps_document_without_undo(monkeypatch):
 
     app_module.App._clear_all(_as_app(app))
 
-    app._push_undo.assert_not_called()
+    app.mock("_push_undo").assert_not_called()
     assert app.focuses[focus.id] is focus
 
 
@@ -45,9 +45,9 @@ def test_clear_all_round_trips_through_real_undo_stack(monkeypatch):
     app = AppFake([focus])
     app._undo_stack = UndoStack()
 
-    def push_undo(label="action", touched_ids=None, *, tree_state=False):
+    def push_undo(label="action", touched_ids=None, run=None, *, tree_state=False):
         app_module.App._push_undo(
-            _as_app(app), label, touched_ids, tree_state=tree_state
+            _as_app(app), label, touched_ids, run, tree_state=tree_state
         )
 
     app._push_undo = push_undo
@@ -77,7 +77,7 @@ def test_undo_and_redo_refresh_selected_focus():
     app._populate.assert_called_once_with(app.selected)
     app._refresh_prereqs.assert_called_once_with()
     app._refresh_mutex.assert_called_once_with()
-    app._refresh_effects.assert_called_once_with()
+    app.mock("_refresh_effects").assert_called_once_with()
 
     app_module.App._redo(_as_app(app))
 
@@ -85,7 +85,7 @@ def test_undo_and_redo_refresh_selected_focus():
     assert app._populate.call_count == 2
     assert app._refresh_prereqs.call_count == 2
     assert app._refresh_mutex.call_count == 2
-    assert app._refresh_effects.call_count == 2
+    assert app.mock("_refresh_effects").call_count == 2
 
 
 def test_bulk_rename_ui_undo_redo_restores_anchor_only_child():
@@ -133,7 +133,9 @@ def test_make_prereq_pushes_child_id():
 
     app_module.App._make_prereq(_as_app(app), child, parent)
 
-    app._push_undo.assert_called_once_with("add prerequisite", touched_ids=(child.id,))
+    app.mock("_push_undo").assert_called_once_with(
+        "add prerequisite", touched_ids=(child.id,)
+    )
     assert child.prereqs == [[parent.id]]
 
 
@@ -145,7 +147,7 @@ def test_duplicate_prereq_does_not_push_undo():
 
     app_module.App._make_prereq(_as_app(app), child, parent)
 
-    app._push_undo.assert_not_called()
+    app.mock("_push_undo").assert_not_called()
     assert child.prereqs == [[parent.id]]
 
 
@@ -154,7 +156,7 @@ def test_remove_prereq_without_selection_does_not_push_undo():
 
     app_module.App._rm_prereq(_as_app(app), 0)
 
-    app._push_undo.assert_not_called()
+    app.mock("_push_undo").assert_not_called()
 
 
 def test_remove_prereq_group_pushes_child_id():
@@ -166,7 +168,7 @@ def test_remove_prereq_group_pushes_child_id():
 
     app_module.App._rm_prereq(_as_app(app), 0)
 
-    app._push_undo.assert_called_once_with(
+    app.mock("_push_undo").assert_called_once_with(
         "remove prerequisite group", touched_ids=(child.id,)
     )
     assert child.prereqs == []
@@ -177,7 +179,7 @@ def test_remove_mutex_without_selection_does_not_push_undo():
 
     app_module.App._rm_mutex(_as_app(app), 0)
 
-    app._push_undo.assert_not_called()
+    app.mock("_push_undo").assert_not_called()
 
 
 def test_make_mutex_pushes_both_focus_ids():
@@ -187,7 +189,7 @@ def test_make_mutex_pushes_both_focus_ids():
 
     app_module.App._make_mutex(_as_app(app), first, second)
 
-    app._push_undo.assert_called_once_with(
+    app.mock("_push_undo").assert_called_once_with(
         "add mutex", touched_ids=(first.id, second.id)
     )
     assert first.mutex == [second.id]
@@ -204,7 +206,7 @@ def test_remove_mutex_pushes_selected_and_partner_ids():
 
     app_module.App._rm_mutex(_as_app(app), 0)
 
-    app._push_undo.assert_called_once_with(
+    app.mock("_push_undo").assert_called_once_with(
         "remove mutex", touched_ids=(selected.id, partner.id)
     )
     assert selected.mutex == []
@@ -219,7 +221,9 @@ def test_rm_effect_pushes_focus_id():
 
     app_module.App._rm_effect(_as_app(app), 0)
 
-    app._push_undo.assert_called_once_with("remove effect", touched_ids=(focus.id,))
+    app.mock("_push_undo").assert_called_once_with(
+        "remove effect", touched_ids=(focus.id,)
+    )
     assert focus.effects == []
 
 
@@ -230,8 +234,10 @@ def test_rm_effect_round_trip_through_real_undo_stack():
     app.selected = focus
     app._undo_stack = UndoStack()
 
-    def push_undo(label="action", touched_ids=None):
-        app_module.App._push_undo(_as_app(app), label, touched_ids)
+    def push_undo(label="action", touched_ids=None, run=None, *, tree_state=False):
+        app_module.App._push_undo(
+            _as_app(app), label, touched_ids, run, tree_state=tree_state
+        )
 
     app._push_undo = push_undo
 
@@ -251,7 +257,9 @@ def test_add_offset_pushes_focus_id_and_appends_offset():
 
     app_module.App._add_offset(_as_app(app))
 
-    app._push_undo.assert_called_once_with("add offset", touched_ids=(focus.id,))
+    app.mock("_push_undo").assert_called_once_with(
+        "add offset", touched_ids=(focus.id,)
+    )
     assert focus.offsets == [
         {"x": 1, "y": 2, "trigger": "has_war = yes"},
         {"x": 0, "y": 0, "trigger": ""},
@@ -265,8 +273,10 @@ def test_add_offset_round_trip_through_real_undo_stack():
     app.selected = focus
     app._undo_stack = UndoStack()
 
-    def push_undo(label="action", touched_ids=None):
-        app_module.App._push_undo(_as_app(app), label, touched_ids)
+    def push_undo(label="action", touched_ids=None, run=None, *, tree_state=False):
+        app_module.App._push_undo(
+            _as_app(app), label, touched_ids, run, tree_state=tree_state
+        )
 
     app._push_undo = push_undo
 
@@ -286,7 +296,9 @@ def test_del_offset_pushes_focus_id_and_removes_offset():
 
     app_module.App._del_offset(_as_app(app), 0)
 
-    app._push_undo.assert_called_once_with("remove offset", touched_ids=(focus.id,))
+    app.mock("_push_undo").assert_called_once_with(
+        "remove offset", touched_ids=(focus.id,)
+    )
     assert focus.offsets == [{"x": 3, "y": 4, "trigger": ""}]
 
 
@@ -297,8 +309,10 @@ def test_del_offset_round_trip_through_real_undo_stack():
     app.selected = focus
     app._undo_stack = UndoStack()
 
-    def push_undo(label="action", touched_ids=None):
-        app_module.App._push_undo(_as_app(app), label, touched_ids)
+    def push_undo(label="action", touched_ids=None, run=None, *, tree_state=False):
+        app_module.App._push_undo(
+            _as_app(app), label, touched_ids, run, tree_state=tree_state
+        )
 
     app._push_undo = push_undo
 
@@ -322,7 +336,7 @@ def test_drag_click_without_grid_move_does_not_push_undo():
     app._foc_pr(focus.id, SimpleNamespace(x=0, y=0, state=0))
     app._foc_mv(focus.id, SimpleNamespace(x=3, y=3))
 
-    app._push_undo.assert_not_called()
+    app.mock("_push_undo").assert_not_called()
     assert (focus.x, focus.y) == (0, 0)
 
 
@@ -336,7 +350,7 @@ def test_drag_into_occupied_cell_does_not_push_undo():
     app._foc_pr(focus.id, SimpleNamespace(x=0, y=0, state=0))
     app._foc_mv(focus.id, SimpleNamespace(x=XGRID, y=YGRID))
 
-    app._push_undo.assert_not_called()
+    app.mock("_push_undo").assert_not_called()
     assert (focus.x, focus.y) == (0, 0)
 
 
@@ -350,7 +364,7 @@ def test_drag_event_for_other_focus_does_not_push_undo():
     app._foc_pr(focus.id, SimpleNamespace(x=0, y=0, state=0))
     app._foc_mv(other.id, SimpleNamespace(x=XGRID, y=YGRID))
 
-    app._push_undo.assert_not_called()
+    app.mock("_push_undo").assert_not_called()
     assert (focus.x, focus.y) == (0, 0)
 
 
@@ -364,7 +378,7 @@ def test_drag_in_mutex_mode_does_not_push_undo():
     app.mutex_mode = True
     app._foc_mv(focus.id, SimpleNamespace(x=XGRID, y=YGRID))
 
-    app._push_undo.assert_not_called()
+    app.mock("_push_undo").assert_not_called()
     assert (focus.x, focus.y) == (0, 0)
 
 
@@ -380,7 +394,7 @@ def test_drag_move_pushes_once_with_moved_focus_id():
 
     app._foc_pr(focus.id, SimpleNamespace(x=0, y=0, state=0))
     app._foc_mv(focus.id, SimpleNamespace(x=3, y=3))
-    app._push_undo.assert_not_called()
+    app.mock("_push_undo").assert_not_called()
 
     app._foc_mv(focus.id, SimpleNamespace(x=XGRID, y=YGRID))
     app._foc_mv(focus.id, SimpleNamespace(x=XGRID, y=YGRID))
@@ -389,7 +403,9 @@ def test_drag_move_pushes_once_with_moved_focus_id():
         SimpleNamespace(x=2 * XGRID, y=2 * YGRID),
     )
 
-    app._push_undo.assert_called_once_with("move focus", touched_ids=(focus.id,))
+    app.mock("_push_undo").assert_called_once_with(
+        "move focus", touched_ids=(focus.id,)
+    )
     assert (focus.x, focus.y) == (2, 2)
 
 
@@ -408,25 +424,25 @@ def test_drag_start_snapshots_occupied_positions():
 def test_rmb_on_occupied_cell_does_not_place(monkeypatch: pytest.MonkeyPatch):
     focus = Focus(id=30, x=2, y=3)
     app = AppFake([focus])
-    app._new_focus_at = Mock()
+    monkeypatch.setattr(app, "_new_focus_at", Mock())
     monkeypatch.setattr(app, "c2w", lambda _x, _y: (2, 3))
     app.cv.find_overlapping.return_value = ()
 
     app._rmb(SimpleNamespace(x=10, y=10))
 
-    app._new_focus_at.assert_not_called()
+    app.mock("_new_focus_at").assert_not_called()
 
 
 def test_rmb_on_free_cell_places(monkeypatch: pytest.MonkeyPatch):
     focus = Focus(id=31, x=2, y=3)
     app = AppFake([focus])
-    app._new_focus_at = Mock()
+    monkeypatch.setattr(app, "_new_focus_at", Mock())
     monkeypatch.setattr(app, "c2w", lambda _x, _y: (5, 5))
     app.cv.find_overlapping.return_value = ()
 
     app._rmb(SimpleNamespace(x=10, y=10))
 
-    app._new_focus_at.assert_called_once_with(5, 5)
+    app.mock("_new_focus_at").assert_called_once_with(5, 5)
 
 
 def _code_app(focus: Focus) -> AppFake:
@@ -554,7 +570,7 @@ def test_add_focus_picks_first_free_cell_without_repairing_indexes():
 
     app_module.App._add_focus(_as_app(app))
 
-    app._new_focus_at.assert_called_once_with(4, 0)
+    app.mock("_new_focus_at").assert_called_once_with(4, 0)
     app.focuses.validate_indexes.assert_not_called()
     app.focuses.rebuild_indexes.assert_not_called()
 
@@ -567,7 +583,7 @@ def test_new_focus_at_keeps_indexes_exact_without_a_rebuild():
 
     app_module.App._new_focus_at(_as_app(app), 2, 0)
 
-    created = app._select.call_args.args[0]
+    created = app.mock("_select").call_args.args[0]
     assert created.name == f"tag_focus_{created.id}"
     assert app.focuses.occupied_positions[(2, 0)] == {created.id}
     assert app.focuses.first_by_name[created.name] == created.id

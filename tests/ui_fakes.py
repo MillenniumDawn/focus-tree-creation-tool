@@ -6,13 +6,16 @@ from collections.abc import Callable
 from typing import Any
 from unittest.mock import Mock
 
+from hoi4cm.core.app_config import AppConfig
 from hoi4cm.core.undo import UndoStack
 from hoi4cm.editor.extra_tree_undo import ExtraTreeUndoHistory
+from hoi4cm.mod.index import ModIndex
 from hoi4cm.models import Focus
 from hoi4cm.models.document import FocusDocument
 from hoi4cm.ui.canvas import CanvasMixin
 from hoi4cm.ui.effects_panel import EffectsMixin
 from hoi4cm.ui.mod_loading import ModLoadingMixin
+from hoi4cm.ui.sprite_images import SpriteImageCache
 
 
 class _FakeTcl:
@@ -26,6 +29,7 @@ class AppFake(CanvasMixin, ModLoadingMixin, EffectsMixin):
     cv: Any
     _mod_lbl: Any
     _lifecycle: Any
+    selected: Focus | None
 
     CANVAS_MIN_SIZE = 10
     CANVAS_EXPAND_STEP = 5
@@ -48,6 +52,17 @@ class AppFake(CanvasMixin, ModLoadingMixin, EffectsMixin):
         # headless contract matches production (canvas.py._init_canvas_state).
         self._init_canvas_state()
         self._default_focus_prefix = ""
+        self.app_config = AppConfig()
+        self.index = ModIndex()
+        self.images = SpriteImageCache()
+        self.edit_focus_file = ""
+        self.edit_loc_file = ""
+        self.edit_ideas_file = ""
+        self.edit_events_file = ""
+        self.edit_events_ns = ""
+        self.edit_decisions_file = ""
+        self.edit_decisions_cat_file = ""
+        self.edit_scripted_loc_file = ""
         self._config_write_warned = False
         self._mod_image_resource_registered = False
         self._eb_win = None
@@ -57,7 +72,7 @@ class AppFake(CanvasMixin, ModLoadingMixin, EffectsMixin):
         self._snapshot_extra_tree_state = Mock(return_value=None)
         # Data-member callbacks (the mixin declares them Callable-style), so
         # the override shapes match the host protocols.
-        self._schedule_validation = Mock(side_effect=self._count_validation)
+        self.__dict__["_schedule_validation"] = Mock(side_effect=self._count_validation)
         self._select = Mock()
         self._deselect = Mock()
         self._make_mutex = Mock()
@@ -85,9 +100,19 @@ class AppFake(CanvasMixin, ModLoadingMixin, EffectsMixin):
         self._invalidate_tree_badges = Mock()
         self._refresh_loaded_trees_panel = Mock()
         self._refresh_tree_meta_panel = Mock()
-        self._invalidate_focus_list_structure = Mock()
+        self.__dict__["_invalidate_focus_list_structure"] = Mock()
         self._update_focus_list_selection = Mock()
         self._update_statusbar = Mock()
+
+        def note_mod_file_written(path: str) -> None:
+            self.images.evict(self.index.note_file_written(path))
+
+        self.note_mod_file_written = note_mod_file_written
+
+        def save_user_config(window_geometry: str = "") -> bool:
+            return True
+
+        self.save_user_config = save_user_config
         self._reset_canvas_bounds()
         self.callbacks: list[Callable[[], None]] = []
         self.loaded_roots: list[str] = []
@@ -99,6 +124,14 @@ class AppFake(CanvasMixin, ModLoadingMixin, EffectsMixin):
         self.redraws = 0
         self.validation_schedules = 0
         self.tk = _FakeTcl()
+
+    def mock(self, name: str) -> Mock:
+        callback = self.__dict__[name]
+        assert isinstance(callback, Mock)
+        return callback
+
+    def _schedule_validation(self) -> None:
+        self.validation_schedules += 1
 
     def after(self, _milliseconds: int, callback: Callable[[], None]) -> object:
         self.callbacks.append(callback)
@@ -119,7 +152,7 @@ class AppFake(CanvasMixin, ModLoadingMixin, EffectsMixin):
     def _get_mod_suggestions(self, etype: str, fname: str) -> list[str]:
         return ["built_in"]
 
-    def _get_tree_badge(self, _tree_idx: int) -> tuple[str, str]:
+    def _get_tree_badge(self, tree_idx: int) -> tuple[str, str]:
         return "", "#374151"
 
     def flush(self) -> None:

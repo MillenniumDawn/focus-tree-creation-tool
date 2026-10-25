@@ -24,6 +24,12 @@
 - **#14**: the big one: `ModContext`/`MOD`, all five wizards, and the three
   UI mixins (`CanvasMixin`, `EffectsMixin`, `ModLoadingMixin`) extracted.
   This is most of what's left in `src/hoi4cm/` today.
+- **#182**: split the extracted `MOD` singleton into the Tk-free
+  `mod/index.py` (`ModIndex` and frozen `ScanSettings`), saved preferences in
+  `core/app_config.py`, and the App-owned PhotoImage LRU in
+  `ui/sprite_images.py`. Edit targets remain session fields on App. The canvas
+  and effects mixins also declare their host fields and type-only callbacks;
+  no protocol was added to App's runtime inheritance.
 - **#17**: security hardening pass: `core/safe_path.py`, `core/safe_xml.py`,
   read/write caps on `core/paths.py` and `core/config.py`, and the O(F^2)
   fixes in `focus_tree/export.py` and the monolith's duplicate-name check.
@@ -183,8 +189,8 @@ and `class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk)`
 - **Validation** (#132): `_validate_tree`, `_refresh_validation_dialog`,
   and the debounced background pass (`_schedule_validation`,
   `_run_validation`, `_apply_validation_result` plus
-  `_validation_sprites`/`_validation_loc_keys` snapshotting the `MOD`
-  bits); the pure logic lives in `focus_tree/validate.py`
+  `_validation_sprites`/`_validation_loc_keys` snapshotting the App's index
+  and edit target); the pure logic lives in `focus_tree/validate.py`
   (`validate_document`, `worst_severity_per_focus`).
 - **New-tree dialog**: `_new_tree_dialog`.
 - **Bulk rename**: `_bulk_rename_dialog`.

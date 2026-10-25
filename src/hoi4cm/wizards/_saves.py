@@ -43,7 +43,18 @@ def _read_existing_file_with_encoding(path):
 
 
 def save_spirit(
-    mod, mod_root, ideas_path, *, sid, slot, ideas_block, loc_name, loc_desc
+    index,
+    config,
+    edits,
+    mod_root,
+    ideas_path,
+    *,
+    sid,
+    slot,
+    ideas_block,
+    loc_name,
+    loc_desc,
+    on_written=None,
 ):
     """Add one national spirit to the ideas and localisation files.
 
@@ -52,12 +63,12 @@ def save_spirit(
     saved = []
     errs = []
     warnings = []
-    wf = notifying_workspace_files(mod, mod_root)
+    wf = notifying_workspace_files(index, mod_root, on_written)
 
     # ── SAFE APPEND to ideas file ─────────────────────────────────────
     try:
         os.makedirs(os.path.dirname(ideas_path), exist_ok=True)
-        selected_ideas = bool(mod.edit_ideas_file)
+        selected_ideas = bool(edits.edit_ideas_file)
         file_exists = os.path.isfile(ideas_path)
         if selected_ideas and not file_exists:
             raise OSError("selected ideas file no longer exists")
@@ -132,11 +143,11 @@ def save_spirit(
         errs.append("Ideas: " + str(exc))
 
     # ── SAFE APPEND to localisation ───────────────────────────────────
-    selected_loc = bool(mod.edit_loc_file)
+    selected_loc = bool(edits.edit_loc_file)
     if selected_loc:
-        loc_path = mod.edit_loc_file
+        loc_path = edits.edit_loc_file
     else:
-        loc_target = mod.loc_target
+        loc_target = config.loc_target
         loc_path = os.path.join(
             mod_root,
             "localisation",
@@ -165,7 +176,7 @@ def save_spirit(
             if not loc_exists:
                 wf.write_text(
                     loc_path,
-                    mod.loc_target.header() + "\n",
+                    config.loc_target.header() + "\n",
                     encoding=loc_encoding,
                 )
             loc_body = "".join(
@@ -181,7 +192,7 @@ def save_spirit(
         errs.append("Localisation: " + str(exc))
 
     # ── SCRIPTED LOC ─────────────────────────────────────────────────
-    if mod.edit_scripted_loc_file:
+    if edits.edit_scripted_loc_file:
         sloc_blocks = []
         if sid:
             sloc_blocks.append({"name": f"GET_{sid}_name", "texts": [], "default": sid})
@@ -194,7 +205,7 @@ def save_spirit(
                     }
                 )
         append_scripted_loc(
-            mod.edit_scripted_loc_file,
+            edits.edit_scripted_loc_file,
             sloc_blocks,
             saved,
             errs,
@@ -205,7 +216,19 @@ def save_spirit(
     return saved, warnings, errs
 
 
-def save_events(mod, mod_root, ev_file, *, ns, events, render_event, render_yml):
+def save_events(
+    index,
+    config,
+    edits,
+    mod_root,
+    ev_file,
+    *,
+    ns,
+    events,
+    render_event,
+    render_yml,
+    on_written=None,
+):
     """Append events to the events and localisation files.
 
     ``events`` need an ``eid``. The two renderers run inside the error
@@ -216,24 +239,23 @@ def save_events(mod, mod_root, ev_file, *, ns, events, render_event, render_yml)
     errs = []
     warnings = []
 
-    selected_event = bool(mod.edit_events_file)
-    selected_loc = bool(mod.edit_loc_file)
+    selected_event = bool(edits.edit_events_file)
+    selected_loc = bool(edits.edit_loc_file)
     if selected_loc:
-        loc_file = mod.edit_loc_file
+        loc_file = edits.edit_loc_file
     else:
-        loc_target = mod.loc_target
+        loc_target = config.loc_target
         loc_file = os.path.join(
             mod_root,
             "localisation",
             loc_target.dirname(),
             loc_target.filename(ns),
         )
-    os.makedirs(os.path.dirname(ev_file), exist_ok=True)
-    os.makedirs(os.path.dirname(loc_file), exist_ok=True)
-    wf = notifying_workspace_files(mod, mod_root)
+    wf = notifying_workspace_files(index, mod_root, on_written)
 
     # ── EVENTS: safe append — never touch existing content ────────────
     try:
+        os.makedirs(os.path.dirname(ev_file), exist_ok=True)
         existing_ids = set()
         file_exists = os.path.isfile(ev_file)
         if selected_event and not file_exists:
@@ -287,8 +309,9 @@ def save_events(mod, mod_root, ev_file, *, ns, events, render_event, render_yml)
 
     # ── LOCALISATION: safe append — skip keys already present ─────────
     try:
+        os.makedirs(os.path.dirname(loc_file), exist_ok=True)
         yml_new_lines = []
-        loc_header = mod.loc_target.header()
+        loc_header = config.loc_target.header()
         for line in render_yml().splitlines():
             if not line.strip() or line.strip() == loc_header:
                 continue
@@ -337,10 +360,10 @@ def save_events(mod, mod_root, ev_file, *, ns, events, render_event, render_yml)
         errs.append("Localisation: " + str(exc))
 
     # ── SCRIPTED LOC ─────────────────────────────────────────────────
-    if mod.edit_scripted_loc_file:
+    if edits.edit_scripted_loc_file:
         sloc_blocks = build_event_scripted_loc_blocks(ev.eid for ev in events)
         append_scripted_loc(
-            mod.edit_scripted_loc_file,
+            edits.edit_scripted_loc_file,
             sloc_blocks,
             saved,
             errs,
@@ -374,7 +397,20 @@ def _replace_or_append_block(src, block_id, new_block):
 
 
 def save_dyn_mod(
-    mod, mod_root, *, mid, icon, name, desc, scope, enable, mod_entries, const_lines
+    index,
+    config,
+    edits,
+    mod_root,
+    *,
+    mid,
+    icon,
+    name,
+    desc,
+    scope,
+    enable,
+    mod_entries,
+    const_lines,
+    on_written=None,
 ):
     """Write one dynamic modifier, its localisation, focus snippet and icon sprite.
 
@@ -383,7 +419,7 @@ def save_dyn_mod(
     """
     results = []  # (rel_path, action, note)
     errors = []
-    workspace_files = notifying_workspace_files(mod, mod_root)
+    workspace_files = notifying_workspace_files(index, mod_root, on_written)
 
     def full(rel):
         return os.path.join(mod_root, rel)
@@ -456,12 +492,12 @@ def save_dyn_mod(
     # for existing keys; only add missing ones.
     # Write to the configured target filename (create or append).
     # ════════════════════════════════════════════════════════
-    loc_target = mod.loc_target
+    loc_target = config.loc_target
     existing_keys = set()
 
     # Collect all keys already in any loc file
     # Accept both modern `key: "value"` and legacy `key:0 "value"` forms
-    for loc_path in find_loc_files(mod_root, language=mod.loc_language):
+    for loc_path in find_loc_files(mod_root, language=config.loc_language):
         try:
             content, _encoding = read_file_with_encoding(loc_path)
         except OSError, ValueError, UnicodeDecodeError:
@@ -472,12 +508,12 @@ def save_dyn_mod(
             existing_keys.add(m.group(1))
 
     # Build only the missing entries
-    selected_loc = bool(mod.edit_loc_file)
+    selected_loc = bool(edits.edit_loc_file)
     if selected_loc:
         loc_rel = (
-            os.path.relpath(mod.edit_loc_file, mod_root)
+            os.path.relpath(edits.edit_loc_file, mod_root)
             if mod_root
-            else mod.edit_loc_file
+            else edits.edit_loc_file
         )
     else:
         loc_rel = os.path.join(
@@ -596,7 +632,9 @@ def save_dyn_mod(
 
 
 def save_decisions(
-    mod,
+    index,
+    config,
+    edits,
     mod_root,
     *,
     ns,
@@ -606,6 +644,7 @@ def save_decisions(
     render_categories,
     render_yml,
     sloc_blocks,
+    on_written=None,
 ):
     """Write the decisions and categories files and append their localisation.
 
@@ -615,9 +654,9 @@ def save_decisions(
     """
     saved = []
     errs = []
-    wf = notifying_workspace_files(mod, mod_root)
-    selected_dec = bool(mod.edit_decisions_file)
-    selected_cat = bool(mod.edit_decisions_cat_file)
+    wf = notifying_workspace_files(index, mod_root, on_written)
+    selected_dec = bool(edits.edit_decisions_file)
+    selected_cat = bool(edits.edit_decisions_cat_file)
     try:
         dec_encoding = "utf-8"
         existing_dec = ""
@@ -658,10 +697,10 @@ def save_decisions(
     except OSError as e:
         errs.append(str(e))
         get_logger("decision").error("save categories failed: %s", e, exc_info=True)
-    loc_target = mod.loc_target
-    selected_loc = bool(mod.edit_loc_file)
+    loc_target = config.loc_target
+    selected_loc = bool(edits.edit_loc_file)
     yml_path = (
-        mod.edit_loc_file
+        edits.edit_loc_file
         if selected_loc
         else os.path.join(
             mod_root,
@@ -706,9 +745,9 @@ def save_decisions(
         errs.append(str(e))
         get_logger("decision").error("save loc failed: %s", e, exc_info=True)
     # ── SCRIPTED LOC ─────────────────────────────────────────────────
-    if mod.edit_scripted_loc_file:
+    if edits.edit_scripted_loc_file:
         append_scripted_loc(
-            mod.edit_scripted_loc_file,
+            edits.edit_scripted_loc_file,
             sloc_blocks,
             saved,
             errs,

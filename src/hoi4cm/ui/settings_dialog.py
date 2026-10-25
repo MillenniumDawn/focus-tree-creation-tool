@@ -9,7 +9,6 @@ from hoi4cm.core.config import CONFIG_PATH
 from hoi4cm.core.i18n import I18N_LANGS, get_language, set_language, tr
 from hoi4cm.core.paths import default_hoi4_mod_dir
 from hoi4cm.focus_tree.loc import LOC_LANGUAGE_NAMES
-from hoi4cm.mod import MOD
 from hoi4cm.ui.theme import (
     BG_CARD,
     BG_DARK,
@@ -138,7 +137,7 @@ def open_settings(app):
         return result
 
     def _save_config():
-        return _report_save_result(MOD.save_config())
+        return _report_save_result(app.save_user_config())
 
     tk.Label(
         win,
@@ -203,7 +202,7 @@ def open_settings(app):
             width=18,
             anchor="w",
         ).pack(side="left")
-        var = tk.StringVar(value=getattr(MOD, attr, ""))
+        var = tk.StringVar(value=getattr(app.app_config, attr, ""))
         e = tk.Entry(
             row,
             textvariable=var,
@@ -218,20 +217,17 @@ def open_settings(app):
         e.pack(side="left", fill="x", expand=True, ipady=3)
 
         def _on_change(*a, _attr=attr, _var=var):
-            setattr(MOD, _attr, _var.get())
+            setattr(app.app_config, _attr, _var.get())
             _save_config()
 
         var.trace_add("write", _on_change)
 
         def _browse(v=var):
+            root = app.index.root
             start = (
-                os.path.join(MOD.root, v.get())
-                if MOD.root and os.path.isdir(os.path.join(MOD.root, v.get()))
-                else (
-                    MOD.root
-                    if MOD.root and os.path.isdir(MOD.root)
-                    else os.path.expanduser("~")
-                )
+                os.path.join(root, v.get())
+                if root and os.path.isdir(os.path.join(root, v.get()))
+                else (root if root and os.path.isdir(root) else os.path.expanduser("~"))
             )
             d = filedialog.askdirectory(
                 title=tr("filedialog.select_folder", "Select folder"),
@@ -239,7 +235,7 @@ def open_settings(app):
             )
             if not d:
                 return
-            v.set(relativize_to_mod_root(d, MOD.root))
+            v.set(relativize_to_mod_root(d, app.index.root))
 
         tk.Button(
             row,
@@ -315,7 +311,7 @@ def open_settings(app):
         width=18,
         anchor="w",
     ).pack(side="left")
-    loc_lang_var = tk.StringVar(value=MOD.loc_language)
+    loc_lang_var = tk.StringVar(value=app.app_config.loc_language)
     loc_lang_combo = ttk.Combobox(
         loc_lang_row,
         textvariable=loc_lang_var,
@@ -335,11 +331,13 @@ def open_settings(app):
     loc_lang_name.pack(side="left")
 
     def _apply_loc_lang(*_):
-        MOD.loc_language = loc_lang_var.get()
-        loc_lang_name.config(text=LOC_LANGUAGE_NAMES.get(MOD.loc_language, ""))
+        app.app_config.loc_language = loc_lang_var.get()
+        loc_lang_name.config(
+            text=LOC_LANGUAGE_NAMES.get(app.app_config.loc_language, "")
+        )
         _save_config()
-        if MOD.root and MOD.is_md:
-            MOD._scan_md_money_files()
+        if app.index.root and app.index.is_md:
+            app.index.rescan_md_money(app.app_config.loc_language)
 
     loc_lang_combo.bind("<<ComboboxSelected>>", _apply_loc_lang)
     _lbl(
@@ -350,12 +348,12 @@ def open_settings(app):
     )
 
     _sec(tr("settings.mod_detection", "MOD DETECTION"))
-    md_color = "#a78bfa" if MOD.is_md else TEXT_DIM
+    md_color = "#a78bfa" if app.index.is_md else TEXT_DIM
     _lbl(
         tr(
             "settings.loaded_mod",
             "  Loaded mod:   {mod}",
-            mod=(MOD.mod_name or tr("common.none", "None")),
+            mod=(app.index.mod_name or tr("common.none", "None")),
         ),
         fg=md_color,
     )
@@ -365,7 +363,7 @@ def open_settings(app):
                 "settings.md_detected_yes",
                 "  MD detected:  YES  -  MD categories and effects are visible",
             )
-            if MOD.is_md
+            if app.index.is_md
             else tr(
                 "settings.md_detected_no",
                 "  MD detected:  NO   -  MD categories hidden",
@@ -386,8 +384,8 @@ def open_settings(app):
     ovr_row.pack(fill="x", padx=10, pady=6)
 
     def _force(is_md):
-        MOD.md_mode_override = is_md
-        MOD.is_md = is_md
+        app.app_config.md_mode_override = is_md
+        app.index.is_md = is_md
         _save_config()
         app._apply_md_visibility()
         lbl_status.config(
@@ -450,9 +448,6 @@ def open_settings(app):
     )
 
     _default_hoi4 = default_hoi4_mod_dir()
-    if not hasattr(MOD, "custom_mod_path"):
-        MOD.custom_mod_path = ""
-
     mp_row = tk.Frame(frm, bg=BG_PANEL)
     mp_row.pack(fill="x", padx=10, pady=3)
     tk.Label(
@@ -464,7 +459,7 @@ def open_settings(app):
         width=14,
         anchor="w",
     ).pack(side="left")
-    mp_var = tk.StringVar(value=MOD.custom_mod_path or _default_hoi4)
+    mp_var = tk.StringVar(value=app.app_config.custom_mod_path or _default_hoi4)
     mp_ent = tk.Entry(
         mp_row,
         textvariable=mp_var,
@@ -479,7 +474,7 @@ def open_settings(app):
     mp_ent.pack(side="left", fill="x", expand=True, ipady=3)
 
     def _on_mp_change(*a):
-        MOD.custom_mod_path = mp_var.get()
+        app.app_config.custom_mod_path = mp_var.get()
         _save_config()
 
     mp_var.trace_add("write", _on_mp_change)
@@ -565,8 +560,8 @@ def open_settings(app):
     for pname, pg, pi in GFX_PATH_PRESETS:
 
         def _apply(g=pg, i=pi):
-            MOD.path_goals = g
-            MOD.path_ideas_gfx = i
+            app.app_config.path_goals = g
+            app.app_config.path_ideas_gfx = i
             _save_config()
             messagebox.showinfo(
                 tr("dialog.preset_applied.title", "Preset Applied"),
@@ -644,7 +639,7 @@ def open_settings(app):
         width=16,
         anchor="w",
     ).pack(side="left")
-    _prof_var = tk.StringVar(value=MOD.event_dim_active_profile)
+    _prof_var = tk.StringVar(value=app.app_config.event_dim_active_profile)
     _prof_cb = ttk.Combobox(
         prof_sel_row,
         textvariable=_prof_var,
@@ -655,13 +650,13 @@ def open_settings(app):
     _prof_cb.pack(side="left", padx=4)
 
     def _refresh_prof_list():
-        names = sorted(MOD.event_dim_profiles.keys())
+        names = sorted(app.app_config.event_dim_profiles.keys())
         _prof_cb["values"] = names
         if _prof_var.get() not in names and names:
             _prof_var.set(names[0])
 
     def _on_prof_select(evt=None):
-        MOD.event_dim_active_profile = _prof_var.get()
+        app.app_config.event_dim_active_profile = _prof_var.get()
         _save_config()
         _refresh_prof_list()
         _refresh_profiles_box()
@@ -676,10 +671,10 @@ def open_settings(app):
     def _refresh_profiles_box():
         for w in profiles_box.winfo_children():
             w.destroy()
-        for pname, dims in sorted(MOD.event_dim_profiles.items()):
+        for pname, dims in sorted(app.app_config.event_dim_profiles.items()):
             cw, ch = dims.get("country", (210, 176))
             nw, nh = dims.get("news", (397, 165))
-            is_active = pname == MOD.event_dim_active_profile
+            is_active = pname == app.app_config.event_dim_active_profile
             row = tk.Frame(
                 profiles_box,
                 bg=BG_CARD,
@@ -745,9 +740,9 @@ def open_settings(app):
             parent=win,
         ):
             return
-        MOD.event_dim_profiles.pop(pname, None)
-        if MOD.event_dim_active_profile == pname:
-            MOD.event_dim_active_profile = "vanilla"
+        app.app_config.event_dim_profiles.pop(pname, None)
+        if app.app_config.event_dim_active_profile == pname:
+            app.app_config.event_dim_active_profile = "vanilla"
             _prof_var.set("vanilla")
         _save_config()
         _refresh_prof_list()
@@ -824,8 +819,8 @@ def open_settings(app):
                 parent=win,
             )
             return
-        MOD.event_dim_profiles[name] = profile
-        MOD.event_dim_active_profile = name
+        app.app_config.event_dim_profiles[name] = profile
+        app.app_config.event_dim_active_profile = name
         _prof_var.set(name)
         _save_config()
         _refresh_prof_list()
@@ -865,7 +860,7 @@ def open_settings(app):
     def _refresh_extra():
         for w in extra_box.winfo_children():
             w.destroy()
-        if not MOD.custom_gfx_dirs:
+        if not app.app_config.custom_gfx_dirs:
             tk.Label(
                 extra_box,
                 text=tr("settings.none_added", "  None added."),
@@ -874,7 +869,7 @@ def open_settings(app):
                 font=("Helvetica", 9, "italic"),
             ).pack(anchor="w")
             return
-        for i, d in enumerate(list(MOD.custom_gfx_dirs)):
+        for i, d in enumerate(list(app.app_config.custom_gfx_dirs)):
             row = tk.Frame(
                 extra_box,
                 bg=BG_CARD,
@@ -895,7 +890,7 @@ def open_settings(app):
                 row,
                 text="X",
                 command=lambda idx=i: [
-                    MOD.custom_gfx_dirs.pop(idx),
+                    app.app_config.custom_gfx_dirs.pop(idx),
                     _save_config(),
                     _refresh_extra(),
                 ],
@@ -913,8 +908,8 @@ def open_settings(app):
         d = filedialog.askdirectory(
             title=tr("filedialog.select_extra_gfx_folder", "Select extra GFX folder")
         )
-        if d and d not in MOD.custom_gfx_dirs:
-            MOD.custom_gfx_dirs.append(d)
+        if d and d not in app.app_config.custom_gfx_dirs:
+            app.app_config.custom_gfx_dirs.append(d)
             _save_config()
             _refresh_extra()
 
@@ -1069,7 +1064,7 @@ def open_settings(app):
     def _refresh_tag_table():
         for w in tag_table.winfo_children():
             w.destroy()
-        tags = dict(MOD.country_tag_names)
+        tags = dict(app.app_config.country_tag_names)
         if not tags:
             tk.Label(
                 tag_table,
@@ -1145,9 +1140,9 @@ def open_settings(app):
                     if not new_tag:
                         return
                     # Remove old key, add updated
-                    MOD.country_tag_names.pop(old_tag, None)
+                    app.app_config.country_tag_names.pop(old_tag, None)
                     if new_name:
-                        MOD.country_tag_names[new_tag] = new_name
+                        app.app_config.country_tag_names[new_tag] = new_name
                     _save_config()
 
                 te.bind("<FocusOut>", lambda e, f=_save_row: f())
@@ -1158,7 +1153,7 @@ def open_settings(app):
                     row,
                     text="✕",
                     command=lambda t=tag: [
-                        MOD.country_tag_names.pop(t, None),
+                        app.app_config.country_tag_names.pop(t, None),
                         _save_config(),
                         _refresh_tag_table(),
                     ],
@@ -1226,7 +1221,7 @@ def open_settings(app):
                 parent=win,
             )
             return
-        MOD.country_tag_names[t] = n
+        app.app_config.country_tag_names[t] = n
         _save_config()
         new_tag_v.set("")
         new_name_v.set("")
@@ -1249,8 +1244,8 @@ def open_settings(app):
     def _fill_vanilla():
         count = 0
         for t, n in VANILLA_COUNTRY_TAGS.items():
-            if t not in MOD.country_tag_names:
-                MOD.country_tag_names[t] = n
+            if t not in app.app_config.country_tag_names:
+                app.app_config.country_tag_names[t] = n
                 count += 1
         _save_config()
         _refresh_tag_table()
@@ -1280,7 +1275,7 @@ def open_settings(app):
         frm,
         text=tr("settings.clear_all_tags", "Clear All Tags"),
         command=lambda: [
-            MOD.country_tag_names.clear(),
+            app.app_config.country_tag_names.clear(),
             _save_config(),
             _refresh_tag_table(),
         ],
@@ -1321,10 +1316,10 @@ def open_settings(app):
 
     tok_row = tk.Frame(frm, bg=BG_PANEL)
     tok_row.pack(fill="x", padx=10, pady=6)
-    _tok_var = tk.StringVar(value=getattr(MOD, "loc_token_style", "colon"))
+    _tok_var = tk.StringVar(value=app.app_config.loc_token_style)
 
     def _on_tok_change(*_):
-        MOD.loc_token_style = _tok_var.get()
+        app.app_config.loc_token_style = _tok_var.get()
         _save_config()
 
     for val, label, hint in [

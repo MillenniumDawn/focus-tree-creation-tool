@@ -22,7 +22,7 @@ from hoi4cm.core import (
     sanitize_component,
     tr,
 )
-from hoi4cm.mod import MOD, find_loc_files
+from hoi4cm.mod import find_loc_files
 from hoi4cm.script.syntax import parse_script, serialize_block
 from hoi4cm.ui import (
     BG_CARD,
@@ -218,13 +218,15 @@ def open_dyn_mod_wizard(app):
     ).pack(side="left", fill="x", expand=True, ipady=4)
 
     def _open_dynmod_gfx_browser():
-        mod_root = getattr(MOD, "root", "") or ""
-        ideas_path = getattr(MOD, "path_ideas_gfx", "") or ""
-        ideas_root = os.path.join(mod_root, ideas_path) if MOD.loaded else None
+        mod_root = app.index.root or ""
+        ideas_path = app.app_config.path_ideas_gfx or ""
+        ideas_root = os.path.join(mod_root, ideas_path) if app.index.loaded else None
         catalog = (
-            MOD.graphics_catalog if ideas_root and os.path.isdir(ideas_root) else None
+            app.index.graphics_catalog
+            if ideas_root and os.path.isdir(ideas_root)
+            else None
         )
-        if not MOD.loaded or not ideas_root or not os.path.isdir(ideas_root):
+        if not app.index.loaded or not ideas_root or not os.path.isdir(ideas_root):
             folder = filedialog.askdirectory(
                 title=tr(
                     "filedialog.select_idea_gfx_folder_hint",
@@ -738,7 +740,7 @@ def open_dyn_mod_wizard(app):
             },
             {"enable": v_enable, "mods": v_mods, "const": v_const},
         )
-        return build_dyn_mod_output(**state, loc_language=MOD.loc_language)
+        return build_dyn_mod_output(**state, loc_language=app.app_config.loc_language)
 
     def _preview(*_):
         if _dm_edit_mode[0]:
@@ -806,8 +808,11 @@ def open_dyn_mod_wizard(app):
             return
 
         results, errors = save_dyn_mod(
-            MOD,
+            app.index,
+            app.app_config,
+            app,
             mod_root,
+            on_written=app.note_mod_file_written,
             mid=mid,
             icon=icon,
             name=name,
@@ -868,7 +873,7 @@ def open_dyn_mod_wizard(app):
         )
 
     def _browse_mod_dynmods():
-        if not MOD.loaded or not MOD.root:
+        if not app.index.loaded or not app.index.root:
             messagebox.showinfo(
                 tr("dialog.no_mod_loaded.title", "No Mod Loaded"),
                 tr(
@@ -878,7 +883,7 @@ def open_dyn_mod_wizard(app):
                 parent=win,
             )
             return
-        dm_dir = os.path.join(MOD.root, "common", "dynamic_modifiers")
+        dm_dir = os.path.join(app.index.root, "common", "dynamic_modifiers")
         if not os.path.isdir(dm_dir):
             messagebox.showinfo(
                 tr("dialog.not_found.title", "Not Found"),
@@ -1026,7 +1031,9 @@ def open_dyn_mod_wizard(app):
 
             # Look up loc strings
             loc_name = loc_desc = ""
-            for loc_path in find_loc_files(MOD.root, language=MOD.loc_language):
+            for loc_path in find_loc_files(
+                app.index.root, language=app.app_config.loc_language
+            ):
                 try:
                     loc_src, encoding = read_file_with_encoding(loc_path)
                     if loc_src is None:
@@ -1098,7 +1105,7 @@ def open_dyn_mod_wizard(app):
         highlightthickness=1,
         highlightbackground=BORDER_G,
     ).pack(side="left", padx=2)
-    if MOD.loaded:
+    if app.index.loaded:
         tk.Button(
             bf,
             text=tr("common.browse_mod", "Browse Mod"),

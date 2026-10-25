@@ -9,10 +9,14 @@ imports the same shared list — always sees the current Millennium Dawn set.
 
 import json
 import tkinter as tk
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from hoi4cm.core import EFFECT_CATS, EFFECT_DEFS, tr
-from hoi4cm.mod import MOD
+from hoi4cm.core.app_config import AppConfig
+from hoi4cm.core.undo import UndoStack
+from hoi4cm.mod.index import ModIndex
+from hoi4cm.models import Focus, FocusDocument
+from hoi4cm.ui.focus_list import FocusListCache
 from hoi4cm.ui.theme import (
     BG_CARD,
     BG_DARK,
@@ -138,12 +142,44 @@ class _RawFieldRow:
 class EffectsMixin:
     """Effects tab, effect browser and parameter-form for :class:`App`."""
 
+    index: ModIndex
+    app_config: AppConfig
+    selected: Focus | None
+    focuses: FocusDocument
+    _undo_stack: UndoStack
+    _focus_list_cache: FocusListCache
     _eb_win: tk.Toplevel | None
     _effects_sig: object | None
 
     if TYPE_CHECKING:
 
         def _get_mod_suggestions(self, etype: str, fname: str) -> list[str]: ...
+
+        def _hint(self, message: str) -> None: ...
+
+        def _push_undo(
+            self, label="action", touched_ids=None, run=None, *, tree_state=False
+        ) -> None: ...
+
+        def _invalidate_focus_list_structure(self) -> None: ...
+
+        def _attach_autocomplete(self, entry_widget, var, get_choices_fn) -> None: ...
+
+        def _flash_added(self, label: str) -> None: ...
+
+        def _mk_btn(
+            self,
+            parent,
+            text,
+            cmd=None,
+            fg=None,
+            bg=None,
+            font_size=9,
+            bold=True,
+            padx=10,
+            pady=4,
+            tip=None,
+        ) -> tk.Button: ...
 
     def _build_sidebar_effects(self, p, _make_scroll_panel):
         # ── TAB 2: Effects ─────────────────────────────────────────────
@@ -208,13 +244,13 @@ class EffectsMixin:
             existing.focus_force()
             return
 
-        win = tk.Toplevel(self)
+        win = tk.Toplevel(cast(tk.Misc, self))
         self._eb_win = win
         win.title(tr("focus.effects.browser_title", "Add Effect"))
         win.configure(bg=BG_DARK)
         win.geometry("720x560")
         win.minsize(560, 380)
-        win.transient(self)
+        win.transient(cast(tk.Wm, self))
 
         cats = ["All"] + list(EFFECT_CATS)
 
@@ -433,7 +469,7 @@ class EffectsMixin:
             self._flash_added(defn.get("label", key))
             return
 
-        pop = tk.Toplevel(self)
+        pop = tk.Toplevel(cast(tk.Misc, self))
         pop.title(defn.get("label", key))
         pop.configure(bg=BG_DARK)
         parent = (
@@ -441,7 +477,7 @@ class EffectsMixin:
             if self._eb_win is not None and self._eb_win.winfo_exists()
             else self
         )
-        pop.transient(parent)
+        pop.transient(cast(tk.Wm, parent))
         pop.resizable(False, False)
 
         tk.Label(
@@ -583,7 +619,11 @@ class EffectsMixin:
     def _refresh_effects(self, force=False):
         effects = self.selected.effects if self.selected else []
         sig = _effects_signature(self.selected, effects)
-        if not force and MOD.sidebar_refresh_skip and self._effects_sig == sig:
+        if (
+            not force
+            and self.app_config.sidebar_refresh_skip
+            and self._effects_sig == sig
+        ):
             return
         self._effects_sig = sig
         self._undo_stack.end_run()
@@ -605,16 +645,16 @@ class EffectsMixin:
         suggestions = _augment_character_suggestions(
             self._get_mod_suggestions(etype, fname),
             fname,
-            loaded=MOD.loaded,
-            character_ids=MOD.character_ids,
+            loaded=self.index.loaded,
+            character_ids=self.index.character_ids,
         )
         return _augment_scripted_suggestions(
             suggestions,
             fname,
-            loaded=MOD.loaded,
-            scripted_effect_ids=MOD.scripted_effect_ids,
-            scripted_trigger_ids=MOD.scripted_trigger_ids,
-            on_action_ids=MOD.on_action_ids,
+            loaded=self.index.loaded,
+            scripted_effect_ids=self.index.scripted_effect_ids,
+            scripted_trigger_ids=self.index.scripted_trigger_ids,
+            on_action_ids=self.index.on_action_ids,
         )
 
     def _draw_eff_card(self, i, eff):
@@ -829,7 +869,7 @@ class EffectsMixin:
                         ),
                     )
                     # Wire autocomplete if mod has data for this field
-                    if suggestions or MOD.loaded:
+                    if suggestions or self.index.loaded:
                         self._attach_autocomplete(
                             ent,
                             var,

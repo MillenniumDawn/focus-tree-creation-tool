@@ -17,7 +17,9 @@ sets USERPROFILE because that is what `expanduser("~")` prefers. The same
 module forbids Tk construction (see "The headless rule"). Plain helpers
 shared by several test files live in `tests/builders.py` (`make_focus`,
 `default_decision`) and `tests/ui_fakes.py` (`AppFake`), imported by bare
-name. Everything else lives in the file that uses it.
+name. Mypy and Pyright also include `tests/` on their search paths so standalone
+benchmarks can import these doubles. Everything else lives in the file that
+uses it.
 
 ## Two suites
 
@@ -152,14 +154,13 @@ state leaks between tests. Six patterns cover what's here today:
   the error buffer. Use this shape for anything that mutates a module
   global as a side effect (see "Module-level singletons" in
   `architecture.md`).
-- **MOD singleton isolation.** Tests that mutate the process-wide `MOD`
-  context opt in to `mod_state_isolation` from `tests/conftest.py`. It restores
-  added/removed attributes and nested built-in containers, `GraphicsCatalog`
-  state, scan diagnostics, and the `sprite_imgs` LRU while retaining the
-  catalog, cache, and cached image object identities. It is deliberately not
-  autouse: modules opt in where needed and keep scenario-specific setup.
-  Tests that only use `monkeypatch.setattr` on MOD have their changes restored
-  by monkeypatch teardown and do not need this fixture.
+- **Per-app mod state.** Construct a fresh `ModIndex`, `AppConfig`, and
+  `SpriteImageCache`, or use `tests/ui_fakes.py`'s `AppFake`, rather than
+  patching a singleton. `tests/test_mod_isolation.py` checks independent
+  owners, frozen scan settings, and worker scans that cannot import Pillow
+  or Tk. Cancellation and image-lifetime tests keep cached images on the Tk
+  thread through success, failure, supersession, and shutdown. The old
+  `mod_state_isolation` snapshot fixture is gone.
 - **Monkeypatch of module path constants.** `tests/test_config.py` points
   `config.CONFIG_PATH` at a `tmp_path` file via `monkeypatch.setattr`
   before calling `cfg_load`/`cfg_save`, so no test ever touches the real
@@ -168,7 +169,8 @@ state leaks between tests. Six patterns cover what's here today:
 - **`tmp_path` mod trees.** `tests/test_mod_context.py`'s `mod_tree`
   fixture writes a small but realistic directory tree (`common/national_focus/...`,
   `gfx/interface/...`) under `tmp_path`, then scans it and asserts on the
-  resulting `MOD.*` fields. It also carries an autouse `isolate_scan_cache`
+  resulting fields on an injected `mod_index` fixture. It also carries an
+  autouse `isolate_scan_cache`
   fixture so the scanner's SQLite cache never touches `~/.hoi4cm`.
 - **Parametrized round-trips.** `tests/test_focus_tree_roundtrip.py` checks
   parse -> build -> export -> reparse stability: the exporter normalizes

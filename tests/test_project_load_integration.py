@@ -45,7 +45,6 @@ class ProjectApp(_DocumentApp):
 
 @pytest.fixture
 def project_case(monkeypatch, tmp_path):
-    monkeypatch.setattr(app_module.MOD, "root", None)
     old = Focus(id=1)
     old.name = "OLD_existing"
     executor = ControlledExecutor()
