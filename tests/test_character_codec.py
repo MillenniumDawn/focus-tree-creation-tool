@@ -230,6 +230,70 @@ def test_character_target_rejects_a_directory_symlink_outside_the_mod(
         shutil.rmtree(outside, ignore_errors=True)
 
 
+class _FakeEditor:
+    """Minimal headless stand-in for the wizard's tk.Text editor."""
+
+    def __init__(self, source: str) -> None:
+        self._source = source
+        self._insert_pos = "1.0"
+
+    def index(self, mark: str) -> str:
+        assert mark == "insert"
+        return self._insert_pos
+
+    def insert(self, _mark: str, text: str) -> None:
+        row, column = (int(part) for part in self._insert_pos.split("."))
+        lines = self._source.split("\n")
+        lines[row - 1] = lines[row - 1][:column] + text + lines[row - 1][column:]
+        self._source = "\n".join(lines)
+
+    def mark_set(self, mark: str, index: str) -> None:
+        if mark == "insert":
+            self._insert_pos = index
+
+    def focus_set(self) -> None:
+        return None
+
+    def text(self) -> str:
+        return self._source
+
+
+class _FakeVar:
+    """Minimal headless stand-in for tk.StringVar."""
+
+    def __init__(self, value: str) -> None:
+        self._value = value
+
+    def get(self) -> str:
+        return self._value
+
+
+def test_field_marshal_role_offered_and_inserted_as_valid_block():
+    from hoi4cm.wizards import character as character_mod
+
+    assert "field_marshal" in character_mod.ROLE_NAMES
+
+    wizard = object.__new__(character_mod.CharacterWizard)
+    editor = _FakeEditor('characters = {\n\tAAA_ada = {\n\t\tname = "Ada"\n\t}\n}\n')
+    wizard.editor = editor
+    wizard.body_indent = "\t\t"
+    wizard.character_close_indent = "\t"
+    wizard.role_var = _FakeVar("field_marshal")
+    # Cursor inside the character body, immediately before the closing "\t}" line.
+    editor.mark_set("insert", "4.0")
+
+    wizard._insert_role()
+
+    inserted = editor.text()
+    assert "field_marshal = {" in inserted
+    document = parse_character_script(inserted)
+    assert document == parse_character_script(document.to_text())
+    assert document.character_ids() == ["AAA_ada"]
+    assert "\t\tfield_marshal = {\n\t\t\t\n\t\t}" in inserted
+    # Caret lands on the blank body line of the new block, column = len(role_indent).
+    assert editor.index("insert") == "6.3"
+
+
 @pytest.mark.parametrize(
     "source",
     ["characters = { X = {", "characters = }", "x = { } }"],

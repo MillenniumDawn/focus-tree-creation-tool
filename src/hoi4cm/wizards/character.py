@@ -18,6 +18,7 @@ from hoi4cm.wizards.character_codec import new_character_script, parse_character
 ROLE_NAMES = (
     "country_leader",
     "advisor",
+    "field_marshal",
     "corps_commander",
     "navy_leader",
     "operative",
