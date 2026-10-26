@@ -9,6 +9,7 @@ survive and that key content actually made it into the exported text.
 import os
 
 import pytest
+from focus_tree_helpers import focus_summary, raw_block_renderer
 from test_focus_tree_parse import (
     NO_WRAPPER,
     WRAPPED,
@@ -24,14 +25,6 @@ from hoi4cm.focus_tree.parse import parse_focus_tree
 from hoi4cm.models import Focus, FocusDocument
 
 FIX_DIR = os.path.join(os.path.dirname(__file__), "fixtures", "focus_trees")
-
-
-def raw_block_renderer(eff):
-    """Mirror the monolith's _raw_block effect rendering (3-tab base indent)."""
-    if eff.get("type") != "_raw_block":
-        return ""
-    raw = eff.get("fields", {}).get("raw", "").strip()
-    return "\n".join(f"\t\t\t{ln}" for ln in raw.splitlines()) if raw else ""
 
 
 def _info(parsed, tree_type):
@@ -64,26 +57,6 @@ def _load_and_export(src, tree_type, path="/tmp/x.txt"):
     return focuses, text
 
 
-def _summary(focuses):
-    by_id = {f.id: f.name for f in focuses}
-    return [
-        (
-            f.name,
-            f.gfx,
-            f.cost,
-            f.x,
-            f.y,
-            getattr(f, "relative_position_id", None),
-            tuple(tuple(by_id.get(i, i) for i in grp) for grp in f.prereqs),
-            tuple(by_id.get(i, i) for i in f.mutex),
-            tuple((o["x"], o["y"]) for o in f.offsets),
-            f.ai_will_do,
-            f.search_filters,
-        )
-        for f in focuses
-    ]
-
-
 @pytest.mark.parametrize(
     "src,tree_type",
     [
@@ -113,7 +86,7 @@ def test_export_is_idempotent(src, tree_type):
 def test_structural_fields_survive(src, tree_type):
     f1, t1 = _load_and_export(src, tree_type)
     f2, _t2 = _load_and_export(t1, tree_type)
-    assert _summary(f1) == _summary(f2)
+    assert focus_summary(f1) == focus_summary(f2)
 
 
 @pytest.mark.parametrize(
@@ -171,7 +144,7 @@ def test_scanner_edge_case_fixture_round_trips():
     f2, t2 = _load_and_export(t1, "shared")
 
     assert t1 == t2
-    assert _summary(f1) == _summary(f2)
+    assert focus_summary(f1) == focus_summary(f2)
     # Every comment is gone, and every surviving "#" is inside a quoted string
     # (an odd number of quotes precedes it on its line).
     for line in t1.splitlines():
@@ -265,7 +238,7 @@ def test_will_lead_to_war_with_block_round_trips():
     assert getattr(_f1[0], "will_lead_to_war_with", "").strip() == "tag = GER"
     _f2, t2 = _load_and_export(t1, "shared")
     assert t1 == t2
-    assert _summary(_f1) == _summary(_f2)
+    assert focus_summary(_f1) == focus_summary(_f2)
     assert getattr(_f2[0], "will_lead_to_war_with", "").strip() == "tag = GER"
 
 
@@ -280,7 +253,7 @@ def test_will_lead_to_war_with_bare_tag_stays_inline():
     assert getattr(_f1[0], "will_lead_to_war_with", "").strip() == "VEN"
     _f2, t2 = _load_and_export(t1, "shared")
     assert t1 == t2
-    assert _summary(_f1) == _summary(_f2)
+    assert focus_summary(_f1) == focus_summary(_f2)
     assert getattr(_f2[0], "will_lead_to_war_with", "").strip() == "VEN"
 
 
@@ -297,7 +270,7 @@ def test_will_lead_to_war_with_repeated_bare_tags_round_trips():
     assert getattr(_f1[0], "will_lead_to_war_with", "").strip() == "DEN\nNOR"
     _f2, t2 = _load_and_export(t1, "shared")
     assert t1 == t2
-    assert _summary(_f1) == _summary(_f2)
+    assert focus_summary(_f1) == focus_summary(_f2)
     assert getattr(_f2[0], "will_lead_to_war_with", "").strip() == "DEN\nNOR"
 
 
@@ -478,7 +451,7 @@ focus_tree = {
     focuses1, t1 = _load_and_export(src, "shared")
     focuses2, t2 = _load_and_export(t1, "shared")
     assert t1 == t2
-    assert _summary(focuses1) == _summary(focuses2)
+    assert focus_summary(focuses1) == focus_summary(focuses2)
     assert "\tdefault = yes" in t1
     assert "\treset_on_civilwar = no" in t1
     assert "base = 0" in t1
@@ -764,4 +737,4 @@ def test_newline_in_scalar_value_is_quoted():
 def test_fixture_structural_fields_survive(fname, tree_type):
     f1, t1 = _load_and_export_fixture(fname, tree_type)
     f2, _t2 = _load_and_export(t1, tree_type)
-    assert _summary(f1) == _summary(f2)
+    assert focus_summary(f1) == focus_summary(f2)

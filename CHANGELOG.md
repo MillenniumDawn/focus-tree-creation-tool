@@ -31,7 +31,8 @@ the version by hand. See `AGENTS.md`.
 - Ignore a non-text event `id` or `picture` when importing events, and report a
   failed events or localisation folder in the Save to Mod summary instead of
   raising.
-
+- Share mod-file discovery, image enumeration, wizard localisation lookup and
+  test helpers without changing file selection or export behavior.
 - Add a UI language by dropping `locales/<code>.json` into the folder: the
   language list is read from the files, each naming itself in `_meta`. Wrap the
   wizard, settings, undo, canvas and validation text that bypassed `tr()`, and

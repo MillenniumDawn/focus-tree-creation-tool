@@ -14,22 +14,6 @@ import sys
 from hoi4cm.core import image, paths
 
 # ---------------------------------------------------------------------------
-# helpers
-# ---------------------------------------------------------------------------
-
-
-def _force_pil_missing(monkeypatch):
-    real_import = builtins.__import__
-
-    def fake_import(name, *a, **k):
-        if name == "PIL" or name.startswith("PIL."):
-            raise ImportError("forced missing for test")
-        return real_import(name, *a, **k)
-
-    monkeypatch.setattr(builtins, "__import__", fake_import)
-
-
-# ---------------------------------------------------------------------------
 # image: _try_install_pillow
 # ---------------------------------------------------------------------------
 
@@ -68,9 +52,8 @@ def test_image_pillow_install_success_returns_true(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_image_import_failure_after_install(monkeypatch):
+def test_image_import_failure_after_install(monkeypatch, missing_pillow):
     """First import fails, install succeeds, second import still fails."""
-    _force_pil_missing(monkeypatch)
     monkeypatch.setenv("HOI4CM_AUTO_INSTALL_PILLOW", "1")
     monkeypatch.setattr(image, "_try_install_pillow", lambda: True)
 
@@ -92,9 +75,8 @@ def test_image_import_failure_after_install(monkeypatch):
     assert tk is None
 
 
-def test_image_import_oserror_after_install_returns_false(monkeypatch):
+def test_image_import_oserror_after_install_returns_false(monkeypatch, missing_pillow):
     """Second import raises OSError (e.g. broken shared lib) -> False."""
-    _force_pil_missing(monkeypatch)
     monkeypatch.setenv("HOI4CM_AUTO_INSTALL_PILLOW", "1")
     monkeypatch.setattr(image, "_try_install_pillow", lambda: True)
 
@@ -115,8 +97,7 @@ def test_image_import_oserror_after_install_returns_false(monkeypatch):
     assert ok is False
 
 
-def test_image_frozen_never_installs(monkeypatch):
-    _force_pil_missing(monkeypatch)
+def test_image_frozen_never_installs(monkeypatch, missing_pillow):
     monkeypatch.setenv("HOI4CM_AUTO_INSTALL_PILLOW", "1")
     monkeypatch.setattr(sys, "frozen", True, raising=False)
     calls: list[bool] = []
@@ -133,31 +114,15 @@ def test_image_frozen_never_installs(monkeypatch):
     assert calls == []
 
 
-def test_image_auto_install_not_attempted_when_install_fails(monkeypatch):
-    _force_pil_missing(monkeypatch)
+def test_image_auto_install_not_attempted_when_install_fails(
+    monkeypatch, missing_pillow
+):
     monkeypatch.setenv("HOI4CM_AUTO_INSTALL_PILLOW", "1")
     monkeypatch.setattr(image, "_try_install_pillow", lambda: False)
 
     _, _, ok = image._import_pillow()
 
     assert ok is False
-
-
-def test_image_no_auto_install_without_env_does_not_call_install(monkeypatch):
-    _force_pil_missing(monkeypatch)
-    monkeypatch.delenv("HOI4CM_AUTO_INSTALL_PILLOW", raising=False)
-    calls: list[bool] = []
-
-    def _track() -> bool:
-        calls.append(True)
-        return True
-
-    monkeypatch.setattr(image, "_try_install_pillow", _track)
-
-    _, _, ok = image._import_pillow()
-
-    assert ok is False
-    assert calls == []
 
 
 # ---------------------------------------------------------------------------

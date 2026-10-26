@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from hoi4cm.mod.graphics_catalog import AssetRef, FileStamp
 from hoi4cm.wizards._graphics import (
     browser_folders,
@@ -65,6 +67,22 @@ def test_collect_image_pairs_falls_back_when_catalog_is_stale(tmp_path):
     pairs = collect_image_pairs(str(root), "GFX_event_", catalog=FakeCatalog(()))
 
     assert pairs == [("GFX_event_new", str(image))]
+
+
+@pytest.mark.parametrize("use_catalog", [True, False])
+def test_nonrecursive_image_pairs_keep_duplicate_stems(tmp_path, use_catalog):
+    root = tmp_path / "selected"
+    nested = root / "nested"
+    nested.mkdir(parents=True)
+    paths = (root / "same.dds", root / "same.PNG", nested / "same.tga")
+    for path in paths:
+        path.touch()
+    catalog = FakeCatalog(tuple(map(str, paths))) if use_catalog else None
+    expected_paths = paths[:2] if use_catalog else sorted(paths[:2])
+
+    assert collect_image_pairs(str(root), "GFX_", catalog=catalog, recursive=False) == [
+        ("GFX_same", str(path)) for path in expected_paths
+    ]
 
 
 def test_browser_folders_uses_catalog_image_locations(tmp_path):
