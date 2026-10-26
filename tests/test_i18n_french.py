@@ -59,11 +59,8 @@ _IDENTICAL_KEYS = frozenset(
         "event.section.flags",
         "event.section.options",
         "event.section.type",
-        "focus.conditions.bypass",
-        "focus.conditions.cancel",
         "focus.conditions.flags",
         "focus.conditions.search_filters_label",
-        "focus.prereq.group_separator",
         "gfx.images_count",
         "load_all.column.type",
         "load_all.type.joint",
@@ -88,7 +85,6 @@ _IDENTICAL_KEYS = frozenset(
         "toolbar.multi",
         "toolbar.mutex",
         "undo.action",
-        "undo.bulk_rename",
         "validation.col_code",
         "validation.col_focus",
         "validation.col_message",
@@ -162,12 +158,13 @@ def test_french_locale_values_are_strings():
     assert all(isinstance(value, str) for value in french.values())
 
 
-def test_french_meta_declares_display_name_and_review_status():
+def test_french_meta_declares_display_name():
     meta = json.loads((LOCALE_DIR / "fr.json").read_text(encoding="utf-8"))["_meta"]
 
+    # Display name is app behavior the Settings dialog reads; the note key is
+    # a release-process comment that changes with review status, so it is not
+    # pinned here.
     assert meta["display_name"] == "Français"
-    # The translation is machine-assisted until a native review lands.
-    assert "réviser" in meta["note"].lower()
 
 
 def test_french_is_registered_as_francais():
