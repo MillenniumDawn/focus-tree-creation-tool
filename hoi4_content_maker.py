@@ -1087,15 +1087,9 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         self._refresh_loaded_trees_panel()
 
     def _undo(self):
-        """Restore the previous state, flushing any pending sidebar edit.
-
-        Undo repopulates the form from the restored object, so an unflushed
-        sidebar edit would be silently dropped; flushing first pushes it onto
-        the undo stack, keeping the input undoable instead of lost. The push
-        also clears the redo trail, so Ctrl+Y cannot replay a stale entry on
-        top of the fresh edit. Headless doubles without the sidebar autosave
-        skip the flush.
-        """
+        """Restore the previous state, flushing any pending sidebar edit."""
+        # Flush first so unsaved sidebar input lands on the undo stack instead
+        # of being dropped by the repopulate below; the push also clears redo.
         autosave = getattr(self, "_autosave", None)
         if self.selected is not None and autosave is not None:
             autosave()
@@ -1129,7 +1123,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
 
     def _redo(self):
         """Re-apply the most recently undone action after flushing edits."""
-        # Same flush rationale as _undo above.
+        # Same flush rationale as _undo.
         autosave = getattr(self, "_autosave", None)
         if self.selected is not None and autosave is not None:
             autosave()
@@ -2528,9 +2522,8 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         self._set_field_error("_fv_y_entry", y_err)
 
         return FocusSidebarValues(
-            # An untouched field repopulated from an imported focus keeps the
-            # imported id verbatim; sanitizing it would misread the untouched
-            # form as dirty and silently rename the focus on select-away.
+            # An untouched field keeps the imported id verbatim; sanitizing it
+            # would read the untouched form as a rename on select-away.
             name=form_focus_id(raw, f.name if f else None),
             icon=self._fv_icon.get(),
             gfx=self._fv_gfx.get().strip() or "GFX_goal_generic_political_pressure",

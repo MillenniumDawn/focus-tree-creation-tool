@@ -10,91 +10,41 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
+from hoi4cm.script.syntax import parse_script
+
 from .focus import Focus
 
 _DEFAULT_GFX = "GFX_goal_generic_political_pressure"
 _DEFAULT_SEARCH = "FOCUS_FILTER_POLITICAL"
 _ID_SANITIZE_RE = re.compile(r"[^A-Za-z0-9_]")
-_AI_ASSIGN_RE = re.compile(r"\s*=\s*")
-# One scalar token, or a block opener (which the numeric parse then rejects).
-_AI_TOKEN_RE = re.compile(r"[^{}\s}]+|\{")
 
 
 def form_focus_id(raw: str, current: str | None) -> str:
-    """The focus id the sidebar writes when the name field reads ``raw``.
+    """The focus id the sidebar writes for the name field's ``raw`` text.
 
-    The field is repopulated verbatim from the focus, so an untouched form on
-    an imported focus whose id contains characters a hand-typed id would not
-    survive must read back unchanged rather than silently rename the focus to
-    a sanitized id on every select-away. Editing the field triggers the usual
-    sanitization.
+    An untouched field keeps an imported id verbatim; sanitizing it would
+    read the untouched form as a rename on every select-away.
     """
     if current is not None and raw == current:
         return raw
     return _ID_SANITIZE_RE.sub("_", raw)
 
 
-def _top_level_assignment(raw_ai: str, key: str) -> str | None:
-    """Token assigned to the first top-level ``key`` in an ai_will_do body.
-
-    Reads the raw text the way ``build_focuses`` reads the parsed dict:
-    comments and quoted strings are skipped, and a brace-depth count keeps
-    keys nested inside modifier blocks from matching. An assignment whose
-    value is itself a block returns its ``{`` opener, which the numeric
-    parse then rejects, matching import's fallback to 1.
-    """
-    depth = 0
-    length = len(raw_ai)
-    index = 0
-    while index < length:
-        char = raw_ai[index]
-        if char == '"':
-            closing = raw_ai.find('"', index + 1)
-            index = length if closing < 0 else closing + 1
-            continue
-        if char == "#":
-            newline = raw_ai.find("\n", index)
-            index = length if newline < 0 else newline + 1
-            continue
-        if char == "{":
-            depth += 1
-        elif char == "}":
-            depth = max(0, depth - 1)
-        elif depth == 0 and char == key[0] and raw_ai.startswith(key, index):
-            word_end = index + len(key)
-            previous = raw_ai[index - 1] if index else "\n"
-            assignment = (
-                _AI_ASSIGN_RE.match(raw_ai, word_end)
-                if previous in "\t\n\r }"
-                else None
-            )
-            if assignment is not None:
-                token = _AI_TOKEN_RE.match(raw_ai, assignment.end())
-                return token.group(0) if token else ""
-            index = word_end
-            continue
-        index += 1
-    return None
-
-
 def parse_ai_will_do(raw_ai: str) -> int:
     """Top-level numeric ai_will_do value from a raw block body.
 
-    Mirrors the import semantics in ``build_focuses``: a top-level ``factor``
-    wins over ``base`` even when ``base`` appears first, keys nested in
-    modifier blocks (or in comments/quoted strings) never count, and a value
-    that does not parse as a number falls back to 1. Negative and fractional
-    numbers survive the trip, which the previous digit-only regex dropped.
+    Reuses the import parser: a top-level ``factor`` wins over ``base``,
+    duplicated keys parse as lists and, like any other non-numeric value,
+    fall back to 1.
     """
-    for key in ("factor", "base"):
-        token = _top_level_assignment(raw_ai, key)
-        if token is None:
-            continue
-        try:
-            return int(float(token.strip('"')))
-        except ValueError:
-            return 1
-    return 1
+    parsed = parse_script(raw_ai)
+    value = parsed.get("factor", parsed.get("base", 1))
+    if not isinstance(value, str | int | float):
+        return 1
+    try:
+        return int(float(value))
+    except ValueError:
+        return 1
 
 
 def parse_focus_cost(raw: str) -> int | float:

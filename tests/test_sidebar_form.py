@@ -22,6 +22,7 @@ from hoi4cm.models import (
     sidebar_values_match_focus,
 )
 from hoi4cm.script import dict_to_raw
+from hoi4cm.script.syntax import parse_script
 
 
 def _values(focus=None, **overrides):
@@ -75,9 +76,39 @@ def _values(focus=None, **overrides):
         # Identifiers merely containing the key are not assignments.
         ("ai_factor = 6\nbase = 4", 4),
         ("factorial = 2\nbase = 4", 4),
+        # Duplicated keys parse as lists and fall back to 1, like import.
+        ("factor = 2\nfactor = 3", 1),
+        ("base = 2\nbase = 3", 1),
+        # Inline comments end at the value.
+        ("factor = 3# comment\nbase = 2", 3),
     ],
 )
 def test_parse_ai_will_do_matches_import_semantics(raw, expected):
+    assert parse_ai_will_do(raw) == expected
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        # Paradox strings carry no escapes, so the quoted text ends at the
+        # first closing quote and what follows parses as script.
+        'note = "escaped \\" factor = 9 rest"\nbase = 2',
+        "factor = 2\nfactor = 3",
+        "base = 2\nbase = 3",
+        "factor = 3# comment\nbase = 2",
+    ],
+)
+def test_parse_ai_will_do_agrees_with_the_script_parser(raw):
+    """The sidebar read reuses parse_script, not homemade token rules."""
+    parsed = parse_script(raw)
+    value = parsed.get("factor", parsed.get("base", 1))
+    if not isinstance(value, str | int | float):
+        expected = 1
+    else:
+        try:
+            expected = int(float(value))
+        except ValueError:
+            expected = 1
     assert parse_ai_will_do(raw) == expected
 
 
@@ -115,9 +146,7 @@ def test_form_focus_id_keeps_an_untouched_imported_id(current, expected):
 
 
 def test_untouched_imported_unsanitized_id_selectaway_is_not_dirty():
-    """The monolith reads the form through ``form_focus_id``; a mere
-    select-away on an imported focus with a colon or dash id must not
-    misread itself as a rename."""
+    """Selecting away on an imported colon/dash id must not read as a rename."""
     focus = make_focus(name="allied-focus.2")
     values = _values(focus, name=form_focus_id(focus.name, focus.name))
     assert values.name == "allied-focus.2"
@@ -151,8 +180,7 @@ def test_form_focus_id_sanitizes_edited_or_new_ids(raw, current, expected):
     ],
 )
 def test_parse_ai_will_do_matches_build_import_semantics(aiblock):
-    """The sidebar read of a raw block must agree with ``build_focuses``'
-    reference computation over the parsed dict it imports from."""
+    """Sidebar read must agree with build_focuses over the parsed dict."""
     try:
         factor = aiblock.get("factor", aiblock.get("base", 1))
         expected = int(float(factor)) if factor is not None else 1
