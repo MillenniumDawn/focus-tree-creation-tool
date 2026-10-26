@@ -43,7 +43,8 @@ def parse_ai_will_do(raw_ai: str) -> int:
         return 1
     try:
         return int(float(value))
-    except ValueError:
+    except ValueError, OverflowError:
+        # OverflowError: infinite float tokens (inf, 1e999) are not int()-able.
         return 1
 
 

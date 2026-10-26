@@ -107,14 +107,16 @@ def _untouched_sidebar_values(focus: Focus) -> FocusSidebarValues:
     An empty raw block displays as ``base = N`` (see ``App._populate``); the
     name field holds the id verbatim, so ``form_focus_id`` keeps it as-is.
     """
+    raw_ai = (getattr(focus, "ai_will_do_raw", "") or "").strip() or (
+        f"base = {focus.ai_will_do}"
+    )
     return FocusSidebarValues(
         name=form_focus_id(focus.name, focus.name),
         icon=focus.icon,
         gfx=focus.gfx,
         cost=focus.cost,
-        ai_will_do=focus.ai_will_do,
-        ai_will_do_raw=(getattr(focus, "ai_will_do_raw", "") or "").strip()
-        or f"base = {focus.ai_will_do}",
+        ai_will_do=m.parse_ai_will_do(raw_ai),
+        ai_will_do_raw=raw_ai,
         x=focus.x,
         y=focus.y,
         loc_name=getattr(focus, "loc_name", ""),

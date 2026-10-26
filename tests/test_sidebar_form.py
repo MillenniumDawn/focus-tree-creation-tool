@@ -81,6 +81,11 @@ def _values(focus=None, **overrides):
         ("base = 2\nbase = 3", 1),
         # Inline comments end at the value.
         ("factor = 3# comment\nbase = 2", 3),
+        # Infinite float tokens are not int()-able and fall back to 1.
+        ("factor = inf", 1),
+        ("base = -inf", 1),
+        ("factor = 1e999", 1),
+        ("base = -1e999", 1),
     ],
 )
 def test_parse_ai_will_do_matches_import_semantics(raw, expected):
