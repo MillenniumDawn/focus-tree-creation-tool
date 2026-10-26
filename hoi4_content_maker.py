@@ -116,6 +116,7 @@ from hoi4cm.models import (  # noqa: E402
     TreeDocument,
     TreeMetadata,
     apply_sidebar_values,
+    form_focus_id,
     parse_ai_will_do,
     parse_focus_cost,
     sidebar_values_match_focus,
@@ -1086,7 +1087,18 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         self._refresh_loaded_trees_panel()
 
     def _undo(self):
-        """Restore the previous state, touching only what it changed."""
+        """Restore the previous state, flushing any pending sidebar edit.
+
+        Undo repopulates the form from the restored object, so an unflushed
+        sidebar edit would be silently dropped; flushing first pushes it onto
+        the undo stack, keeping the input undoable instead of lost. The push
+        also clears the redo trail, so Ctrl+Y cannot replay a stale entry on
+        top of the fresh edit. Headless doubles without the sidebar autosave
+        skip the flush.
+        """
+        autosave = getattr(self, "_autosave", None)
+        if self.selected is not None and autosave is not None:
+            autosave()
         history = getattr(self, "_tree_undo_history", None)
         aligned = history is not None and history.is_aligned(len(self._undo_stack))
         result = self._undo_stack.undo(self.focuses, Focus.from_dict)
@@ -1116,7 +1128,11 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         self._hint(tr("hint.undid", "↩ Undid: {label}", label=undo_label_text(label)))
 
     def _redo(self):
-        """Re-apply the most recently undone action."""
+        """Re-apply the most recently undone action after flushing edits."""
+        # Same flush rationale as _undo above.
+        autosave = getattr(self, "_autosave", None)
+        if self.selected is not None and autosave is not None:
+            autosave()
         history = getattr(self, "_tree_undo_history", None)
         aligned = history is not None and history.is_aligned(len(self._undo_stack))
         result = self._undo_stack.redo(self.focuses, Focus.from_dict)
@@ -2512,7 +2528,10 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         self._set_field_error("_fv_y_entry", y_err)
 
         return FocusSidebarValues(
-            name=re.sub(r"[^A-Za-z0-9_]", "_", raw),
+            # An untouched field repopulated from an imported focus keeps the
+            # imported id verbatim; sanitizing it would misread the untouched
+            # form as dirty and silently rename the focus on select-away.
+            name=form_focus_id(raw, f.name if f else None),
             icon=self._fv_icon.get(),
             gfx=self._fv_gfx.get().strip() or "GFX_goal_generic_political_pressure",
             cost=cost,

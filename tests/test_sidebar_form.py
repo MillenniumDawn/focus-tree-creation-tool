@@ -16,10 +16,12 @@ from hoi4cm.models import (
     FocusDocument,
     FocusSidebarValues,
     apply_sidebar_values,
+    form_focus_id,
     parse_ai_will_do,
     parse_focus_cost,
     sidebar_values_match_focus,
 )
+from hoi4cm.script import dict_to_raw
 
 
 def _values(focus=None, **overrides):
@@ -55,12 +57,27 @@ def _values(focus=None, **overrides):
         ("base = 3", 3),
         ("factor = 2.5", 2),
         ("base = 1.9", 1),
-        ("modifier = {\n\tfactor = 2\n}", 2),
         ("", 1),
-        ("base = 4\nfactor = 9", 4),
+        # Import reads the parsed dict factor-first, not base-first.
+        ("base = 4\n\tfactor = 9", 9),
+        # A factor only nested inside a modifier block is not the top value.
+        ("modifier = {\n\tfactor = 2\n}", 1),
+        ("modifier = { factor = 100 }\nbase = 3", 3),
+        # Negatives and fractions survive like build()'s int(float(...)).
+        ("base = -2", -2),
+        ("factor = -1.5", -1),
+        ("base = +3", 3),
+        # Comments and quoted strings never count as assignments.
+        ("# factor = 9\nbase = 2", 2),
+        ('base = "5"', 5),
+        # A key assigned a whole block falls back to 1, like import.
+        ("factor = { modifier = { factor = 100 } }", 1),
+        # Identifiers merely containing the key are not assignments.
+        ("ai_factor = 6\nbase = 4", 4),
+        ("factorial = 2\nbase = 4", 4),
     ],
 )
-def test_parse_ai_will_do_accepts_base_or_factor(raw, expected):
+def test_parse_ai_will_do_matches_import_semantics(raw, expected):
     assert parse_ai_will_do(raw) == expected
 
 
@@ -82,6 +99,66 @@ def test_parse_focus_cost_keeps_fractions_and_normalizes_whole_numbers(raw, expe
 def test_parse_focus_cost_rejects_non_numeric():
     with pytest.raises(ValueError):
         parse_focus_cost("not-a-number")
+
+
+@pytest.mark.parametrize(
+    ("current", "expected"),
+    [
+        # An untouched imported id keeps characters sanitizing would eat.
+        ("allied-focus.2", "allied-focus.2"),
+        ("tag:shared_focus", "tag:shared_focus"),
+        ("plain_id", "plain_id"),
+    ],
+)
+def test_form_focus_id_keeps_an_untouched_imported_id(current, expected):
+    assert form_focus_id(current, current) == expected
+
+
+def test_untouched_imported_unsanitized_id_selectaway_is_not_dirty():
+    """The monolith reads the form through ``form_focus_id``; a mere
+    select-away on an imported focus with a colon or dash id must not
+    misread itself as a rename."""
+    focus = make_focus(name="allied-focus.2")
+    values = _values(focus, name=form_focus_id(focus.name, focus.name))
+    assert values.name == "allied-focus.2"
+    assert sidebar_values_match_focus(focus, values) is True
+
+
+@pytest.mark.parametrize(
+    ("raw", "current", "expected"),
+    [
+        # Editing the field triggers the usual sanitization.
+        ("my focus", "my_focus", "my_focus"),
+        ("untouched", "other", "untouched"),
+        # No current id (new focus) still sanitizes.
+        ("weird id", None, "weird_id"),
+    ],
+)
+def test_form_focus_id_sanitizes_edited_or_new_ids(raw, current, expected):
+    assert form_focus_id(raw, current) == expected
+
+
+@pytest.mark.parametrize(
+    "aiblock",
+    [
+        {"factor": 2},
+        {"base": "-2"},
+        {"factor": 2.5},
+        {"base": 4, "factor": 9},
+        {"modifier": {"factor": 2}},
+        {"base": 3, "modifier": {"factor": 100}},
+        {},
+    ],
+)
+def test_parse_ai_will_do_matches_build_import_semantics(aiblock):
+    """The sidebar read of a raw block must agree with ``build_focuses``'
+    reference computation over the parsed dict it imports from."""
+    try:
+        factor = aiblock.get("factor", aiblock.get("base", 1))
+        expected = int(float(factor)) if factor is not None else 1
+    except ValueError, TypeError:
+        expected = 1
+    assert parse_ai_will_do(dict_to_raw(aiblock)) == expected
 
 
 def test_matching_form_is_noop():
