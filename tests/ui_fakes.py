@@ -25,7 +25,6 @@ class AppFake(CanvasMixin, ModLoadingMixin, EffectsMixin):
     cv: Any
     _mod_lbl: Any
     _lifecycle: Any
-    selected: Focus | None
 
     CANVAS_MIN_SIZE = 10
     CANVAS_EXPAND_STEP = 5
@@ -100,7 +99,6 @@ class AppFake(CanvasMixin, ModLoadingMixin, EffectsMixin):
         self.invalidations = 0
         self.redraws = 0
         self.validation_schedules = 0
-        self._schedule_validation = self._register_validation_schedule
         self.tk = _FakeTcl()
 
     def after(self, _milliseconds: int, callback: Callable[[], None]) -> object:
@@ -116,11 +114,10 @@ class AppFake(CanvasMixin, ModLoadingMixin, EffectsMixin):
     def _on_mod_loaded(self, root: str) -> None:
         self.loaded_roots.append(root)
 
-    def _register_validation_schedule(self) -> None:
-        """Bound-method stand-in so the faked host matches the base slot."""
+    def _schedule_validation(self) -> None:
         self.validation_schedules += 1
 
-    def _get_mod_suggestions(self, etype: str, fname: str) -> list[str]:
+    def _get_mod_suggestions(self, _etype: str, _fname: str) -> list[str]:
         return ["built_in"]
 
     def _get_tree_badge(self, _tree_idx: int) -> tuple[str, str]:

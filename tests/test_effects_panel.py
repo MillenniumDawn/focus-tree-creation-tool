@@ -3,11 +3,11 @@
 The signature drives whether ``_refresh_effects`` tears down and rebuilds the
 effect cards. It covers everything a card renders, so a match means a rebuild
 would draw the same thing. These tests pin that contract, including that it
-survives CPython recycling a freed focus's memory address.
-
-Tests ``test_*raw*`` exercise the raw-effect key/value row wiring (:class:`
-_RawFieldRow`) headlessly through the :class:`ui_fakes.AppFake` mixin host,
-including undo coalescing via a real :class:`UndoStack`.
+survives CPython recycling a freed focus's memory address. The
+``test_typing_through_taken_prefix_reaches_free_key`` and
+``test_pending_collision_value_edit_then_continuing_rename`` cases exercise
+the raw-effect key/value row wiring headlessly through :class:`ui_fakes.AppFake`
+with a real :class:`UndoStack`.
 """
 
 from collections.abc import Callable
@@ -168,15 +168,15 @@ def test_value_edit_targets_latest_valid_renamed_key():
     assert len(app._undo_stack) == 2  # rename run + value run stay separate
 
 
-def test_rejected_collision_then_value_edit_then_continuing_rename():
-    """A colliding rename keeps both fields, and editing continues cleanly."""
+def test_pending_collision_value_edit_then_continuing_rename():
+    """A taken name stays pending; a free name commits and keeps both fields."""
     app, focus = _raw_app({"old": "1", "taken": "2"})
     _row, kvar, vvar = _wired_row(app, "old")
     revision = app.focuses.content_revision
 
     kvar.set("taken")
 
-    assert kvar.value == "old"  # entry text restored to the committed key
+    assert kvar.value == "taken"  # pending text kept, fields untouched
     assert _fields(focus) == {"old": "1", "taken": "2"}
     assert len(app._undo_stack) == 0
     assert app.focuses.content_revision == revision
@@ -187,9 +187,37 @@ def test_rejected_collision_then_value_edit_then_continuing_rename():
 
     kvar.set("renamed")
 
-    assert _fields(focus) == {"renamed": "9", "taken": "2"}
     assert kvar.value == "renamed"
+    assert _fields(focus) == {"renamed": "9", "taken": "2"}
     assert len(app._undo_stack) == 2
+
+
+def test_typing_through_taken_prefix_reaches_free_key():
+    """Pending-taken text must not block reaching a free longer name."""
+    app, focus = _raw_app({"a": "1", "ab": "2"})
+    _row, kvar, vvar = _wired_row(app, "a")
+    revision = app.focuses.content_revision
+
+    kvar.set("ab")
+
+    assert kvar.value == "ab"  # taken -> pending; nothing committed
+    assert _fields(focus) == {"a": "1", "ab": "2"}
+    assert len(app._undo_stack) == 0
+    assert app.focuses.content_revision == revision
+
+    vvar.set("5")
+
+    assert _fields(focus) == {"a": "5", "ab": "2"}
+
+    kvar.set("abc")
+
+    assert _fields(focus) == {"abc": "5", "ab": "2"}
+
+    kvar.set("abcd")
+
+    assert _fields(focus) == {"abcd": "5", "ab": "2"}
+    assert list(_fields(focus)) == ["abcd", "ab"]
+    assert len(app._undo_stack) == 2  # value run + coalesced rename run
 
 
 def test_rename_keeps_the_field_slot_order():

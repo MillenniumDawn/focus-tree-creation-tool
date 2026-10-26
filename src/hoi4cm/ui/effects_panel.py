@@ -9,14 +9,10 @@ imports the same shared list — always sees the current Millennium Dawn set.
 
 import json
 import tkinter as tk
-from collections.abc import Callable
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING
 
 from hoi4cm.core import EFFECT_CATS, EFFECT_DEFS, tr
-from hoi4cm.core.undo import UndoStack
 from hoi4cm.mod import MOD
-from hoi4cm.models import Focus
-from hoi4cm.models.document import FocusDocument
 from hoi4cm.ui.theme import (
     BG_CARD,
     BG_DARK,
@@ -83,13 +79,7 @@ def _effects_signature(focus, effects):
 
 
 def _next_unused_raw_key(fields):
-    """First ``keyN`` name not already present in ``fields``.
-
-    The raw add-field button must name a NEW field, so the scan walks past
-    every taken ``keyN``. Keying on ``len(fields)`` alone silently overwrote
-    existing data whenever a set like ``{key0, key2}`` asked for ``key2``
-    again.
-    """
+    """First ``keyN`` name not already present in ``fields``."""
     n = 0
     while f"key{n}" in fields:
         n += 1
@@ -97,46 +87,25 @@ def _next_unused_raw_key(fields):
 
 
 def _rename_key_in_place(fields, old, new) -> None:
-    """Rename ``old`` to ``new`` in ``fields``, keeping the key's slot order.
-
-    Plain ``fields[new] = fields.pop(old)`` moves the entry to the end of
-    the dict, so the renamed row jumps to the bottom of the card and the
-    exported field order churns on the first typed character. Rebuilding
-    the dict with the name swapped in place keeps the row where it was.
-    """
+    """Rename ``old`` to ``new`` in ``fields``, keeping the key's slot order."""
     renamed = {new if name == old else name: entry for name, entry in fields.items()}
     fields.clear()
     fields.update(renamed)
 
 
 class _RawFieldRow:
-    """Row-key state shared by one raw effect's key and value entries.
-
-    Captured once when the row is drawn; both entry write-traces talk to
-    this object, so the key a value edit lands on is always the row's
-    latest valid name — typing a rename streams as ONE undo run keyed by
-    the stable row token, and a rename colliding with another field is
-    rejected with the entry's text restored, so neither field's data is
-    ever dropped.
-    """
+    """Row-key state shared by one raw effect's key and value entry bindings."""
 
     def __init__(self, panel, idx, key):
         self._panel = panel
         self._idx = idx
         self.key = key
-        # Stable run token for the row's rename stream. Deliberately a
-        # 4-tuple so it can never equal a ``(focus.id, idx, fname)`` token
-        # from _write_effect_field: a rename and a name-keyed value burst
-        # must not coalesce into one undo step.
+        # 4-tuple: cannot collide with _write_effect_field's fname tokens.
         self._run = ("key", getattr(panel.selected, "id", None), idx, key)
 
     def on_key_text(self, var) -> bool:
-        """Commit one write-trace of the key entry; True when the name moved.
-
-        A name already taken by another field is rejected: the entry's text
-        is restored to the committed key (which re-fires this trace as a
-        no-op) and the fields dict is left untouched.
-        """
+        """Commit one key write-trace: a free name moves the field, a taken
+        name stays pending."""
         panel = self._panel
         focus = panel.selected
         if focus is None or self._idx >= len(focus.effects):
@@ -145,7 +114,11 @@ class _RawFieldRow:
         if new == self.key:
             return False
         fields = focus.effects[self._idx].setdefault("fields", {})
-        if new in fields or self.key not in fields:
+        if new in fields:
+            # Pending: keep the typed text, keep ``self.key`` committed and
+            # untouched, so both fields survive until typing reaches a free name.
+            return False
+        if self.key not in fields:
             var.set(self.key)
             return False
         panel._push_undo("edit effect", touched_ids=(focus.id,), run=self._run)
@@ -157,7 +130,7 @@ class _RawFieldRow:
         return True
 
     def on_value_text(self, var) -> None:
-        """Forward a value write-trace to the field's latest valid key."""
+        """Forward a value write-trace to the field's last committed key."""
         self._panel._write_effect_field(self._idx, self.key, var.get())
 
 
@@ -168,20 +141,6 @@ class EffectsMixin:
     _effects_sig: object | None
 
     if TYPE_CHECKING:
-        # Host-side members this mixin consumes from App; declared so the
-        # module type-checks on its own, as for _get_mod_suggestions below.
-        # Members the test host doubles with Mocks stay Any: annotating them
-        # as methods would make Mock assignment in AppFake a type error.
-        selected: Focus | None
-        focuses: FocusDocument
-        _undo_stack: UndoStack
-        _focus_list_cache: Any
-        _invalidate_focus_list_structure: Callable[..., None]
-        _push_undo: Callable[..., None]
-        _hint: Callable[..., None]
-        _flash_added: Callable[..., None]
-        _mk_btn: Callable[..., tk.Button]
-        _attach_autocomplete: Callable[..., None]
 
         def _get_mod_suggestions(self, etype: str, fname: str) -> list[str]: ...
 
@@ -248,13 +207,13 @@ class EffectsMixin:
             existing.focus_force()
             return
 
-        win = tk.Toplevel(cast("tk.Tk", self))
+        win = tk.Toplevel(self)
         self._eb_win = win
         win.title(tr("focus.effects.browser_title", "Add Effect"))
         win.configure(bg=BG_DARK)
         win.geometry("720x560")
         win.minsize(560, 380)
-        win.transient(cast("tk.Tk", self))
+        win.transient(self)
 
         cats = ["All"] + list(EFFECT_CATS)
 
@@ -473,13 +432,13 @@ class EffectsMixin:
             self._flash_added(defn.get("label", key))
             return
 
-        pop = tk.Toplevel(cast("tk.Tk", self))
+        pop = tk.Toplevel(self)
         pop.title(defn.get("label", key))
         pop.configure(bg=BG_DARK)
         parent = (
             self._eb_win
             if self._eb_win is not None and self._eb_win.winfo_exists()
-            else cast("tk.Tk", self)
+            else self
         )
         pop.transient(parent)
         pop.resizable(False, False)
@@ -771,8 +730,7 @@ class EffectsMixin:
             )
             ve.pack(side="left", fill="x", expand=True, ipady=2, padx=2)
             if raw_row is not None:
-                # The value binding goes through the row state so edits keep
-                # landing on the key's latest valid name across renames.
+                # Value binding goes through the row to the last committed key.
                 vvar.trace_add(
                     "write",
                     lambda *a, r=raw_row, v=vvar: r.on_value_text(v),
@@ -979,12 +937,7 @@ class EffectsMixin:
         self._invalidate_focus_list_structure()
 
     def _add_raw_effect_field(self, idx):
-        """Add a fresh ``keyN`` field to a raw effect and redraw its card.
-
-        The name comes from :func:`_next_unused_raw_key` so the added field
-        can never overwrite an existing one, the way the naive
-        ``f"key{len(fields)}"`` did.
-        """
+        """Add a fresh, unused ``keyN`` field to a raw effect and redraw its card."""
         if not self.selected or idx >= len(self.selected.effects):
             return
         fields = self.selected.effects[idx].setdefault("fields", {})
