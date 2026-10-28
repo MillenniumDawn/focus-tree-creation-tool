@@ -1,8 +1,11 @@
 """Tests for hoi4cm.focus_tree.build — parsed data -> Focus objects."""
 
+import pytest
 from test_focus_tree_parse import WRAPPED
+from test_focus_tree_roundtrip import _info, raw_block_renderer
 
 from hoi4cm.focus_tree.build import BuildContext, build_focuses
+from hoi4cm.focus_tree.export import export_focus_tree
 from hoi4cm.focus_tree.parse import parse_focus_tree
 from hoi4cm.models import Focus
 
@@ -26,7 +29,10 @@ def test_build_basic_fields():
     # extract_raw_block keeps trailing block indentation; the renderer strips it.
     assert len(alpha.effects) == 1
     assert alpha.effects[0]["type"] == "_raw_block"
-    assert alpha.effects[0]["fields"]["raw"].strip() == "add_political_power = 120"
+    fields = alpha.effects[0].get("fields")
+    assert isinstance(fields, dict)
+    raw = fields.get("raw")
+    assert isinstance(raw, str) and raw.strip() == "add_political_power = 120"
     assert alpha._raw_gx == 4 and alpha._raw_gy == 0
 
 
@@ -331,3 +337,90 @@ def test_duplicate_reference_resolution_keeps_lookup_winner_policy():
     deferred_context.add_focuses([deferred], reconcile=False)
     deferred_context.add_focuses([first, last])
     assert deferred.prereqs == [[last.id]]
+
+
+def _tree_with_ai(ai_clause):
+    return (
+        "focus_tree = {\n"
+        "\tid = AI_tree\n"
+        "\tfocus = {\n"
+        "\t\tid = TST_alpha\n"
+        "\t\tx = 1\n"
+        "\t\ty = 1\n"
+        f"\t\t{ai_clause}\n"
+        "\t}\n"
+        "}\n"
+    )
+
+
+@pytest.mark.parametrize("literal", ["inf", "-inf", "1e999", "-1e999"])
+@pytest.mark.parametrize("form", ["scalar", "factor", "base"])
+def test_nonfinite_ai_will_do_falls_back_to_one(literal, form):
+    if form == "scalar":
+        ai_clause = f"ai_will_do = {literal}"
+    elif form == "factor":
+        ai_clause = f"ai_will_do = {{ factor = {literal} }}"
+    else:
+        ai_clause = f"ai_will_do = {{ base = {literal} }}"
+    parsed = parse_focus_tree(_tree_with_ai(ai_clause), "/tmp/ai.txt")
+    # Non-finite literals (±inf, ±1e999) must not abort an otherwise usable import.
+    focuses = build_focuses(parsed, tree_idx=1)
+    assert _by_name(focuses)["TST_alpha"].ai_will_do == 1
+
+
+@pytest.mark.parametrize(
+    "ai_clause,expected",
+    [
+        ("ai_will_do = -2", -2),
+        ("ai_will_do = 1.75", 1),
+        ("ai_will_do = { factor = 0.5 }", 0),
+        ("ai_will_do = { base = -3.5 }", -3),
+        ("ai_will_do = { base = 4 }", 4),
+        ("ai_will_do = { factor = 2 base = 9 }", 2),
+        ("ai_will_do = { modifier = { factor = 2 } }", 1),
+    ],
+)
+def test_finite_ai_will_do_precedence_and_values(ai_clause, expected):
+    parsed = parse_focus_tree(_tree_with_ai(ai_clause), "/tmp/ai.txt")
+    focuses = build_focuses(parsed, tree_idx=1)
+    assert _by_name(focuses)["TST_alpha"].ai_will_do == expected
+
+
+def test_nonfinite_ai_will_do_raw_block_round_trips():
+    src = (
+        "focus_tree = {\n"
+        "\tid = AI_tree\n"
+        "\tfocus = {\n"
+        "\t\tid = TST_alpha\n"
+        "\t\tx = 1\n"
+        "\t\ty = 1\n"
+        "\t\tcompletion_reward = {\n"
+        "\t\t\tadd_political_power = 120\n"
+        "\t\t}\n"
+        "\t\tai_will_do = { factor = 1e999 modifier = { factor = 2 } }\n"
+        "\t}\n"
+        "}\n"
+    )
+    parsed = parse_focus_tree(src, "/tmp/ai.txt")
+    focuses = build_focuses(parsed, tree_idx=1)
+    alpha = _by_name(focuses)["TST_alpha"]
+    assert alpha.ai_will_do == 1
+    assert "factor = 1e999" in alpha.ai_will_do_raw
+
+    def _export(tree):
+        lookup = {f.id: f for f in tree}
+        return export_focus_tree(
+            tree,
+            _info(parsed, "shared"),
+            focus_lookup=lookup,
+            effect_renderer=raw_block_renderer,
+        )
+
+    t1 = _export(focuses)
+    assert "factor = 1e999" in t1
+    rebuilt = build_focuses(parse_focus_tree(t1, "/tmp/ai.txt"), tree_idx=1)
+    rebuilt_alpha = _by_name(rebuilt)["TST_alpha"]
+    assert rebuilt_alpha.ai_will_do == 1
+    assert "factor = 1e999" in rebuilt_alpha.ai_will_do_raw
+    t2 = _export(rebuilt)
+    assert t1 == t2

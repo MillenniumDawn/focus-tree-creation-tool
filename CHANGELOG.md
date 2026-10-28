@@ -8,6 +8,11 @@ the version by hand. See `AGENTS.md`.
 
 ## Unreleased
 
+- Import focus trees containing non-finite `ai_will_do` values (`inf`,
+  `-inf`, `1e999`, `-1e999`) instead of aborting the load: the field falls
+  back to the existing default of 1 in both scalar and block form, and the
+  original block content is preserved for round-trips.
+
 - Add a UI language by dropping `locales/<code>.json` into the folder: the
   language list is read from the files, each naming itself in `_meta`. Wrap the
   wizard, settings, undo, canvas and validation text that bypassed `tr()`, and
