@@ -17,6 +17,7 @@ import sys
 import tkinter as tk
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 from ui_fakes import AppFake
@@ -31,6 +32,7 @@ from hoi4cm.ui.gfx_browser import (
     open_gfx_placement_editor,
     open_universal_gfx_browser,
 )
+from hoi4cm.ui.theme import XGRID, YGRID
 from hoi4cm.ui.widgets import grab_when_visible
 from hoi4cm.wizards._shared import open_effect_picker, open_trigger_picker
 
@@ -239,7 +241,82 @@ def test_entry_point_smoke_check(tmp_path):
     )
 
 
+def test_minimap_first_show_uses_requested_size_before_geometry_settles(monkeypatch):
+    monkeypatch.setattr(main_mod.App, "_run_startup_prompts", lambda self: None)
+    root = main_mod.App()
+    try:
+        parent = Focus(id=1, x=1, y=1)
+        child = Focus(id=2, x=2, y=2)
+        child.prereqs = [[parent.id]]
+        root.focuses.extend([parent, child])
+        root.update_idletasks()
+
+        root._toggle_minimap()
+
+        mm = root._mm_canvas
+        assert mm is not None and mm.winfo_exists()
+        assert root._mm_world_bounds == (0.0, 0.0, 3.0, 3.0)
+        assert root._mm_scale > 0
+        assert root._mm_scale == pytest.approx(min(200 / 3, 130 / 3))
+        assert len(root._mm_dot_pool) == 2
+        for item in root._mm_dot_pool:
+            left, top, right, bottom = mm.coords(item)
+            assert 0 <= left < right <= 220
+            assert 0 <= top < bottom <= 150
+
+        root._mm_click(SimpleNamespace(x=110, y=75))
+        assert root.offset[0] == pytest.approx(
+            root.cv.winfo_width() / 2 - 1.5 * XGRID * root.zoom
+        )
+        assert root.offset[1] == pytest.approx(
+            root.cv.winfo_height() / 2 - 1.5 * YGRID * root.zoom
+        )
+        root._toggle_minimap()
+        assert root._mm_visible is False
+        root._toggle_minimap()
+        assert root._mm_canvas is mm
+        assert root._mm_scale > 0
+    finally:
+        assert root._lifecycle is not None
+        root._lifecycle.finish_close()
+        root.destroy()
+        gc.collect()
+
+
+@pytest.mark.parametrize(
+    "reported_size,expected_size",
+    [
+        ((0, 0), (220, 150)),
+        ((1, 1), (220, 150)),
+        ((1, 300), (220, 300)),
+        ((400, 1), (400, 150)),
+        ((400, 300), (400, 300)),
+    ],
+)
+def test_minimap_keeps_each_realized_dimension(reported_size, expected_size):
+    cv = Mock()
+    cv.winfo_width.return_value = 800
+    cv.winfo_height.return_value = 600
+    fake = AppFake([Focus(id=1, x=1, y=1), Focus(id=2, x=2, y=2)], cv=cv)
+    mm = Mock()
+    mm.winfo_exists.return_value = 1
+    mm.winfo_width.return_value, mm.winfo_height.return_value = reported_size
+    fake._mm_visible = True
+    fake._mm_canvas = mm
+
+    fake._draw_minimap()
+
+    assert fake._mm_content_key[-2:] == expected_size
+    width, height = expected_size
+    assert fake._mm_scale == pytest.approx(min((width - 20) / 3, (height - 20) / 3))
+
+
 _FAR_RECT = (0.0, 0.0, 10.0, 10.0)
+
+
+def _tcl_commands(cv: tk.Canvas) -> set[str]:
+    """tk.Canvas._tclCommands is a private Tk attribute (not in stubs)."""
+    return set(getattr(cv, "_tclCommands", None) or ())
 
 
 def test_focus_callbacks_released_on_cull_lod_and_external_delete(app):
@@ -247,25 +324,25 @@ def test_focus_callbacks_released_on_cull_lod_and_external_delete(app):
     try:
         fake = AppFake(cv=cv)
         focus = Focus(id=1, x=1, y=1)
-        baseline = set(cv._tclCommands or ())
+        baseline = _tcl_commands(cv)
         for _ in range(3):
             fake.zoom = 1.0
             fake._draw_focus(focus, _FAR_RECT)
-            full_commands = set(cv._tclCommands or ()) - baseline
+            full_commands = _tcl_commands(cv) - baseline
             assert len(full_commands) == 70
             fake.zoom = 0.3
             fake._draw_focus(focus, _FAR_RECT)
-            assert len(set(cv._tclCommands or ()) - baseline) == 15
+            assert len(_tcl_commands(cv) - baseline) == 15
             # Tkinter names use Python object IDs, which can be reused after free.
-            retired = full_commands - set(cv._tclCommands or ())
+            retired = full_commands - _tcl_commands(cv)
             assert not any(cv.tk.call("info", "commands", cmd) for cmd in retired)
             cv.delete("all")
             fake._validate_canvas_probe()
-            assert set(cv._tclCommands or ()) == baseline
+            assert _tcl_commands(cv) == baseline
             fake.zoom = 1.0
             fake._draw_focus(focus, _FAR_RECT)
             fake._reclaim_focus_bundles(set())
-            assert set(cv._tclCommands or ()) == baseline
+            assert _tcl_commands(cv) == baseline
             fake._reclaim_focus_bundles(set())
     finally:
         cv.destroy()

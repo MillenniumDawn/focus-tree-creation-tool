@@ -16,6 +16,8 @@ the version by hand. See `AGENTS.md`.
   test now fails when a `tr()` key is missing from `en.json` or a locale drifts.
 - Record a failed sibling autosave once in the error log, including its path.
   Repeated ticks for the same failure do not add another entry.
+- Draw the minimap at its requested size on first show so its dots and
+  click-to-pan use a positive scale before Tk finishes laying it out.
 
 ---
 
