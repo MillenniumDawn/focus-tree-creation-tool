@@ -308,6 +308,43 @@ def test_minimap_toggle_and_cfp_are_optional_handles(app):
         gc.collect()
 
 
+def test_real_app_recovers_a_populated_canvas_after_external_delete(monkeypatch):
+    monkeypatch.setattr(main_mod.App, "_run_startup_prompts", lambda self: None)
+    root = main_mod.App()
+    try:
+        parent = Focus(id=1, x=1, y=1)
+        child = Focus(id=2, x=2, y=2)
+        child.tree_idx = 1
+        child.prereqs = [[parent.id]]
+        root.focuses.extend([parent, child])
+        root._extra_trees = [
+            {"type": "shared", "tree_id": "EXTRA", "focus_ids": {child.id}}
+        ]
+        root.update_idletasks()
+        root._redraw_now(RedrawChannel.VIEW | RedrawChannel.SCENE, reason="test")
+        assert root._lines and root._grid_pool and root._legend_pool
+        assert set(root._focus_bundles) == {parent.id, child.id}
+        old_line = root._lines[0]
+        scene = root._scene_index
+        scheduler = root._redraw_state
+
+        root.cv.delete("all")
+        root._redraw_now(RedrawChannel.VIEW | RedrawChannel.SCENE, reason="test")
+
+        assert not root.cv.type(old_line)
+        assert root._scene_index is scene
+        assert root._redraw_state is scheduler
+        assert set(root._focus_bundles) == {parent.id, child.id}
+        assert root.focuses[child.id].prereqs == [[parent.id]]
+        for pool in (root._lines, root._grid_pool, root._legend_pool):
+            assert pool and all(root.cv.type(item) for item in pool)
+    finally:
+        assert root._lifecycle is not None
+        root._lifecycle.finish_close()
+        root.destroy()
+        gc.collect()
+
+
 def test_entry_point_smoke_check(tmp_path):
     # The real entry point in a fresh process, as the frozen build runs it.
     entry = Path(main_mod.__file__).resolve()
