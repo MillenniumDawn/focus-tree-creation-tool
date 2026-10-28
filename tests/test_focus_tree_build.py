@@ -397,7 +397,8 @@ def test_nonfinite_ai_will_do_raw_block_round_trips():
         "\t\tcompletion_reward = {\n"
         "\t\t\tadd_political_power = 120\n"
         "\t\t}\n"
-        "\t\tai_will_do = { factor = 1e999 modifier = { factor = 2 } }\n"
+        "\t\tai_will_do = { factor = 1e999 "
+        "modifier = { factor = 2 has_war = yes } }\n"
         "\t}\n"
         "}\n"
     )
@@ -418,7 +419,11 @@ def test_nonfinite_ai_will_do_raw_block_round_trips():
 
     t1 = _export(focuses)
     assert "factor = 1e999" in t1
-    rebuilt = build_focuses(parse_focus_tree(t1, "/tmp/ai.txt"), tree_idx=1)
+    reparsed = parse_focus_tree(t1, "/tmp/ai.txt")
+    assert (
+        reparsed.focuses_data[0]["ai_will_do"] == parsed.focuses_data[0]["ai_will_do"]
+    )
+    rebuilt = build_focuses(reparsed, tree_idx=1)
     rebuilt_alpha = _by_name(rebuilt)["TST_alpha"]
     assert rebuilt_alpha.ai_will_do == 1
     assert "factor = 1e999" in rebuilt_alpha.ai_will_do_raw
