@@ -39,7 +39,6 @@ Controls:
 
 import os as _os
 import sys as _sys
-from contextlib import nullcontext
 from typing import TYPE_CHECKING, Any
 
 _SRC = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "src")
@@ -263,6 +262,9 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
     _config_write_warned: bool
     _mod_image_resource_registered: bool
     _image_broker: ImageBroker | None
+    _eb_win: tk.Toplevel | None
+    _effects_sig: object | None
+    _coord_lbl: tk.Label
 
     if TYPE_CHECKING:
 
@@ -293,41 +295,35 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         self.resizable(True, True)
         self.workspace = EditorWorkspace()
         self.focuses = self.workspace.focuses
+        # shared_focus/joint_focus lines preserved from import; these are the
+        # metadata's own list objects (rebound wholesale on project install).
+        self._shared_focuses = self.workspace.main_tree.metadata.shared_focuses
+        self._joint_focuses = self.workspace.main_tree.metadata.joint_focuses
+        self._tree_badge_table = None  # rebuilt by _get_tree_badge
         # Extra loaded shared/joint tree metadata, populated during UI setup.
         self._extra_trees: list[dict[str, Any]] = []
         self._eb_win = None
         self._effects_sig = None
         self._config_write_warned = False
         self._mod_image_resource_registered = False
-        self._image_broker = None
-        self._focus_bundles: dict[int, FocusCanvasBundle] = {}
         # Inclusive cell bounds of the usable canvas (grid indices).
         self._canvas_min = [0, 0]
         self._canvas_max = [self.CANVAS_MIN_SIZE - 1, self.CANVAS_MIN_SIZE - 1]
         self.selected = None
-        self._multi_sel = set()  # set of fids in multi-select
-        self._multisel_mode = False  # True when multi-select mode active
-        self._grid_on = True
         self._default_focus_prefix = ""  # set by tag detection
-        self.mutex_src = None
-        self.mutex_mode = False
-        self._lines = []
-        self._temp_line = None
         self.offset = [80, 60]
-        self._pan_start = None
         self.zoom = 1.5
-        self._drag = {}
-        self._redraw_pending = False
-        self._redraw_job = None
-        self._lines_job = None  # throttle handle for line redraws during drag
         self._grid_img = None
-        self._grid_item = None
-        self._grid_key = None
         self._sash_x = 0
         self._validation_issues = []
         self._validation_worst = {}
         self._validation_job = None
         self._validation_win = None
+        # Continuous focus position — stored as integers when read from file.
+        self._cfp_x = None  # None = no value read; use fallback on export
+        self._cfp_y = None
+        self._undo_stack = UndoStack(maxlen=60)
+        self._tree_undo_history = ExtraTreeUndoHistory(maxlen=60)
         self._saved_revision = self.focuses.content_revision
         self._saved_fingerprint = self._workspace_fingerprint()
         self._autosave_job = None
@@ -375,11 +371,11 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         try:
             cfp_x = int(self._cfp_x_var.get())
         except TypeError, ValueError, AttributeError:
-            cfp_x = getattr(self, "_cfp_x", None)
+            cfp_x = self._cfp_x
         try:
             cfp_y = int(self._cfp_y_var.get())
         except TypeError, ValueError, AttributeError:
-            cfp_y = getattr(self, "_cfp_y", None)
+            cfp_y = self._cfp_y
         extra_fp = []
         for tree in self._extra_trees:
             extra_fp.append(
@@ -407,23 +403,21 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             getattr(self, "_tree_had_wrapper", True),
             cfp_x,
             cfp_y,
-            tuple(getattr(self, "_shared_focuses", [])),
-            tuple(getattr(self, "_joint_focuses", [])),
+            tuple(self._shared_focuses),
+            tuple(self._joint_focuses),
             tuple(self._canvas_min),
             tuple(self._canvas_max),
-            getattr(self, "_default_focus_prefix", ""),
+            self._default_focus_prefix,
             tuple(extra_fp),
         )
 
     def _is_dirty(self) -> bool:
         if self.focuses is None:
             return False
-        if self.focuses.content_revision != getattr(self, "_saved_revision", 0):
+        if self.focuses.content_revision != self._saved_revision:
             return True
         try:
-            return self._workspace_fingerprint() != getattr(
-                self, "_saved_fingerprint", None
-            )
+            return self._workspace_fingerprint() != self._saved_fingerprint
         except Exception:
             return True
 
@@ -492,7 +486,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             self._autosave_interval_ms = _AUTOSAVE_INTERVAL_MS
 
     def _cancel_autosave(self) -> None:
-        job = getattr(self, "_autosave_job", None)
+        job = self._autosave_job
         if job is not None:
             try:
                 self.after_cancel(job)
@@ -510,7 +504,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
                 writer = getattr(self, "_autosave_writer", None)
                 if writer is None:
                     writer = self._autosave_writer = AutosaveWriter()
-                sibling = getattr(self, "_last_project_path", None)
+                sibling = self._last_project_path
                 sibling_path = sibling_autosave_path(sibling) if sibling else None
                 paths = (path, sibling_path) if sibling_path else (path,)
 
@@ -659,18 +653,10 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
     def _build_ui(self):
         """Orchestrate full UI construction."""
         self._init_error_log()
-        self._undo_stack = UndoStack(maxlen=60)
-        self._tree_undo_history = ExtraTreeUndoHistory(maxlen=60)
         self._tree_id = tk.StringVar(value="TAG_focus_tree")
-        # Continuous focus position — stored as integers when read from file
-        self._cfp_x = None  # None = no value read; use fallback on export
-        self._cfp_y = None
+        # Continuous focus position widgets (values initialized in __init__)
         self._cfp_x_var = tk.StringVar(value="")
         self._cfp_y_var = tk.StringVar(value="")
-        # shared_focus and joint_focus lines preserved from import
-        self._shared_focuses = self.workspace.main_tree.metadata.shared_focuses
-        self._joint_focuses = self.workspace.main_tree.metadata.joint_focuses
-        self._tree_badge_table = None  # rebuilt by _get_tree_badge on change
         toolbar = tk.Frame(self, bg=BG_DARK)
         toolbar.pack(fill="x")
         self._menu_controller = build_menubar(
@@ -1054,17 +1040,9 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         `run` keys a stream of edits that undo as one step (typing in one
         field); see `UndoStack.push`.
         """
-        history = getattr(self, "_tree_undo_history", None)
-        state = (
-            self._snapshot_extra_tree_state()
-            if tree_state and history is not None
-            else None
-        )
-        with (
-            history.track(self._undo_stack, label, state)
-            if history is not None
-            else nullcontext()
-        ):
+        history = self._tree_undo_history
+        state = self._snapshot_extra_tree_state() if tree_state else None
+        with history.track(self._undo_stack, label, state):
             self._undo_stack.push(label, self.focuses, touched_ids, run=run)
 
     def _snapshot_extra_tree_state(self):
@@ -1087,19 +1065,18 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
 
     def _undo(self):
         """Restore the previous state, touching only what it changed."""
-        history = getattr(self, "_tree_undo_history", None)
-        aligned = history is not None and history.is_aligned(len(self._undo_stack))
+        history = self._tree_undo_history
+        aligned = history.is_aligned(len(self._undo_stack))
         result = self._undo_stack.undo(self.focuses, Focus.from_dict)
         if result is None:
             self._hint(tr("hint.nothing_to_undo", "Nothing to undo."))
             return
         label, changed_ids, removed_ids = result
-        if history is not None:
-            tree_state = history.undo(
-                label, self._snapshot_extra_tree_state, aligned=aligned
-            )
-            if tree_state is not None:
-                self._restore_extra_tree_state(tree_state)
+        tree_state = history.undo(
+            label, self._snapshot_extra_tree_state, aligned=aligned
+        )
+        if tree_state is not None:
+            self._restore_extra_tree_state(tree_state)
         for fid in changed_ids | removed_ids:
             self.cv.delete("F" + str(fid))
         if self.selected and self.selected.id in removed_ids:
@@ -1117,19 +1094,18 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
 
     def _redo(self):
         """Re-apply the most recently undone action."""
-        history = getattr(self, "_tree_undo_history", None)
-        aligned = history is not None and history.is_aligned(len(self._undo_stack))
+        history = self._tree_undo_history
+        aligned = history.is_aligned(len(self._undo_stack))
         result = self._undo_stack.redo(self.focuses, Focus.from_dict)
         if result is None:
             self._hint(tr("hint.nothing_to_redo", "Nothing to redo."))
             return
         label, changed_ids, removed_ids = result
-        if history is not None:
-            tree_state = history.redo(
-                label, self._snapshot_extra_tree_state, aligned=aligned
-            )
-            if tree_state is not None:
-                self._restore_extra_tree_state(tree_state)
+        tree_state = history.redo(
+            label, self._snapshot_extra_tree_state, aligned=aligned
+        )
+        if tree_state is not None:
+            self._restore_extra_tree_state(tree_state)
         for fid in changed_ids | removed_ids:
             self.cv.delete("F" + str(fid))
         if self.selected and self.selected.id in removed_ids:
@@ -1161,7 +1137,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         return collect_loc_keys_from_file(getattr(MOD, "edit_loc_file", ""))
 
     def _schedule_validation(self):
-        if getattr(self, "_validation_job", None):
+        if self._validation_job is not None:
             return
         try:
             self._validation_job = self.after(150, self._run_validation)
@@ -1210,7 +1186,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             except Exception:
                 pass
         # if validation dialog is open, refresh its contents
-        win = getattr(self, "_validation_win", None)
+        win = self._validation_win
         if win is not None and win.winfo_exists():
             try:
                 self._refresh_validation_dialog(win)
@@ -1275,11 +1251,9 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         for w in self._tree_meta_jf_box.winfo_children():
             w.destroy()
         self._fill_tree_meta_box(
-            self._tree_meta_sf_box, getattr(self, "_shared_focuses", []), "#86efac"
+            self._tree_meta_sf_box, self._shared_focuses, "#86efac"
         )
-        self._fill_tree_meta_box(
-            self._tree_meta_jf_box, getattr(self, "_joint_focuses", []), "#fbbf24"
-        )
+        self._fill_tree_meta_box(self._tree_meta_jf_box, self._joint_focuses, "#fbbf24")
 
     def _fill_tree_meta_box(self, box, refs, color):
         """Render up to TREE_META_REF_CAP ref labels into box, plus a "+N more"."""
@@ -2680,12 +2654,8 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         try:
             if new_code == App._build_focus_code(self, f):
                 return True
-            history = getattr(self, "_tree_undo_history", None)
-            with (
-                history.track(self._undo_stack, "edit focus code")
-                if history is not None
-                else nullcontext()
-            ):
+            history = self._tree_undo_history
+            with history.track(self._undo_stack, "edit focus code"):
                 with self._undo_stack.record("edit focus code", self.focuses, (f.id,)):
                     apply_focus_code(
                         f,
@@ -3070,12 +3040,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
     def _update_title(self):
         """Reflect current tree ID in the window title bar."""
         tid = self._tree_id.get() or "untitled"
-        dirty = (
-            " *"
-            if getattr(self, "_saved_fingerprint", None) is not None
-            and self._is_dirty()
-            else ""
-        )
+        dirty = " *" if self._saved_fingerprint is not None and self._is_dirty() else ""
         self.title(
             tr(
                 "app.title.tree",
@@ -4641,7 +4606,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         extra_trees = self._extra_trees
         if tree_idx <= 0 or tree_idx > len(extra_trees):
             return "", FC_BORDER
-        table = getattr(self, "_tree_badge_table", None)
+        table = self._tree_badge_table
         if table is None or len(table) != len(extra_trees):
             table = build_tree_badges(extra_trees)
             self._tree_badge_table = table
@@ -5542,8 +5507,8 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             else getattr(self, "_tree_country_tag", "TAG")
         )
         country_tag = sanitize_component(country_tag.upper(), fallback="TAG")
-        cfp_x = getattr(self, "_cfp_x", None)
-        cfp_y = getattr(self, "_cfp_y", None)
+        cfp_x = self._cfp_x
+        cfp_y = self._cfp_y
         try:
             cfp_x = int(self._cfp_x_var.get())
         except Exception:
@@ -5627,8 +5592,8 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
                 "cfp_y": cfp_y,
                 "country_raw": getattr(self, "_tree_country_raw", ""),
                 "tree_extras": getattr(self, "_tree_extras", {}),
-                "shared_focuses": list(getattr(self, "_shared_focuses", [])),
-                "joint_focuses": list(getattr(self, "_joint_focuses", [])),
+                "shared_focuses": list(self._shared_focuses),
+                "joint_focuses": list(self._joint_focuses),
             },
             focus_lookup=focus_lookup,
             focus_name_lookup=focus_name_lookup,
@@ -5701,11 +5666,11 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         try:
             cfp_x = int(self._cfp_x_var.get())
         except TypeError, ValueError:
-            cfp_x = getattr(self, "_cfp_x", None)
+            cfp_x = self._cfp_x
         try:
             cfp_y = int(self._cfp_y_var.get())
         except TypeError, ValueError:
-            cfp_y = getattr(self, "_cfp_y", None)
+            cfp_y = self._cfp_y
         meta = TreeMetadata(
             tree_id=self._tree_id.get(),
             country_tag=getattr(self, "_tree_country_tag", ""),
@@ -5820,7 +5785,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
 
     def _save(self, *, save_as=False):
         path = choose_project_save_path(
-            getattr(self, "_last_project_path", None),
+            self._last_project_path,
             save_as=save_as,
             choose_path=lambda: filedialog.asksaveasfilename(
                 defaultextension=".json",
@@ -6396,7 +6361,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         hdr_lbl = getattr(win, "_val_hdr_lbl", None)
         if filt is None or tree is None:
             return
-        issues = getattr(self, "_validation_issues", [])
+        issues = self._validation_issues
         mode = filt.get()
         if mode == "error":
             shown = [it for it in issues if it.severity == "error"]
@@ -6455,7 +6420,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             self._redraw()
             self._invalidate_focus_list_structure()
         except Exception:
-            issues = getattr(self, "_validation_issues", [])
+            issues = self._validation_issues
         win = tk.Toplevel(self)
         win.title(tr("validation.title", "Tree Validation"))
         win.configure(bg=BG_DARK)

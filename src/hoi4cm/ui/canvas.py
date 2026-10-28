@@ -8,11 +8,12 @@ lines out of ``hoi4_content_maker.py``.
 
 import math
 import tkinter as tk
-from typing import Any
+from typing import TYPE_CHECKING
 
 from hoi4cm.core.i18n import tr
-from hoi4cm.focus_tree.validate import Severity
 from hoi4cm.mod import MOD
+from hoi4cm.models import Focus
+from hoi4cm.ui.app_contracts import CanvasHost
 from hoi4cm.ui.canvas_renderer import FocusCanvasBundle
 from hoi4cm.ui.canvas_scheduler import DirtyRedrawState, RedrawChannel
 from hoi4cm.ui.image_broker import ImageBroker
@@ -53,55 +54,96 @@ _CFP_MARKER_MIN_ZOOM = 0.3
 _GRID_MARGIN_SCREENS = 1
 
 
-class CanvasMixin:
-    """Canvas rendering + interaction methods for :class:`App`."""
+if TYPE_CHECKING:
 
-    # App-owned attributes accessed through the mixin. Declared here so
-    # type-checkers know they exist on the concrete App instance.
-    _multi_sel: set[int]
-    _multisel_mode: bool
-    mutex_src: Any  # type: ignore[no-redef]
-    mutex_mode: Any  # type: ignore[no-redef]
-    _lines: Any  # type: ignore[no-redef]
-    _temp_line: Any  # type: ignore[no-redef]
-    _pan_start: Any  # type: ignore[no-redef]
-    _drag: Any  # type: ignore[no-redef]
-    _redraw_state: Any  # type: ignore[no-redef]
-    _scene_index: Any  # type: ignore[no-redef]
-    _focus_bundles: dict[int, FocusCanvasBundle]
-    _canvas_probe: Any  # type: ignore[no-redef]
-    _rendering_frame: Any  # type: ignore[no-redef]
-    _focus_line_stack_dirty: Any  # type: ignore[no-redef]
-    _lines_key: Any  # type: ignore[no-redef]
-    _redraw_job: Any  # type: ignore[no-redef]
-    _lines_job: Any  # type: ignore[no-redef]
-    _push_undo: Any  # type: ignore[no-redef]
-    _grid_pool: Any  # type: ignore[no-redef]
-    _grid_used: Any  # type: ignore[no-redef]
-    _grid_key: Any  # type: ignore[no-redef]
-    _grid_item: Any  # type: ignore[no-redef]
-    _coord_label_pools: Any  # type: ignore[no-redef]
-    _coord_label_styles: Any  # type: ignore[no-redef]
-    _coord_label_used: Any  # type: ignore[no-redef]
-    _coord_label_key: Any  # type: ignore[no-redef]
-    _legend_pool: Any  # type: ignore[no-redef]
-    _legend_used: Any  # type: ignore[no-redef]
-    _legend_key: Any  # type: ignore[no-redef]
-    _legend_stack_key: Any  # type: ignore[no-redef]
-    _grid_on: bool
-    _image_poll_job: Any  # type: ignore[no-redef]
-    _validation_worst: dict[int, Severity]
+    class _CanvasState(CanvasHost):
+        """Type-check-time base binding CanvasHost to the mixin."""
+
+else:
+    # Runtime base keeps ``Protocol`` out of ``App``'s MRO (see
+    # tests/test_app_mixin_mro.py).
+    _CanvasState = object
+
+
+class CanvasMixin(_CanvasState):
+    """Canvas rendering + interaction methods for :class:`App`.
+
+    Attribute state is the ``CanvasHost`` contract in
+    ``app_contracts.py``, created exactly once by
+    :meth:`_init_canvas_state`.
+    """
 
     # Above this many loaded focuses, the minimap buckets dots to one per
     # occupied pixel cell and skips prereq lines (see _draw_minimap).
     _MM_DOWNSAMPLE_THRESHOLD = 2000
 
+    def _init_canvas_state(self) -> None:
+        """Create all canvas-owned state once (CanvasHost contract)."""
+        self._multi_sel: set[int] = set()
+        self._multisel_mode = False
+        self.mutex_src: Focus | None = None
+        self.mutex_mode = False
+        self._temp_line = None
+        self._pan_start = None
+        self._drag = {}
+        self._lines = []
+        self._lines_used = 0
+        self._lines_key = None
+        self._grid_on = True
+        self._grid_pool = []
+        self._grid_used = 0
+        self._grid_key = None
+        self._grid_item = None
+        self._redraw_state = DirtyRedrawState()
+        self._redraw_pending = False
+        self._redraw_job = None
+        self._lines_job = None
+        self._scene_index = SceneIndex()
+        self._rendering_frame = False
+        self._focus_line_stack_dirty = False
+        self._focus_bundles: dict[int, FocusCanvasBundle] = {}
+        self._coord_label_pools = {"rectangle": [], "text": [], "line": []}
+        self._coord_label_styles = {"rectangle": [], "text": [], "line": []}
+        self._coord_label_used = {"rectangle": 0, "text": 0, "line": 0}
+        self._coord_label_key = None
+        self._legend_pool = []
+        self._legend_used = 0
+        self._legend_key = None
+        self._legend_stack_key = None
+        self._mm_visible = False
+        self._mm_canvas = None
+        self._mm_line_pool = []
+        self._mm_line_used = 0
+        self._mm_dot_pool = []
+        self._mm_dot_used = 0
+        self._mm_bounds_key = None
+        self._mm_content_key = None
+        # Placeholder bounds; recomputed before first read because
+        # ``_mm_bounds_key`` starts at ``None`` (never a valid key).
+        self._mm_world_bounds = (0.0, 0.0, 0.0, 0.0)
+        self._mm_scale = None
+        self._mm_min_x = None
+        self._mm_min_y = None
+        self._mm_ox = None
+        self._mm_oy = None
+        self._image_broker: ImageBroker | None = None
+        self._image_poll_job: str | None = None
+        self._focus_bounds_cache = (None, None)
+        # Sentinel item that survives external ``cv.delete("all")`` sweeps.
+        self._canvas_probe = self._create_canvas_probe()
+
+    def _create_canvas_probe(self) -> int:
+        """Create the hidden sentinel line used to detect external deletes."""
+        return self.cv.create_line(
+            0, 0, 0, 0, state="hidden", tags=("focus", "canvas_probe")
+        )
+
     def _bind_canvas(self):
+        self._init_canvas_state()
         c = self.cv
         self._image_broker = ImageBroker(
             get_executor(self), generation=lambda: MOD.graphics_catalog.generation
         )
-        self._image_poll_job = None
         lifecycle = self._lifecycle
         if lifecycle is not None:
             lifecycle.add_resource(self._close_canvas_tasks)
@@ -130,16 +172,21 @@ class CanvasMixin:
         lifecycle = self._lifecycle
         if lifecycle is not None and not lifecycle.accepting:
             return
-        self._image_broker.drain()
-        if self._image_broker.pending:
+        image_broker = self._image_broker
+        if image_broker is None:
+            return
+        image_broker.drain()
+        if image_broker.pending:
             self._image_poll_job = self.cv.after(16, self._poll_images)
 
     def _start_image_poll(self):
         lifecycle = self._lifecycle
+        image_broker = self._image_broker
         if (
             (lifecycle is None or lifecycle.accepting)
             and self._image_poll_job is None
-            and self._image_broker.pending
+            and image_broker is not None
+            and image_broker.pending
         ):
             self._image_poll_job = self.cv.after(16, self._poll_images)
 
@@ -149,15 +196,16 @@ class CanvasMixin:
             image_broker.clear()
 
     def _close_canvas_tasks(self):
-        for attribute in ("_image_poll_job", "_redraw_job", "_lines_job"):
-            job = getattr(self, attribute, None)
-            if job is None:
+        for handle in (self._image_poll_job, self._redraw_job, self._lines_job):
+            if handle is None:
                 continue
             try:
-                self.cv.after_cancel(job)
+                self.cv.after_cancel(handle)
             except tk.TclError:
                 pass
-            setattr(self, attribute, None)
+        self._image_poll_job = None
+        self._redraw_job = None
+        self._lines_job = None
         image_broker = self._image_broker
         if image_broker is not None:
             image_broker.close()
@@ -218,7 +266,7 @@ class CanvasMixin:
         just recomputes.
         """
         revision = getattr(self.focuses, "revision", None)
-        cached = getattr(self, "_focus_bounds_cache", None)
+        cached = self._focus_bounds_cache
         if revision is not None and cached is not None and cached[0] == revision:
             return cached[1]
         bounds = None
@@ -297,18 +345,6 @@ class CanvasMixin:
             self.offset[0], self.offset[1], self.zoom, W, H, margin
         )
 
-    def _canvas_runtime(self):
-        if not hasattr(self, "_redraw_state"):
-            self._redraw_state = DirtyRedrawState()
-        if not hasattr(self, "_scene_index"):
-            self._scene_index = SceneIndex()
-        if not hasattr(self, "_focus_line_stack_dirty"):
-            self._focus_line_stack_dirty = False
-        if not hasattr(self, "_canvas_probe"):
-            self._canvas_probe = self.cv.create_line(
-                0, 0, 0, 0, state="hidden", tags=("focus", "canvas_probe")
-            )
-
     def _canvas_item_exists(self, item):
         try:
             return bool(self.cv.type(item))
@@ -330,9 +366,7 @@ class CanvasMixin:
         self._grid_used = 0
         self._grid_key = None
         self._grid_item = None
-        self._canvas_probe = self.cv.create_line(
-            0, 0, 0, 0, state="hidden", tags=("focus", "canvas_probe")
-        )
+        self._canvas_probe = self._create_canvas_probe()
 
     def _redraw(
         self,
@@ -341,22 +375,19 @@ class CanvasMixin:
         reason="legacy",
     ):
         """Schedule one frame and merge any additional dirty channels into it."""
-        self._canvas_runtime()
-        if channels & RedrawChannel.SCENE and getattr(self, "_lines_job", None):
+        if channels & RedrawChannel.SCENE and self._lines_job is not None:
             self.cv.after_cancel(self._lines_job)
             self._lines_job = None
         if self._redraw_state.request(channels, reason) and not self._redraw_job:
             self._redraw_job = self.cv.after(16, self._do_redraw)
 
     def _do_redraw(self):
-        self._canvas_runtime()
         self._redraw_job = None
         self._redraw_pending = False
         request = self._redraw_state.consume()
         self._render_frame(request.channels)
 
     def _render_frame(self, channels):
-        self._canvas_runtime()
         self._validate_canvas_probe()
         self._rendering_frame = True
         try:
@@ -406,8 +437,7 @@ class CanvasMixin:
 
     def _do_draw_lines_throttled(self):
         self._lines_job = None
-        self._canvas_runtime()
-        drag = getattr(self, "_drag", None)
+        drag = self._drag
         drag_id = drag.get("id") if drag and drag.get("moved") else None
         if drag_id is not None:
             # Single-focus geometry move (a drag): patch just that focus and its
@@ -424,7 +454,6 @@ class CanvasMixin:
         reason="immediate",
     ):
         """Immediate redraw for zoom/resize — skips throttle."""
-        self._canvas_runtime()
         if self._redraw_job:
             self.cv.after_cancel(self._redraw_job)
             self._redraw_job = None
@@ -471,13 +500,10 @@ class CanvasMixin:
         ``self._lines``) rather than deleted and recreated, since every zoom
         notch drives a synchronous regeneration.
         """
-        if not hasattr(self, "_grid_pool"):
-            self._grid_pool = []
-            self._grid_used = 0
         # A `cv.delete("all")` elsewhere (new/clear document) takes the pooled
         # items with it; the ids left behind name nothing.
         if (
-            not getattr(self, "_rendering_frame", False)
+            not self._rendering_frame
             and self._grid_pool
             and not self.cv.type(self._grid_pool[0])
         ):
@@ -560,19 +586,9 @@ class CanvasMixin:
 
     def _draw_coord_labels(self):
         """Draw HOI4 x/y grid numbers along top and left so exact position is clear."""
-        pools = getattr(
-            self,
-            "_coord_label_pools",
-            {"rectangle": [], "text": [], "line": []},
-        )
-        styles = getattr(
-            self,
-            "_coord_label_styles",
-            {"rectangle": [], "text": [], "line": []},
-        )
-        used_before = getattr(
-            self, "_coord_label_used", {"rectangle": 0, "text": 0, "line": 0}
-        )
+        pools = self._coord_label_pools
+        styles = self._coord_label_styles
+        used_before = self._coord_label_used
         # Recover if another canvas user cleared all items without resetting our
         # retained ids. One sentinel probe is enough for the usual delete-all.
         first_pool = next((pool for pool in pools.values() if pool), None)
@@ -591,7 +607,7 @@ class CanvasMixin:
         stepy = YGRID * self.zoom
         step = min(stepx, stepy)  # use smaller axis for density checks
         key = (W, H, self.zoom, tuple(self.offset))
-        if key == getattr(self, "_coord_label_key", None):
+        if key == self._coord_label_key:
             return
 
         used = {"rectangle": 0, "text": 0, "line": 0}
@@ -725,8 +741,7 @@ class CanvasMixin:
 
     def _draw_lines(self, vis_rect=None):
         """Draw edges: solid blue elbow+arrow for prereqs; dashed orange for mutex."""
-        self._canvas_runtime()
-        if not getattr(self, "_rendering_frame", False):
+        if not self._rendering_frame:
             self._validate_canvas_probe()
         self._scene_index.ensure(self.focuses, validate=False)
         cv = self.cv
@@ -739,7 +754,7 @@ class CanvasMixin:
             self._scene_index.revision,
             vis_rect,
         )
-        if key == getattr(self, "_lines_key", None):
+        if key == self._lines_key:
             return
         half = BOX * self.zoom / 2
         lw = max(1, int(2.0 * self.zoom))  # line width scales with zoom
@@ -818,7 +833,7 @@ class CanvasMixin:
         # `self._lines.clear()` elsewhere follows deletion of the matching
         # canvas items and shrinks the pool, hence the clamp.
         pool_size = len(self._lines)
-        previous_used = min(getattr(self, "_lines_used", pool_size), pool_size)
+        previous_used = min(self._lines_used, pool_size)
         for idx in range(need, previous_used):
             cv.itemconfig(self._lines[idx], state="hidden")
         self._lines_used = need
@@ -831,9 +846,7 @@ class CanvasMixin:
                 cv.tag_lower("grid")
             # Labels sit below lines so arrows always draw on top of text.
             # During a frame, defer this until after newly created labels exist.
-            if not getattr(self, "_rendering_frame", False) and cv.find_withtag(
-                "focus_lbl"
-            ):
+            if not self._rendering_frame and cv.find_withtag("focus_lbl"):
                 cv.tag_lower("focus_lbl", "line")
                 self._focus_line_stack_dirty = False
         self._lines_key = key
@@ -882,8 +895,7 @@ class CanvasMixin:
 
     def _draw_focus(self, f, vis_rect=None):
         """Create once; skip update if state unchanged for near-zero idle cost."""
-        self._canvas_runtime()
-        if not getattr(self, "_rendering_frame", False):
+        if not self._rendering_frame:
             self._validate_canvas_probe()
         if vis_rect is None:
             vis_rect = self._visible_rect()
@@ -1482,8 +1494,8 @@ class CanvasMixin:
         skip the Tk updates when the visible rows and canvas view are unchanged.
         """
         cv = self.cv
-        pool = getattr(self, "_legend_pool", [])
-        used_before = getattr(self, "_legend_used", 0)
+        pool = self._legend_pool
+        used_before = self._legend_used
         if pool and not self._canvas_item_exists(pool[0]):
             pool = []
             used_before = 0
@@ -1522,8 +1534,8 @@ class CanvasMixin:
             tuple(self.offset),
             getattr(self.focuses, "revision", None),
         )
-        if key == getattr(self, "_legend_key", None):
-            if rows and stack_key != getattr(self, "_legend_stack_key", None):
+        if key == self._legend_key:
+            if rows and stack_key != self._legend_stack_key:
                 cv.tag_raise("legend")
                 self._legend_stack_key = stack_key
             return
@@ -1615,10 +1627,7 @@ class CanvasMixin:
             )
 
         # Main tree CFP
-        if (
-            getattr(self, "_cfp_x", None) is not None
-            and getattr(self, "_cfp_y", None) is not None
-        ):
+        if self._cfp_x is not None and self._cfp_y is not None:
             _draw_box(
                 self._cfp_x / XGRID,
                 self._cfp_y / YGRID,
@@ -1655,10 +1664,10 @@ class CanvasMixin:
 
     def _toggle_minimap(self):
         """Show or hide the minimap overlay in the bottom-right corner."""
-        self._mm_visible = not getattr(self, "_mm_visible", False)
+        self._mm_visible = not self._mm_visible
         if self._mm_visible:
             # Create the minimap canvas lazily on first show
-            if not hasattr(self, "_mm_canvas") or not self._mm_canvas.winfo_exists():
+            if self._mm_canvas is None or not self._mm_canvas.winfo_exists():
                 mm = tk.Canvas(
                     self.cv,
                     bg="#070c15",
@@ -1686,7 +1695,7 @@ class CanvasMixin:
             tk.Misc.tkraise(self._mm_canvas)
             self._draw_minimap()
         else:
-            if hasattr(self, "_mm_canvas"):
+            if self._mm_canvas is not None:
                 try:
                     self._mm_canvas.place_forget()
                 except tk.TclError:
@@ -1784,18 +1793,12 @@ class CanvasMixin:
         drawing one edge/focus is no longer cheap enough to do 20k+ times
         per minimap refresh.
         """
-        if not hasattr(self, "_mm_line_pool"):
-            self._mm_line_pool = []
-            self._mm_line_used = 0
-        if not hasattr(self, "_mm_dot_pool"):
-            self._mm_dot_pool = []
-            self._mm_dot_used = 0
-        if not getattr(self, "_mm_visible", False):
+        if not self._mm_visible:
             return
-        if not hasattr(self, "_mm_canvas"):
+        mm = self._mm_canvas
+        if mm is None:
             return
         try:
-            mm = self._mm_canvas
             if not mm.winfo_exists():
                 return
         except tk.TclError:
@@ -1811,24 +1814,23 @@ class CanvasMixin:
             mm.delete("mm_overlay")
             return
 
-        self._canvas_runtime()
         self._scene_index.ensure(self.focuses, validate=False)
         MM_W = mm.winfo_width() or 220
         MM_H = mm.winfo_height() or 150
         margin = 10
 
         cfp_key = (
-            getattr(self, "_cfp_x", None),
-            getattr(self, "_cfp_y", None),
+            self._cfp_x,
+            self._cfp_y,
             tuple((et.get("cfp_x"), et.get("cfp_y")) for et in self._extra_trees),
         )
         bounds_key = (self._scene_index.revision, cfp_key)
-        if getattr(self, "_mm_bounds_key", None) != bounds_key:
-            all_xs = [f.x for f in self.focuses.values()]
-            all_ys = [f.y for f in self.focuses.values()]
-            if getattr(self, "_cfp_x", None) is not None:
+        if self._mm_bounds_key != bounds_key:
+            all_xs: list[float] = [f.x for f in self.focuses.values()]
+            all_ys: list[float] = [f.y for f in self.focuses.values()]
+            if self._cfp_x is not None:
                 all_xs.append(self._cfp_x / XGRID)
-            if getattr(self, "_cfp_y", None) is not None:
+            if self._cfp_y is not None:
                 all_ys.append(self._cfp_y / YGRID)
             for et in self._extra_trees:
                 if et.get("cfp_x") is not None:
@@ -1867,7 +1869,7 @@ class CanvasMixin:
             return ox + (gx - min_x) * scale, oy + (gy - min_y) * scale
 
         content_key = (bounds_key, MM_W, MM_H)
-        if getattr(self, "_mm_content_key", None) != content_key:
+        if self._mm_content_key != content_key:
             self._draw_minimap_content(mm, g2mm, scale)
             self._mm_content_key = content_key
 
@@ -1890,10 +1892,7 @@ class CanvasMixin:
                 tags="mm_overlay",
             )
 
-        if (
-            getattr(self, "_cfp_x", None) is not None
-            and getattr(self, "_cfp_y", None) is not None
-        ):
+        if self._cfp_x is not None and self._cfp_y is not None:
             _mm_cfp(self._cfp_x / XGRID, self._cfp_y / YGRID, "#22d3ee")
         for idx, et in enumerate(self._extra_trees, start=1):
             if et.get("cfp_x") is not None and et.get("cfp_y") is not None:
@@ -1937,7 +1936,7 @@ class CanvasMixin:
 
     def _mm_click(self, e):
         """Pan the main canvas to the position clicked on the minimap."""
-        if not hasattr(self, "_mm_scale") or not self._mm_scale:
+        if self._mm_scale is None or not self._mm_scale:
             return
         gx = self._mm_min_x + (e.x - self._mm_ox) / self._mm_scale
         gy = self._mm_min_y + (e.y - self._mm_oy) / self._mm_scale

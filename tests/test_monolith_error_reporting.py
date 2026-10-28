@@ -18,6 +18,7 @@ import hoi4cm.core.logger as logmod
 import hoi4cm.ui.error_report as error_report
 from hoi4cm.core.undo import UndoStack
 from hoi4cm.editor import decode_project
+from hoi4cm.editor.extra_tree_undo import ExtraTreeUndoHistory
 from hoi4cm.models import Focus, FocusDocument
 from hoi4cm.models.focus import MAX_FOCUS_ID
 
@@ -297,7 +298,14 @@ def test_save_reports_a_write_failure(shown, monkeypatch):
         raise PermissionError("read-only folder")
 
     monkeypatch.setattr(m, "write_project", boom)
-    shell = type("Shell", (), {"_capture_workspace": lambda self: None})()
+
+    class _SaveShell:
+        _last_project_path: str | None = None
+
+        def _capture_workspace(self):
+            return None
+
+    shell = _SaveShell()
 
     m.App._save(cast(m.App, shell))
 
@@ -311,9 +319,12 @@ def test_save_reports_a_write_failure(shown, monkeypatch):
 
 
 def test_apply_focus_code_reports_a_parse_failure(shown):
-    shell = type(
-        "Shell", (), {"focuses": FocusDocument(), "_undo_stack": UndoStack()}
-    )()
+    class _CodeShell:
+        def __init__(self) -> None:
+            self.focuses = FocusDocument()
+            self._undo_stack = UndoStack()
+
+    shell = _CodeShell()
     focus = Focus(id=2)
 
     assert (
@@ -338,6 +349,7 @@ def test_apply_focus_code_restore_uses_redraw_now(monkeypatch):
     shell = SimpleNamespace(
         focuses=FocusDocument([focus, extra]),
         _undo_stack=UndoStack(),
+        _tree_undo_history=ExtraTreeUndoHistory(),
         selected=focus,
         zoom=1.25,
         offset=[10, 20],

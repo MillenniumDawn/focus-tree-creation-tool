@@ -6,6 +6,7 @@ from unittest.mock import Mock
 
 import hoi4_content_maker as m
 from hoi4cm.core.undo import UndoStack
+from hoi4cm.editor.extra_tree_undo import ExtraTreeUndoHistory
 from hoi4cm.models import Focus, FocusDocument
 
 
@@ -41,6 +42,8 @@ def test_import_txt_pushes_undo_before_replacing_document(monkeypatch, tmp_path)
         _import_generation=0,
         focuses=FocusDocument([old_focus]),
         _undo_stack=UndoStack(),
+        _tree_undo_history=ExtraTreeUndoHistory(),
+        _snapshot_extra_tree_state=Mock(return_value=None),
         _extra_trees=[{"tree_id": "existing_shared"}],
         cv=Mock(),
         _reset_canvas_bounds=Mock(),

@@ -65,7 +65,14 @@
   parameter form), and `ModLoadingMixin` (`mod_loading.py`). Their shared
   host-state requirements are recorded as `CanvasHost`, `EffectsHost`, and
   `ModLoadingHost` protocols in `app_contracts.py`, checked against `App`
-  without adding runtime inheritance — plus
+  without adding runtime inheritance. `CanvasMixin` additionally binds
+  `CanvasHost` as a type-check-time base (never at runtime — `Protocol`
+  must stay out of `App`'s MRO, pinned by `tests/test_app_mixin_mro.py`),
+  so every canvas-owned attribute resolves from the one protocol contract
+  and is initialized exactly once by `CanvasMixin._init_canvas_state`
+  (production via `_bind_canvas`, tests via `AppFake`); render paths read
+  the typed `None`-optional handles (minimap) directly instead of probing
+  for attribute presence — plus
   `gfx_browser.py` (the universal GFX picker, the drag-to-place GFX
   editor, and the sidebar's narrower focus-icon picker, see
   `monolith-migration.md` for why there are two GFX browsers instead of
