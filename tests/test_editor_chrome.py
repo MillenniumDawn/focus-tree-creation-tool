@@ -98,7 +98,7 @@ def test_reveal_and_action_menu_use_selected_focus_id():
     app = app_state()
     app._center_on_focus = lambda focus_id: calls.append(("reveal", focus_id))
     app._focus_actions = SimpleNamespace(
-        show=lambda focus_id, keyboard: calls.append(("actions", focus_id, keyboard))
+        show=lambda focus_id: calls.append(("actions", focus_id))
     )
     chrome = EditorChrome(app)
     chrome.reveal()
@@ -107,7 +107,7 @@ def test_reveal_and_action_menu_use_selected_focus_id():
     app.selected = SimpleNamespace(id=42)
     chrome.reveal()
     chrome.actions()
-    assert calls == [("reveal", 42), ("actions", 42, True)]
+    assert calls == [("reveal", 42), ("actions", 42)]
 
 
 def selected_form(app):

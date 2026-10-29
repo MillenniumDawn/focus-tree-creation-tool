@@ -178,9 +178,7 @@ def test_project_explorer_search_expansion_selection_and_keyboard(app, monkeypat
     app.update()
     assert tree.selection() == (f"focus:{second.id}",)
     called = []
-    monkeypatch.setattr(
-        app._focus_actions, "show", lambda fid, keyboard: called.append(fid)
-    )
+    monkeypatch.setattr(app._focus_actions, "show", lambda fid: called.append(fid))
     sidebar.activate()
     assert called == [second.id]
     app._lp_search_var.set("no-matching-explorer-entry")
@@ -507,7 +505,7 @@ def test_successive_applied_fields_refresh_both_recovery_files(
 def test_keyboard_action_list_has_all_labels_and_escape_is_noop(app):
     app._new_focus_at(46, 44)
     before = len(app._undo_stack)
-    app._focus_actions.show(app.selected.id, keyboard=True)
+    app._focus_actions.show(app.selected.id)
     app.update()
     assert [button.cget("text") for button in app._focus_actions.buttons] == [
         "Edit Focus",

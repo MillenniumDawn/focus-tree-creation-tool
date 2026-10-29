@@ -347,7 +347,6 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         self._grid_img = None
         self._grid_item = None
         self._grid_key = None
-        self._sash_x = 0
         self._validation_issues = []
         self._validation_worst = {}
         self._validation_job = None
@@ -2433,20 +2432,6 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         ):
             return sorted(MOD.focus_ids)
         return []
-
-    def _sash_pr(self, e):
-        self._sash_x = e.x_root
-
-    def _sash_mv(self, e):
-        dx = self._sash_x - e.x_root  # dragging left = wider sidebar
-        self._sash_x = e.x_root
-        new_w = max(260, min(700, self._sb_width + dx))
-        if new_w != self._sb_width:
-            self._sb_width = new_w
-            self._sb_frame.config(width=new_w)
-
-    def _sash_rl(self, e):
-        pass
 
     # ── SELECTION ───────────────────────────────────────────────
     def _on_icon_change(self, *_):
@@ -6101,10 +6086,6 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         self._sb_mod_lbl2.config(text=mod_txt)
 
     # ─────────────────── FOCUS LIST PANEL ────────────────────────
-    def _refresh_focus_list_debounced(self):
-        """Filter the existing project snapshot without rebuilding it."""
-        self._project_sidebar.schedule_filter()
-
     def _invalidate_focus_list_structure(self):
         """Refresh project ownership and focus labels after document changes."""
         if hasattr(self, "_project_sidebar"):
@@ -6114,13 +6095,6 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         """Synchronize explorer selection after a canvas selection."""
         if hasattr(self, "_project_sidebar"):
             self._project_sidebar.sync_selection(force=True)
-
-    def _select_focus_from_list(self, focus_id):
-        if focus_id in self.focuses:
-            if self._select(self.focuses[focus_id]) is False:
-                return
-            self._center_on_focus(focus_id)
-            self.cv.focus_set()
 
     def _toggle_focus_list(self):
         """Collapse or restore project navigation without losing its state."""

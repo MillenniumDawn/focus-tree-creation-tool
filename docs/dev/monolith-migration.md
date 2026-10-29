@@ -206,9 +206,9 @@ and `class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk)`
   `ui/loaded_trees.py`'s `VirtualLoadedTreesList`),
   `_export_extra_tree`, `_batch_load_trees_worker` (one-line delegate into
   `focus_tree/batch_load.py`), `_load_all_trees`, `_save_all_trees`.
-- **Focus list panel**: `_refresh_focus_list_debounced`,
-  `_invalidate_focus_list_structure`, `_update_focus_list_selection`,
-  `_select_focus_from_list`, `_toggle_focus_list`.
+- **Focus list panel**: `_invalidate_focus_list_structure`,
+  `_update_focus_list_selection`, `_toggle_focus_list`, one-line calls into
+  `ui/project_sidebar.py`.
 - **Wizard/dialog delegates**: `_open_settings`, `_additional_income_wizard`,
   `_national_spirit_wizard`, `_dyn_mod_wizard`, `_decision_wizard`,
   `_event_wizard`, one-line calls into their `hoi4cm` modules.
@@ -220,8 +220,7 @@ and `class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk)`
 - **Autocomplete / mod-aware suggestions**: `_attach_autocomplete`,
   `_get_mod_suggestions`.
 - **Widget factories / low-level helpers**: `_mk_btn`, `_hint`,
-  `_sash_pr`/`_sash_mv`/`_sash_rl`
-  (sidebar-splitter drag), `_update_statusbar`,
+  `_update_statusbar`,
   `_refresh_tree_meta_panel`/`_fill_tree_meta_box`, the canvas redraw
   wrappers (`_redraw`, `_redraw_now`, `_center_on_focus`).
 - **Bootstrap**: `__init__`, `_on_app_close`, `_close_app_caches`,

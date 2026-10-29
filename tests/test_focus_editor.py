@@ -9,8 +9,7 @@ from builders import make_focus
 import hoi4_content_maker as main
 from hoi4cm.core.undo import UndoStack
 from hoi4cm.models import Focus, FocusDocument, FocusSidebarValues, apply_sidebar_values
-from hoi4cm.ui.focus_editor import flush_pending_editor, reveal_search_result
-from hoi4cm.ui.focus_list import FocusListItem
+from hoi4cm.ui.focus_editor import flush_pending_editor
 
 
 def host(**changes):
@@ -161,17 +160,3 @@ def test_save_cancelled_when_editor_has_invalid_code():
     app = host()
     app._focus_editor = SimpleNamespace(flush=lambda: False)
     assert main.App._save(app) is False
-
-
-def test_search_enter_reveals_first_matching_focus():
-    app = SimpleNamespace(
-        _focus_list_items=(
-            FocusListItem(1, "AAA_focus"),
-            FocusListItem(2, "BBB_focus"),
-        ),
-        _lp_search_var=Mock(),
-        _select_focus_from_list=Mock(),
-    )
-    app._lp_search_var.get.return_value = "bbb"
-    reveal_search_result(app)
-    app._select_focus_from_list.assert_called_once_with(2)

@@ -22,11 +22,8 @@ class FocusActions:
     def __init__(self, app: Any):
         self.app = app
         self.focus_id: int | None = None
-        self.buttons: list[tk.Button] = []
-        self.images: list[tk.PhotoImage] = []
-        self.popup = None
-        self._view_state = None
-        self._keyboard_focus = None
+        self._view_state: tuple[float, tuple[float, ...]] | None = None
+        self._keyboard_focus: tk.Misc | None = None
         self.spotlight = FocusSpotlight(app, ACTIONS, self.invoke, self.dismiss)
         self.bindings = []
         for sequence, callback in (
@@ -40,17 +37,25 @@ class FocusActions:
     def blocks_canvas(self) -> bool:
         return self.focus_id is not None
 
+    @property
+    def buttons(self) -> list[tk.Button]:
+        return self.spotlight.buttons
+
+    @property
+    def images(self) -> list[tk.PhotoImage]:
+        return self.spotlight.images
+
     def _keyboard_show(self, event=None):
         selected = self.app.selected
         if selected is not None and not self.app.mutex_mode:
-            self.show(selected.id, keyboard=True)
+            self.show(selected.id)
         return "break"
 
     def _escape(self, event=None):
         self.dismiss()
         return "break"
 
-    def show(self, fid, keyboard=False):
+    def show(self, fid):
         self.dismiss()
         if fid not in self.app.focuses or self.app.mutex_mode:
             return
@@ -67,8 +72,6 @@ class FocusActions:
                 parent=self.app,
             )
             return
-        self.buttons = self.spotlight.buttons
-        self.images = self.spotlight.images
 
     def reflow(self):
         if self.focus_id is None:
@@ -81,16 +84,8 @@ class FocusActions:
     def dismiss(self):
         visible = self.focus_id is not None
         self.focus_id = None
-        spotlight = getattr(self, "spotlight", None)
-        if spotlight is not None:
-            spotlight.close()
-        else:
-            for button in self.buttons:
-                button.destroy()
-            self.buttons.clear()
-            self.images.clear()
-        state = getattr(self, "_view_state", None)
-        self._view_state = None
+        self.spotlight.close()
+        state, self._view_state = self._view_state, None
         if state is not None:
             zoom, offset = state
             changed = self.app.zoom != zoom or tuple(self.app.offset) != offset
@@ -99,15 +94,10 @@ class FocusActions:
             if changed:
                 self.app._redraw()
         if visible:
-            previous = getattr(self, "_keyboard_focus", None)
-            self._keyboard_focus = None
-            target = (
-                previous
-                if previous is not None and previous.winfo_exists()
-                else self.app.cv
-            )
-            focus = getattr(target, "focus_force", target.focus_set)
-            focus()
+            previous, self._keyboard_focus = self._keyboard_focus, None
+            if previous is None or not previous.winfo_exists():
+                previous = self.app.cv
+            previous.focus_force()
 
     def close(self):
         self.dismiss()
@@ -158,7 +148,7 @@ class FocusActions:
         child.prereqs = [[parent.id]]
         if app._default_focus_prefix:
             child.name = f"{app._default_focus_prefix}focus_{child.id}"
-        trees: list[dict[str, Any]] = getattr(app, "_extra_trees", [])
+        trees: list[dict[str, Any]] = app._extra_trees
         tree = trees[parent.tree_idx - 1] if 0 < parent.tree_idx <= len(trees) else None
         if tree is not None:
             app._push_undo("add child", touched_ids=(), tree_state=True)

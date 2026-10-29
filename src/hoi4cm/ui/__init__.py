@@ -16,11 +16,7 @@ from hoi4cm.ui.editor_chrome import (
 from hoi4cm.ui.error_report import report_error
 from hoi4cm.ui.file_errors import report_write_failure
 from hoi4cm.ui.focus_actions import FocusActions
-from hoi4cm.ui.focus_editor import (
-    FocusEditor,
-    flush_pending_editor,
-    reveal_search_result,
-)
+from hoi4cm.ui.focus_editor import FocusEditor, flush_pending_editor
 from hoi4cm.ui.focus_spotlight import FocusSpotlight, SpotlightLayout, spotlight_layout
 from hoi4cm.ui.gfx_browser import (
     open_focus_icon_browser,
@@ -97,7 +93,6 @@ __all__ = [
     "FocusActions",
     "FocusEditor",
     "flush_pending_editor",
-    "reveal_search_result",
     "EditorChrome",
     "EditorStatus",
     "mark_editor_saved",

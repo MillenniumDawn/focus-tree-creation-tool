@@ -301,7 +301,7 @@ class EditorChrome:
 
     def actions(self):
         if self.app.selected is not None:
-            self.app._focus_actions.show(self.app.selected.id, keyboard=True)
+            self.app._focus_actions.show(self.app.selected.id)
 
     def zoom(self, factor):
         app = self.app

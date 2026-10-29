@@ -8,17 +8,8 @@ from typing import Any
 
 from hoi4cm.core.i18n import tr
 from hoi4cm.models.sidebar_form import parse_focus_cost, sidebar_values_match_focus
-from hoi4cm.ui.focus_list import filter_focus_items
 from hoi4cm.ui.theme import BG_CARD, BG_DARK, BG_PANEL, BLUE, TEXT
 from hoi4cm.ui.widgets import Tooltip
-
-
-def reveal_search_result(app: Any) -> None:
-    items = filter_focus_items(
-        getattr(app, "_focus_list_items", ()), app._lp_search_var.get()
-    )
-    if items:
-        app._select_focus_from_list(items[0].key)
 
 
 def flush_pending_editor(app: Any, *, autosave: bool = False) -> bool:
@@ -305,4 +296,4 @@ class FocusEditor:
             )
 
 
-__all__ = ["FocusEditor", "flush_pending_editor", "reveal_search_result"]
+__all__ = ["FocusEditor", "flush_pending_editor"]

@@ -19,7 +19,8 @@ def make_actions():
         focuses=document,
         selected=parent,
         mutex_mode=False,
-        cv=SimpleNamespace(focus_set=Mock()),
+        cv=SimpleNamespace(focus_force=Mock()),
+        _extra_trees=[],
         _default_focus_prefix="TAG_",
         _focus_editor=SimpleNamespace(open=Mock(), flush=Mock(return_value=True)),
         _push_undo=Mock(),
@@ -33,9 +34,9 @@ def make_actions():
     actions = object.__new__(FocusActions)
     actions.app = app
     actions.focus_id = parent.id
-    actions.buttons = []
-    actions.images = []
-    actions.popup = None
+    actions.spotlight = Mock()
+    actions._view_state = None
+    actions._keyboard_focus = None
     return actions, app, parent
 
 
@@ -80,7 +81,7 @@ def test_dismiss_and_stale_target_do_not_mutate():
     actions.dismiss()
     assert actions.focus_id is None
     app._push_undo.assert_not_called()
-    app.cv.focus_set.assert_called_once()
+    app.cv.focus_force.assert_called_once()
     actions.focus_id = target.id
     app.focuses.delete_many((target.id,))
     actions.invoke("delete")
@@ -159,7 +160,7 @@ def test_dismiss_restores_the_original_keyboard_widget():
     actions._keyboard_focus = previous
     actions.dismiss()
     previous.focus_force.assert_called_once()
-    app.cv.focus_set.assert_not_called()
+    app.cv.focus_force.assert_not_called()
 
 
 def test_spotlight_open_error_reports_and_releases_input(monkeypatch):

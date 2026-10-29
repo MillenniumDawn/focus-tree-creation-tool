@@ -824,7 +824,7 @@ class ProjectSidebar:
         if item and item.kind == "focus":
             self.select()
             if self.app.selected and self.app.selected.id == item.focus_id:
-                self.app._focus_actions.show(item.focus_id, keyboard=True)
+                self.app._focus_actions.show(item.focus_id)
         elif item and item.kind == "tree_file":
             self.app._import_txt(path=item.path)
         elif item and item.kind == "file":
