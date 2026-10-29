@@ -235,7 +235,11 @@ class ApplicationLifecycle:
         except AttributeError, RuntimeError, tk.TclError:
             return
         for job in jobs if isinstance(jobs, tuple) else ():
-            self._cancel_after(owner, job)
+            # Leave callback commands for their owning widgets to destroy.
+            try:
+                owner.tk.call("after", "cancel", job)
+            except AttributeError, RuntimeError, tk.TclError:
+                continue
 
 
 def find_lifecycle(owner: object | None) -> ApplicationLifecycle | None:
