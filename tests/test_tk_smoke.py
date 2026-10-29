@@ -745,6 +745,35 @@ def test_dismissing_the_editor_asks_before_dropping_an_invalid_draft(
     assert not answers
 
 
+def test_discarding_a_code_draft_leaves_undo_and_dirty_state_alone(app, monkeypatch):
+    app._new_focus_at(260 + len(app.focuses) * 2, 60)
+    focus = app.selected
+    editor = app._focus_editor
+    editor.open(tab="Code")
+    app.update()
+    app._code_edit_btn.invoke()
+    assert app._code_edit_mode[0]
+    app._code_txt.delete("1.0", "end")
+    app._code_txt.insert("1.0", "this is { not a focus block")
+    undo_count = len(app._undo_stack)
+    revision = app.focuses.content_revision
+    dirty = app._is_dirty()
+
+    asked = []
+    monkeypatch.setattr(
+        "tkinter.messagebox.askyesno", lambda *a, **kw: asked.append(a) or True
+    )
+    assert editor.dismiss()
+
+    assert asked, "an unparsable Code draft must be offered for discard"
+    assert not app._code_edit_mode[0], "discard must lock the Code tab again"
+    assert "not a focus block" not in app._code_txt.get("1.0", "end")
+    assert len(app._undo_stack) == undo_count
+    assert app.focuses.content_revision == revision
+    assert app._is_dirty() == dirty
+    assert app.selected is focus
+
+
 def test_tree_settings_keeps_loaded_trees_and_references_accessible(app):
     app._focus_editor.open_tree_settings()
     app.update()
