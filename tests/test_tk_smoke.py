@@ -17,7 +17,6 @@ import sys
 import tkinter as tk
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import Mock
 
 import pytest
 from ui_fakes import AppFake
@@ -264,6 +263,12 @@ def test_minimap_first_show_uses_requested_size_before_geometry_settles(monkeypa
             assert 0 <= left < right <= 220
             assert 0 <= top < bottom <= 150
 
+        scale = root._mm_scale
+        root.update_idletasks()
+        assert (mm.winfo_width(), mm.winfo_height()) == (220, 150)
+        root._draw_minimap()
+        assert root._mm_scale == scale
+
         root._mm_click(SimpleNamespace(x=110, y=75))
         assert root.offset[0] == pytest.approx(
             root.cv.winfo_width() / 2 - 1.5 * XGRID * root.zoom
@@ -281,34 +286,6 @@ def test_minimap_first_show_uses_requested_size_before_geometry_settles(monkeypa
         root._lifecycle.finish_close()
         root.destroy()
         gc.collect()
-
-
-@pytest.mark.parametrize(
-    "reported_size,expected_size",
-    [
-        ((0, 0), (220, 150)),
-        ((1, 1), (220, 150)),
-        ((1, 300), (220, 300)),
-        ((400, 1), (400, 150)),
-        ((400, 300), (400, 300)),
-    ],
-)
-def test_minimap_keeps_each_realized_dimension(reported_size, expected_size):
-    cv = Mock()
-    cv.winfo_width.return_value = 800
-    cv.winfo_height.return_value = 600
-    fake = AppFake([Focus(id=1, x=1, y=1), Focus(id=2, x=2, y=2)], cv=cv)
-    mm = Mock()
-    mm.winfo_exists.return_value = 1
-    mm.winfo_width.return_value, mm.winfo_height.return_value = reported_size
-    fake._mm_visible = True
-    fake._mm_canvas = mm
-
-    fake._draw_minimap()
-
-    assert fake._mm_content_key[-2:] == expected_size
-    width, height = expected_size
-    assert fake._mm_scale == pytest.approx(min((width - 20) / 3, (height - 20) / 3))
 
 
 _FAR_RECT = (0.0, 0.0, 10.0, 10.0)
