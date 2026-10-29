@@ -14,6 +14,7 @@ from collections.abc import Callable
 from types import SimpleNamespace
 from typing import Any, cast
 
+import pytest
 from ui_fakes import AppFake
 
 import hoi4_content_maker as app_module
@@ -218,6 +219,29 @@ def test_typing_through_taken_prefix_reaches_free_key():
     assert _fields(focus) == {"abcd": "5", "ab": "2"}
     assert list(_fields(focus)) == ["abcd", "ab"]
     assert len(app._undo_stack) == 2  # value run + coalesced rename run
+
+
+@pytest.mark.parametrize("unusable", ["", "  ", "_hidden"])
+def test_unusable_key_text_stays_pending(unusable):
+    """An empty or ``_`` name would export as invalid script or be skipped."""
+    app, focus = _raw_app({"old": "1"})
+    _row, kvar, vvar = _wired_row(app, "old")
+    revision = app.focuses.content_revision
+
+    kvar.set(unusable)
+
+    assert kvar.value == unusable
+    assert _fields(focus) == {"old": "1"}
+    assert len(app._undo_stack) == 0
+    assert app.focuses.content_revision == revision
+
+    vvar.set("5")
+
+    assert _fields(focus) == {"old": "5"}
+
+    kvar.set("renamed")
+
+    assert _fields(focus) == {"renamed": "5"}
 
 
 def test_rename_keeps_the_field_slot_order():

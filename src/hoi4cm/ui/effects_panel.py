@@ -104,8 +104,8 @@ class _RawFieldRow:
         self._run = ("key", getattr(panel.selected, "id", None), idx, key)
 
     def on_key_text(self, var) -> bool:
-        """Commit one key write-trace: a free name moves the field, a taken
-        name stays pending."""
+        """Commit one key write-trace: a free name moves the field, a taken,
+        empty or internal (``_``) name stays pending."""
         panel = self._panel
         focus = panel.selected
         if focus is None or self._idx >= len(focus.effects):
@@ -114,9 +114,10 @@ class _RawFieldRow:
         if new == self.key:
             return False
         fields = focus.effects[self._idx].setdefault("fields", {})
-        if new in fields:
+        if new in fields or not new.strip() or new.startswith("_"):
             # Pending: keep the typed text, keep ``self.key`` committed and
             # untouched, so both fields survive until typing reaches a free name.
+            # An empty or ``_`` name would export as invalid script or be skipped.
             return False
         if self.key not in fields:
             var.set(self.key)
