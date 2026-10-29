@@ -295,13 +295,13 @@ def build_focuses(
             try:
                 factor = aiblock.get("factor", aiblock.get("base", 1))
                 f.ai_will_do = int(float(factor)) if factor is not None else 1
-            except ValueError, TypeError:
+            except ValueError, TypeError, OverflowError:
                 f.ai_will_do = 1
             f.ai_will_do_raw = dict_to_raw(aiblock)
         else:
             try:
                 f.ai_will_do = int(float(aiblock))
-            except ValueError, TypeError:
+            except ValueError, TypeError, OverflowError:
                 f.ai_will_do = 1
             f.ai_will_do_raw = ""
         f.cancel_if_invalid = rf.get("cancel_if_invalid", "yes") == "yes"
