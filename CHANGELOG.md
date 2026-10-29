@@ -8,6 +8,13 @@ the version by hand. See `AGENTS.md`.
 
 ## Unreleased
 
+- Finish the UI strings left in English after language discovery: the effects
+  hover hint, the edit-target menubar label, the event-picture profile line,
+  and the wizard, Draw.io and Set Edit Targets file-type filters. Inline
+  `tr()` defaults now match `en.json`, and the key-drift test checks that. The
+  settings hint on how Millennium Dawn is detected names `00_money_system.txt`
+  again in every language. The German, Spanish and Chinese strings added here
+  are machine translations and need native review.
 - Add a UI language by dropping `locales/<code>.json` into the folder: the
   language list is read from the files, each naming itself in `_meta`. Wrap the
   wizard, settings, undo, canvas and validation text that bypassed `tr()`, and
@@ -22,6 +29,18 @@ the version by hand. See `AGENTS.md`.
   it, undo, or redo. That covers ids with characters outside letters, digits
   and underscores, nested, duplicate or negative `ai_will_do` values, and
   conditions, offsets or localization text with surrounding whitespace.
+- Fix renaming a key on a raw effect. The full typed name is now stored as one
+  undo step, the field keeps its place, and editing the value afterward writes
+  the renamed key instead of adding the old one back. A name that is already
+  used, empty, or starts with `_` stays pending and changes nothing. Add field
+  now picks an unused `keyN` instead of overwriting one.
+- Add French (Français) as an interface language. The strings are machine
+  translations and need native review.
+- Offer the field marshal role in the Character Editor's role list, next to
+  corps commander and navy leader.
+- Make the raw effect block editor, raw key rename, raw field add and the icon
+  picker undoable. Typing in a raw block is one undo step, and a key release or
+  icon pick that changes nothing adds no entry.
 
 ---
 

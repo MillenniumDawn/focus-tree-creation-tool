@@ -2084,7 +2084,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
                     text=tr("common.lock", "Lock"), fg="#4ade80", bg="#1a2c1a"
                 )
                 self._code_mode_lbl.config(
-                    text=tr("common.editing", "editing"), fg="#4ade80"
+                    text=tr("common.editing", "editing..."), fg="#4ade80"
                 )
             else:
                 # Lock: parse edits into the focus BEFORE overwriting the text
@@ -2492,12 +2492,14 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
 
     # ── SELECTION ───────────────────────────────────────────────
     def _on_icon_change(self, *_):
-        if not self.selected:
+        f = self.selected
+        if not f:
             return
         icon = self._fv_icon.get()
-        if self.selected.icon == icon:
+        if icon == f.icon:
             return
-        self.selected.icon = icon
+        self._push_undo("change icon", touched_ids=(f.id,))
+        f.icon = icon
         self.focuses.mark_content_changed()
         self._redraw_now()
 
@@ -3089,18 +3091,11 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
     def _update_title(self):
         """Reflect current tree ID in the window title bar."""
         tid = self._tree_id.get() or "untitled"
-        dirty = (
-            " *"
-            if getattr(self, "_saved_fingerprint", None) is not None
-            and self._is_dirty()
-            else ""
-        )
         self.title(
             tr(
                 "app.title.tree",
-                "HOI4 Content Maker  -  {tree}{dirty}  [Wiki Accurate v2]",
+                "HOI4 Content Maker  -  {tree}  [Wiki Accurate v2]",
                 tree=tid,
-                dirty=dirty,
             )
         )
         self._update_statusbar()
@@ -3860,8 +3855,8 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
 
         path = filedialog.askopenfilename(
             filetypes=[
-                ("Draw.io / XML", "*.xml *.drawio"),
-                ("All files", "*.*"),
+                (tr("filetype.drawio", "Draw.io / XML"), "*.xml *.drawio"),
+                (tr("filetype.all_files", "All files"), "*.*"),
             ],
             title=tr("filedialog.import_drawio", "Import Draw.io Diagram"),
         )
@@ -6425,7 +6420,6 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             shown = list(issues)
         if hdr_lbl is not None:
             err = sum(1 for it in issues if it.severity == "error")
-            warn = sum(1 for it in issues if it.severity == "warning")
             if not issues:
                 hdr_lbl.config(
                     text=tr("validation.clean", "  Tree looks clean!"),
@@ -6435,10 +6429,8 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
                 hdr_lbl.config(
                     text=tr(
                         "validation.issues_found",
-                        "  {count} issues — {err} errors, {warn} warnings",
+                        "  {count} issues found",
                         count=len(issues),
-                        err=err,
-                        warn=warn,
                     ),
                     fg="#fbbf24" if err else "#f59e0b",
                 )
@@ -6688,7 +6680,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
                     "",
                     tr(
                         "validation.all_prereqs_valid",
-                        "All prerequisite chains are valid.",
+                        "  All prerequisite chains are valid.",
                     ),
                     "",
                 ),

@@ -120,6 +120,7 @@ def test_shipped_languages_are_discovered_with_english_first():
         ("en", "English"),
         ("de", "Deutsch"),
         ("es", "Español"),
+        ("fr", "Français"),
         ("zh_CN", "简体中文"),
     ]
 
