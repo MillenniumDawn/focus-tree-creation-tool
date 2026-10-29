@@ -213,6 +213,86 @@ def test_project_explorer_invalid_draft_blocks_selection_and_tools(app):
     app._focus_editor.close()
 
 
+def test_explorer_rebuilds_never_move_the_canvas(app, monkeypatch):
+    sidebar = app._project_sidebar
+    app._new_focus_at(150, 60)
+    first = app.selected
+    app._new_focus_at(154, 60)
+    app.update()
+    tree = sidebar.tree
+    sentinel = [1234.0, 5678.0]
+    # A canvas redraw would otherwise move the highlight back to the focus row.
+    monkeypatch.setattr(app, "_update_focus_list_selection", lambda: None)
+
+    tree.selection_set("tree:0")
+    app.update()
+    assert app.offset != sentinel, "choosing a tree row still recenters the canvas"
+
+    def search():
+        app._lp_search_var.set(first.name)
+        sidebar.render()
+
+    def revision_bump():
+        app.focuses.touch()
+        sidebar.refresh()
+
+    for rebuild in (sidebar.render, search, revision_bump):
+        app.offset[:] = sentinel
+        rebuild()
+        app.update()
+        assert app.offset == sentinel, rebuild.__name__
+        assert tree.selection() == ("tree:0",), rebuild.__name__
+    app._lp_search_var.set("")
+    sidebar.render()
+    app.update()
+
+    app.offset[:] = sentinel
+    tree.selection_set("tree:0")
+    app.update()
+    assert app.offset != sentinel, "a real click must still recenter"
+
+
+def test_explorer_ignores_pure_moves_but_follows_structure(app, monkeypatch):
+    sidebar = app._project_sidebar
+    app._new_focus_at(160, 60)
+    focus = app.selected
+    app.update()
+    renders = []
+    original = sidebar.render
+    monkeypatch.setattr(sidebar, "render", lambda: renders.append(1) or original())
+
+    app.focuses.move(focus.id, 160, 61)
+    app.focuses.move(focus.id, 161, 61)
+    sidebar.refresh()
+    assert not renders, "dragging or nudging must not rebuild the explorer"
+
+    focus.name = "EXPLORER_renamed_by_structure"
+    app.focuses.touch()
+    sidebar.refresh()
+    assert len(renders) == 1
+    assert sidebar.tree.exists(f"focus:{focus.id}")
+    sidebar.refresh()
+    assert len(renders) == 1, "a refresh with nothing new must not render"
+
+
+def test_explorer_label_follows_localized_name_edits(app):
+    sidebar = app._project_sidebar
+    app._new_focus_at(170, 60)
+    focus = app.selected
+    key = f"focus:{focus.id}"
+    app.update()
+
+    app._fv_loc_name.set("Applied Localized Name")
+    app._apply()
+    app.update()
+    assert sidebar.tree.item(key, "text").strip() == "Applied Localized Name"
+
+    app._fv_loc_name.set("Flushed Localized Name")
+    assert app._focus_editor.flush()
+    sidebar.refresh()
+    assert sidebar.tree.item(key, "text").strip() == "Flushed Localized Name"
+
+
 def test_project_sidebar_collapse_resize_and_scaled_rows(app):
     sidebar = app._project_sidebar
     geometry = app.geometry()

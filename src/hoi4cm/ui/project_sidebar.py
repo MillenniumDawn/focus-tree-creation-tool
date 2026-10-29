@@ -74,6 +74,8 @@ class ProjectSidebar:
         self._width = 280
         self._hover = ""
         self._selected_id = None
+        self._restored: tuple[str, ...] = ()
+        self._skips = 0
         scale = app.winfo_fpixels("1i") / 96
         self.scale = scale
         self.panes = tk.PanedWindow(
@@ -489,7 +491,7 @@ class ProjectSidebar:
         app = self.app
         signature = (
             id(app.focuses),
-            app.focuses.revision,
+            app.focuses.structure_revision,
             app._tree_id.get(),
             app._last_project_path,
             getattr(app, "_navigation_started", False),
@@ -502,112 +504,19 @@ class ProjectSidebar:
                 for t in app._extra_trees
             ),
         )
-        if signature != self._signature:
+        rebuild = signature != self._signature
+        if rebuild:
             self._signature = signature
             self.items = project_items(app, MOD)
-            if not MOD.root:
-                self.resources = tuple(
-                    ExplorerItem(
-                        f"unloaded:{item.key}",
-                        item.key,
-                        "Unavailable — load a mod to browse",
-                        "state",
-                    )
-                    for item in self.items
-                    if item.kind == "resource"
-                )
-            self._update_index()
-        if self._resource_root != MOD.root:
-            self._resource_root = root = MOD.root
-            self.resources = ()
-            self._focus_files = None
-            self._focus_errors = ()
-            self._discovery_generation += 1
-            generation = self._discovery_generation
-            if root:
-                self.resources = tuple(
-                    ExplorerItem(
-                        f"loading:{item.key}",
-                        item.key,
-                        "Discovering source files…",
-                        "state",
-                    )
-                    for item in self.items
-                    if item.kind == "resource"
-                )
-                categories = tuple(
-                    item
-                    for item in self.items
-                    if item.kind in ("resource", "tree_catalog")
-                )
-
-                def work():
-                    return tuple(
-                        (
-                            item,
-                            (
-                                discover_focus_files(item.path)
-                                if item.kind == "tree_catalog"
-                                else discover_resources(item.path)
-                            ),
-                        )
-                        for item in categories
-                    )
-
-                def done(results):
-                    if MOD.root != root or generation != self._discovery_generation:
-                        return
-                    entries = []
-                    for category, (paths, errors) in results:
-                        if category.kind == "tree_catalog":
-                            self._focus_files, self._focus_errors = paths, errors
-                            for error in errors:
-                                add_error(f"Focus-tree discovery: {error}")
-                            continue
-                        entries.extend(
-                            ExplorerItem(
-                                f"file:{path}",
-                                category.key,
-                                str(Path(path).relative_to(category.path)),
-                                "file",
-                                path,
-                            )
-                            for path in paths
-                        )
-                        for index, error in enumerate(errors):
-                            add_error(f"Project explorer: {error}")
-                            entries.append(
-                                ExplorerItem(
-                                    f"error:{category.key}:{index}",
-                                    category.key,
-                                    "Read failure — see error log",
-                                    "state",
-                                    detail=error,
-                                )
-                            )
-                        if not paths and not errors:
-                            entries.append(
-                                ExplorerItem(
-                                    f"empty:{category.key}",
-                                    category.key,
-                                    "No source files found",
-                                    "state",
-                                )
-                            )
-                    self.resources = tuple(entries)
-                    self._update_index()
-
-                run_bg(app, work, done)
-            else:
-                self.resources = tuple(
-                    ExplorerItem(
-                        f"unloaded:{item.key}",
-                        item.key,
-                        "Unavailable — load a mod to browse",
-                        "state",
-                    )
-                    for item in self.items
-                    if item.kind == "resource"
+        root = MOD.root
+        if self._resource_root != root:
+            self._resource_root = root
+            rebuild = True
+            self._discover(root)
+        if rebuild:
+            if not root:
+                self.resources = self._placeholders(
+                    "unloaded", "Unavailable — load a mod to browse"
                 )
             self._update_index()
         self.sync_selection()
@@ -617,6 +526,85 @@ class ProjectSidebar:
             app._editor_chrome.navigation_buttons[label].config(
                 bg=ACTIVE if active else NAVY
             )
+
+    def _placeholders(self, prefix, text):
+        return tuple(
+            ExplorerItem(f"{prefix}:{item.key}", item.key, text, "state")
+            for item in self.items
+            if item.kind == "resource"
+        )
+
+    def _discover(self, root):
+        """Start a worker inventory of the mod's source files for ``root``."""
+        self._focus_files = None
+        self._focus_errors = ()
+        self._discovery_generation += 1
+        generation = self._discovery_generation
+        self.resources = ()
+        if not root:
+            return
+        self.resources = self._placeholders("loading", "Discovering source files…")
+        categories = tuple(
+            item for item in self.items if item.kind in ("resource", "tree_catalog")
+        )
+
+        def work():
+            return tuple(
+                (
+                    item,
+                    (
+                        discover_focus_files(item.path)
+                        if item.kind == "tree_catalog"
+                        else discover_resources(item.path)
+                    ),
+                )
+                for item in categories
+            )
+
+        def done(results):
+            if MOD.root != root or generation != self._discovery_generation:
+                return
+            entries = []
+            for category, (paths, errors) in results:
+                if category.kind == "tree_catalog":
+                    self._focus_files, self._focus_errors = paths, errors
+                    for error in errors:
+                        add_error(f"Focus-tree discovery: {error}")
+                    continue
+                entries.extend(
+                    ExplorerItem(
+                        f"file:{path}",
+                        category.key,
+                        str(Path(path).relative_to(category.path)),
+                        "file",
+                        path,
+                    )
+                    for path in paths
+                )
+                for index, error in enumerate(errors):
+                    add_error(f"Project explorer: {error}")
+                    entries.append(
+                        ExplorerItem(
+                            f"error:{category.key}:{index}",
+                            category.key,
+                            "Read failure — see error log",
+                            "state",
+                            detail=error,
+                        )
+                    )
+                if not paths and not errors:
+                    entries.append(
+                        ExplorerItem(
+                            f"empty:{category.key}",
+                            category.key,
+                            "No source files found",
+                            "state",
+                        )
+                    )
+            self.resources = tuple(entries)
+            self._update_index()
+
+        run_bg(self.app, work, done)
 
     def create_tree(self):
         if self.app._focus_editor.close():
@@ -719,11 +707,11 @@ class ProjectSidebar:
                 tags=("state",) if item.kind == "state" else (),
             )
         if selected and self.tree.exists(selected[0]):
-            self.tree.selection_set(selected)
+            self._restore(selected)
         elif self.app.selected is not None:
             key = f"focus:{self.app.selected.id}"
             if self.tree.exists(key):
-                self.tree.selection_set(key)
+                self._restore((key,))
                 self.tree.focus(key)
         self.message.config(
             text=(
@@ -737,6 +725,23 @@ class ProjectSidebar:
             )
         )
         self.sync_selection()
+
+    def _restore(self, keys):
+        """Reselect rows after a rebuild without acting on them again.
+
+        ``selection_set`` posts one ``<<TreeviewSelect>>`` after this returns, and
+        ``select()`` would recenter the canvas for a tree row. It skips exactly
+        that many events. Idle callbacks run only once the queue is empty, so
+        they drop a skip whose event never arrived.
+        """
+        self._restored = tuple(keys)
+        self._skips += 1
+        self.tree.selection_set(keys)
+        self.app.after_idle(self._forget_restored)
+
+    def _forget_restored(self):
+        self._restored = ()
+        self._skips = 0
 
     def sync_selection(self, force=False):
         focus = self.app.selected
@@ -756,6 +761,9 @@ class ProjectSidebar:
         had_focus = self.app.focus_get() is self.tree
         keys = self.tree.selection()
         if not keys:
+            return
+        if self._skips and keys == self._restored:
+            self._skips -= 1
             return
         item = self.by_key.get(keys[0])
         if item is None:

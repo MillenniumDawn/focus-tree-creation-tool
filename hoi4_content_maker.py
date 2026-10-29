@@ -2553,12 +2553,15 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
                 return
             self._push_undo("edit focus", touched_ids=(f.id,))
             content_revision = self.focuses.content_revision
+            label_changed = f.loc_name != values.loc_name
             name_changed = apply_sidebar_values(f, values)
             self.focuses.move(f.id, values.x, values.y)
             # name is the only autosave field that still needs a full index rebuild;
             # x/y already go through move()'s incremental occupied_positions patch.
             if name_changed:
                 self.focuses.touch()
+            elif label_changed:
+                self.focuses.mark_labels_changed()
             elif self.focuses.content_revision == content_revision:
                 self.focuses.mark_content_changed()
         except Exception as ex:
@@ -3346,6 +3349,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             return
         self._push_undo("edit focus", touched_ids=(f.id,))
         content_revision = self.focuses.content_revision
+        label_changed = f.loc_name != values.loc_name
         name_changed = apply_sidebar_values(f, values)
         if not self.focuses.move(f.id, values.x, values.y):
             # Pre-checked; if indexes raced, restore name indexes at least.
@@ -3362,6 +3366,8 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             return
         if name_changed:
             self.focuses.touch()
+        elif label_changed:
+            self.focuses.mark_labels_changed()
         elif content_revision == self.focuses.content_revision:
             self.focuses.mark_content_changed()
         self._redraw()

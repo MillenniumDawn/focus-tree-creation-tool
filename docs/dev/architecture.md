@@ -305,7 +305,10 @@ both revisions; sidebar edits that do not affect geometry or indexes call
 `content_revision`, so a cost or description edit reaches recovery without
 rebuilding scene or spatial indexes. Coordinate changes still go through
 `FocusDocument.move()`, and fields that affect derived indexes use their
-mutators or `touch()`.
+mutators or `touch()`. `structure_revision` advances with every change except a
+pure `move()`, plus `mark_labels_changed()` for display labels such as the
+localized name. Lists that show ids, names, labels and tree ownership (the project
+explorer) key on it, so a drag or nudge does not rebuild them.
 
 ## Threading model (phase 5)
 
