@@ -92,6 +92,9 @@ class CanvasMixin:
     _image_poll_job: Any  # type: ignore[no-redef]
     _validation_worst: dict[int, Severity]
 
+    _MM_WIDTH = 220
+    _MM_HEIGHT = 150
+
     # Above this many loaded focuses, the minimap buckets dots to one per
     # occupied pixel cell and skips prereq lines (see _draw_minimap).
     _MM_DOWNSAMPLE_THRESHOLD = 2000
@@ -1681,7 +1684,13 @@ class CanvasMixin:
                 close_lbl.place(relx=1.0, rely=0, anchor="ne", x=-2, y=2)
                 close_lbl.bind("<ButtonPress-1>", lambda e: self._toggle_minimap())
             self._mm_canvas.place(
-                relx=1.0, rely=1.0, anchor="se", x=-8, y=-8, width=220, height=150
+                relx=1.0,
+                rely=1.0,
+                anchor="se",
+                x=-8,
+                y=-8,
+                width=self._MM_WIDTH,
+                height=self._MM_HEIGHT,
             )
             tk.Misc.tkraise(self._mm_canvas)
             self._draw_minimap()
@@ -1813,8 +1822,13 @@ class CanvasMixin:
 
         self._canvas_runtime()
         self._scene_index.ensure(self.focuses, validate=False)
-        MM_W = mm.winfo_width() or 220
-        MM_H = mm.winfo_height() or 150
+        MM_W = mm.winfo_width()
+        MM_H = mm.winfo_height()
+        # Tk reports 1 before the newly placed widget has real geometry.
+        if MM_W <= 1:
+            MM_W = self._MM_WIDTH
+        if MM_H <= 1:
+            MM_H = self._MM_HEIGHT
         margin = 10
 
         cfp_key = (

@@ -28,6 +28,8 @@ the version by hand. See `AGENTS.md`.
   test now fails when a `tr()` key is missing from `en.json` or a locale drifts.
 - Record a failed sibling autosave once in the error log, including its path.
   Repeated ticks for the same failure do not add another entry.
+- Draw the minimap at its requested size on first show so its dots and
+  click-to-pan use a positive scale before Tk finishes laying it out.
 - Keep unsaved sidebar edits when you press Ctrl+Z or Ctrl+Y. The edit becomes
   its own undo step first, so Ctrl+Y can bring it back. An untouched imported
   focus no longer adds an undo entry or clears redo when you select away from
