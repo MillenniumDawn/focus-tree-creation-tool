@@ -2475,12 +2475,14 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
 
     # ── SELECTION ───────────────────────────────────────────────
     def _on_icon_change(self, *_):
-        if not self.selected:
+        f = self.selected
+        if not f:
             return
         icon = self._fv_icon.get()
-        if self.selected.icon == icon:
+        if icon == f.icon:
             return
-        self.selected.icon = icon
+        self._push_undo("change icon", touched_ids=(f.id,))
+        f.icon = icon
         self.focuses.mark_content_changed()
         self._redraw_now()
 
