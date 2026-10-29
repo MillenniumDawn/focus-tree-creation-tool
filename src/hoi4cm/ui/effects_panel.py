@@ -78,6 +78,63 @@ def _effects_signature(focus, effects):
     )
 
 
+def _next_unused_raw_key(fields):
+    """First ``keyN`` name not already present in ``fields``."""
+    n = 0
+    while f"key{n}" in fields:
+        n += 1
+    return f"key{n}"
+
+
+def _rename_key_in_place(fields, old, new) -> None:
+    """Rename ``old`` to ``new`` in ``fields``, keeping the key's slot order."""
+    renamed = {new if name == old else name: entry for name, entry in fields.items()}
+    fields.clear()
+    fields.update(renamed)
+
+
+class _RawFieldRow:
+    """Row-key state shared by one raw effect's key and value entry bindings."""
+
+    def __init__(self, panel, idx, key):
+        self._panel = panel
+        self._idx = idx
+        self.key = key
+        # 4-tuple: cannot collide with _write_effect_field's fname tokens.
+        self._run = ("key", getattr(panel.selected, "id", None), idx, key)
+
+    def on_key_text(self, var) -> bool:
+        """Commit one key write-trace: a free name moves the field, a taken,
+        empty or internal (``_``) name stays pending."""
+        panel = self._panel
+        focus = panel.selected
+        if focus is None or self._idx >= len(focus.effects):
+            return False
+        new = var.get()
+        if new == self.key:
+            return False
+        fields = focus.effects[self._idx].setdefault("fields", {})
+        if new in fields or not new.strip() or new.startswith("_"):
+            # Pending: keep the typed text, keep ``self.key`` committed and
+            # untouched, so both fields survive until typing reaches a free name.
+            # An empty or ``_`` name would export as invalid script or be skipped.
+            return False
+        if self.key not in fields:
+            var.set(self.key)
+            return False
+        panel._push_undo("edit effect", touched_ids=(focus.id,), run=self._run)
+        _rename_key_in_place(fields, self.key, new)
+        self.key = new
+        panel.focuses.mark_content_changed()
+        # The cards no longer match the signature taken when they were built.
+        panel._effects_sig = None
+        return True
+
+    def on_value_text(self, var) -> None:
+        """Forward a value write-trace to the field's last committed key."""
+        self._panel._write_effect_field(self._idx, self.key, var.get())
+
+
 class EffectsMixin:
     """Effects tab, effect browser and parameter-form for :class:`App`."""
 
@@ -541,7 +598,7 @@ class EffectsMixin:
                 font=("Helvetica", 9, "italic"),
             ).pack(anchor="w")
             return
-        for i, eff in enumerate(self.selected.effects):
+        for i, eff in enumerate(effects):
             self._draw_eff_card(i, eff)
 
     def _get_effect_suggestions(self, etype, fname):
@@ -626,7 +683,9 @@ class EffectsMixin:
             row = tk.Frame(parent, bg=BG_CARD)
             row.pack(fill="x", padx=4, pady=1)
             # key label (editable only for raw effects)
+            raw_row = None
             if not known:
+                raw_row = _RawFieldRow(self, idx, key)
                 kvar = tk.StringVar(value=key)
                 ke = tk.Entry(
                     row,
@@ -641,12 +700,9 @@ class EffectsMixin:
                     width=12,
                 )
                 ke.pack(side="left", ipady=2, padx=(0, 2))
-
                 kvar.trace_add(
                     "write",
-                    lambda *a, old=key, kv=kvar, efidx=idx: self._rename_effect_key(
-                        efidx, old, kv.get()
-                    ),
+                    lambda *a, r=raw_row, kv=kvar: r.on_key_text(kv),
                 )
             else:
                 tk.Label(
@@ -674,12 +730,19 @@ class EffectsMixin:
                 highlightbackground=BORDER_G,
             )
             ve.pack(side="left", fill="x", expand=True, ipady=2, padx=2)
-            vvar.trace_add(
-                "write",
-                lambda *a, efidx=idx, fn=fkey, v=vvar: self._live_eff_field(
-                    efidx, fn, v
-                ),
-            )
+            if raw_row is not None:
+                # Value binding goes through the row to the last committed key.
+                vvar.trace_add(
+                    "write",
+                    lambda *a, r=raw_row, v=vvar: r.on_value_text(v),
+                )
+            else:
+                vvar.trace_add(
+                    "write",
+                    lambda *a, efidx=idx, fn=fkey, v=vvar: self._live_eff_field(
+                        efidx, fn, v
+                    ),
+                )
 
         if known:
             # Render structured fields from EFFECT_DEFS
@@ -849,7 +912,7 @@ class EffectsMixin:
             tk.Button(
                 ef,
                 text=tr("focus.effects.add_field", "+ add field"),
-                command=lambda efidx=i: self._add_raw_effect_field(efidx),
+                command=lambda idx=i: self._add_raw_effect_field(idx),
                 bg=BG_CARD,
                 fg=TEXT_DIM,
                 relief="flat",
@@ -907,7 +970,7 @@ class EffectsMixin:
             return
         self._push_undo("add effect field", touched_ids=(focus.id,))
         fields = focus.effects[idx].setdefault("fields", {})
-        fields[f"key{len(fields)}"] = "value"
+        fields[_next_unused_raw_key(fields)] = "value"
         self.focuses.mark_content_changed()
         self._refresh_effects()
 

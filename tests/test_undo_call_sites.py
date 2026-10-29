@@ -715,7 +715,7 @@ def test_rename_effect_key_without_a_change_pushes_nothing(old, new):
 @pytest.mark.parametrize(
     ("effect", "added"),
     [
-        ({"type": "mine", "fields": {"a": "1"}}, {"a": "1", "key1": "value"}),
+        ({"type": "mine", "fields": {"a": "1"}}, {"a": "1", "key0": "value"}),
         ({"type": "mine"}, {"key0": "value"}),
     ],
     ids=["with-fields", "no-fields"],
