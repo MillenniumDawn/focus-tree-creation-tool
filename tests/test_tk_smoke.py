@@ -901,6 +901,15 @@ def test_tutorial_starts_and_closes(app, opened):
     app._tutorial.close()
 
 
+def test_tutorial_steps_highlight_widgets_that_are_on_screen(app):
+    from hoi4cm.ui.tutorial import TUTORIAL_STEPS
+
+    app.update()
+    for step in TUTORIAL_STEPS:
+        targets = app._tutorial._resolve_app_targets(step)
+        assert len(targets) == len(step.widget_keys), step.title_key
+
+
 def test_entry_point_smoke_check(tmp_path):
     # The real entry point in a fresh process, as the frozen build runs it.
     entry = Path(main_mod.__file__).resolve()

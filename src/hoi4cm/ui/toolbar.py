@@ -111,7 +111,7 @@ def build_canvas_toolbar(app, toolbar):
             "toolbar.add_focus.tip", "Add a new focus.\nAlso: right-click the canvas."
         ),
     )
-    app._conn_btn = button(
+    app._prereq_btn = button(
         tools,
         tr("toolbar.prereq", "Prereq"),
         app._pick_prereq,
@@ -137,7 +137,9 @@ def build_canvas_toolbar(app, toolbar):
         ),
     )
     button(tools, tr("toolbar.reveal_selected", "Reveal Selected"), chrome.reveal)
-    button(tools, tr("toolbar.focus_actions", "Focus Actions"), chrome.actions)
+    app._focus_actions_btn = button(
+        tools, tr("toolbar.focus_actions", "Focus Actions"), chrome.actions
+    )
     separator(tools)
     button(
         tools,

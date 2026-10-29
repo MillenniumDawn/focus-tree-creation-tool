@@ -65,11 +65,12 @@ TUTORIAL_STEPS = (
         "Describe the selected focus",
         "tutorial.step.properties.body",
         (
-            "Click a focus to open this sidebar. Give it a unique Focus ID, a readable "
-            "name and description, an appropriate cost, and a GFX icon. Changes are "
-            "applied to the selected focus as you edit."
+            "Click a focus to open its actions, then choose Edit Focus (or use Focus "
+            "Actions in the toolbar). Give it a unique Focus ID, a readable name and "
+            "description, an appropriate cost, and a GFX icon. Changes are applied "
+            "when you close the editor."
         ),
-        ("_sb_frame",),
+        ("_focus_actions_btn",),
     ),
     TutorialStep(
         "tutorial.step.relationships.title",
@@ -81,21 +82,18 @@ TUTORIAL_STEPS = (
             "another. "
             "The arrows on the canvas show the resulting path."
         ),
-        ("_conn_btn", "_mutex_btn"),
+        ("_prereq_btn", "_mutex_btn"),
     ),
     TutorialStep(
         "tutorial.step.behaviour.title",
         "Add conditions and outcomes",
         "tutorial.step.behaviour.body",
         (
-            "After selecting a focus, use Effects for completion rewards and "
-            "Conditions "
-            "for availability, visibility, and bypass rules. Properties controls the "
-            "basic fields; Code is available when you need to inspect or edit the "
-            "script."
+            "Use the Add Effect action for completion rewards. In Edit Focus, "
+            "Advanced settings reveals Conditions for availability, visibility, and "
+            "bypass rules, and Code for inspecting or editing the script."
         ),
-        ("tab:Effects", "tab:Conditions", "tab:Code"),
-        "_sb_frame",
+        ("_focus_actions_btn",),
     ),
     TutorialStep(
         "tutorial.step.wizards.title",
