@@ -646,7 +646,7 @@
   "settings.loaded_mod": "  Mod cargado:   {mod}",
   "settings.md_detected_yes": "  MD detectado:  SÍ  -  las categorías y efectos de MD están visibles",
   "settings.md_detected_no": "  MD detectado:  NO   -  categorías de MD ocultas",
-  "settings.detection_checks": "  Comprobaciones de detección: nombre de la carpeta, contenido de descriptor.mod.",
+  "settings.detection_checks": "  Comprobaciones de detección: nombre de la carpeta, contenido de descriptor.mod y 00_money_system.txt.",
   "settings.override_manually": "  También puedes forzarlo manualmente:",
   "settings.md_overridden": "  Forzado manualmente:  MD = {state}",
   "settings.force_md_on": "Forzar MD ACTIVADO",

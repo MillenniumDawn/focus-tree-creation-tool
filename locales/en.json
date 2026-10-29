@@ -646,7 +646,7 @@
   "settings.loaded_mod": "  Loaded mod:   {mod}",
   "settings.md_detected_yes": "  MD detected:  YES  -  MD categories and effects are visible",
   "settings.md_detected_no": "  MD detected:  NO   -  MD categories hidden",
-  "settings.detection_checks": "  Detection checks: folder name, descriptor.mod content.",
+  "settings.detection_checks": "  Detection checks: folder name, descriptor.mod content, and 00_money_system.txt.",
   "settings.override_manually": "  You can also override manually:",
   "settings.md_overridden": "  Overridden:  MD = {state}",
   "settings.force_md_on": "Force MD ON",

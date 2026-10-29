@@ -646,7 +646,7 @@
   "settings.loaded_mod": "  已加载 Mod：  {mod}",
   "settings.md_detected_yes": "  MD 检测：是  -  MD 分类和效果可见",
   "settings.md_detected_no": "  MD 检测：否  -  MD 分类隐藏",
-  "settings.detection_checks": "  检测依据：文件夹名称、descriptor.mod 内容。",
+  "settings.detection_checks": "  检测依据：文件夹名称、descriptor.mod 内容和 00_money_system.txt。",
   "settings.override_manually": "  也可以手动覆盖：",
   "settings.md_overridden": "  已覆盖：MD = {state}",
   "settings.force_md_on": "强制 MD 开启",

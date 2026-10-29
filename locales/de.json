@@ -646,7 +646,7 @@
   "settings.loaded_mod": "  Geladener Mod:   {mod}",
   "settings.md_detected_yes": "  MD erkannt:  JA  -  MD-Kategorien und -Effekte sind sichtbar",
   "settings.md_detected_no": "  MD erkannt:  NEIN  -  MD-Kategorien ausgeblendet",
-  "settings.detection_checks": "  Erkennungsprüfungen: Ordnername, Inhalt der descriptor.mod.",
+  "settings.detection_checks": "  Erkennungsprüfungen: Ordnername, Inhalt der descriptor.mod und 00_money_system.txt.",
   "settings.override_manually": "  Du kannst dies auch manuell überschreiben:",
   "settings.md_overridden": "  Überschrieben:  MD = {state}",
   "settings.force_md_on": "MD ERZWINGEN AN",

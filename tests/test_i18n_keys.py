@@ -198,6 +198,32 @@ def test_literal_tr_defaults_match_english_locale():
     assert mismatches == []
 
 
+def _is_literal_file_filter(node: ast.AST) -> bool:
+    """A ``("label", "*.ext")`` pair whose label is a bare string."""
+    if not isinstance(node, ast.Tuple) or len(node.elts) != 2:
+        return False
+    label, pattern = node.elts
+    return (
+        isinstance(label, ast.Constant)
+        and isinstance(label.value, str)
+        and isinstance(pattern, ast.Constant)
+        and isinstance(pattern.value, str)
+        and pattern.value.startswith("*")
+    )
+
+
+def test_file_dialog_filter_labels_go_through_tr():
+    """Tk shows a file-type filter's label, so it must be translated."""
+    untranslated = [
+        f"{path.relative_to(ROOT).as_posix()}:{node.lineno}"
+        for path in SOURCE_PATHS
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
+        if _is_literal_file_filter(node)
+    ]
+
+    assert untranslated == []
+
+
 def test_dynamic_tr_calls_are_all_declared():
     _literal, dynamic = _scan()
 

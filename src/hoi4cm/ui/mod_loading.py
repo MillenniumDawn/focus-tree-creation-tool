@@ -450,6 +450,11 @@ class ModLoadingMixin:
         loc_path_var = tk.StringVar(value=MOD.edit_loc_file)
         scripted_loc_path_var = tk.StringVar(value=MOD.edit_scripted_loc_file)
 
+        txt_filetypes = (
+            (tr("filetype.hoi4_txt", "HOI4 txt"), "*.txt"),
+            (tr("filetype.all", "All"), "*.*"),
+        )
+
         def _make_section(
             parent,
             title,
@@ -457,7 +462,7 @@ class ModLoadingMixin:
             file_list,
             browse_dir,
             browse_title,
-            browse_ftypes=(("HOI4 txt", "*.txt"), ("All", "*.*")),
+            browse_ftypes=txt_filetypes,
         ):
             """Build a section with entry + browse + quick-pick listbox."""
             tk.Label(
@@ -668,7 +673,10 @@ class ModLoadingMixin:
             loc_files,
             loc_dir or (MOD.root or ""),
             tr("filedialog.select_localisation_yml", "Select localisation .yml file"),
-            browse_ftypes=(("YML localisation", "*.yml"), ("All", "*.*")),
+            browse_ftypes=(
+                (tr("filetype.yml_localisation", "YML localisation"), "*.yml"),
+                (tr("filetype.all", "All"), "*.*"),
+            ),
         )
 
         tk.Frame(body, bg=BORDER, height=1).pack(fill="x", pady=6)
@@ -700,7 +708,7 @@ class ModLoadingMixin:
                 "filedialog.select_scripted_localisation_txt",
                 "Select scripted_localisation .txt file",
             ),
-            browse_ftypes=(("HOI4 txt", "*.txt"), ("All", "*.*")),
+            browse_ftypes=txt_filetypes,
         )
 
         # ── Bottom bar buttons (bot frame already created above the scroll area) ──

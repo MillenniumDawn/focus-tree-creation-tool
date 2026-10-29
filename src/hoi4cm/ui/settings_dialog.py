@@ -376,7 +376,8 @@ def open_settings(app):
     _lbl(
         tr(
             "settings.detection_checks",
-            "  Detection checks: folder name, descriptor.mod content.",
+            "  Detection checks: folder name, descriptor.mod content, "
+            "and 00_money_system.txt.",
         )
     )
     _lbl(tr("settings.override_manually", "  You can also override manually:"))
