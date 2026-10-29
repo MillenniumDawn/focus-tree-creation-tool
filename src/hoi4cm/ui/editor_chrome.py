@@ -8,6 +8,7 @@ import tkinter as tk
 from dataclasses import dataclass
 from tkinter import ttk
 
+from hoi4cm.core.logger import add_error, get_logger
 from hoi4cm.models.sidebar_form import (
     FocusSidebarValues,
     parse_ai_will_do,
@@ -15,6 +16,8 @@ from hoi4cm.models.sidebar_form import (
     sidebar_values_match_focus,
 )
 from hoi4cm.ui.theme import BG_CARD, BLUE, TEXT, TEXT_DIM
+
+log = get_logger("editor_chrome")
 
 
 @dataclass
@@ -225,13 +228,26 @@ class EditorChrome:
         self.navigation_buttons: dict[str, tk.Button] = {}
         self.windows: dict[str, tk.Toplevel] = {}
         self._status_job = None
+        self._closed = False
+        self._failing = False
 
     def start(self):
         """Poll the selected form only; dispose through the app lifecycle."""
-        self.refresh()
-        self._status_job = self.app.after(300, self.start)
+        if self._closed:
+            return
+        try:
+            self.refresh()
+            self._failing = False
+        except Exception as exc:  # polling must survive one bad refresh
+            if not self._failing:
+                self._failing = True
+                log.exception("editor status refresh failed")
+                add_error(f"Editor status refresh failed: {exc}")
+        finally:
+            self._status_job = self.app.after(300, self.start)
 
     def close(self):
+        self._closed = True
         if self._status_job is not None:
             self.app.after_cancel(self._status_job)
             self._status_job = None

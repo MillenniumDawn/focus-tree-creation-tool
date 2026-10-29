@@ -1,6 +1,7 @@
 """Headless tests for editor state, navigation, and selected-form tracking."""
 
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 from hoi4cm.models.document import FocusDocument
 from hoi4cm.ui.editor_chrome import (
@@ -91,6 +92,37 @@ def test_pending_form_invalidates_saved_and_validated_status():
     assert pending_editor_changes(app)
     app.selected = None
     assert not pending_editor_changes(app)
+
+
+def test_status_poll_reschedules_and_reports_a_failing_refresh_once(monkeypatch):
+    errors = []
+    monkeypatch.setattr("hoi4cm.ui.editor_chrome.add_error", errors.append)
+    app = SimpleNamespace(after=Mock(return_value="job"), after_cancel=Mock())
+    chrome = EditorChrome(app)
+    chrome.refresh = Mock(side_effect=RuntimeError("boom"))
+
+    chrome.start()
+    chrome.start()
+
+    assert app.after.call_count == 2, "a failed refresh must still reschedule"
+    assert len(errors) == 1 and "boom" in errors[0]
+
+    chrome.refresh = Mock()
+    chrome.start()
+    chrome.refresh = Mock(side_effect=RuntimeError("again"))
+    chrome.start()
+    assert len(errors) == 2, "a new failure after recovery is reported again"
+
+
+def test_closed_status_poll_stops_rescheduling():
+    app = SimpleNamespace(after=Mock(return_value="job"), after_cancel=Mock())
+    chrome = EditorChrome(app)
+    chrome.refresh = Mock()
+    chrome.start()
+    chrome.close()
+    app.after_cancel.assert_called_once_with("job")
+    chrome.start()
+    assert app.after.call_count == 1
 
 
 def test_reveal_and_action_menu_use_selected_focus_id():
