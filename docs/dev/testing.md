@@ -119,6 +119,10 @@ that:
 
 - every literal key is in `locales/en.json`, and every key in `en.json` is used
   by some call (orphans fail);
+- every string-literal default matches the `en.json` value for its key. A
+  default that is not a string literal is not compared;
+- every file-dialog filter label, a `("label", "*.ext")` pair, goes through
+  `tr()`;
 - every locale file has exactly the keys of `en.json`, apart from `_meta`, with
   the same named placeholders;
 - every call supplies the placeholders its English text names, and none passes

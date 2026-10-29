@@ -376,7 +376,8 @@ def open_settings(app):
     _lbl(
         tr(
             "settings.detection_checks",
-            "  Detection checks: folder name, descriptor.mod content, and 00_money_system.txt.",
+            "  Detection checks: folder name, descriptor.mod content, "
+            "and 00_money_system.txt.",
         )
     )
     _lbl(tr("settings.override_manually", "  You can also override manually:"))
@@ -706,7 +707,14 @@ def open_settings(app):
             ).pack(side="left")
             tk.Label(
                 row,
-                text=f"country={cw}×{ch}  news={nw}×{nh}",
+                text=tr(
+                    "settings.event_profile.dimensions",
+                    "country={country_w}×{country_h}  news={news_w}×{news_h}",
+                    country_w=cw,
+                    country_h=ch,
+                    news_w=nw,
+                    news_h=nh,
+                ),
                 bg=BG_CARD,
                 fg=TEXT_DIM,
                 font=("Courier", 8),

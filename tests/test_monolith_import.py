@@ -4,6 +4,8 @@ from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import Mock
 
+import pytest
+
 import hoi4_content_maker as m
 import hoi4cm.focus_tree.parse as parse_module
 from hoi4cm.models import Focus, FocusDocument
@@ -148,3 +150,41 @@ def test_import_success_assigns_targets_after_build(tmp_path, monkeypatch):
     assert app._last_project_path is None
     assert warnings == []
     assert infos
+
+
+@pytest.mark.parametrize(
+    "ai_clause",
+    [
+        "ai_will_do = 1e999",
+        "ai_will_do = { base = -1e999 modifier = { factor = 2 has_war = yes } }",
+    ],
+)
+def test_import_nonfinite_ai_commits_the_built_document(
+    tmp_path, monkeypatch, ai_clause
+):
+    app, _old_model_focus = _shell()
+    focus_path, loc_path = _configure_mod(
+        monkeypatch, tmp_path, tmp_path / "old.txt", tmp_path / "old.yml"
+    )
+    focus_path.write_text(
+        "focus_tree = { id = NEW_tree focus = { id = TST_new_focus "
+        f"{ai_clause} }} }}",
+        encoding="utf-8",
+    )
+    warnings: list[tuple[Any, ...]] = []
+    infos: list[tuple[Any, ...]] = []
+    _patch_import_ui(monkeypatch, warnings, infos)
+    monkeypatch.setattr(
+        m.filedialog, "askopenfilename", lambda **_kwargs: str(focus_path)
+    )
+
+    m.App._import_txt(cast(m.App, app))
+
+    [focus] = app.focuses.values()
+    assert focus.name == "TST_new_focus"
+    assert focus.ai_will_do == 1
+    assert m.MOD.edit_focus_file == str(focus_path)
+    assert m.MOD.edit_loc_file == str(loc_path)
+    assert app._last_project_path is None
+    assert warnings == []
+    assert len(infos) == 1

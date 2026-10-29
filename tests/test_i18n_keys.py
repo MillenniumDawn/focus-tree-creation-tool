@@ -1,8 +1,9 @@
 """Key drift guard for the UI translations (issue #21).
 
 ``tr(key, default)`` falls back to the inline English default, so a key that is
-missing from ``locales/en.json`` never fails at run time. These tests read the
-``tr()`` calls out of the source and compare them with the locale files.
+missing from ``locales/en.json``, or a default that differs from it, changes
+the text when the locale fails to load. These tests read the ``tr()`` calls
+out of the source and compare them with the locale files.
 """
 
 from __future__ import annotations
@@ -167,6 +168,60 @@ def test_every_literal_tr_key_is_in_the_english_locale():
     )
 
     assert missing == []
+
+
+def test_literal_tr_defaults_match_english_locale():
+    """A string-literal default must equal the English value for its key."""
+    english = _strings(ENGLISH_PATH)
+    mismatches = []
+    for path in SOURCE_PATHS:
+        rel = path.relative_to(ROOT).as_posix()
+        for call in _tr_calls(path):
+            if len(call.args) < 2:
+                continue
+            keys = _literal_keys(call.args[0])
+            default = call.args[1]
+            if (
+                keys is None
+                or not isinstance(default, ast.Constant)
+                or not isinstance(default.value, str)
+            ):
+                continue
+            for key in keys:
+                expected = english.get(key)
+                if expected != default.value:
+                    mismatches.append(
+                        f"{rel}:{call.lineno} {key}: "
+                        f"{default.value!r} != {expected!r}"
+                    )
+
+    assert mismatches == []
+
+
+def _is_literal_file_filter(node: ast.AST) -> bool:
+    """A ``("label", "*.ext")`` pair whose label is a bare string."""
+    if not isinstance(node, ast.Tuple) or len(node.elts) != 2:
+        return False
+    label, pattern = node.elts
+    return (
+        isinstance(label, ast.Constant)
+        and isinstance(label.value, str)
+        and isinstance(pattern, ast.Constant)
+        and isinstance(pattern.value, str)
+        and pattern.value.startswith("*")
+    )
+
+
+def test_file_dialog_filter_labels_go_through_tr():
+    """Tk shows a file-type filter's label, so it must be translated."""
+    untranslated = [
+        f"{path.relative_to(ROOT).as_posix()}:{node.lineno}"
+        for path in SOURCE_PATHS
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
+        if _is_literal_file_filter(node)
+    ]
+
+    assert untranslated == []
 
 
 def test_dynamic_tr_calls_are_all_declared():

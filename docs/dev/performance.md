@@ -132,7 +132,9 @@ are pooled the same way `_draw_lines`' line pool already was (reuse +
 hide-surplus instead of delete-and-recreate every call), and above 2,000
 focuses the minimap buckets to one dot per occupied pixel cell and skips
 prereq lines, since individual dots/edges aren't legible at that density
-anyway. The low-zoom level-of-detail pass (one pooled rectangle per focus
+anyway. Each minimap axis uses its requested size until Tk reports realized
+geometry; the first draw does not run a nested event loop. The low-zoom
+level-of-detail pass (one pooled rectangle per focus
 below `_FOCUS_LOD_ZOOM` at 0.4 zoom, instead of the full multi-item card)
 is implemented in `ui/canvas.py`: `_draw_focus` selects `lod = "compact"`
 based on the zoom threshold, and the compact branch renders a single
