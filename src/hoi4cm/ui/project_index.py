@@ -7,6 +7,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from hoi4cm.core.i18n import tr
 from hoi4cm.core.paths import read_file_with_encoding
 
 _TREE_DECLARATION = re.compile(
@@ -23,6 +24,7 @@ class ExplorerItem:
     path: str = ""
     focus_id: int | None = None
     detail: str = ""
+    icon: str = ""
     search_text: str = field(init=False)
 
     def __post_init__(self):
@@ -54,11 +56,17 @@ def project_items(app, mod) -> tuple[ExplorerItem, ...]:
         else Path(project or source).stem
     )
     items = [
-        ExplorerItem("project", "", name or "Untitled project", "project", root_path),
+        ExplorerItem(
+            "project",
+            "",
+            name or tr("explorer.untitled_project", "Untitled project"),
+            "project",
+            root_path,
+        ),
         ExplorerItem(
             "focus-trees",
             "project",
-            "Focus Trees",
+            tr("nav.focus_trees", "Focus Trees"),
             "tree_catalog",
             str(Path(mod.root) / "common" / "national_focus") if mod.root else "",
         ),
@@ -75,7 +83,12 @@ def project_items(app, mod) -> tuple[ExplorerItem, ...]:
     )
     known = {tree[0] for tree in trees}
     trees.extend(
-        (index, f"Unregistered tree {index}", "", "ownership unavailable")
+        (
+            index,
+            tr("explorer.unregistered_tree", "Unregistered tree {index}", index=index),
+            "",
+            tr("explorer.ownership_unavailable", "ownership unavailable"),
+        )
         for index in app.focuses.tree_membership
         if index not in known
     )
@@ -87,7 +100,7 @@ def project_items(app, mod) -> tuple[ExplorerItem, ...]:
             ExplorerItem(
                 key,
                 "focus-trees",
-                tree_id or "Untitled tree",
+                tree_id or tr("explorer.untitled_tree", "Untitled tree"),
                 "tree",
                 path,
                 detail=kind,
@@ -112,18 +125,32 @@ def project_items(app, mod) -> tuple[ExplorerItem, ...]:
                 ExplorerItem(
                     f"empty-tree:{index}",
                     parent,
-                    "No focuses yet — use + Focus",
+                    tr(
+                        "explorer.no_focuses",
+                        "No focuses yet — use {button}",
+                        button=tr("toolbar.add_focus", "+ Focus"),
+                    ),
                     "state",
                 )
             )
-    for label, relative in (
-        ("Localization", "localisation"),
-        ("Graphics", "gfx"),
-        ("Scripted Effects", "common/scripted_effects"),
+    for label, relative, icon in (
+        (
+            tr("explorer.resource.localization", "Localization"),
+            "localisation",
+            "file_localization",
+        ),
+        (tr("explorer.resource.graphics", "Graphics"), "gfx", "file_graphics"),
+        (
+            tr("explorer.resource.scripted_effects", "Scripted Effects"),
+            "common/scripted_effects",
+            "file_scripted_effects",
+        ),
     ):
         path = str(Path(mod.root) / relative) if mod.root else ""
         items.append(
-            ExplorerItem(f"resource:{relative}", "project", label, "resource", path)
+            ExplorerItem(
+                f"resource:{relative}", "project", label, "resource", path, icon=icon
+            )
         )
     return tuple(items)
 
@@ -138,14 +165,17 @@ def focus_file_items(items, paths=None, errors=()) -> tuple[ExplorerItem, ...]:
             ExplorerItem(
                 "trees:unloaded",
                 category.key,
-                "Load a mod to browse other trees",
+                tr("explorer.tree_files.unloaded", "Load a mod to browse other trees"),
                 "state",
             ),
         )
     if paths is None:
         return (
             ExplorerItem(
-                "trees:loading", category.key, "Discovering focus-tree files…", "state"
+                "trees:loading",
+                category.key,
+                tr("explorer.tree_files.loading", "Discovering focus-tree files…"),
+                "state",
             ),
         )
     loaded = {
@@ -160,7 +190,10 @@ def focus_file_items(items, paths=None, errors=()) -> tuple[ExplorerItem, ...]:
             str(Path(path).relative_to(category.path)),
             "tree_file",
             path,
-            detail="Unopened focus-tree file — Enter or double-click to open",
+            detail=tr(
+                "explorer.tree_files.unopened",
+                "Unopened focus-tree file — Enter or double-click to open",
+            ),
         )
         for path in paths
         if Path(path).suffix.casefold() == ".txt"
@@ -170,7 +203,7 @@ def focus_file_items(items, paths=None, errors=()) -> tuple[ExplorerItem, ...]:
         ExplorerItem(
             f"trees:error:{index}",
             category.key,
-            "Read failure — see error log",
+            tr("explorer.read_failure", "Read failure — see error log"),
             "state",
             detail=error,
         )
@@ -181,7 +214,10 @@ def focus_file_items(items, paths=None, errors=()) -> tuple[ExplorerItem, ...]:
             ExplorerItem(
                 "trees:empty",
                 category.key,
-                "No focus-tree files found — create a new tree",
+                tr(
+                    "explorer.tree_files.none",
+                    "No focus-tree files found — create a new tree",
+                ),
                 "state",
             )
         )

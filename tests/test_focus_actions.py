@@ -6,7 +6,7 @@ from ui_fakes import AppFake
 
 from hoi4cm.models.document import FocusDocument
 from hoi4cm.ui.canvas import CanvasMixin
-from hoi4cm.ui.focus_actions import ACTIONS, FocusActions
+from hoi4cm.ui.focus_actions import ACTIONS, FocusActions, action_labels
 from hoi4cm.ui.focus_spotlight import spotlight_layout
 
 
@@ -38,6 +38,11 @@ def make_actions():
     actions._view_state = None
     actions._keyboard_focus = None
     return actions, app, parent
+
+
+def test_action_labels_follow_the_action_order():
+    assert tuple(action_labels()) == ACTIONS
+    assert all(label for label in action_labels().values())
 
 
 @pytest.mark.parametrize(

@@ -8,6 +8,7 @@ import tkinter as tk
 from dataclasses import dataclass
 from tkinter import ttk
 
+from hoi4cm.core.i18n import tr
 from hoi4cm.core.logger import add_error, get_logger
 from hoi4cm.models.sidebar_form import (
     FocusSidebarValues,
@@ -29,14 +30,16 @@ class EditorStatus:
     change_revision: int = 0
 
     def labels(self, signature, pending=False):
-        saved = "Unsaved" if pending or signature != self.saved else "Saved"
-        validation = "Validation: not run"
-        if self.validated is not None:
-            validation = (
-                "Validation: current"
-                if not pending and signature == self.validated
-                else "Validation: outdated"
-            )
+        if pending or signature != self.saved:
+            saved = tr("editor.unsaved", "Unsaved")
+        else:
+            saved = tr("editor.saved", "Saved")
+        if self.validated is None:
+            validation = tr("editor.validation.not_run", "Validation: not run")
+        elif not pending and signature == self.validated:
+            validation = tr("editor.validation.current", "Validation: current")
+        else:
+            validation = tr("editor.validation.outdated", "Validation: outdated")
         return saved, validation
 
 
@@ -226,6 +229,8 @@ class EditorChrome:
         self.app = app
         self.active_content = "Focus Trees"
         self.navigation_buttons: dict[str, tk.Button] = {}
+        # Display names for the content ids; ``active_content`` stays an id.
+        self.titles: dict[str, str] = {}
         self.windows: dict[str, tk.Toplevel] = {}
         self._status_job = None
         self._closed = False
@@ -334,12 +339,13 @@ class EditorChrome:
 
     def refresh(self):
         app = self.app
-        tree_id = app._tree_id.get() or "no tree"
+        tree_id = app._tree_id.get() or tr("status.no_tree", "no tree")
         selected = getattr(app, "selected", None)
         index = selected.tree_idx if selected is not None else 0
         if 0 < index <= len(app._extra_trees):
             tree_id = app._extra_trees[index - 1].get("tree_id", tree_id)
-        app._editor_context_lbl.config(text=f"{self.active_content}  /  {tree_id}")
+        title = self.titles.get(self.active_content, self.active_content)
+        app._editor_context_lbl.config(text=f"{title}  /  {tree_id}")
         app._editor_zoom_lbl.config(text=f"{int(app.zoom * 100)}%")
         for label, button in self.navigation_buttons.items():
             active = label == self.active_content

@@ -622,7 +622,7 @@ def test_spotlight_buttons_run_existing_actions(app, opened, action):
     undo_count = len(app._undo_stack)
     app._focus_actions.show(target_id)
     app.update()
-    index = [key for key, _ in ACTIONS].index(action)
+    index = ACTIONS.index(action)
     app._focus_actions.buttons[index].invoke()
     app.update()
     assert app._focus_actions.focus_id is None

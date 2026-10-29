@@ -35,22 +35,35 @@ def build_toolbar_row2(app, toolbar):
     context = row()
     app._editor_context_lbl = tk.Label(
         context,
-        text="Focus Trees",
+        text=tr("nav.focus_trees", "Focus Trees"),
         bg=background,
         fg=TEXT,
         padx=8,
         font=("Helvetica", 10, "bold"),
     )
     separator(context)
-    button(context, "Save Project", app._save, bg="#163e2b")
-    button(context, "Validate", app._validate_tree, bg="#26375a")
-    button(context, "Export", app._export, bg="#503818")
+    button(context, tr("menu.save_project", "Save Project"), app._save, bg="#163e2b")
+    button(
+        context,
+        tr("toolbar.validate", "Validate"),
+        app._validate_tree,
+        bg="#26375a",
+    )
+    button(context, tr("toolbar.export", "Export"), app._export, bg="#503818")
     app._editor_save_lbl = tk.Label(
-        context, text="Saved", bg=background, fg=TEXT_DIM, padx=8
+        context,
+        text=tr("editor.saved", "Saved"),
+        bg=background,
+        fg=TEXT_DIM,
+        padx=8,
     )
     app._editor_save_lbl.pack(side="left")
     app._editor_validation_lbl = tk.Label(
-        context, text="Validation: not run", bg=background, fg=TEXT_DIM, padx=4
+        context,
+        text=tr("editor.validation.not_run", "Validation: not run"),
+        bg=background,
+        fg=TEXT_DIM,
+        padx=4,
     )
     app._editor_validation_lbl.pack(side="left")
     app._editor_context_lbl.pack(side="right", padx=8)
@@ -81,7 +94,10 @@ def build_canvas_toolbar(app, toolbar):
 
     tools = row()
     app._sidebar_toggle_btn = button(
-        tools, "Sidebar", app._toggle_focus_list, tip="Collapse or restore sidebar (F)"
+        tools,
+        tr("toolbar.sidebar", "Sidebar"),
+        app._toggle_focus_list,
+        tip=tr("toolbar.sidebar.tip", "Collapse or restore sidebar (F)"),
     )
     app._sidebar_toggle_btn.config(
         image=app._project_sidebar.collapse_icon, compound="left"
@@ -113,14 +129,21 @@ def build_canvas_toolbar(app, toolbar):
     separator(tools)
     button(
         tools,
-        "Search Focuses",
+        tr("toolbar.search_focuses", "Search Focuses"),
         chrome.search,
-        tip="Open the focus list and search by focus ID or name.",
+        tip=tr(
+            "toolbar.search_focuses.tip",
+            "Open the focus list and search by focus ID or name.",
+        ),
     )
-    button(tools, "Reveal Selected", chrome.reveal)
-    button(tools, "Focus Actions", chrome.actions)
+    button(tools, tr("toolbar.reveal_selected", "Reveal Selected"), chrome.reveal)
+    button(tools, tr("toolbar.focus_actions", "Focus Actions"), chrome.actions)
     separator(tools)
-    button(tools, "Tree Settings", lambda: app._focus_editor.open_tree_settings())
+    button(
+        tools,
+        tr("toolbar.tree_settings", "Tree Settings"),
+        lambda: app._focus_editor.open_tree_settings(),
+    )
     app._additional_income_btn = button(
         tools,
         tr("toolbar.add_income", "Add Income"),
@@ -138,11 +161,16 @@ def build_canvas_toolbar(app, toolbar):
         app._additional_income_btn.pack_forget()
 
     view = row()
-    button(view, "Fit", app._fit_all)
-    button(view, "−", lambda: chrome.zoom(1 / 1.2), tip="Zoom out")
+    button(view, tr("toolbar.fit", "Fit"), app._fit_all)
+    button(
+        view,
+        "−",
+        lambda: chrome.zoom(1 / 1.2),
+        tip=tr("toolbar.zoom_out", "Zoom out"),
+    )
     app._editor_zoom_lbl = tk.Label(view, text="100%", width=5, bg=background, fg=TEXT)
     app._editor_zoom_lbl.pack(side="left")
-    button(view, "+", lambda: chrome.zoom(1.2), tip="Zoom in")
+    button(view, "+", lambda: chrome.zoom(1.2), tip=tr("toolbar.zoom_in", "Zoom in"))
     separator(view)
     app._msel_btn = button(
         view,

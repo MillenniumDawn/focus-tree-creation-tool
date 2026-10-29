@@ -3,17 +3,30 @@
 import tkinter as tk
 from typing import Any
 
+from hoi4cm.core.i18n import tr
 from hoi4cm.ui.error_report import report_error
 from hoi4cm.ui.focus_spotlight import FocusSpotlight
 
 ACTIONS = (
-    ("edit_focus", "Edit Focus"),
-    ("add_prerequisite", "Add Prerequisite"),
-    ("add_effect", "Add Effect"),
-    ("add_child", "Add Child"),
-    ("duplicate", "Duplicate"),
-    ("delete", "Delete"),
+    "edit_focus",
+    "add_prerequisite",
+    "add_effect",
+    "add_child",
+    "duplicate",
+    "delete",
 )
+
+
+def action_labels() -> dict[str, str]:
+    """Button text for each action, in ``ACTIONS`` order, in the current language."""
+    return {
+        "edit_focus": tr("focus_action.edit_focus", "Edit Focus"),
+        "add_prerequisite": tr("focus_action.add_prerequisite", "Add Prerequisite"),
+        "add_effect": tr("focus_action.add_effect", "Add Effect"),
+        "add_child": tr("focus_action.add_child", "Add Child"),
+        "duplicate": tr("focus_action.duplicate", "Duplicate"),
+        "delete": tr("focus_action.delete", "Delete"),
+    }
 
 
 class FocusActions:
@@ -24,7 +37,7 @@ class FocusActions:
         self.focus_id: int | None = None
         self._view_state: tuple[float, tuple[float, ...]] | None = None
         self._keyboard_focus: tk.Misc | None = None
-        self.spotlight = FocusSpotlight(app, ACTIONS, self.invoke, self.dismiss)
+        self.spotlight = FocusSpotlight(app, action_labels, self.invoke, self.dismiss)
         self.bindings = []
         for sequence, callback in (
             ("<Shift-F10>", self._keyboard_show),
@@ -67,7 +80,11 @@ class FocusActions:
         except tk.TclError as exc:
             self.dismiss()
             report_error(
-                f"Focus Spotlight could not open. Tk reported: {exc}",
+                tr(
+                    "focus_action.open_failed",
+                    "Focus Spotlight could not open. Tk reported: {error}",
+                    error=exc,
+                ),
                 exc,
                 parent=self.app,
             )
@@ -110,7 +127,7 @@ class FocusActions:
         fid = self.focus_id
         self.dismiss()
         focus = self.app.focuses.get(fid)
-        if focus is None or action not in {key for key, _ in ACTIONS}:
+        if focus is None or action not in ACTIONS:
             return
         if not self.app._focus_editor.flush():
             return

@@ -82,7 +82,7 @@ def test_generated_spec_is_windowless_and_bundles_runtime_assets(tmp_path, monke
 
 def test_bundled_focus_actions_have_png_assets():
     assets = ROOT / "src" / "hoi4cm" / "ui" / "assets"
-    for action, _label in import_module("hoi4cm.ui.focus_actions").ACTIONS:
+    for action in import_module("hoi4cm.ui.focus_actions").ACTIONS:
         image = assets / f"{action}.png"
         assert image.read_bytes().startswith(b"\x89PNG\r\n\x1a\n"), image
 

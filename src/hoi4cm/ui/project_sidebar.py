@@ -99,7 +99,11 @@ class ProjectSidebar:
         header = tk.Frame(self.panel, bg=NAVY)
         header.pack(fill="x", padx=12, pady=(8, 4))
         tk.Label(
-            header, text="CONTENT", bg=NAVY, fg=MUTED, font=("Segoe UI", 9, "bold")
+            header,
+            text=tr("explorer.content", "CONTENT"),
+            bg=NAVY,
+            fg=MUTED,
+            font=("Segoe UI", 9, "bold"),
         ).pack(side="left")
         self.collapse_icon = sidebar_icon(app, "sidebar_collapse", 28, scale)
         self.expand_icon = sidebar_icon(app, "sidebar_expand", 28, scale)
@@ -118,7 +122,12 @@ class ProjectSidebar:
         self.icons = []
         for index, (label, display, command, tip) in enumerate(
             (
-                ("Focus Trees", "Focus Trees", None, "Focus Trees"),
+                (
+                    "Focus Trees",
+                    tr("nav.focus_trees", "Focus Trees"),
+                    None,
+                    tr("nav.focus_trees", "Focus Trees"),
+                ),
                 (
                     "Decisions",
                     tr("toolbar.decisions", "Decisions"),
@@ -185,6 +194,7 @@ class ProjectSidebar:
             button.pack(fill="x", padx=(0, 8))
             Tooltip(button, tip)
             chrome.navigation_buttons[label] = button
+            chrome.titles[label] = display
             self.accents[label] = accent
         tk.Frame(self.panel, bg=DIVIDER, height=1).pack(
             fill="x", padx=14, pady=(16, 12)
@@ -193,7 +203,7 @@ class ProjectSidebar:
         project_header.pack(fill="x", padx=16)
         tk.Label(
             project_header,
-            text="PROJECT",
+            text=tr("explorer.project", "PROJECT"),
             bg=NAVY,
             fg=MUTED,
             font=("Segoe UI", 10, "bold"),
@@ -210,7 +220,7 @@ class ProjectSidebar:
             bd=0,
         )
         refresh.pack(side="right")
-        Tooltip(refresh, "Refresh project source files")
+        Tooltip(refresh, tr("explorer.refresh.tip", "Refresh project source files"))
         search = tk.Frame(self.panel, bg=NAVY)
         search.pack(fill="x", padx=12, pady=(8, 10))
         self.utility_icons = {
@@ -240,7 +250,7 @@ class ProjectSidebar:
             highlightcolor=BLUE,
         )
         clear_search.pack(side="right", padx=(4, 0))
-        Tooltip(clear_search, "Clear project search")
+        Tooltip(clear_search, tr("explorer.clear_search.tip", "Clear project search"))
         app._focus_search_entry.pack(side="left", fill="x", expand=True, ipady=6)
         self.search_hint_icon = sidebar_icon(app, "search", 20, scale)
         self.search_hint = tk.Label(
@@ -263,12 +273,15 @@ class ProjectSidebar:
         app._focus_search_entry.bind(
             "<FocusOut>", lambda _event: self._update_search_hint()
         )
-        Tooltip(app._focus_search_entry, "Search project by name, ID or source path")
+        Tooltip(
+            app._focus_search_entry,
+            tr("explorer.search.tip", "Search project by name, ID or source path"),
+        )
         app._focus_search_entry.bind("<Return>", self.first_result)
         app._lp_search_var.trace_add("write", lambda *_: self.schedule_filter())
         self.new_tree_button = tk.Button(
             self.panel,
-            text="  New Focus Tree",
+            text="  " + tr("focus.new_tree.title", "New Focus Tree"),
             image=self.utility_icons["new_focus"],
             compound="left",
             command=self.create_tree,
@@ -284,30 +297,33 @@ class ProjectSidebar:
         self.new_tree_button.pack(fill="x", padx=12, pady=(0, 10))
         Tooltip(
             self.new_tree_button,
-            "Create a new focus tree using the existing setup wizard",
+            tr(
+                "explorer.new_tree.tip",
+                "Create a new focus tree using the existing setup wizard",
+            ),
         )
         self.empty = tk.Frame(self.panel, bg=NAVY)
         tk.Label(
             self.empty,
-            text="Open a project or use\nNew Focus Tree to get started.",
+            text=tr(
+                "explorer.empty",
+                "Open a project or use\nNew Focus Tree to get started.",
+            ),
             bg=NAVY,
             fg=MUTED,
             font=("Segoe UI", 10),
         ).pack(pady=12)
-        for label, command, icon_name in (
-            ("Open Project…", app._load, "open_project"),
-        ):
-            tk.Button(
-                self.empty,
-                text=label,
-                image=self.utility_icons[icon_name],
-                compound="left",
-                command=command,
-                bg=ACTIVE,
-                fg=TEXT,
-                relief="flat",
-                takefocus=True,
-            ).pack(fill="x", padx=16, pady=4)
+        tk.Button(
+            self.empty,
+            text=tr("explorer.open_project", "Open Project…"),
+            image=self.utility_icons["open_project"],
+            compound="left",
+            command=app._load,
+            bg=ACTIVE,
+            fg=TEXT,
+            relief="flat",
+            takefocus=True,
+        ).pack(fill="x", padx=16, pady=4)
         self.tree_frame = tk.Frame(self.panel, bg=NAVY)
         style = ttk.Style(app)
         self.item_icons = {
@@ -481,9 +497,12 @@ class ProjectSidebar:
         )
         Tooltip(
             self.message,
-            "Enter or double-click a focus to open Spotlight.\n"
-            "Arrow keys select; Left/Right collapse/expand.\n"
-            "Enter on a source file reveals its folder.",
+            tr(
+                "explorer.legend.tip",
+                "Enter or double-click a focus to open Spotlight.\n"
+                "Arrow keys select; Left/Right collapse/expand.\n"
+                "Enter on a source file reveals its folder.",
+            ),
         )
         self.refresh()
 
@@ -516,7 +535,8 @@ class ProjectSidebar:
         if rebuild:
             if not root:
                 self.resources = self._placeholders(
-                    "unloaded", "Unavailable — load a mod to browse"
+                    "unloaded",
+                    tr("explorer.unavailable", "Unavailable — load a mod to browse"),
                 )
             self._update_index()
         self.sync_selection()
@@ -543,7 +563,9 @@ class ProjectSidebar:
         self.resources = ()
         if not root:
             return
-        self.resources = self._placeholders("loading", "Discovering source files…")
+        self.resources = self._placeholders(
+            "loading", tr("explorer.discovering", "Discovering source files…")
+        )
         categories = tuple(
             item for item in self.items if item.kind in ("resource", "tree_catalog")
         )
@@ -587,7 +609,7 @@ class ProjectSidebar:
                         ExplorerItem(
                             f"error:{category.key}:{index}",
                             category.key,
-                            "Read failure — see error log",
+                            tr("explorer.read_failure", "Read failure — see error log"),
                             "state",
                             detail=error,
                         )
@@ -597,7 +619,7 @@ class ProjectSidebar:
                         ExplorerItem(
                             f"empty:{category.key}",
                             category.key,
-                            "No source files found",
+                            tr("explorer.no_files", "No source files found"),
                             "state",
                         )
                     )
@@ -672,14 +694,16 @@ class ProjectSidebar:
         if not self.items:
             self.tree_frame.pack_forget()
             self.empty.pack(fill="x")
-            self.message.config(text="Everything for your mod, in one place.")
+            self.message.config(
+                text=tr("explorer.welcome", "Everything for your mod, in one place.")
+            )
             return
         self.empty.pack_forget()
         self.tree_frame.pack(fill="both", expand=True)
         visible = filter_project(self.items + self.catalog + self.resources, query)
         # Parents precede children, including asynchronously discovered resources.
         for item in visible:
-            icon_name = {
+            icon_name = item.icon or {
                 "project": (
                     "project_folder_open"
                     if query or item.key in self._expanded
@@ -691,12 +715,6 @@ class ProjectSidebar:
                 "focus": "item_focus",
                 "file": "file_generic",
             }.get(item.kind)
-            if item.kind == "resource":
-                icon_name = {
-                    "Localization": "file_localization",
-                    "Graphics": "file_graphics",
-                    "Scripted Effects": "file_scripted_effects",
-                }[item.label]
             self.tree.insert(
                 item.parent,
                 "end",
@@ -713,17 +731,17 @@ class ProjectSidebar:
             if self.tree.exists(key):
                 self._restore((key,))
                 self.tree.focus(key)
-        self.message.config(
-            text=(
-                "No results. Try a name, ID or file path."
-                if not visible
-                else (
-                    "Search project…"
-                    if not query
-                    else f"{len(visible)} items including groups"
-                )
+        if not visible:
+            text = tr("explorer.no_results", "No results. Try a name, ID or file path.")
+        elif not query:
+            text = tr("explorer.search_prompt", "Search project…")
+        else:
+            text = tr(
+                "explorer.match_count",
+                "{count} items including groups",
+                count=len(visible),
             )
-        )
+        self.message.config(text=text)
         self.sync_selection()
 
     def _restore(self, keys):
@@ -798,16 +816,25 @@ class ProjectSidebar:
         if had_focus:
             self.tree.focus_set()
         help_text = {
-            "focus": "Enter: open Focus Spotlight",
-            "file": "Enter: reveal source folder",
-            "tree_file": "Enter or double-click: open focus tree",
-            "tree_catalog": "All focus-tree files in this mod",
-            "tree": "Left / Right: collapse or expand",
-            "project": "Your loaded project and source resources",
+            "focus": tr("explorer.help.focus", "Enter: open Focus Spotlight"),
+            "file": tr("explorer.help.file", "Enter: reveal source folder"),
+            "tree_file": tr(
+                "explorer.help.tree_file", "Enter or double-click: open focus tree"
+            ),
+            "tree_catalog": tr(
+                "explorer.help.tree_catalog", "All focus-tree files in this mod"
+            ),
+            "tree": tr("explorer.help.tree", "Left / Right: collapse or expand"),
+            "project": tr(
+                "explorer.help.project", "Your loaded project and source resources"
+            ),
             "resource": (
-                "Browse existing source files"
+                tr("explorer.help.resource", "Browse existing source files")
                 if item.path
-                else "Load a mod to browse source files"
+                else tr(
+                    "explorer.help.resource_unloaded",
+                    "Load a mod to browse source files",
+                )
             ),
         }
         self.message.config(text=help_text.get(item.kind, item.label))
@@ -832,7 +859,13 @@ class ProjectSidebar:
                 reveal_source(item.path)
             except OSError as exc:
                 add_error(f"Cannot reveal {item.path}: {exc}")
-                self.message.config(text=f"Cannot reveal source: {exc}")
+                self.message.config(
+                    text=tr(
+                        "explorer.cannot_reveal",
+                        "Cannot reveal source: {error}",
+                        error=exc,
+                    )
+                )
         elif item and item.kind != "state":
             opened = not self.tree.item(item.key, "open")
             self.tree.item(item.key, open=opened)

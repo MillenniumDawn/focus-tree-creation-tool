@@ -9,6 +9,7 @@ from pathlib import Path
 from tkinter import font as tkfont
 from typing import Any
 
+from hoi4cm.core.i18n import tr
 from hoi4cm.mod import MOD
 from hoi4cm.ui.image_broker import ImageTransform
 
@@ -210,9 +211,11 @@ class FocusSpotlight:
     _art_item: int
     _fallback: int
 
-    def __init__(self, app: Any, actions, invoke, dismiss):
-        self.app, self.actions = app, actions
+    def __init__(self, app: Any, labels, invoke, dismiss):
+        """``labels()`` returns button text keyed by action id, in display order."""
+        self.app, self.labels = app, labels
         self.invoke, self.dismiss = invoke, dismiss
+        self.texts: dict[str, str] = {}
         self.backdrop: tk.Toplevel | None = None
         self.window: tk.Toplevel | None = None
         self.focus_id = None
@@ -232,6 +235,7 @@ class FocusSpotlight:
 
     def open(self, focus):
         self.focus_id = focus.id
+        self.texts = self.labels()
         self._previous_grab = self.app.grab_current()
         self.backdrop = tk.Toplevel(self.app)
         self.backdrop.withdraw()
@@ -272,7 +276,7 @@ class FocusSpotlight:
         self.scroll.create_window(0, 0, window=self.content, anchor="nw")
         self.close_button = tk.Button(
             self.window,
-            text="Close ×",
+            text=f"{tr('common.close', 'Close')} ×",
             command=self.dismiss,
             bg=TRANSPARENT,
             activebackground="#203442",
@@ -303,13 +307,13 @@ class FocusSpotlight:
         )
         self.duration_label = tk.Label(
             self.preview,
-            text=f"{focus.cost * 7:g} days",
+            text=tr("focus_action.days", "{days} days", days=f"{focus.cost * 7:g}"),
             bg=TRANSPARENT,
             fg=CYAN,
             font=("Segoe UI", 11),
         )
         scale = self._scale()
-        for action, label in self.actions:
+        for action, label in self.texts.items():
             source = tk.PhotoImage(
                 master=self.window,
                 data=(
@@ -358,7 +362,8 @@ class FocusSpotlight:
         font = tkfont.Font(root=app, font=("Segoe UI", 11))
         bw = max(
             round(200 * scale),
-            max(font.measure(label) for _, label in self.actions) + round(72 * scale),
+            max(font.measure(label) for label in self.texts.values())
+            + round(72 * scale),
         )
         bh = max(round(48 * scale), font.metrics("linespace") + round(24 * scale))
         self.name_label.configure(wraplength=round(216 * scale))
