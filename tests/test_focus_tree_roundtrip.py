@@ -765,3 +765,83 @@ def test_fixture_structural_fields_survive(fname, tree_type):
     f1, t1 = _load_and_export_fixture(fname, tree_type)
     f2, _t2 = _load_and_export(t1, tree_type)
     assert _summary(f1) == _summary(f2)
+
+
+_WS_REWARD_TREE = """\
+focus_tree = {
+	id = TST_ws_tree
+	focus = {
+		id = TST_ws
+		x = 0
+		y = 0
+		completion_reward = {
+		}
+	}
+	focus = {
+		id = TST_absent
+		x = 1
+		y = 0
+	}
+	focus = {
+		id = TST_real
+		x = 2
+		y = 0
+		completion_reward = {
+			add_political_power = 50
+			foo_bar = 3
+		}
+	}
+}
+"""
+
+
+def _load_and_export_default(src, tree_type="shared"):
+    """parse -> build -> export with the production default renderer."""
+    parsed = parse_focus_tree(src, "/tmp/issue-358.txt")
+    focuses = build_focuses(parsed, tree_idx=1)
+    lookup = {f.id: f for f in focuses}
+    return focuses, export_focus_tree(
+        focuses, _info(parsed, tree_type), focus_lookup=lookup
+    )
+
+
+def test_empty_completion_reward_export_is_idempotent_issue_358():
+    """Absent and whitespace-only rewards keep no blank line on export."""
+    _f1, t1 = _load_and_export_default(_WS_REWARD_TREE)
+    assert "completion_reward = {\n\n" not in t1
+    _f2, t2 = _load_and_export_default(t1)
+    assert t2 == t1
+    assert "completion_reward = {\n\n" not in t2
+
+
+def test_nonempty_reward_survives_empty_effect_skip_issue_358():
+    """The empty-rendered-effect skip keeps real and unknown effects."""
+    focus1, t1 = _load_and_export_default(_WS_REWARD_TREE)
+    focus2, t2 = _load_and_export_default(t1)
+    assert t2 == t1
+    assert "\t\t\tadd_political_power = 50" in t1
+    assert "\t\t\tfoo_bar = 3" in t1
+    assert _summary(focus1) == _summary(focus2)
+
+
+def test_supplied_raw_block_keeps_comments_and_quoted_hash_issue_358():
+    """An explicitly supplied _raw_block keeps its comments through export."""
+    focus = Focus(id=9, x=0, y=0)
+    focus.name = "TST_raw"
+    focus.effects = [
+        {
+            "type": "_raw_block",
+            "fields": {
+                "raw": (
+                    "# keep this comment\n"
+                    'custom_effect_tooltip = "reward } # inside"\n'
+                    "foo_bar = 3"
+                )
+            },
+        }
+    ]
+    info = _extra_tree_info()
+    text = export_focus_tree([focus], info, focus_lookup={focus.id: focus})
+    assert "# keep this comment" in text
+    assert 'custom_effect_tooltip = "reward } # inside"' in text
+    assert "foo_bar = 3" in text

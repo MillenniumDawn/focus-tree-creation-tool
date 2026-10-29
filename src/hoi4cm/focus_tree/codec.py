@@ -267,10 +267,10 @@ def render_focus_body(
             f'{inner_indent}log = "[GetDateText]: [Root.GetName]: Focus {focus_label}"'
         )
     if focus.effects:
-        out.extend(
-            _reindent_effect(effect_renderer(effect), inner_indent)
-            for effect in focus.effects
-        )
+        for effect in focus.effects:
+            rendered = _reindent_effect(effect_renderer(effect), inner_indent)
+            if rendered.strip():
+                out.append(rendered)
     elif completion_reward_policy == "main":
         out.append(f"{inner_indent}# TODO: add effects")
     elif completion_reward_policy == "extra":
