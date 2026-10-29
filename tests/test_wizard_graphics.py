@@ -78,7 +78,7 @@ def test_nonrecursive_image_pairs_keep_duplicate_stems(tmp_path, use_catalog):
     for path in paths:
         path.touch()
     catalog = FakeCatalog(tuple(map(str, paths))) if use_catalog else None
-    expected_paths = paths[:2] if use_catalog else sorted(paths[:2])
+    expected_paths = paths[:2] if use_catalog else sorted(paths[:2], key=str)
 
     assert collect_image_pairs(str(root), "GFX_", catalog=catalog, recursive=False) == [
         ("GFX_same", str(path)) for path in expected_paths
