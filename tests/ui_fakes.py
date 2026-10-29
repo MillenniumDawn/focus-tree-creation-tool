@@ -31,6 +31,7 @@ class AppFake(CanvasMixin, ModLoadingMixin, EffectsMixin):
     CANVAS_EXPAND_STEP = 5
 
     def __init__(self, focuses=(), cv: Any = None) -> None:
+        super().__init__()
         self.focuses = FocusDocument(focuses)
         self.cv = cv if cv is not None else Mock()
         self.offset = [0, 0]
