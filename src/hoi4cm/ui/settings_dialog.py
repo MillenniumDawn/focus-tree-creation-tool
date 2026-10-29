@@ -22,6 +22,7 @@ from hoi4cm.ui.theme import (
     TEXT,
     TEXT_DIM,
 )
+from hoi4cm.ui.widgets import grab_when_visible
 
 # Built-in vanilla HOI4 tag names, used as the "Load Vanilla HOI4 Tags" quick-fill.
 VANILLA_COUNTRY_TAGS = {
@@ -116,7 +117,7 @@ def open_settings(app):
     win.configure(bg=BG_DARK)
     win.geometry("600x580")
     win.resizable(True, True)
-    win.grab_set()
+    grab_when_visible(win)
 
     save_warning_shown = False
 
@@ -726,7 +727,15 @@ def open_settings(app):
     def _delete_profile(pname):
         if pname == "vanilla":
             return
-        if not messagebox.askyesno("Delete", f"Delete profile '{pname}'?", parent=win):
+        if not messagebox.askyesno(
+            tr("settings.event_profile.delete.title", "Delete"),
+            tr(
+                "settings.event_profile.delete.body",
+                "Delete profile '{name}'?",
+                name=pname,
+            ),
+            parent=win,
+        ):
             return
         MOD.event_dim_profiles.pop(pname, None)
         if MOD.event_dim_active_profile == pname:
@@ -769,13 +778,13 @@ def open_settings(app):
             width=width,
         ).pack(side="left", padx=2)
 
-    _lbl_s(new_prof_row, "Name:")
+    _lbl_s(new_prof_row, tr("settings.event_profile.name", "Name:"))
     _ent_s(new_prof_row, np_name, 14)
-    _lbl_s(new_prof_row, "  country:")
+    _lbl_s(new_prof_row, tr("settings.event_profile.country", "  country:"))
     _ent_s(new_prof_row, np_cw, 5)
     _lbl_s(new_prof_row, "×")
     _ent_s(new_prof_row, np_ch, 5)
-    _lbl_s(new_prof_row, "  news:")
+    _lbl_s(new_prof_row, tr("settings.event_profile.news", "  news:"))
     _ent_s(new_prof_row, np_nw, 5)
     _lbl_s(new_prof_row, "×")
     _ent_s(new_prof_row, np_nh, 5)
@@ -783,7 +792,14 @@ def open_settings(app):
     def _add_profile():
         name = np_name.get().strip()
         if not name:
-            messagebox.showerror("Error", "Profile name cannot be empty.", parent=win)
+            messagebox.showerror(
+                tr("dialog.error.title", "Error"),
+                tr(
+                    "settings.event_profile.name_empty",
+                    "Profile name cannot be empty.",
+                ),
+                parent=win,
+            )
             return
         try:
             profile = {
@@ -791,7 +807,14 @@ def open_settings(app):
                 "news": (int(np_nw.get()), int(np_nh.get())),
             }
         except ValueError:
-            messagebox.showerror("Error", "Dimensions must be integers.", parent=win)
+            messagebox.showerror(
+                tr("dialog.error.title", "Error"),
+                tr(
+                    "settings.event_profile.dimensions_invalid",
+                    "Dimensions must be integers.",
+                ),
+                parent=win,
+            )
             return
         MOD.event_dim_profiles[name] = profile
         MOD.event_dim_active_profile = name

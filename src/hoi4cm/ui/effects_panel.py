@@ -27,6 +27,7 @@ from hoi4cm.ui.theme import (
     TEXT,
     TEXT_DIM,
 )
+from hoi4cm.ui.widgets import grab_when_visible
 
 
 def _augment_character_suggestions(suggestions, fname, *, loaded, character_ids):
@@ -496,8 +497,8 @@ class EffectsMixin:
 
         def _grab():
             try:
-                if pop.winfo_exists():
-                    pop.grab_set()
+                if pop.winfo_exists() and not grab_when_visible(pop):
+                    return
             except tk.TclError:
                 pass  # window not viewable yet — modality is a nicety, skip
 
@@ -517,6 +518,7 @@ class EffectsMixin:
         if fields is None:
             fields = {fn: dv for fn, _, dv, _ in defn.get("fields", [])}
         self.selected.effects.append({"type": etype, "fields": dict(fields)})
+        self.focuses.mark_content_changed()
         self._refresh_effects()
         self._focus_list_cache.invalidate()
         self._invalidate_focus_list_structure()
@@ -858,6 +860,7 @@ class EffectsMixin:
             return
         self._push_undo("remove effect", touched_ids=(self.selected.id,))
         self.selected.effects.pop(idx)
+        self.focuses.mark_content_changed()
         self._refresh_effects()
         self._focus_list_cache.invalidate()
         self._invalidate_focus_list_structure()
@@ -892,6 +895,7 @@ class EffectsMixin:
             return
         self._push_undo("rename effect field", touched_ids=(focus.id,))
         fields[new] = fields.pop(old)
+        self.focuses.mark_content_changed()
         self._effects_sig = None
 
     def _add_raw_effect_field(self, idx):
@@ -901,6 +905,7 @@ class EffectsMixin:
         self._push_undo("add effect field", touched_ids=(focus.id,))
         fields = focus.effects[idx].setdefault("fields", {})
         fields[f"key{len(fields)}"] = "value"
+        self.focuses.mark_content_changed()
         self._refresh_effects()
 
     def _write_effect_field(self, idx, fname, value):
@@ -915,5 +920,6 @@ class EffectsMixin:
             "edit effect", touched_ids=(focus.id,), run=(focus.id, idx, fname)
         )
         fields[fname] = value
+        self.focuses.mark_content_changed()
         # The cards no longer match the signature taken when they were built.
         self._effects_sig = None

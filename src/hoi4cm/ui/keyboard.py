@@ -82,7 +82,14 @@ def nudge_selection(app: KeyboardNudgeHost, dx: int, dy: int) -> None:
         if parent_id is not None and parent_id in moving_ids:
             relative_metadata[focus_id] = {
                 attribute: getattr(focus, attribute)
-                for attribute in ("_raw_gx", "_raw_gy", "_rel_dx", "_rel_dy")
+                for attribute in (
+                    "_raw_gx",
+                    "_raw_gy",
+                    "_rel_dx",
+                    "_rel_dy",
+                    "_build_gx",
+                    "_build_gy",
+                )
                 if hasattr(focus, attribute)
             }
     for x, y in targets.values():
@@ -106,13 +113,12 @@ def nudge_selection(app: KeyboardNudgeHost, dx: int, dy: int) -> None:
         app._fv_x.set(str(app.selected.x))
         app._fv_y.set(str(app.selected.y))
     app._hint(
-        tr(
-            "hint.focus_nudged",
-            "Moved selection {direction}.",
-            direction={(-1, 0): "left", (1, 0): "right", (0, -1): "up", (0, 1): "down"}[
-                (dx, dy)
-            ],
-        )
+        {
+            (-1, 0): tr("hint.focus_nudged_left", "Moved selection left."),
+            (1, 0): tr("hint.focus_nudged_right", "Moved selection right."),
+            (0, -1): tr("hint.focus_nudged_up", "Moved selection up."),
+            (0, 1): tr("hint.focus_nudged_down", "Moved selection down."),
+        }[(dx, dy)]
     )
 
 

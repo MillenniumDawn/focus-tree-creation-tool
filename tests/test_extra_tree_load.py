@@ -114,6 +114,76 @@ def test_load_extra_tree_parses_off_the_tk_thread(tmp_path, monkeypatch):
     assert app._extra_trees[0]["tree_id"] == "TST_shared"
 
 
+def test_later_extra_tree_adoption_reconciles_live_indexes_and_undo_redo(
+    tmp_path, monkeypatch
+):
+    target = tmp_path / "target.txt"
+    target.write_text(
+        "focus_tree = { id = TST_target focus = { id = TARGET x = 5 y = 7 } }",
+        encoding="utf-8",
+    )
+    dependent = Focus(id=41, x=2, y=3)
+    dependent.name = "DEPENDENT"
+    dependent.tree_idx = 1
+    dependent.relative_position_id = "TARGET"
+    dependent._raw_gx = dependent._build_gx = 2
+    dependent._raw_gy = dependent._build_gy = 3
+    dependent._rel_dx = 2
+    dependent._rel_dy = 3
+    dependent._relative_pending = True
+    dependent.prereqs = [[]]
+    dependent._unresolved_prereqs = [["TARGET"]]
+    dependent._unresolved_mutex = ["TARGET"]
+    app = _shell()
+    app.focuses.extend([dependent])
+    calls: list[dict[str, Any]] = []
+    _patch_run_bg(monkeypatch, calls)
+    monkeypatch.setattr(m.filedialog, "askopenfilename", lambda **_k: str(target))
+    monkeypatch.setattr(m.messagebox, "showinfo", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        m,
+        "progress_modal",
+        lambda *_a, **_k: SimpleNamespace(close=lambda: None),
+    )
+    monkeypatch.setattr(m.MOD, "loaded", False)
+    monkeypatch.setattr(m.MOD, "root", None)
+
+    m.App._load_extra_tree(cast(m.App, app), "shared")
+
+    target_focus = app.focuses.find_by_name("TARGET")
+    assert target_focus is not None
+    live_dependent = app.focuses[dependent.id]
+    assert (live_dependent.x, live_dependent.y) == (7, 10)
+    assert live_dependent.prereqs == [[target_focus.id]]
+    assert live_dependent.mutex == [target_focus.id]
+    assert live_dependent._unresolved_prereqs == [[]]
+    assert live_dependent._unresolved_mutex == []
+    assert app.focuses.occupied_positions[(7, 10)] == {dependent.id}
+    assert app.focuses.reverse_prerequisites == {target_focus.id: {dependent.id}}
+    assert app.focuses.reverse_mutex == {target_focus.id: {dependent.id}}
+    assert app.focuses.validate_indexes()
+
+    app._undo()
+
+    restored = app.focuses[dependent.id]
+    assert (restored.x, restored.y) == (2, 3)
+    assert restored.prereqs == [[]]
+    assert restored._unresolved_prereqs == [["TARGET"]]
+    assert restored._unresolved_mutex == ["TARGET"]
+    assert app.focuses.occupied_positions[(2, 3)] == {dependent.id}
+    assert app.focuses.reverse_prerequisites == {}
+    assert app.focuses.reverse_mutex == {}
+    assert app.focuses.validate_indexes()
+
+    app._redo()
+
+    redone = app.focuses[dependent.id]
+    assert (redone.x, redone.y) == (7, 10)
+    assert redone.prereqs == [[target_focus.id]]
+    assert redone.mutex == [target_focus.id]
+    assert app.focuses.validate_indexes()
+
+
 def test_load_extra_tree_after_undo_does_not_reuse_redo_id(tmp_path, monkeypatch):
     tree = tmp_path / "shared.txt"
     tree.write_text(

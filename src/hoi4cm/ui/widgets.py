@@ -7,8 +7,78 @@ functions/classes here so the App and every wizard can share them.
 import time
 import tkinter as tk
 import tkinter.font as tkfont
+from typing import Any
 
 from hoi4cm.ui.theme import BG_CARD, BORDER_G, SEL_BG, TEXT
+
+
+def grab_when_visible(window: Any) -> bool:
+    """Set a local grab once mapped, unless the caller's window was destroyed.
+
+    Already-viewable windows are grabbed immediately. For a new toplevel,
+    defer the grab until its map event instead of entering a nested Tk wait.
+    An intentionally withdrawn but live window is left alone and the builder
+    may continue creating its widgets.
+
+    Return ``False`` only when the window was destroyed. ``True`` means the
+    caller may safely continue, including when the live window is withdrawn.
+    """
+    try:
+        if not window.winfo_exists():
+            return False
+        if window.state() == "withdrawn":
+            return True
+        viewable = window.winfo_viewable()
+        if viewable:
+            window.grab_set()
+            return True
+        if viewable is None:
+            # Minimal Tk shims often return None for unknown widget methods.
+            # Leave their builders alone and skip modality.
+            return True
+
+        binding_ids: list[tuple[str, str | None]] = []
+
+        def cleanup():
+            for sequence, funcid in binding_ids:
+                if funcid:
+                    try:
+                        window.unbind(sequence, funcid)
+                    except tk.TclError:
+                        pass
+            binding_ids.clear()
+
+        def try_grab(event=None):
+            if event is not None and event.widget is not window:
+                return
+            try:
+                if not window.winfo_exists() or window.state() == "withdrawn":
+                    cleanup()
+                elif window.winfo_viewable():
+                    window.grab_set()
+                    cleanup()
+            except tk.TclError:
+                cleanup()
+
+        def check_state(event=None):
+            if event is None or event.widget is window:
+                try_grab(event)
+
+        def on_destroy(event):
+            if event.widget is window:
+                cleanup()
+
+        for sequence, callback in (
+            ("<Map>", check_state),
+            ("<Visibility>", check_state),
+            ("<Unmap>", check_state),
+            ("<Destroy>", on_destroy),
+        ):
+            binding_ids.append((sequence, window.bind(sequence, callback, "+")))
+    except tk.TclError:
+        return False
+    return True
+
 
 # ── Safe after() wrappers ────────────────────────────────────────
 # Guard only a destroyed widget (TclError, or AttributeError from the
@@ -335,6 +405,7 @@ class Tooltip:
 
 __all__ = [
     "Tooltip",
+    "grab_when_visible",
     "_safe_after",
     "_safe_after_idle",
 ]

@@ -12,6 +12,8 @@ that).
   recipe, what's still deferred and why.
 - **[performance.md](performance.md)**: scale targets, the profiling
   harness, the hot-path ledger, GIL guidance, cache inventory.
+- **[issue-331-autosave.md](issue-331-autosave.md)**: sidebar recovery regression
+  reproduction and verification evidence.
 - **[testing.md](testing.md)**: fixture/isolation patterns, the headless
   constraint, manual verification checklist.
 - **[wizards.md](wizards.md)**: the six wizard modules, `_shared.py`

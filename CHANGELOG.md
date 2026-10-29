@@ -8,6 +8,12 @@ the version by hand. See `AGENTS.md`.
 
 ## Unreleased
 
+- Add a UI language by dropping `locales/<code>.json` into the folder: the
+  language list is read from the files, each naming itself in `_meta`. Wrap the
+  wizard, settings, undo, canvas and validation text that bypassed `tr()`, and
+  add the keys the code used but the locale files lacked. The German, Spanish and
+  Chinese strings added here are machine translations and need native review. A
+  test now fails when a `tr()` key is missing from `en.json` or a locale drifts.
 - Record a failed sibling autosave once in the error log, including its path.
   Repeated ticks for the same failure do not add another entry.
 - Make the raw effect block editor, raw key rename, raw field add and the icon

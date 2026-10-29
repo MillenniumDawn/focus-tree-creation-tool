@@ -96,7 +96,8 @@ def apply_sidebar_values(focus: Focus, values: FocusSidebarValues) -> bool:
     """Write non-position form fields onto ``focus``.
 
     Returns True when ``name`` changed (caller must ``touch()`` name indexes).
-    Position is left to ``FocusDocument.move``.
+    Position is left to ``FocusDocument.move``. When neither changes, the
+    caller must still mark the content revision for other field edits.
     """
     name_changed = focus.name != values.name
     focus.name = values.name

@@ -13,6 +13,11 @@
   `script/__init__.py`, `ui/splash.py`).
 - **#10**: i18n support added directly in `hoi4cm.core.i18n`, plus the
   `locales/*.json` files.
+- **#21**: languages are discovered from `locales/*.json` (`_meta.display_name`),
+  the Tk shells' remaining literals went through `tr()`, and
+  `tests/test_i18n_keys.py` guards key drift. Undo labels stay English on the
+  stack and are translated for display by `ui/undo_labels.py`, so the monolith
+  gained only the `tr()` calls and one import for it.
 - **#13**: the three separate parse/build/export code paths that had grown
   in the monolith de-duplicated into one pipeline: `focus_tree/parse.py`,
   `build.py`, `export.py`.

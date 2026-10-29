@@ -62,6 +62,7 @@ def test_link_prerequisite_and_mode_validation():
     document.link_prerequisite(child.id, (parent_a.id, parent_b.id), mode="and")
 
     assert child.prereqs == [[parent_a.id], [parent_b.id]]
+    assert child._unresolved_prereqs == [[], []]
     with pytest.raises(ValueError, match="mode must be 'or' or 'and'"):
         document.link_prerequisite(child.id, (parent_a.id,), mode="invalid")
 
@@ -198,6 +199,33 @@ def test_rename_prefix_bumps_revision_so_cached_ui_refreshes():
     assert renamed == 1
     assert document.revision == revision + 1
     assert document.first_by_name == {"NEW_a": 1, "keep": 2}
+
+
+def test_rename_prefix_updates_exact_relative_anchors_and_preserves_indexes():
+    root = _focus(1, name="OLD_root")
+    child = _focus(2, name="child")
+    grandchild = _focus(3, name="OTHER_grandchild")
+    unrelated = _focus(4, name="OLDish_root")
+    root.prereqs = [[2]]
+    child.mutex = [3]
+    child.relative_position_id = root.name
+    grandchild.relative_position_id = child.name
+    unrelated.relative_position_id = root.name
+    document = FocusDocument((root, child, grandchild, unrelated))
+
+    renamed = document.rename_prefix("OLD_", "NEW_")
+
+    assert renamed == 1
+    assert root.name == "NEW_root"
+    assert child.relative_position_id == "NEW_root"
+    assert grandchild.relative_position_id == "child"
+    assert unrelated.name == "OLDish_root"
+    assert unrelated.relative_position_id == "NEW_root"
+    assert root.prereqs == [[2]]
+    assert child.mutex == [3]
+    assert document.find_by_name("NEW_root") is root
+    assert document.find_by_name("OLD_root") is None
+    _assert_indexes(document)
 
 
 def test_randomized_mutations_match_reference_indexes():
@@ -463,6 +491,18 @@ def test_unlink_prerequisite_group_keeps_parents_another_group_still_names():
     document.unlink_prerequisite_group(2, 0)
     assert document.reverse_prerequisites == {}
     _assert_indexes(document)
+
+
+def test_unlink_prerequisite_group_keeps_unresolved_or_group_alignment():
+    child = _focus(2)
+    child.prereqs = [[], [3]]
+    child._unresolved_prereqs = [["MISSING_A"], ["MISSING_B"]]
+    document = FocusDocument((child, _focus(3)))
+
+    document.unlink_prerequisite_group(child.id, 0)
+
+    assert child.prereqs == [[3]]
+    assert child._unresolved_prereqs == [["MISSING_B"]]
 
 
 def test_unlink_mutex_drops_emptied_buckets_even_for_a_missing_partner():

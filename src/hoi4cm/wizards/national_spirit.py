@@ -44,6 +44,7 @@ from hoi4cm.ui import (
     open_folder_gfx_browser,
     report_error,
 )
+from hoi4cm.ui.widgets import grab_when_visible
 from hoi4cm.wizards._generators import build_national_spirit_output
 from hoi4cm.wizards._graphics import browser_folders, collect_image_pairs
 from hoi4cm.wizards._saves import save_spirit
@@ -126,7 +127,7 @@ def open_national_spirit_wizard(app):
     win.configure(bg=BG_DARK)
     win.geometry("820x860")
     win.resizable(True, True)
-    win.grab_set()
+    grab_when_visible(win)
 
     # ── Auto-save on close ─────────────────────────────────────────────
     # Snapshot (detached copy) and the JSON write live in the module-level
@@ -477,8 +478,11 @@ def open_national_spirit_wizard(app):
 
         if not folders:
             messagebox.showinfo(
-                "No Folders",
-                "No image files or subfolders found in the ideas GFX path.",
+                tr("dialog.no_folders.title", "No Folders"),
+                tr(
+                    "dialog.no_ideas_gfx_folders",
+                    "No image files or subfolders found in the ideas GFX path.",
+                ),
             )
             return
 
@@ -1007,11 +1011,23 @@ def open_national_spirit_wizard(app):
             if key.endswith("_desc"):
                 if val != v_loc_desc.get():
                     v_loc_desc.set(val)
-                    changes.append(f"Description → {val!r}")
+                    changes.append(
+                        tr(
+                            "spirit.change.description",
+                            "Description → {value}",
+                            value=repr(val),
+                        )
+                    )
             else:
                 if val != v_loc_name.get():
                     v_loc_name.set(val)
-                    changes.append(f"Display name → {val!r}")
+                    changes.append(
+                        tr(
+                            "spirit.change.display_name",
+                            "Display name → {value}",
+                            value=repr(val),
+                        )
+                    )
 
         # Walk the ideas block with a state machine
         state = "top"
@@ -1039,7 +1055,13 @@ def open_national_spirit_wizard(app):
                 widget.delete("1.0", "end")
                 if content:
                     widget.insert("1.0", content)
-                changes.append(f"{label} block updated")
+                changes.append(
+                    tr(
+                        "spirit.change.block_updated",
+                        "{label} block updated",
+                        label=label,
+                    )
+                )
 
         for ln in ideas_lines:
             s = ln.strip()
@@ -1091,8 +1113,11 @@ def open_national_spirit_wizard(app):
                         _set_text(t_rule, content, "rule")
                     elif current_block == "modifier":
                         warnings.append(
-                            "modifier block — modifier cards not updated "
-                            "(use Extra / Custom Modifiers field if needed)"
+                            tr(
+                                "spirit.warning.modifier_block",
+                                "modifier block — modifier cards not updated "
+                                "(use Extra / Custom Modifiers field if needed)",
+                            )
                         )
                     current_block = None
                     block_buf = []
@@ -1105,36 +1130,70 @@ def open_national_spirit_wizard(app):
             m = re.match(r"picture\s*=\s*(\S+)", s)
             if m and m.group(1) != v_picture.get():
                 v_picture.set(m.group(1))
-                changes.append(f"Picture GFX → {m.group(1)!r}")
+                changes.append(
+                    tr(
+                        "spirit.change.picture_gfx",
+                        "Picture GFX → {value}",
+                        value=repr(m.group(1)),
+                    )
+                )
                 continue
             m = re.match(r"^name\s*=\s*(\S+)", s)
             if m and m.group(1) != v_name_key.get():
                 v_name_key.set(m.group(1))
-                changes.append(f"Name key → {m.group(1)!r}")
+                changes.append(
+                    tr(
+                        "spirit.change.name_key",
+                        "Name key → {value}",
+                        value=repr(m.group(1)),
+                    )
+                )
                 continue
             m = re.match(r"cost\s*=\s*(-?\d+(?:\.\d+)?)", s)
             if m and m.group(1) != v_cost.get():
                 v_cost.set(m.group(1))
-                changes.append(f"Cost → {m.group(1)}")
+                changes.append(
+                    tr("spirit.change.cost", "Cost → {value}", value=m.group(1))
+                )
                 continue
             m = re.match(r"removal_cost\s*=\s*(-?\d+(?:\.\d+)?)", s)
             if m and m.group(1) != v_removal.get():
                 v_removal.set(m.group(1))
-                changes.append(f"Removal cost → {m.group(1)}")
+                changes.append(
+                    tr(
+                        "spirit.change.removal_cost",
+                        "Removal cost → {value}",
+                        value=m.group(1),
+                    )
+                )
                 continue
             m = re.match(r"ai_will_do\s*=\s*\{\s*factor\s*=\s*(\S+)\s*\}", s)
             if m and m.group(1) != v_ai.get():
                 v_ai.set(m.group(1))
-                changes.append(f"AI will do → {m.group(1)}")
+                changes.append(
+                    tr(
+                        "spirit.change.ai_will_do",
+                        "AI will do → {value}",
+                        value=m.group(1),
+                    )
+                )
                 continue
 
             # Spirit/slot ID changes
             if spirit_id and spirit_id != v_id.get():
                 v_id.set(spirit_id)
-                changes.append(f"Idea ID → {spirit_id!r}")
+                changes.append(
+                    tr(
+                        "spirit.change.idea_id",
+                        "Idea ID → {value}",
+                        value=repr(spirit_id),
+                    )
+                )
             if slot_val and slot_val != v_slot.get():
                 v_slot.set(slot_val)
-                changes.append(f"Slot → {slot_val!r}")
+                changes.append(
+                    tr("spirit.change.slot", "Slot → {value}", value=repr(slot_val))
+                )
 
             # Block openings
             matched_block = False
@@ -1157,15 +1216,25 @@ def open_national_spirit_wizard(app):
             if not matched_block and s not in ("}", "{{"):
                 # line inside spirit block we didn't handle
                 if not re.match(r"^(picture|name|cost|removal_cost|ai_will_do)\b", s):
-                    warnings.append(f"Unrecognised line kept as-is: {s!r}")
+                    warnings.append(
+                        tr(
+                            "spirit.warning.unrecognised_line",
+                            "Unrecognised line kept as-is: {line}",
+                            line=repr(s),
+                        )
+                    )
 
         # Apply spirit_id / slot if not caught inside loop
         if spirit_id and spirit_id != v_id.get():
             v_id.set(spirit_id)
-            changes.append(f"Idea ID → {spirit_id!r}")
+            changes.append(
+                tr("spirit.change.idea_id", "Idea ID → {value}", value=repr(spirit_id))
+            )
         if slot_val and slot_val != v_slot.get():
             v_slot.set(slot_val)
-            changes.append(f"Slot → {slot_val!r}")
+            changes.append(
+                tr("spirit.change.slot", "Slot → {value}", value=repr(slot_val))
+            )
 
         # ── Build notification message ────────────────────────────────────
         _lock_lbl.config(
@@ -1175,20 +1244,37 @@ def open_national_spirit_wizard(app):
         parts = []
         if changes:
             parts.append(
-                "Fields updated from your code:\n"
+                tr("spirit.review.fields_updated", "Fields updated from your code:")
+                + "\n"
                 + "\n".join(f"  • {c}" for c in changes)
             )
         if warnings:
             parts.append(
-                "Please check these manually:\n"
+                tr("spirit.review.check_fields", "Please check these manually:")
+                + "\n"
                 + "\n".join(f"  ⚠ {w}" for w in warnings)
             )
         if not changes and not warnings:
-            parts.append("No field changes detected. Raw override saved.")
+            parts.append(
+                tr(
+                    "spirit.review.no_changes",
+                    "No field changes detected. Raw override saved.",
+                )
+            )
 
-        parts.append("\nThe output will export exactly as shown in the preview.")
+        parts.append(
+            "\n"
+            + tr(
+                "spirit.review.exports_as_shown",
+                "The output will export exactly as shown in the preview.",
+            )
+        )
 
-        messagebox.showinfo("Saved — Review Changes", "\n\n".join(parts), parent=win)
+        messagebox.showinfo(
+            tr("dialog.saved_review.title", "Saved — Review Changes"),
+            "\n\n".join(parts),
+            parent=win,
+        )
 
     _edit_btn.config(command=_toggle_edit)
     _save_raw_btn.config(command=_save_raw)
@@ -1214,7 +1300,9 @@ def open_national_spirit_wizard(app):
         txt = _get_output_text()
         win.clipboard_clear()
         win.clipboard_append(txt)
-        app._hint("National Spirit code copied to clipboard!")
+        app._hint(
+            tr("spirit.hint.code_copied", "National Spirit code copied to clipboard!")
+        )
 
     def _save_to_mod():
         sid = sanitize_component(
@@ -1234,7 +1322,10 @@ def open_national_spirit_wizard(app):
             ideas_path = os.path.join(mod_root, "common", "ideas", f"{sid}.txt")
         else:
             mod_root = filedialog.askdirectory(
-                title="Select MOD ROOT folder (common/ideas/ will be used)"
+                title=tr(
+                    "filedialog.spirit_mod_root",
+                    "Select MOD ROOT folder (common/ideas/ will be used)",
+                )
             )
             if not mod_root:
                 return
@@ -1251,13 +1342,18 @@ def open_national_spirit_wizard(app):
             loc_desc=v_loc_desc.get().strip(),
         )
         msg = format_save_summary(saved, warnings, errs)
-        messagebox.showinfo("Saved to Mod", msg, parent=win)
+        messagebox.showinfo(
+            tr("dialog.saved_to_mod.title", "Saved to Mod"), msg, parent=win
+        )
 
     def _browse_existing_spirits():
         if not MOD.loaded or not MOD.root:
             messagebox.showinfo(
-                "No Mod Loaded",
-                "Load a mod first to browse existing spirits.",
+                tr("dialog.no_mod_loaded.title", "No Mod Loaded"),
+                tr(
+                    "spirit.dialog.load_mod_to_browse",
+                    "Load a mod first to browse existing spirits.",
+                ),
                 parent=win,
             )
             return
@@ -1265,7 +1361,12 @@ def open_national_spirit_wizard(app):
         ideas_dir = os.path.join(MOD.root, "common", "ideas")
         if not os.path.isdir(ideas_dir):
             messagebox.showinfo(
-                "Not Found", "No common/ideas/ directory found in mod.", parent=win
+                tr("dialog.not_found.title", "Not Found"),
+                tr(
+                    "spirit.dialog.no_ideas_dir",
+                    "No common/ideas/ directory found in mod.",
+                ),
+                parent=win,
             )
             return
 
@@ -1309,7 +1410,7 @@ def open_national_spirit_wizard(app):
         dlg.configure(bg=BG_DARK)
         dlg.geometry("600x520")
         dlg.resizable(True, True)
-        dlg.grab_set()
+        grab_when_visible(dlg)
 
         tk.Label(
             dlg,
@@ -1374,7 +1475,11 @@ def open_national_spirit_wizard(app):
 
         info_lbl = tk.Label(
             dlg,
-            text=f"{len(spirits)} spirits found in mod",
+            text=tr(
+                "spirit.browser.count",
+                "{count} spirits found in mod",
+                count=len(spirits),
+            ),
             bg=BG_DARK,
             fg=TEXT_DIM,
             font=("Helvetica", 8),
@@ -1406,13 +1511,22 @@ def open_national_spirit_wizard(app):
                 )
                 if not isinstance(spirit, dict):
                     report_error(
-                        f"Could not parse spirit '{spirit_id}'",
+                        tr(
+                            "spirit.error.parse_spirit",
+                            "Could not parse spirit '{name}'",
+                            name=spirit_id,
+                        ),
                         parent=dlg,
-                        title="Parse Error",
+                        title=tr("dialog.parse_error.title", "Parse Error"),
                     )
                     return
             except (OSError, ValueError, TypeError, RuntimeError) as exc:
-                report_error(str(exc), exc, parent=dlg, title="Parse Error")
+                report_error(
+                    str(exc),
+                    exc,
+                    parent=dlg,
+                    title=tr("dialog.parse_error.title", "Parse Error"),
+                )
                 return
 
             # Populate identity fields
@@ -1476,7 +1590,14 @@ def open_national_spirit_wizard(app):
 
             _refresh_preview()
             dlg.destroy()
-            app._hint(f"Loaded spirit '{spirit_id}' from {os.path.basename(fp)}")
+            app._hint(
+                tr(
+                    "spirit.hint.loaded",
+                    "Loaded spirit '{name}' from {file}",
+                    name=spirit_id,
+                    file=os.path.basename(fp),
+                )
+            )
 
         lb.bind("<Double-Button-1>", lambda e: _load_selected())
 

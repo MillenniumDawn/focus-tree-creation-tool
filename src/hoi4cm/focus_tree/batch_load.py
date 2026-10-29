@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import threading
 import time
+from copy import deepcopy
 from types import SimpleNamespace
 
 from hoi4cm.core.logger import get_logger
@@ -41,8 +42,10 @@ def batch_load_trees(
 ):
     """Parse and build selected trees sequentially, stopping if cancelled."""
     total = len(to_load)
-    existing = list(existing_seed)
-    build_context = BuildContext(existing, id_floor=allocator_floor)
+    # Workers may resolve links into the seed while constructing a detached
+    # batch. Keep those mutations off live App focus objects until Tk adoption.
+    existing = deepcopy(list(existing_seed))
+    build_context = BuildContext(existing, id_floor=allocator_floor, reconcile=False)
     tree_idx = extra_trees_start_idx
     results = []
     stopped_early = False
@@ -64,10 +67,12 @@ def batch_load_trees(
                 tree_idx + 1,
                 country_tag=country_tag,
                 context=build_context,
+                register_focuses=False,
             )
             if cancelled is not None and cancelled.is_set():
                 stopped_early = True
                 break
+            build_context.add_focuses(new_focuses, reconcile=False)
             tree_idx += 1
             t2 = time.perf_counter()
             _log.debug(
@@ -92,6 +97,7 @@ def batch_load_trees(
             break
         except Exception as exc:  # noqa: BLE001
             results.append({"path": path, "type": ttype, "ok": False, "error": exc})
+    build_context._reconcile_pending()
     return results, stopped_early
 
 

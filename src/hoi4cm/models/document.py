@@ -68,6 +68,7 @@ class FocusDocument(MutableMapping[int, Focus]):
         self._focuses: dict[int, Focus] = {}
         self._id_set_cache: frozenset[int] | None = None
         self.geometry_revision = 0
+        self.content_revision = 0
         self.names: dict[str, tuple[int, ...]] = {}
         self.first_by_name: dict[str, int] = {}
         self.last_by_name: dict[str, int] = {}
@@ -210,6 +211,9 @@ class FocusDocument(MutableMapping[int, Focus]):
         if getattr(focus, "_rel_dx", None) is not None:
             focus._rel_dx += dgx
             focus._rel_dy += dgy
+        if getattr(focus, "_build_gx", None) is not None:
+            focus._build_gx += dgx
+            focus._build_gy += dgy
         focus.x, focus.y = x, y
         # Only occupied_positions depends on x/y, so update it in place rather
         # than rebuilding every index. This keeps a drag cheap on a big tree.
@@ -229,12 +233,18 @@ class FocusDocument(MutableMapping[int, Focus]):
         if not parents:
             return
         child = self._focuses[child_id]
+        unresolved = getattr(child, "_unresolved_prereqs", [])
+        while len(unresolved) < len(child.prereqs):
+            unresolved.append([])
         if mode == "or":
             child.prereqs.append(parents)
+            unresolved.append([])
         elif mode == "and":
             child.prereqs.extend([parent_id] for parent_id in parents)
+            unresolved.extend([] for _parent_id in parents)
         else:
             raise ValueError("mode must be 'or' or 'and'")
+        child._unresolved_prereqs = unresolved
         for parent_id in parents:
             self.reverse_prerequisites.setdefault(parent_id, set()).add(child_id)
         self._changed()
@@ -244,6 +254,12 @@ class FocusDocument(MutableMapping[int, Focus]):
         for parent_id in child.prereqs.pop(group_index):
             if not any(parent_id in group for group in child.prereqs):
                 _discard(self.reverse_prerequisites, parent_id, child_id)
+        unresolved = getattr(child, "_unresolved_prereqs", [])
+        while len(unresolved) < len(child.prereqs):
+            unresolved.append([])
+        if group_index < len(unresolved):
+            unresolved.pop(group_index)
+        child._unresolved_prereqs = unresolved
         self._changed()
 
     def link_mutex(self, left_id: int, right_id: int) -> None:
@@ -304,14 +320,40 @@ class FocusDocument(MutableMapping[int, Focus]):
             self._changed()
         self.rebuild_indexes()
 
+    def prefix_rename_touched_ids(self, old: str) -> set[int]:
+        """Return focuses whose names or relative-position anchors would change."""
+        if not old:
+            raise ValueError("old prefix cannot be empty")
+        renamed_names = {
+            focus.name for focus in self._focuses.values() if focus.name.startswith(old)
+        }
+        return {
+            focus.id
+            for focus in self._focuses.values()
+            if focus.name.startswith(old)
+            or getattr(focus, "relative_position_id", None) in renamed_names
+        }
+
     def rename_prefix(self, old: str, new: str) -> int:
         if not old:
             raise ValueError("old prefix cannot be empty")
-        renamed = 0
+        name_map: dict[str, str] = {}
         for focus in self._focuses.values():
             if focus.name.startswith(old):
-                focus.name = new + focus.name[len(old) :]
+                name_map.setdefault(focus.name, new + focus.name[len(old) :])
+        if not name_map:
+            return 0
+
+        renamed = 0
+        for focus in self._focuses.values():
+            replacement = name_map.get(focus.name)
+            if replacement is not None:
+                focus.name = replacement
                 renamed += 1
+            relative_position_id = getattr(focus, "relative_position_id", None)
+            if relative_position_id in name_map:
+                focus.relative_position_id = name_map[relative_position_id]
+
         if renamed:
             # Bump the revision too: names don't affect the SceneIndex
             # signature, so without this the canvas keeps the old labels until
@@ -354,6 +396,10 @@ class FocusDocument(MutableMapping[int, Focus]):
         self._changed()
         self.rebuild_indexes()
 
+    def mark_content_changed(self) -> None:
+        """Record content edits that do not affect focus indexes or geometry."""
+        self.content_revision += 1
+
     def _put(self, focus: Focus) -> None:
         old = self._focuses.get(focus.id)
         self._focuses[focus.id] = focus
@@ -378,11 +424,17 @@ class FocusDocument(MutableMapping[int, Focus]):
             focus = self._focuses.get(focus_id)
             if focus is None:
                 continue
-            focus.prereqs = [
-                [parent for parent in group if parent not in deleted]
-                for group in focus.prereqs
-            ]
-            focus.prereqs = [group for group in focus.prereqs if group]
+            unresolved = getattr(focus, "_unresolved_prereqs", [])
+            retained_groups = []
+            retained_unresolved = []
+            for index, group in enumerate(focus.prereqs):
+                filtered = [parent for parent in group if parent not in deleted]
+                names = unresolved[index] if index < len(unresolved) else []
+                if filtered or names:
+                    retained_groups.append(filtered)
+                    retained_unresolved.append(names)
+            focus.prereqs = retained_groups
+            focus._unresolved_prereqs = retained_unresolved
             focus.mutex = [other for other in focus.mutex if other not in deleted]
 
     def _unindex(self, removed: Iterable[Focus]) -> None:
@@ -485,6 +537,7 @@ class FocusDocument(MutableMapping[int, Focus]):
 
     def _changed(self) -> None:
         self.geometry_revision += 1
+        self.content_revision += 1
 
 
 @dataclass

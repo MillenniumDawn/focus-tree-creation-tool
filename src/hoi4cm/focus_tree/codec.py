@@ -55,6 +55,11 @@ _PRESERVED_PARSE_FIELDS = (
     "_rel_dy",
     "_joint_extra",
     "_script_extras",
+    "_unresolved_prereqs",
+    "_unresolved_mutex",
+    "_build_gx",
+    "_build_gy",
+    "_relative_pending",
     "_icon_script",
 )
 
@@ -105,7 +110,7 @@ def _render_coordinates(
     relative_id = getattr(focus, "relative_position_id", None)
     parent = name_lookup.get(relative_id) if relative_id else None
     if parent is None:
-        return x, y, None
+        return x, y, relative_id
 
     if policy == "raw":
         dx = getattr(focus, "_rel_dx", None)
@@ -185,18 +190,33 @@ def render_focus_body(
         joint_extra = getattr(focus, "_joint_extra", "").strip()
         out.extend(f"{indent}{line}" for line in joint_extra.splitlines())
 
-    for group in focus.prereqs:
+    unresolved_groups = getattr(focus, "_unresolved_prereqs", [])
+    for group_index, group in enumerate(focus.prereqs):
         valid = [focus_id for focus_id in group if focus_id in focus_lookup]
-        if valid:
-            values = " ".join(
-                f"focus = {emit_scalar(focus_identifier(focus_lookup[focus_id].name))}"
-                for focus_id in valid
+        unresolved = (
+            unresolved_groups[group_index]
+            if group_index < len(unresolved_groups)
+            else []
+        )
+        values = " ".join(
+            f"focus = {emit_scalar(focus_identifier(focus_lookup[focus_id].name))}"
+            for focus_id in valid
+        )
+        if unresolved:
+            unresolved_values = " ".join(
+                f"focus = {emit_scalar(name)}" for name in unresolved
             )
+            values = f"{values} {unresolved_values}".strip()
+        if values:
             out.append(f"{indent}prerequisite = {{ {values} }}")
     for focus_id in focus.mutex:
         if focus_id in focus_lookup:
             mutex_name = emit_scalar(focus_identifier(focus_lookup[focus_id].name))
             out.append(f"{indent}mutually_exclusive = " f"{{ focus = {mutex_name} }}")
+    out.extend(
+        f"{indent}mutually_exclusive = {{ focus = {emit_scalar(name)} }}"
+        for name in getattr(focus, "_unresolved_mutex", [])
+    )
 
     search_filters = getattr(focus, "search_filters", "").strip()
     if search_filters:
@@ -329,6 +349,7 @@ def apply_focus_code(
         focus.tree_idx,
         country_tag=country_tag,
         existing_focuses=existing,
+        register_focuses=False,
     )[0]
     candidate.prereqs = [
         [focus.id if value == candidate.id else value for value in group]

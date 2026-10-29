@@ -120,6 +120,16 @@ file text
   -> loc export                             (id -> configured-language YML entries)
 ```
 
+Imported prerequisite, mutex, and relative-position names remain on the focus
+until their target is present. `BuildContext` reconciles these references when
+a batch or a later extra-tree adoption adds targets. Project saves and sparse
+undo snapshots carry this import metadata. Batch workers register a built tree only after the
+cancellation check, then reconcile the accepted batch once against its complete
+lookup. Single-tree workers use existing names for lookup but leave live focus
+objects untouched; Tk-thread adoption reconciles the completed document and
+calls `FocusDocument.touch()` so canvas and reverse-link indexes are rebuilt
+together.
+
 The selected HOI4 localisation language is persisted as `loc_language` on
 `ModContext`. UI code snapshots that string into export plans and pure wizard
 generators; worker code does not read mutable global settings. Existing edit
@@ -230,7 +240,9 @@ or state leaks across tests:
   module globals, loaded once at import time and reassigned by
   `set_language()`. Read them through `get_language()`/`tr()`, not by
   importing the globals directly (an imported name goes stale after a
-  language switch).
+  language switch). `I18N_LANGS` is built once at import from the
+  `locales/*.json` files (see "UI translations" in `testing.md`), so adding a
+  language needs no code change.
 - **Logger state** (`hoi4cm.core.logger`): the error buffer, the
   registered error callback, and whether the excepthook is installed are
   all module globals. `test_logger.py`'s `log_state` fixture snapshots and
@@ -249,15 +261,17 @@ or state leaks across tests:
 
 ## Revision discipline
 
-`FocusDocument` owns focus geometry and bumps a `geometry_revision` counter
-whenever a focus moves (its mutating methods, or an explicit `touch()`).
-UI that caches against that counter recomputes only when it changes:
-`SceneIndex` (canvas hit-testing and culling) rebuilds when
-`FocusDocument.revision` moves, and the minimap's world-bounds cache is keyed
-on `SceneIndex.revision`. The rule: never mutate a focus's coordinates in
-place without going through `FocusDocument` / `touch()`. Skip it and those
-caches keep stale coordinates, so hit-testing and the minimap disagree with
-what's actually drawn until something else forces a rebuild.
+`FocusDocument.revision` aliases `geometry_revision`, which invalidates focus
+indexes and scene caches after geometry or topology changes. `SceneIndex`
+(canvas hit-testing and culling) rebuilds when that revision moves, and the
+minimap's world-bounds cache is keyed on `SceneIndex.revision`. The separate
+`content_revision` tracks saveable focus edits. Normal document mutations bump
+both revisions; sidebar edits that do not affect geometry or indexes call
+`mark_content_changed()` instead. Dirty tracking and autosave deduplication use
+`content_revision`, so a cost or description edit reaches recovery without
+rebuilding scene or spatial indexes. Coordinate changes still go through
+`FocusDocument.move()`, and fields that affect derived indexes use their
+mutators or `touch()`.
 
 ## Threading model (phase 5)
 

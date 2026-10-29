@@ -1,9 +1,6 @@
 """Tests for hoi4cm.core.i18n — locale loading and translation lookup."""
 
 import json
-import re
-from collections import Counter
-from pathlib import Path
 
 import pytest
 
@@ -47,29 +44,10 @@ def _read_json_or_empty(path):
         return {}
 
 
-def _locale_files():
-    locale_dir = Path(__file__).parents[1] / "locales"
-    return (
-        json.loads((locale_dir / "en.json").read_text()),
-        json.loads((locale_dir / "de.json").read_text()),
+def _write_locale(directory, code, payload):
+    (directory / f"{code}.json").write_text(
+        json.dumps(payload, ensure_ascii=False), encoding="utf-8"
     )
-
-
-_PLACEHOLDER_RE = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}")
-
-
-def test_german_locale_has_exact_english_key_parity():
-    english, german = _locale_files()
-    assert set(german) == set(english)
-
-
-def test_german_locale_preserves_named_placeholders():
-    english, german = _locale_files()
-
-    for key, english_text in english.items():
-        assert Counter(_PLACEHOLDER_RE.findall(german[key])) == Counter(
-            _PLACEHOLDER_RE.findall(english_text)
-        ), key
 
 
 def test_tr_returns_default_when_key_missing(restore_i18n_state):
@@ -135,3 +113,92 @@ def test_get_language_tracks_set_language(restore_i18n_state, fake_config):
     assert i18n_mod.get_language() == "en"
     i18n_mod.set_language("zh_CN")
     assert i18n_mod.get_language() == "zh_CN"
+
+
+def test_shipped_languages_are_discovered_with_english_first():
+    assert list(i18n_mod.I18N_LANGS.items()) == [
+        ("en", "English"),
+        ("de", "Deutsch"),
+        ("es", "Español"),
+        ("zh_CN", "简体中文"),
+    ]
+
+
+def test_discover_languages_reads_meta_display_names(tmp_path):
+    _write_locale(tmp_path, "zh_CN", {"_meta": {"display_name": "简体中文"}})
+    _write_locale(tmp_path, "fr", {"_meta": {"display_name": "Français"}})
+    _write_locale(tmp_path, "en", {"_meta": {"display_name": "English"}})
+
+    assert list(i18n_mod.discover_languages(tmp_path).items()) == [
+        ("en", "English"),
+        ("fr", "Français"),
+        ("zh_CN", "简体中文"),
+    ]
+
+
+def test_discover_languages_always_offers_english(tmp_path):
+    assert i18n_mod.discover_languages(tmp_path) == {"en": "English"}
+    assert i18n_mod.discover_languages(tmp_path / "missing") == {"en": "English"}
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [{"a.key": "text"}, {"_meta": {}}, {"_meta": {"display_name": ""}}, {"_meta": "x"}],
+)
+def test_discover_languages_falls_back_to_code_without_display_name(tmp_path, payload):
+    _write_locale(tmp_path, "pt_BR", payload)
+
+    assert i18n_mod.discover_languages(tmp_path)["pt_BR"] == "pt_BR"
+
+
+def test_discover_languages_skips_unreadable_files(tmp_path):
+    (tmp_path / "bad_json.json").write_text("{not json", encoding="utf-8")
+    (tmp_path / "bad_bytes.json").write_bytes(b"\xff\xfe\x00")
+    (tmp_path / "not_object.json").write_text("[1, 2]", encoding="utf-8")
+    _write_locale(tmp_path, "de", {"_meta": {"display_name": "Deutsch"}})
+
+    assert i18n_mod.discover_languages(tmp_path) == {"en": "English", "de": "Deutsch"}
+
+
+def test_unknown_language_falls_back_to_english(restore_i18n_state, fake_config):
+    i18n_mod._load_i18n("xx_YY")
+
+    assert i18n_mod.get_language() == "en"
+
+
+def test_missing_locale_file_leaves_inline_defaults_in_use(
+    restore_i18n_state, fake_config, tmp_path, monkeypatch
+):
+    monkeypatch.setattr(i18n_mod, "_project_root", lambda: str(tmp_path))
+
+    i18n_mod._load_i18n("en")
+
+    assert i18n_mod.I18N_STRINGS == {}
+    assert i18n_mod.tr("common.cancel", "Cancel") == "Cancel"
+
+
+def test_meta_block_is_not_a_translation(restore_i18n_state):
+    i18n_mod._load_i18n("de")
+
+    assert "_meta" not in i18n_mod.I18N_STRINGS
+    assert i18n_mod.tr("_meta") == "_meta"
+
+
+def test_dropped_in_locale_file_is_selectable(
+    restore_i18n_state, fake_config, tmp_path, monkeypatch
+):
+    locales = tmp_path / "locales"
+    locales.mkdir()
+    _write_locale(
+        locales,
+        "fr",
+        {"_meta": {"display_name": "Français"}, "common.cancel": "Annuler"},
+    )
+    monkeypatch.setattr(i18n_mod, "_project_root", lambda: str(tmp_path))
+    monkeypatch.setattr(i18n_mod, "I18N_LANGS", i18n_mod.discover_languages(locales))
+
+    i18n_mod.set_language("fr")
+
+    assert i18n_mod.get_language() == "fr"
+    assert i18n_mod.tr("common.cancel", "Cancel") == "Annuler"
+    assert "_meta" not in i18n_mod.I18N_STRINGS

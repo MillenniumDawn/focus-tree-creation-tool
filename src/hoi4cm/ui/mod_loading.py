@@ -38,6 +38,7 @@ from hoi4cm.ui.theme import (
     TEXT,
     TEXT_DIM,
 )
+from hoi4cm.ui.widgets import grab_when_visible
 from hoi4cm.wizards import _shared as _wiz_shared
 
 log = get_logger("mod_loading")
@@ -338,7 +339,7 @@ class ModLoadingMixin:
         _sh = dlg.winfo_screenheight()
         dlg.geometry(f"640x{min(700, _sh - 80)}")
         dlg.resizable(True, True)
-        dlg.grab_set()
+        grab_when_visible(dlg)
 
         # ── Header (pinned, not scrolled) ─────────────────────────────────
         tk.Label(

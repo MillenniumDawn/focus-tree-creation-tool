@@ -1,3 +1,4 @@
+from hoi4cm.focus_tree import validate as validate_mod
 from hoi4cm.focus_tree.validate import (
     DEFAULT_GFX,
     Issue,
@@ -452,6 +453,30 @@ def test_issues_capped_with_truncation_notice():
     assert issues[-1].severity == "info"
     assert "15" in issues[-1].message
     assert all(it.code != "issues_truncated" for it in issues[:-1])
+
+
+def test_cap_renders_only_the_messages_it_keeps(monkeypatch):
+    focuses = [
+        _focus(fid, name=f"F{fid}", x=fid, gfx="", effects=[]) for fid in range(1, 11)
+    ]
+    doc = FocusDocument(focuses)
+    uncapped = validate_document(doc, max_issues=100)
+    rendered = []
+    real_tr = validate_mod.tr
+
+    def counting_tr(key, default=None, **kwargs):
+        rendered.append(key)
+        return real_tr(key, default, **kwargs)
+
+    monkeypatch.setattr(validate_mod, "tr", counting_tr)
+
+    capped = validate_document(doc, max_issues=5)
+
+    assert capped[:5] == uncapped[:5]
+    assert "[F1]" in capped[0].message
+    # Twenty issues were found; only the five kept ones and the notice render.
+    assert len(rendered) == 6
+    assert rendered[-1] == "validation.issue.issues_truncated"
 
 
 def test_issues_not_truncated_when_under_cap():

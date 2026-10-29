@@ -207,3 +207,127 @@ def test_build_context_updates_first_position_and_last_link_indexes():
     assert second_batch[0].id == 44
     assert second_batch[0].prereqs == [[first_batch[-1].id]]
     assert second_batch[0].prereqs != [[second_batch[0].id]]
+
+
+def test_build_preserves_unresolved_links_and_reconciles_later_tree():
+    child_src = """focus_tree = {
+        id = CHILD_tree
+        focus = {
+            id = CHILD_one
+            x = 3
+            y = 2
+            relative_position_id = MID_anchor
+            prerequisite = { focus = KNOWN focus = LATE }
+            prerequisite = { focus = LATE }
+            mutually_exclusive = { focus = LATE }
+        }
+        focus = { id = MID_anchor x = 2 y = 1 relative_position_id = LATE }
+    }"""
+    context = BuildContext()
+    child = build_focuses(
+        parse_focus_tree(child_src, "child.txt"), tree_idx=1, context=context
+    )
+    known = Focus(id=90)
+    known.name = "KNOWN"
+    context.add_focuses([known])
+
+    # Missing anchors use their raw displacement until the target is adopted.
+    assert (child[0].x, child[0].y) == (5, 3)
+    assert child[0].prereqs == [[known.id], []]
+    assert child[0]._unresolved_prereqs == [["LATE"], ["LATE"]]
+    assert child[0]._unresolved_mutex == ["LATE"]
+
+    late = Focus(id=91, x=10, y=20)
+    late.name = "LATE"
+    context.add_focuses([late])
+
+    assert (child[1].x, child[1].y) == (12, 21)
+    assert (child[0].x, child[0].y) == (15, 23)
+    assert child[0].prereqs == [[known.id, late.id], [late.id]]
+    assert child[0]._unresolved_prereqs == [[], []]
+    assert child[0].mutex == [late.id]
+    assert child[0]._unresolved_mutex == []
+
+
+def test_build_batch_order_parity_with_multihop_anchors_and_cycles(tmp_path):
+    first = tmp_path / "first.txt"
+    second = tmp_path / "second.txt"
+    first.write_text(
+        "focus_tree = { id = FIRST focus = { id = A x = 2 y = 1 "
+        "relative_position_id = B } focus = { id = B x = 3 y = 4 "
+        "relative_position_id = C } focus = { id = C x = 10 y = 20 } }",
+        encoding="utf-8",
+    )
+    second.write_text(
+        "focus_tree = { id = SECOND focus = { id = C x = 10 y = 20 } "
+        "focus = { id = B x = 3 y = 4 relative_position_id = C } "
+        "focus = { id = A x = 2 y = 1 relative_position_id = B } }",
+        encoding="utf-8",
+    )
+    cycle = parse_focus_tree(
+        "focus_tree = { id = CYCLE focus = { id = X x = 1 y = 2 "
+        "relative_position_id = Y } focus = { id = Y x = 3 y = 4 "
+        "relative_position_id = X } }",
+        "cycle.txt",
+    )
+
+    ordered = build_focuses(parse_focus_tree(first.read_text(), str(first)), 1)
+    reverse = build_focuses(parse_focus_tree(second.read_text(), str(second)), 1)
+    ordered_positions = {focus.name: (focus.x, focus.y) for focus in ordered}
+    reverse_positions = {focus.name: (focus.x, focus.y) for focus in reverse}
+    assert ordered_positions == reverse_positions
+    assert ordered_positions == {"A": (15, 25), "B": (13, 24), "C": (10, 20)}
+    cyclic = build_focuses(cycle, 1)
+    assert all(
+        isinstance(focus.x, int) and isinstance(focus.y, int) for focus in cyclic
+    )
+
+
+def test_relative_pending_propagates_through_later_tree_anchor():
+    context = BuildContext()
+    first = parse_focus_tree(
+        "focus_tree = { id = A focus = { id = A x = 1 y = 0 "
+        "relative_position_id = M } }",
+        "a.txt",
+    )
+    second = parse_focus_tree(
+        "focus_tree = { id = B focus = { id = B x = 2 y = 0 "
+        "relative_position_id = A } }",
+        "b.txt",
+    )
+    target = Focus(id=100, x=10, y=0)
+    target.name = "M"
+
+    a = build_focuses(first, 1, context=context)
+    b = build_focuses(second, 2, context=context)
+    context.add_focuses([target])
+
+    assert (a[0].x, b[0].x) == (11, 13)
+    assert a[0]._relative_pending is False
+    assert b[0]._relative_pending is False
+
+
+def test_duplicate_reference_resolution_keeps_lookup_winner_policy():
+    source = parse_focus_tree(
+        "focus_tree = { id = C focus = { id = CHILD prerequisite = { "
+        "focus = LATE } } }",
+        "child.txt",
+    )
+    first = Focus(id=80)
+    first.name = "LATE"
+    last = Focus(id=81)
+    last.name = "LATE"
+
+    immediate_context = BuildContext()
+    immediate = build_focuses(source, 1, context=immediate_context)[0]
+    immediate_context.add_focuses([first])
+    immediate_context.add_focuses([last])
+    assert immediate.prereqs == [[first.id]]
+
+    deferred_context = BuildContext(reconcile=False)
+    deferred = build_focuses(
+        source, 1, context=deferred_context, register_focuses=False
+    )[0]
+    deferred_context.add_focuses([deferred], reconcile=False)
+    deferred_context.add_focuses([first, last])
+    assert deferred.prereqs == [[last.id]]

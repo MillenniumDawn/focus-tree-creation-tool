@@ -7,7 +7,9 @@ Source code uses stable keys plus English fallbacks::
 The default language is taken from the ``HOI4CM_LANG`` env var, falling back
 to the user's saved config (``language`` key), falling back to ``en``.
 Locale JSON files live in ``./locales/<lang>.json`` and may be edited without
-touching code.
+touching code. Every ``locales/*.json`` file is a selectable language: its
+``_meta.display_name`` is the name shown in Settings, so a new language is one
+new file.
 
 This module is intentionally a stateful singleton (the i18n strings are
 loaded once into a module-level dict and re-read on ``set_language``) because
@@ -17,21 +19,14 @@ Tk code reads ``tr(...)`` at call time, not at import time.
 import json
 import os
 import sys
+from pathlib import Path
 
 from hoi4cm.core.config import cfg_load, cfg_save
 from hoi4cm.core.logger import get_logger
 
 _log = get_logger("i18n")
 
-# Public state
-I18N_LANGS = {
-    "en": "English",
-    "zh_CN": "简体中文",
-    "de": "Deutsch",
-    "es": "Español",
-}
-I18N_LANG = None
-I18N_STRINGS: dict[str, str] = {}
+META_KEY = "_meta"
 
 
 def _project_root():
@@ -49,8 +44,44 @@ def _project_root():
     return here.rsplit(os.sep, 4)[0]
 
 
+def _locales_dir():
+    return os.path.join(_project_root(), "locales")
+
+
 def _locale_path(lang):
-    return os.path.join(_project_root(), "locales", f"{lang}.json")
+    return os.path.join(_locales_dir(), f"{lang}.json")
+
+
+def discover_languages(locale_dir: str | os.PathLike[str]) -> dict[str, str]:
+    """Map language code to display name for each ``*.json`` in *locale_dir*.
+
+    English comes first so the Settings combo keeps a stable head, then the
+    rest by code. A file that cannot be read is skipped; one without a usable
+    ``_meta.display_name`` is listed under its code.
+    """
+    languages = {"en": "English"}
+    for path in sorted(Path(locale_dir).glob("*.json")):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except OSError, ValueError:
+            _log.warning("locale %s is unreadable, skipping", path.name)
+            continue
+        if not isinstance(data, dict):
+            _log.warning("locale %s is not a JSON object, skipping", path.name)
+            continue
+        meta = data.get(META_KEY)
+        name = meta.get("display_name") if isinstance(meta, dict) else None
+        if not isinstance(name, str) or not name.strip():
+            _log.warning("locale %s has no _meta.display_name", path.name)
+            name = path.stem
+        languages[path.stem] = name
+    return languages
+
+
+# Public state
+I18N_LANGS = discover_languages(_locales_dir())
+I18N_LANG = None
+I18N_STRINGS: dict[str, str] = {}
 
 
 def _load_i18n(lang=None):
@@ -63,7 +94,9 @@ def _load_i18n(lang=None):
     path = _locale_path(chosen)
     try:
         with open(path, encoding="utf-8") as f:
-            I18N_STRINGS = json.load(f)
+            strings = json.load(f)
+        strings.pop(META_KEY, None)
+        I18N_STRINGS = strings
     except (OSError, json.JSONDecodeError, UnicodeDecodeError, ValueError) as exc:
         _log.warning("locale load failed for %s: %s", chosen, exc)
         I18N_STRINGS = {}
@@ -106,6 +139,7 @@ __all__ = [
     "I18N_LANGS",
     "I18N_LANG",
     "I18N_STRINGS",
+    "discover_languages",
     "get_language",
     "set_language",
     "tr",

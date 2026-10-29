@@ -4,6 +4,7 @@
 
 import os
 import tkinter as tk
+from collections.abc import Callable
 from unittest.mock import Mock
 
 import pytest
@@ -24,11 +25,32 @@ class _Var:
     def __init__(self, v=""):
         self._v = v
 
-    def get(self):
+    def get(self, *_args):
         return self._v
 
     def set(self, v):
         self._v = v
+
+
+class _ManualTimer:
+    def __init__(self):
+        self.job: tuple[str, Callable[[], None]] | None = None
+        self.next_job = 0
+
+    def after(self, _delay, callback):
+        self.next_job += 1
+        job = f"job-{self.next_job}"
+        self.job = job, callback
+        return job
+
+    def after_cancel(self, _job):
+        self.job = None
+
+    def tick(self):
+        assert self.job is not None
+        _job, callback = self.job
+        self.job = None
+        callback()
 
 
 @pytest.fixture
@@ -76,7 +98,7 @@ def _fake_app(**overrides):
     fake._default_focus_prefix = ""
     fake._extra_trees = []
     fake.focuses = FocusDocument()
-    fake._saved_revision = fake.focuses.revision
+    fake._saved_revision = fake.focuses.content_revision
     fake._saved_fingerprint = fake._workspace_fingerprint()
     fake._autosave_job = None
     fake._autosave_interval_ms = 60000
@@ -151,7 +173,7 @@ def test_mark_clean_resets_dirty():
     assert app._is_dirty() is True
     app._mark_clean()
     assert app._is_dirty() is False
-    assert app._saved_revision == app.focuses.revision
+    assert app._saved_revision == app.focuses.content_revision
 
 
 def test_workspace_fingerprint_changes_with_extra_tree_focus_ids_order():
@@ -301,6 +323,158 @@ def test_autosave_tick_writes_sibling_when_last_path(monkeypatch, tmp_path):
     app._autosave_tick()
     assert len(writes) == 2
     assert any(".autosave.json" in p for p in writes)
+
+
+@pytest.mark.parametrize("commit_path", ["apply", "select-away"])
+def test_autosave_timer_persists_sidebar_cost_and_description_edits(
+    monkeypatch, tmp_path, commit_path
+):
+    app = _fake_app()
+    for name in (
+        "_autosave",
+        "_apply",
+        "_select",
+        "_read_sidebar_values",
+        "_coerce_numeric",
+        "_set_field_error",
+        "_read_offsets_from_form",
+    ):
+        setattr(app, name, getattr(m.App, name).__get__(app))
+    first = Focus(id=1, x=0, y=0)
+    first.name = "focus_one"
+    first.desc = "old description"
+    second = Focus(id=2, x=2, y=0)
+    second.name = "focus_two"
+    app.focuses.add(first)
+    app.focuses.add(second)
+    app.selected = first
+    app.workspace = EditorWorkspace(focuses=app.focuses)
+    app._push_undo = lambda *_args, **_kwargs: None
+    app._redraw = app._show_form = app._update_focus_list_selection = lambda: None
+    app._invalidate_focus_list_structure = lambda: None
+    app._populate = lambda focus: populate_sidebar(app, focus)
+    app._offset_entries = []
+    app._fv_name = _Var()
+    app._fv_icon = _Var()
+    app._fv_gfx = _Var()
+    app._fv_cost = _Var()
+    app._fv_ai_raw = _Var()
+    app._fv_x = _Var()
+    app._fv_y = _Var()
+    app._fv_loc_name = _Var()
+    app._fv_desc = _Var()
+    app._fv_search = _Var()
+    app._fv_avail = _Var()
+    app._fv_bypass = _Var()
+    app._fv_cancel2 = _Var()
+    app._fv_cancel = _Var()
+    app._fv_continue = _Var()
+    app._fv_cap = _Var()
+    app._set_field_error = lambda *_args: None
+    app._populate(first)
+
+    def commit_sidebar(target):
+        if commit_path == "apply":
+            app._apply()
+        else:
+            app._select(target)
+
+    timer = _ManualTimer()
+    app.after = timer.after
+    app.after_cancel = timer.after_cancel
+    app._last_project_path = str(tmp_path / "project.json")
+    primary = tmp_path / "workspace.json"
+    sibling = tmp_path / "project.autosave.json"
+    monkeypatch.setattr(m, "workspace_autosave_path", lambda: str(primary))
+    monkeypatch.setattr(m, "sibling_autosave_path", lambda _path: str(sibling))
+    writes = []
+    write = aw.write_project_text
+
+    def record_write(path, text):
+        writes.append(path)
+        write(path, text)
+
+    monkeypatch.setattr(aw, "write_project_text", record_write)
+
+    app._schedule_autosave()
+    timer.tick()
+    assert [m.read_project(path).focuses[1].cost for path in (primary, sibling)] == [
+        10,
+        10,
+    ]
+    assert len(writes) == 2
+
+    geometry_revision = app.focuses.revision
+    content_revision = getattr(app.focuses, "content_revision", geometry_revision)
+    name_index = app.focuses.names
+    position_index = app.focuses.occupied_positions
+    app._fv_cost.set("35")
+    commit_sidebar(second)
+    assert app.focuses[1].cost == 35
+    assert app.focuses.revision == geometry_revision
+    assert app._is_dirty()
+    timer.tick()
+    assert [m.read_project(path).focuses[1].cost for path in (primary, sibling)] == [
+        35,
+        35,
+    ]
+    assert app.focuses.content_revision > content_revision
+    assert app.focuses.names is name_index
+    assert app.focuses.occupied_positions is position_index
+    assert len(writes) == 4
+    assert primary.read_bytes() == sibling.read_bytes()
+    timer.tick()
+    assert len(writes) == 4
+
+    # A normal project save can make the workspace clean between recovery
+    # writes. The next sidebar edit must transition it back to dirty.
+    app._mark_clean()
+    assert not app._is_dirty()
+    if commit_path == "select-away":
+        app._select(first)
+    content_revision = app.focuses.content_revision
+    app._fv_desc.set("new description")
+    commit_sidebar(second)
+    assert app.focuses[1].desc == "new description"
+    assert app.focuses.revision == geometry_revision
+    assert app._is_dirty()
+    timer.tick()
+    recovery = [m.read_project(path).focuses[1] for path in (primary, sibling)]
+    assert [(focus.cost, focus.desc) for focus in recovery] == [
+        (35, "new description"),
+        (35, "new description"),
+    ]
+    assert app.focuses.content_revision > content_revision
+    assert app.focuses.names is name_index
+    assert app.focuses.occupied_positions is position_index
+    assert len(writes) == 6
+    assert primary.read_bytes() == sibling.read_bytes()
+
+    timer.tick()
+    assert len(writes) == 6
+
+
+def populate_sidebar(app, focus):
+    values = {
+        "_fv_name": focus.name,
+        "_fv_icon": focus.icon,
+        "_fv_gfx": focus.gfx,
+        "_fv_cost": str(focus.cost),
+        "_fv_ai_raw": focus.ai_will_do_raw or f"base = {focus.ai_will_do}",
+        "_fv_x": str(focus.x),
+        "_fv_y": str(focus.y),
+        "_fv_loc_name": focus.loc_name,
+        "_fv_desc": focus.desc,
+        "_fv_search": focus.search_filters,
+        "_fv_avail": focus.available_cond,
+        "_fv_bypass": focus.bypass_cond,
+        "_fv_cancel2": focus.cancel_cond,
+        "_fv_cancel": focus.cancel_if_invalid,
+        "_fv_continue": focus.continue_if_invalid,
+        "_fv_cap": focus.available_if_capitulated,
+    }
+    for name, value in values.items():
+        getattr(app, name).set(value)
 
 
 def test_autosave_tick_swallows_write_error(monkeypatch, tmp_path, errors):
