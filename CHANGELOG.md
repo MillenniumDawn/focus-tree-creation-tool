@@ -8,6 +8,11 @@ the version by hand. See `AGENTS.md`.
 
 ## Unreleased
 
+- Import focus trees containing non-finite `ai_will_do` values (`inf`,
+  `-inf`, `1e999`, `-1e999`) instead of aborting the load: the field falls
+  back to the existing default of 1 in both scalar and block form, and the
+  original block content is preserved for round-trips.
+
 - Finish the UI strings left in English after language discovery: the effects
   hover hint, the edit-target menubar label, the event-picture profile line,
   and the wizard, Draw.io and Set Edit Targets file-type filters. Inline
