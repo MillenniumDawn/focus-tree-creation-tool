@@ -23,6 +23,8 @@ the version by hand. See `AGENTS.md`.
   test now fails when a `tr()` key is missing from `en.json` or a locale drifts.
 - Record a failed sibling autosave once in the error log, including its path.
   Repeated ticks for the same failure do not add another entry.
+- Add French (Français) as an interface language. The strings are machine
+  translations and need native review.
 - Offer the field marshal role in the Character Editor's role list, next to
   corps commander and navy leader.
 - Make the raw effect block editor, raw key rename, raw field add and the icon
