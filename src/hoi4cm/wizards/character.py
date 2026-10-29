@@ -190,7 +190,10 @@ class CharacterWizard:
             parent=self.win,
             title=tr("wizard.character.open_title", "Open character file"),
             initialdir=os.path.join(self.mod_root, "common", "characters"),
-            filetypes=(("HOI4 script", "*.txt"), ("All files", "*")),
+            filetypes=(
+                (tr("filetype.hoi4_script", "HOI4 script"), "*.txt"),
+                (tr("filetype.all_files", "All files"), "*"),
+            ),
         )
         if not path:
             return
