@@ -25,6 +25,12 @@ the version by hand. See `AGENTS.md`.
   and shutdown cleanup stay on the Tk thread.
 - Report unreadable folders in the fallback focus-icon picker instead of
   failing its Tk callback.
+- Remember the window size and position between launches. Every config save
+  used to overwrite the stored geometry with an empty string, so it never
+  restored.
+- Ignore a non-text event `id` or `picture` when importing events, and report a
+  failed events or localisation folder in the Save to Mod summary instead of
+  raising.
 
 - Add a UI language by dropping `locales/<code>.json` into the folder: the
   language list is read from the files, each naming itself in `_meta`. Wrap the

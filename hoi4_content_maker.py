@@ -411,10 +411,6 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         """Update the index, then drop stale PhotoImages on the Tk thread."""
         return self.images.evict(self.index.note_file_written(path))
 
-    def note_mod_file_deleted(self, path: str):
-        """Update the index, then drop stale PhotoImages on the Tk thread."""
-        return self.images.evict(self.index.note_file_deleted(path))
-
     def _workspace_fingerprint(self):
         try:
             cfp_x = int(self._cfp_x_var.get())
