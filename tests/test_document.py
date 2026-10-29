@@ -703,3 +703,37 @@ def test_mutations_bump_the_revision_once_and_id_set_only_when_structural(
     assert document.id_set == frozenset(document)
     assert (document.id_set is cached) is not structural
     assert document.validate_indexes()
+
+
+def test_move_advances_geometry_and_content_but_not_structure():
+    document = FocusDocument((_focus(1), _focus(2)))
+    geometry = document.revision
+    content = document.content_revision
+    structure = document.structure_revision
+
+    assert document.move(1, 9, 9)
+
+    assert document.revision == geometry + 1
+    assert document.content_revision == content + 1
+    assert document.structure_revision == structure
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda doc: doc.add(_focus(3)),
+        lambda doc: doc.delete_many((2,)),
+        lambda doc: doc.set_tree(1, 3),
+        lambda doc: doc.touch(),
+        lambda doc: doc.mark_labels_changed(),
+    ],
+)
+def test_structure_revision_advances_for_everything_but_a_move(mutate):
+    document = FocusDocument((_focus(1), _focus(2)))
+    structure = document.structure_revision
+    content = document.content_revision
+
+    mutate(document)
+
+    assert document.structure_revision > structure
+    assert document.content_revision > content

@@ -62,28 +62,35 @@ its parameter list when you add one. Do not add click-through tests.
 `hoi4_content_maker.py` Tk shell, with branch coverage on. The source list is
 in `[tool.coverage.run]` in `pyproject.toml`; `--cov` without a value uses
 that list. `pytest --cov --cov-report=term-missing` prints per-file gaps.
-CI follows the headless run with two filtered reports so the sources have
-independent floors rather than one blended percentage:
+CI then runs the Tk smoke in a separate process and appends coverage for
+`ui/project_sidebar.py`, `ui/focus_editor.py` and `ui/editor_chrome.py` only.
+Those stay in the package floor; Tk execution does not raise the headless
+monolith measurement. The filtered reports keep independent floors rather than
+one blended percentage:
 
 ```sh
+xvfb-run -a pytest -m tk --cov=hoi4cm.ui.project_sidebar \
+  --cov=hoi4cm.ui.focus_editor --cov=hoi4cm.ui.editor_chrome --cov-append
 coverage report --include='src/hoi4cm/*' --fail-under=91
 coverage report --include='hoi4_content_maker.py' --fail-under=34
 ```
 
-Measured on the headless suite: 92% for the package and 35% for the monolith.
-Each floor sits one point below. These are floors, not targets: raise them as
-coverage climbs. The package and monolith must stay separately included in
-`pyproject.toml` so a future change cannot silently stop measuring either
-source.
+Measured with that Tk coverage appended: 91% for the package and 39% for the
+headless monolith. The floors remain 91% and 34%. These are floors, not
+targets: raise them as coverage climbs. The package and monolith must stay
+separately included in `pyproject.toml` so a future change cannot silently stop
+measuring either source.
 
-The package floor leaves out the modules that build Tk widgets. They are
+The package floor leaves out most modules that build Tk widgets. They are
 listed under `omit` in `[tool.coverage.report]`: the wizard dialogs, the
 canvas, the browsers, the menubar and toolbar, and the other widget modules.
 The headless suite reaches 2% to 77% of each, so including them would turn
 the floor back into a number nobody can move. `tests/test_coverage_gates.py`
 fails if an omitted module does not import tkinter, so a pure module cannot
 be hidden there. A new pure module is gated automatically. A new widget
-module drags the floor down until it is added to `omit`.
+module needs either real Tk coverage, as the project sidebar, focus editor and
+editor chrome have, or an entry in `omit` if its logic is already covered
+through extracted helpers.
 
 The way to raise real coverage is extraction: move logic out of a dialog
 closure into a pure module (the `_generators.py` pattern), where it is gated
@@ -113,6 +120,8 @@ never fails at run time. `tests/test_i18n_keys.py` is the guard. It reads every
 `tr()` call in `src/hoi4cm` and `hoi4_content_maker.py` with `ast` and checks
 that:
 
+- each JSON key is unique, so a repeated entry cannot silently replace a
+  translation;
 - every literal key is in `locales/en.json`, and every key in `en.json` is used
   by some call (orphans fail);
 - every locale file has exactly the keys of `en.json`, apart from `_meta`, with
@@ -252,21 +261,30 @@ regression, so it was documented rather than reverted.
 
 The Tk smoke needs a display. On Linux run it under `xvfb-run -a` so nothing
 opens on your desktop (`sudo apt-get install xvfb xauth` on Debian/Ubuntu).
-That is the only way it is run and checked. CI runs it on Linux only, so a
-pass says nothing about Windows or macOS.
+CI runs `pytest -m tk` on Linux under Xvfb and on native Windows and macOS.
+The Spotlight cases run on every platform: Windows checks color-key
+transparency; Linux and macOS check the solid dark surface. All three run
+the same action, keyboard, resizing and dismissal assertions. The 200% DPI
+smoke raises the window maximum before App construction and fixes both size
+limits at its required 1440×1000 client area. This keeps native screen-height
+fitting from shrinking the layout viewport on small runner desktops. The
+Spotlight reflow case separately covers resizing a normal app window.
 
 The separate `windows-permissions` job runs `tests/test_cache_permissions.py`
-on native Windows. Both new-cache and existing-cache cases inspect real directory
-and database DACLs. Executable builds depend on this job as well as lint and the
-Linux test job, so a cache-permission failure blocks release artifacts.
+and then the Tk smoke in separate processes on native Windows. Both new-cache
+and existing-cache cases inspect real directory and database DACLs. The
+`macos-tk` job runs the Tk smoke on native macOS. Executable builds depend on
+both jobs as well as lint and the Linux test job, so native Tk or cache-permission
+failures block release artifacts.
 
 ## What is not automated
 
-Widget behavior has no automated test: canvas drawing and culling, the
+Most widget behavior still needs manual checks: canvas drawing and culling, the
 virtualized list and thumbnail pools, dialog flows (confirm, browse, the
 button press that starts a save), keyboard focus, grabs, and the tutorial
-walk. The smoke proves each window builds. The checklists below cover the
-rest by hand, and each one is a candidate for extraction into a pure function
+walk. The smoke proves each window builds and exercises Spotlight actions,
+keyboard navigation and dismissal. The checklists below cover the rest by
+hand, and each one is a candidate for extraction into a pure function
 with a headless test.
 
 What a wizard save writes is the worked example: the four "Save to Mod" paths
@@ -375,11 +393,14 @@ tests. Widget construction still needs a live `App` against a loaded mod:
   intended rows, and leave those commands non-interactive. Resize or move the
   app between steps, finish with "Don't show this again" selected, restart to
   confirm it stays hidden, then use Help > Start Tutorial to relaunch it.
-- **Toolbar sweep**: click every toolbar row 2 button (Prereq, Mutex,
-  wizard shortcuts, Multi, Del Selected, Clear All, +Shared, +Joint, Load
-  All, Save All) and confirm each still opens the right dialog or performs
-  the right canvas action. Type into the Continuous Focus Position x/y
-  fields, tab out, and confirm the value commits (`_cfp_commit`).
+- **Toolbar sweep**: click every canvas toolbar button (Prereq, Mutex, Search
+  Focuses, Reveal Selected, Focus Actions, Fit, zoom, Multi, Del Selected,
+  Clear All) and each content entry in the sidebar (Decisions, Events, Ideas,
+  Dyn Mod), and confirm each opens the right dialog or performs the right
+  canvas action. In Tree Settings, try +Shared, +Joint, Load All and Save All,
+  and type into the Continuous Focus Position x/y fields, tab out, and confirm
+  the value commits (`_commit_tree_settings`). Narrow the window until the
+  toolbar wraps and confirm every button stays reachable by keyboard.
 - **GFX browser parity**: from the sidebar's Icon GFX field, open the
   browser with a mod loaded (should show only `gfx/interface/goals/` and
   its subfolders) and with no mod loaded (should fall back to a folder
@@ -390,3 +411,28 @@ tests. Widget construction still needs a live `App` against a loaded mod:
   full folder list (decisions, ideas, goals, event pictures, flags,
   interface, custom) still all show up, unaffected by the sidebar picker's
   narrower scope.
+
+### Project explorer, Spotlight and Edit Focus
+
+The Tk smoke covers explorer navigation, search and expansion restore, selection
+sync, multiple trees, resource and tree-file discovery, collapse and resize, a
+simulated 200% DPI layout, the Spotlight actions and dismissal, adding and removing
+effects, and the invalid-draft prompts. Two regressions are worth remembering when
+changing this area:
+
+- Validate must style only `Val.Treeview`. Calling `ttk.Style.theme_use("clam")`
+  replaces the application-wide theme (`vista` on Windows) and drops the explorer's
+  named styles.
+- A rebuild of the explorer must not act on the selection it restores, or the canvas
+  recenters on every search keystroke and document change.
+
+Left to manual checks, because the smoke cannot see them:
+
+- Enter on a source file opens the platform folder viewer (the smoke mocks
+  `reveal_source`), on Windows, macOS and Linux.
+- Moving the window between monitors with different DPI.
+- Against Millennium Dawn: the Focus Trees group lists every tree file with the
+  utility files excluded, and searching a country name finds its tree. The listing
+  is cached text, so search does not rescan.
+- Drag a focus in a tree of several thousand focuses and confirm the explorer does
+  not stutter; it should not rebuild while only positions change.

@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any
+from itertools import count
+from typing import TYPE_CHECKING, Any, Literal, cast
 from unittest.mock import Mock
 
 from hoi4cm.core.undo import UndoStack
@@ -12,6 +13,9 @@ from hoi4cm.models.document import FocusDocument
 from hoi4cm.ui.canvas import CanvasMixin
 from hoi4cm.ui.effects_panel import EffectsMixin
 from hoi4cm.ui.mod_loading import ModLoadingMixin
+
+if TYPE_CHECKING:
+    from _tkinter import TkappType
 
 
 class _FakeTcl:
@@ -25,6 +29,13 @@ class AppFake(CanvasMixin, ModLoadingMixin, EffectsMixin):
     cv: Any
     _mod_lbl: Any
     _lifecycle: Any
+    _focus_actions: Mock
+    selected: Focus | None
+    _refresh_effects: Mock
+    _select: Mock
+    _hint: Mock
+    _new_focus_at: Mock
+    _update_statusbar: Mock
 
     CANVAS_MIN_SIZE = 10
     CANVAS_EXPAND_STEP = 5
@@ -80,7 +91,6 @@ class AppFake(CanvasMixin, ModLoadingMixin, EffectsMixin):
         self._refresh_prereqs = Mock()
         self._refresh_mutex = Mock()
         self.__dict__["_refresh_effects"] = Mock()
-        self._focus_list_cache = Mock()
         self._save_offsets_to_focus = Mock()
         self._refresh_offsets = Mock()
         self._begin_document_generation = Mock()
@@ -90,7 +100,9 @@ class AppFake(CanvasMixin, ModLoadingMixin, EffectsMixin):
         self._invalidate_focus_list_structure = Mock()
         self._update_statusbar = Mock()
         self._reset_canvas_bounds()
-        self.callbacks: list[Callable[[], None]] = []
+        self.callbacks: list[Callable[[], object]] = []
+        self._after_callbacks: dict[str, Callable[[], object]] = {}
+        self._after_ids = count()
         self.loaded_roots: list[str] = []
         self.after_calls: list[tuple[int, Callable[[], None]]] = []
         self.visibility_updates = 0
@@ -99,14 +111,28 @@ class AppFake(CanvasMixin, ModLoadingMixin, EffectsMixin):
         self.invalidations = 0
         self.redraws = 0
         self.validation_schedules = 0
-        self.tk = _FakeTcl()
+        self.tk = cast("TkappType", _FakeTcl())
 
-    def after(self, _milliseconds: int, callback: Callable[[], None]) -> object:
+    def after[**P](
+        self,
+        ms: int | Literal["idle"],
+        func: Callable[P, object],
+        *args: P.args,
+        **kwargs: P.kwargs,
+    ) -> str:
+        identifier = f"after-{next(self._after_ids)}"
+
+        def callback() -> object:
+            self._after_callbacks.pop(identifier, None)
+            return func(*args, **kwargs)
+
         self.callbacks.append(callback)
-        return callback
+        self._after_callbacks[identifier] = callback
+        return identifier
 
-    def after_cancel(self, identifier: object) -> None:
-        self.callbacks = [cb for cb in self.callbacks if cb is not identifier]
+    def after_cancel(self, id: str) -> None:
+        callback = self._after_callbacks.pop(id, None)
+        self.callbacks = [cb for cb in self.callbacks if cb is not callback]
 
     def winfo_exists(self) -> int:
         return 1
@@ -117,7 +143,7 @@ class AppFake(CanvasMixin, ModLoadingMixin, EffectsMixin):
     def _schedule_validation(self) -> None:
         self.validation_schedules += 1
 
-    def _get_mod_suggestions(self, _etype: str, _fname: str) -> list[str]:
+    def _get_mod_suggestions(self, etype: str, fname: str) -> list[str]:
         return ["built_in"]
 
     def _get_tree_badge(self, _tree_idx: int) -> tuple[str, str]:

@@ -1,0 +1,377 @@
+"""Persistent contextual focus form and its pending-edit boundary."""
+
+from __future__ import annotations
+
+import tkinter as tk
+from tkinter import messagebox
+from typing import Any
+
+from hoi4cm.core.i18n import tr
+from hoi4cm.models.sidebar_form import parse_focus_cost, sidebar_values_match_focus
+from hoi4cm.ui.theme import BG_CARD, BG_DARK, BG_PANEL, BLUE, TEXT
+from hoi4cm.ui.widgets import Tooltip
+
+
+def flush_pending_editor(
+    app: Any, *, autosave: bool = False, quiet: bool = False
+) -> bool:
+    """Commit a valid draft, or keep it visible for correction.
+
+    The form remains the sole owner of its widgets. In particular, an unlocked
+    Code tab must be parsed before a selection change can replace those widgets.
+    ``quiet`` skips the warning so the caller can ask what to do instead.
+    """
+    focus = app.selected
+    if focus is None:
+        return True
+    try:
+        parse_focus_cost(app._fv_cost.get())
+        int(app._fv_x.get())
+        int(app._fv_y.get())
+    except ValueError, OverflowError:
+        if not autosave and not quiet:
+            messagebox.showwarning(
+                tr("focus_editor.pending.title", "Pending focus edits"),
+                tr(
+                    "focus_editor.pending.numbers",
+                    "Correct the cost and position before leaving this focus.",
+                ),
+                parent=app,
+            )
+        return False
+    values = app._read_sidebar_values()
+    # Imported trees may already share a cell; only a move needs a free one.
+    if values is None or (
+        (values.x, values.y) != (focus.x, focus.y)
+        and not app.focuses.position_free(values.x, values.y, except_id=focus.id)
+    ):
+        if not autosave and not quiet:
+            messagebox.showwarning(
+                tr("focus_editor.pending.title", "Pending focus edits"),
+                tr(
+                    "focus_editor.pending.position",
+                    "Enter a focus ID and an unoccupied position "
+                    "before leaving this focus.",
+                ),
+                parent=app,
+            )
+        return False
+    changed = not sidebar_values_match_focus(focus, values)
+    revision = app.focuses.revision
+    app._autosave()
+    if not sidebar_values_match_focus(focus, values):
+        return False
+    if changed and app.focuses.revision == revision:
+        # Older documents only advance their revision for structural changes.
+        app.focuses.touch()
+    if not autosave and app._code_edit_mode[0]:
+        app._code_edit_btn.invoke()
+        if app._code_edit_mode[0]:
+            return False
+    app._update_statusbar()
+    return True
+
+
+class FocusEditor:
+    """Keep the legacy field builders alive in a resizable, hidden-until-used form."""
+
+    def __init__(self, app: Any):
+        self.app = app
+        self.window = tk.Toplevel(app)
+        self.window.withdraw()
+        self.window.title(tr("focus_action.edit_focus", "Edit Focus"))
+        self.window.configure(bg=BG_PANEL)
+        self.window.geometry("480x700")
+        self.window.minsize(380, 320)
+        self.window.transient(app)
+        self.window.protocol("WM_DELETE_WINDOW", self.dismiss)
+        self.window.bind("<Escape>", lambda _event: self.dismiss())
+        self.window.bind("<KeyPress>", self._local_shortcuts)
+        for sequence in (
+            "<Control-n>",
+            "<Control-o>",
+            "<Control-e>",
+            "<Control-d>",
+            "<Control-a>",
+            "<Control-Shift-s>",
+            "<Control-Shift-S>",
+            "<F1>",
+            "<Delete>",
+            "<Left>",
+            "<Right>",
+            "<Up>",
+            "<Down>",
+        ):
+            self.window.bind(sequence, app.bind(sequence))
+        header = tk.Frame(self.window, bg=BG_DARK)
+        header.pack(fill="x")
+        self.heading = tk.Label(
+            header,
+            text=tr("focus_action.edit_focus", "Edit Focus"),
+            bg=BG_DARK,
+            fg=TEXT,
+            font=("Segoe UI", 11, "bold"),
+            padx=10,
+            pady=8,
+        )
+        self.heading.pack(side="left")
+        tk.Button(
+            header,
+            text=tr("focus_editor.apply_close", "Apply & Close"),
+            command=self.close,
+            bg=BG_CARD,
+            fg=TEXT,
+            highlightcolor=BLUE,
+            highlightthickness=2,
+        ).pack(side="right", padx=8, pady=4)
+        self.tree_panel = tk.Frame(self.window, bg=BG_PANEL)
+        self.focus_panel = tk.Frame(self.window, bg=BG_PANEL)
+        self.advanced = False
+        self.advanced_panel: tk.Frame | None = None
+        self.advanced_button: tk.Button | None = None
+
+    def _local_shortcuts(self, event: Any) -> str | None:
+        if not event.state & 0x0004:
+            return None
+        key = event.keysym.lower()
+        if key == "s":
+            if self.flush():
+                self.app._save()
+            return "break"
+        if key in ("z", "y") and not isinstance(event.widget, tk.Text):
+            if self.flush():
+                redo = key == "y" or bool(event.state & 0x0001)
+                (self.app._redo if redo else self.app._undo)()
+            return "break"
+        return None
+
+    def flush(self, *, autosave: bool = False, quiet: bool = False) -> bool:
+        return flush_pending_editor(self.app, autosave=autosave, quiet=quiet)
+
+    def flush_or_discard(self) -> bool:
+        """Commit the draft, or offer to drop one that cannot be applied.
+
+        False means the user chose to keep editing. Save and selection changes
+        never call this: they keep refusing until the draft is corrected.
+        """
+        if self.flush(quiet=True):
+            return True
+        shown = self.window.winfo_viewable()
+        if not messagebox.askyesno(
+            tr("dialog.discard_draft.title", "Discard Edits?"),
+            tr(
+                "dialog.discard_draft.body",
+                "The pending focus edits cannot be applied.\n\n"
+                "Discard them and continue?",
+            ),
+            parent=self.window if shown else self.app,
+        ):
+            return False
+        self.discard_draft()
+        return True
+
+    def discard_draft(self) -> None:
+        """Reset the form, and an unlocked Code tab, to the committed focus."""
+        app = self.app
+        focus = app.selected
+        if focus is None:
+            return
+        app._populate(focus)
+        if app._code_edit_mode[0]:
+            app._code_txt.delete("1.0", "end")
+            app._code_txt.insert("1.0", app._build_focus_code(focus).strip())
+            app._code_edit_btn.invoke()
+
+    def open(self, *, tab: str = "Properties") -> None:
+        if self.app.selected is None:
+            return
+        self.tree_panel.pack_forget()
+        self.focus_panel.pack(fill="both", expand=True)
+        name = self.app.selected.name
+        self.heading.config(
+            text=tr("focus_editor.heading", "Edit Focus: {name}", name=name)
+        )
+        self.window.title(
+            tr("focus_editor.window_title", "Edit Focus — {name}", name=name)
+        )
+        if tab in ("Conditions", "Code") and not self.advanced:
+            self.toggle_advanced()
+        self.app._switch_tab_fn(tab)
+        self.window.deiconify()
+        self.window.lift()
+        self.app._tab_btns[tab][0].focus_set()
+
+    def open_tree_settings(self) -> None:
+        if not self.flush():
+            return
+        self.focus_panel.pack_forget()
+        self.tree_panel.pack(fill="both", expand=True)
+        self.heading.config(
+            text=tr("focus_editor.tree_heading", "Loaded trees & tree settings")
+        )
+        self.window.title(tr("toolbar.tree_settings", "Tree Settings"))
+        self.window.deiconify()
+        self.window.lift()
+        self.window.focus_set()
+
+    def close(self) -> bool:
+        if not self.flush():
+            return False
+        self.window.withdraw()
+        self.app.cv.focus_set()
+        return True
+
+    def dismiss(self) -> bool:
+        """Close for Escape or the window button; offer to drop an invalid draft."""
+        return self.flush_or_discard() and self.close()
+
+    def reset(self) -> None:
+        self.window.withdraw()
+        self.app._focus_actions.dismiss()
+
+    def make_advanced_properties(self, parent: tk.Frame) -> tk.Frame:
+        self.advanced_panel = tk.Frame(parent, bg=BG_PANEL)
+        return self.advanced_panel
+
+    def finish_build(self) -> None:
+        controls = tk.Frame(self.tree_panel, bg=BG_PANEL)
+        controls.pack(
+            fill="x", padx=8, pady=8, before=self.tree_panel.winfo_children()[0]
+        )
+        tk.Label(
+            controls,
+            text=tr("focus_editor.tree_id", "Focus tree ID"),
+            bg=BG_PANEL,
+            fg=TEXT,
+        ).pack(anchor="w")
+        self._tree_entry(controls, self.app._tree_id).pack(fill="x", pady=(0, 5))
+        tk.Label(
+            controls,
+            text=tr("toolbar.continuous_focus_pos", "Continuous Focus Pos:"),
+            bg=BG_PANEL,
+            fg=TEXT,
+        ).pack(anchor="w")
+        position = tk.Frame(controls, bg=BG_PANEL)
+        position.pack(fill="x", pady=(0, 5))
+        for axis, variable in (
+            ("x:", self.app._cfp_x_var),
+            ("y:", self.app._cfp_y_var),
+        ):
+            tk.Label(position, text=axis, bg=BG_PANEL, fg=TEXT).pack(side="left")
+            self._tree_entry(position, variable, width=8).pack(
+                side="left", padx=(2, 10)
+            )
+        for label, command, tip in (
+            (
+                tr("toolbar.shared", "+ Shared"),
+                lambda: self.app._load_extra_tree("shared"),
+                tr(
+                    "toolbar.shared.tip",
+                    "Load a shared_focus tree alongside the main tree.\n"
+                    "Its focuses appear on canvas with amber [S] badges.",
+                ),
+            ),
+            (
+                tr("toolbar.joint", "+ Joint"),
+                lambda: self.app._load_extra_tree("joint"),
+                tr(
+                    "toolbar.joint.tip",
+                    "Load a joint_focus tree alongside the main tree.\n"
+                    "Its focuses appear on canvas with purple [J] badges.",
+                ),
+            ),
+            (
+                tr("toolbar.load_all", "Load All"),
+                self.app._load_all_trees,
+                tr(
+                    "toolbar.load_all.tip",
+                    "Scan the mod's national_focus folder and load selected trees "
+                    "from a checklist.",
+                ),
+            ),
+            (
+                tr("toolbar.save_all", "Save All"),
+                self.app._save_all_trees,
+                tr(
+                    "toolbar.save_all.tip",
+                    "Export all loaded trees (main + shared + joint) at once.",
+                ),
+            ),
+        ):
+            button = tk.Button(
+                controls,
+                text=label,
+                command=command,
+                bg=BG_CARD,
+                fg=TEXT,
+                highlightcolor=BLUE,
+                highlightthickness=2,
+            )
+            button.pack(fill="x", pady=2)
+            Tooltip(button, tip)
+        self.advanced_button = tk.Button(
+            self.focus_panel,
+            text=self._advanced_text(),
+            command=self.toggle_advanced,
+            bg=BG_CARD,
+            fg=TEXT,
+            highlightcolor=BLUE,
+            highlightthickness=2,
+            font=("Segoe UI", 10),
+            pady=5,
+        )
+        self.advanced_button.pack(side="bottom", fill="x")
+        for name in ("Conditions", "Code"):
+            self.app._tab_btns[name][0].master.pack_forget()
+
+    def _tree_entry(
+        self, parent: tk.Frame, variable: tk.StringVar, **options: Any
+    ) -> tk.Entry:
+        entry = tk.Entry(
+            parent,
+            textvariable=variable,
+            bg=BG_CARD,
+            fg=TEXT,
+            insertbackground=TEXT,
+            highlightcolor=BLUE,
+            highlightthickness=2,
+            **options,
+        )
+        entry.bind("<FocusOut>", self._commit_tree_settings)
+        entry.bind("<Return>", self._commit_tree_settings)
+        return entry
+
+    def _commit_tree_settings(self, _event: Any = None) -> None:
+        for axis in ("x", "y"):
+            value = getattr(self.app, f"_cfp_{axis}_var").get().strip()
+            try:
+                setattr(self.app, f"_cfp_{axis}", int(value) if value else None)
+            except ValueError:
+                return
+        self.app._update_title()
+        self.app._redraw()
+
+    def toggle_advanced(self) -> None:
+        self.advanced = not self.advanced
+        if self.advanced_panel is not None:
+            if self.advanced:
+                self.advanced_panel.pack(fill="x")
+            else:
+                self.advanced_panel.pack_forget()
+        for name in ("Conditions", "Code"):
+            column = self.app._tab_btns[name][0].master
+            if self.advanced:
+                column.pack(side="left", expand=True, fill="x")
+            else:
+                column.pack_forget()
+        if not self.advanced and self.app._active_tab.get() in ("Conditions", "Code"):
+            self.app._switch_tab_fn("Properties")
+        if self.advanced_button is not None:
+            self.advanced_button.config(text=self._advanced_text())
+
+    def _advanced_text(self) -> str:
+        arrow = "▾" if self.advanced else "▸"
+        return f"{tr('focus_editor.advanced', 'Advanced settings')} {arrow}"
+
+
+__all__ = ["FocusEditor", "flush_pending_editor"]

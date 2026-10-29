@@ -76,6 +76,8 @@ omit = [
   "src/hoi4cm/ui/tasks.py",
   "src/hoi4cm/ui/thumbnail_grid.py",
   "src/hoi4cm/ui/toolbar.py",
+  "src/hoi4cm/ui/focus_actions.py",
+  "src/hoi4cm/ui/focus_spotlight.py",
   "src/hoi4cm/ui/tutorial.py",
   "src/hoi4cm/ui/widgets.py",
   "src/hoi4cm/wizards/_image_loader.py",

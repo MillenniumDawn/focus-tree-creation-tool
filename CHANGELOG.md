@@ -8,6 +8,26 @@ the version by hand. See `AGENTS.md`.
 
 ## Unreleased
 
+- Replace the right-hand focus form and the left focus list with a resizable
+  content sidebar and a searchable project explorer. Switch between Focus Trees,
+  Decisions, Events, Ideas and Dynamic Modifiers, browse the loaded trees and
+  their focuses, and see the mod's localisation, graphics and scripted-effect
+  files. Enter on a source file reveals its folder. Unopened tree files under
+  `common/national_focus` open through the usual import prompts, and New Focus
+  Tree is one click.
+- Click a focus to open a Spotlight with six actions: Edit Focus, Add
+  Prerequisite, Add Effect, Add Child, Duplicate and Delete. Edit Focus opens the
+  existing form in its own window, with Conditions and Code under Advanced
+  settings. Escape, closing that window or quitting offers to discard an edit
+  that cannot be applied. On Linux and macOS the Spotlight sits on a solid dark
+  surface; Windows keeps color-key transparency.
+- Keep Save Project, Validate, Export and the Saved and Validation status in
+  view, wrap the canvas tools in narrow windows, and move the loaded trees, tree
+  ID and continuous focus position into Tree Settings. The German, Spanish and
+  Chinese strings added for this are machine translations and need native review.
+- Opening Validate no longer switches the whole app to the clam ttk theme.
+- Importing events whose id, picture or options are written as blocks no longer
+  raises an error.
 - Add a UI language by dropping `locales/<code>.json` into the folder: the
   language list is read from the files, each naming itself in `_meta`. Wrap the
   wizard, settings, undo, canvas and validation text that bypassed `tr()`, and

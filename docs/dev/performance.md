@@ -402,3 +402,37 @@ changes, and canvas reset. See [the reproducible callback benchmark](perf-322-ca
 Follow-up measured fixes and controls: [recovery serialization](perf-323-recovery.md),
 [wheel coalescing](perf-324-wheel.md), [optional scene fingerprints](perf-325-scene.md),
 [worker/GC investigation](perf-326-worker.md), and [structured icon correctness](perf-327-icons.md).
+
+### Project explorer snapshots
+
+`project_index.py` precomputes case-folded display names, identifiers and paths.
+The sidebar rebuilds this snapshot only when `FocusDocument.structure_revision` or
+the project/tree metadata changes. That counter advances for every document change
+except a pure `move()`, and for label edits through `mark_labels_changed()`, so a drag
+or nudge does not rebuild the explorer even though it advances `revision`. The status
+poll in `EditorChrome` checks the signature every 300 ms, so keying on `revision`
+would have rebuilt every row on each tick of a drag. Search is debounced by 120 ms and
+filters the existing snapshot; it does not walk mod directories or parse focus scripts
+on a keystroke. Resource inventories are discovered off the Tk thread once per mod
+root or explicit PROJECT refresh. Native Treeview rows avoid creating a Tk widget per
+focus. Search temporarily opens matching ancestors and restores the pre-search
+expansion state when cleared.
+
+Measured on Python 3.14.4, Linux, Xvfb, one process, median of 7 runs, synthetic
+focuses with unique names (the repo's `track_perf.py` harness is headless and does not
+build Tk widgets, so this was timed with `perf_counter` around `ProjectSidebar.refresh()`):
+
+| Focuses | Refresh after a pure move, before | Refresh after a pure move, after | Refresh after a structural change |
+|---|---|---|---|
+| 5,000 | 26.8 ms (single run) | 0.08 ms | 31.0 ms |
+| 20,000 | 147.2 ms (single run) | 0.03 ms | 128.8 ms |
+
+"Before" is one run of the same call on the previous signature, which rebuilt on every
+revision change. A structural change (add, delete, rename, tree move) still rebuilds
+every row; that cost is unchanged and happens once per edit, not once per tick.
+
+The unopened focus-tree file catalog uses the same worker inventory and refresh
+boundary. It reads each `.txt` under `common/national_focus` once to look for tree
+declarations, which is the only content read, and parses no focus. Filtering does not
+rescan files or parse every tree in the mod. Inventory
+results carry a generation token so a stale refresh cannot replace a newer result.

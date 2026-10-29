@@ -18,10 +18,26 @@ from hoi4cm.wizards.decision import (
 )
 from hoi4cm.wizards.event import (
     EVENT_AUTOSAVE_FIELDS,
+    _event_text,
     event_autosave_records,
     restore_event_autosave,
 )
 from hoi4cm.wizards.national_spirit import spirit_autosave_snapshot
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("plain", "plain"),
+        ({"text": "conditional", "trigger": {}}, "conditional"),
+        ([{"trigger": {}}, {"text": "first"}, {"text": "second"}], "first"),
+        (["direct"], "direct"),
+        ({"text": {}}, "fallback"),
+        (None, "fallback"),
+    ],
+)
+def test_event_text_accepts_script_text_blocks(value, expected):
+    assert _event_text(value, "fallback") == expected
 
 
 def _cat(uid: str, cat_id: str = "TAG_one", **extra: Any) -> dict[str, Any]:

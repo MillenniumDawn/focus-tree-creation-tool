@@ -42,7 +42,6 @@ class TutorialStep:
     body_key: str
     body_default: str
     widget_keys: tuple[str, ...] = ()
-    fallback_widget_key: str | None = None
     menu_key: str | None = None
     menu_item_keys: tuple[str, ...] = ()
 
@@ -65,11 +64,12 @@ TUTORIAL_STEPS = (
         "Describe the selected focus",
         "tutorial.step.properties.body",
         (
-            "Click a focus to open this sidebar. Give it a unique Focus ID, a readable "
-            "name and description, an appropriate cost, and a GFX icon. Changes are "
-            "applied to the selected focus as you edit."
+            "Click a focus to open its actions, then choose Edit Focus (or use Focus "
+            "Actions in the toolbar). Give it a unique Focus ID, a readable name and "
+            "description, an appropriate cost, and a GFX icon. Changes are applied "
+            "when you close the editor."
         ),
-        ("_sb_frame",),
+        ("_focus_actions_btn",),
     ),
     TutorialStep(
         "tutorial.step.relationships.title",
@@ -81,21 +81,18 @@ TUTORIAL_STEPS = (
             "another. "
             "The arrows on the canvas show the resulting path."
         ),
-        ("_conn_btn", "_mutex_btn"),
+        ("_prereq_btn", "_mutex_btn"),
     ),
     TutorialStep(
         "tutorial.step.behaviour.title",
         "Add conditions and outcomes",
         "tutorial.step.behaviour.body",
         (
-            "After selecting a focus, use Effects for completion rewards and "
-            "Conditions "
-            "for availability, visibility, and bypass rules. Properties controls the "
-            "basic fields; Code is available when you need to inspect or edit the "
-            "script."
+            "Use the Add Effect action for completion rewards. In Edit Focus, "
+            "Advanced settings reveals Conditions for availability, visibility, and "
+            "bypass rules, and Code for inspecting or editing the script."
         ),
-        ("tab:Effects", "tab:Conditions", "tab:Code"),
-        "_sb_frame",
+        ("_focus_actions_btn",),
     ),
     TutorialStep(
         "tutorial.step.wizards.title",
@@ -431,23 +428,10 @@ class TutorialController:
     def _resolve_app_targets(self, step: TutorialStep) -> list[tk.Widget]:
         targets: list[tk.Widget] = []
         for key in step.widget_keys:
-            widget = self._resolve_app_widget(key)
-            if widget is not None and self._is_viewable(widget):
-                targets.append(widget)
-        if not targets and step.fallback_widget_key is not None:
-            fallback = self._resolve_app_widget(step.fallback_widget_key)
-            if fallback is not None:
-                targets.append(fallback)
-        return targets
-
-    def _resolve_app_widget(self, key: str) -> tk.Widget | None:
-        if key.startswith("tab:"):
-            tab_name = key.removeprefix("tab:")
-            tab = getattr(self._app, "_tab_btns", {}).get(tab_name)
-            widget = tab[0] if tab else None
-        else:
             widget = getattr(self._app, key, None)
-        return widget if isinstance(widget, tk.Widget) else None
+            if isinstance(widget, tk.Widget) and self._is_viewable(widget):
+                targets.append(widget)
+        return targets
 
     @staticmethod
     def _is_viewable(widget: tk.Widget) -> bool:
