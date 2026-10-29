@@ -2479,10 +2479,11 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         if not f:
             return
         icon = self._fv_icon.get()
-        if icon != f.icon:
-            self._push_undo("change icon", touched_ids=(f.id,))
-            f.icon = icon
-            self.focuses.mark_content_changed()
+        if icon == f.icon:
+            return
+        self._push_undo("change icon", touched_ids=(f.id,))
+        f.icon = icon
+        self.focuses.mark_content_changed()
         self._redraw_now()
 
     def _read_sidebar_values(self):

@@ -626,10 +626,12 @@ def _raw_of(app: AppFake) -> str:
 def test_raw_edit_pushes_before_writing_and_undo_restores_the_imported_text():
     imported = "add_political_power = 5  \n"
     app = _live_undo_app(_raw_focus(imported))
+    revision = app.focuses.content_revision
 
     app._live_raw_block(0, _TextFake("add_political_power = 50\n"))
 
     assert _raw_of(app) == "add_political_power = 50"
+    assert app.focuses.content_revision > revision
     assert len(app._undo_stack) == 1
     app_module.App._undo(_as_app(app))
     assert _raw_of(app) == imported
@@ -668,10 +670,12 @@ def test_rename_effect_key_pushes_and_undo_restores_the_key():
     focus.effects = [{"type": "mine", "fields": {"amount": "1", "tag": "GER"}}]
     app = _live_undo_app(focus)
     app._effects_sig = "built"
+    revision = app.focuses.content_revision
 
     app._rename_effect_key(0, "amount", "value")
 
     assert _fields_of(app, 41) == {"value": "1", "tag": "GER"}
+    assert app.focuses.content_revision > revision
     assert app._effects_sig is None
     assert len(app._undo_stack) == 1
     app_module.App._undo(_as_app(app))
@@ -698,10 +702,12 @@ def test_rename_effect_key_without_a_change_pushes_nothing(old, new):
     focus.effects = [{"type": "mine", "fields": {"amount": "1", "tag": "GER"}}]
     app = _live_undo_app(focus)
     app._effects_sig = "built"
+    revision = app.focuses.content_revision
 
     app._rename_effect_key(0, old, new)
 
     assert list(_fields_of(app, 41).items()) == [("amount", "1"), ("tag", "GER")]
+    assert app.focuses.content_revision == revision
     assert app._effects_sig == "built"
     assert len(app._undo_stack) == 0
 
@@ -719,10 +725,12 @@ def test_add_raw_field_pushes_and_undo_removes_it(effect, added):
     focus.effects = [effect]
     before = copy.deepcopy(effect)
     app = _live_undo_app(focus)
+    revision = app.focuses.content_revision
 
     app._add_raw_effect_field(0)
 
     assert _fields_of(app, 42) == added
+    assert app.focuses.content_revision > revision
     assert len(app._undo_stack) == 1
     cast(Any, app)._refresh_effects.assert_called_once_with()
     app_module.App._undo(_as_app(app))
@@ -768,10 +776,12 @@ def _icon_focus(focus_id: int, icon: str) -> Focus:
 def test_icon_change_pushes_before_writing_and_round_trips_through_undo_redo():
     focus = _icon_focus(43, "A")
     app, icon_var = _icon_app(focus)
+    revision = app.focuses.content_revision
 
     icon_var.set("B")
 
     assert focus.icon == "B"
+    assert app.focuses.content_revision > revision
     assert len(app._undo_stack) == 1
     cast(Any, app)._redraw_now.assert_called_once_with()
     app_module.App._undo(_as_app(app))
@@ -784,12 +794,14 @@ def test_icon_change_pushes_before_writing_and_round_trips_through_undo_redo():
 def test_icon_repick_of_the_current_icon_pushes_nothing():
     focus = _icon_focus(43, "A")
     app, icon_var = _icon_app(focus)
+    revision = app.focuses.content_revision
 
     icon_var.set("A")
 
     assert focus.icon == "A"
+    assert app.focuses.content_revision == revision
     assert len(app._undo_stack) == 0
-    cast(Any, app)._redraw_now.assert_called_once_with()
+    cast(Any, app)._redraw_now.assert_not_called()
 
 
 def test_icon_change_without_a_selected_focus_writes_nothing():
