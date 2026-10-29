@@ -230,6 +230,104 @@ def test_character_target_rejects_a_directory_symlink_outside_the_mod(
         shutil.rmtree(outside, ignore_errors=True)
 
 
+class _FakeEditor:
+    """Minimal headless stand-in for the wizard's tk.Text editor."""
+
+    def __init__(self, source: str) -> None:
+        self._source = source
+        self._insert_pos = "1.0"
+
+    def index(self, mark: str) -> str:
+        assert mark == "insert"
+        return self._insert_pos
+
+    def insert(self, _mark: str, text: str) -> None:
+        row, column = (int(part) for part in self._insert_pos.split("."))
+        lines = self._source.split("\n")
+        lines[row - 1] = lines[row - 1][:column] + text + lines[row - 1][column:]
+        self._source = "\n".join(lines)
+
+    def mark_set(self, mark: str, index: str) -> None:
+        if mark == "insert":
+            self._insert_pos = index
+
+    def focus_set(self) -> None:
+        return None
+
+    def text(self) -> str:
+        return self._source
+
+
+class _FakeVar:
+    """Minimal headless stand-in for tk.StringVar."""
+
+    def __init__(self, value: str) -> None:
+        self._value = value
+
+    def get(self) -> str:
+        return self._value
+
+
+def test_field_marshal_role_offered_and_inserted_as_valid_block():
+    from hoi4cm.wizards import character as character_mod
+
+    assert "field_marshal" in character_mod.ROLE_NAMES
+
+    wizard = object.__new__(character_mod.CharacterWizard)
+    editor = _FakeEditor('characters = {\n\tAAA_ada = {\n\t\tname = "Ada"\n\t}\n}\n')
+    wizard.editor = editor
+    wizard.body_indent = "\t\t"
+    wizard.character_close_indent = "\t"
+    wizard.role_var = _FakeVar("field_marshal")
+    # _position_in_character_body leaves the caret on the closing brace itself.
+    editor.mark_set("insert", "4.1")
+
+    wizard._insert_role()
+
+    inserted = editor.text()
+    assert inserted == (
+        'characters = {\n\tAAA_ada = {\n\t\tname = "Ada"\n\t\n'
+        "\t\tfield_marshal = {\n\t\t\t\n\t\t}\n\t}\n}\n"
+    )
+    document = parse_character_script(inserted)
+    assert document == parse_character_script(document.to_text())
+    assert document.character_ids() == ["AAA_ada"]
+    # Caret lands on the blank body line of the new block, column = len(role_indent).
+    assert editor.index("insert") == "6.3"
+
+
+def test_existing_field_marshal_block_round_trips_with_skills_and_traits():
+    source = """
+characters = {
+    AAA_ada = {
+        name = "Ada"
+        field_marshal = {
+            skill = 3
+            attack_skill = 4
+            defense_skill = 2
+            planning_skill = 3
+            logistics_skill = 2
+            traits = { old_guard organizer }
+        }
+        corps_commander = { skill = 2 traits = { trait_cavalry_leader } }
+        field_marshal = { skill = 1 custom_field = kept }
+    }
+}
+"""
+
+    document = parse_character_script(source)
+    encoded = document.to_text()
+
+    assert parse_character_script(encoded) == document
+    assert encoded.count("field_marshal = {") == 2
+    for kept in ("attack_skill = 4", "logistics_skill = 2", "custom_field = kept"):
+        assert kept in encoded
+    assert "old_guard" in encoded
+    assert "organizer" in encoded
+    assert encoded.index("field_marshal") < encoded.index("corps_commander")
+    assert encoded.index("corps_commander") < encoded.rindex("field_marshal")
+
+
 @pytest.mark.parametrize(
     "source",
     ["characters = { X = {", "characters = }", "x = { } }"],
