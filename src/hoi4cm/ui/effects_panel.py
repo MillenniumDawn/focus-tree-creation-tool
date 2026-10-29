@@ -154,7 +154,7 @@ class EffectsMixin:
         # itself stays focused on the effects you've already added.
         self._mk_btn(
             eff_frm_outer,
-            tr("focus.effects.add", "＋  Add Effect"),
+            tr("focus.effects.add", "+ Add Effect"),
             self._open_effect_browser,
             fg="#4ade80",
             bg="#14532d",
@@ -168,7 +168,7 @@ class EffectsMixin:
         )
         tk.Label(
             eff_frm_outer,
-            text=tr("focus.effects.added", "ADDED EFFECTS"),
+            text=tr("focus.effects.added", "  ADDED EFFECTS"),
             bg=BG_PANEL,
             fg=TEXT_DIM,
             font=("Helvetica", 8, "bold"),
@@ -315,7 +315,7 @@ class EffectsMixin:
             if total == 0:
                 tk.Label(
                     card_holder,
-                    text=tr("focus.effects.none_found", "No effects match."),
+                    text=tr("focus.effects.none_found", "No effects found"),
                     bg=BG_PANEL,
                     fg=TEXT_DIM,
                     font=("Helvetica", 10, "italic"),
@@ -851,8 +851,11 @@ class EffectsMixin:
                     hl.bind(
                         "<Leave>",
                         lambda e: self._hint(
-                            "Right-click canvas to place focus  •  "
-                            "Ctrl+drag to pan  •  Scroll to zoom"
+                            tr(
+                                "hint.canvas_controls",
+                                "Right-click canvas to place a focus  -  "
+                                "Ctrl+drag to pan  -  Scroll to zoom",
+                            )
                         ),
                     )
         else:
@@ -885,19 +888,10 @@ class EffectsMixin:
                 )
                 raw_txt.insert("1.0", raw_val)
                 raw_txt.pack(fill="x", padx=6, pady=(0, 4))
-
-                def _on_raw_edit(e, efidx=i, tw=raw_txt):
-                    # Only update the data field — do NOT trigger a canvas redraw.
-                    # (Redrawing mid-edit causes zoom resets and phantom arrow lines
-                    # because prerequisite data may be in a partially edited state.)
-                    if self.selected and efidx < len(self.selected.effects):
-                        value = tw.get("1.0", "end").strip()
-                        fields = self.selected.effects[efidx]["fields"]
-                        if fields.get("raw") != value:
-                            fields["raw"] = value
-                            self.focuses.mark_content_changed()
-
-                raw_txt.bind("<KeyRelease>", _on_raw_edit)
+                raw_txt.bind(
+                    "<KeyRelease>",
+                    lambda e, efidx=i, tw=raw_txt: self._live_raw_block(efidx, tw),
+                )
             elif not fields:
                 tk.Label(
                     ef,
@@ -937,20 +931,48 @@ class EffectsMixin:
         self._focus_list_cache.invalidate()
         self._invalidate_focus_list_structure()
 
-    def _add_raw_effect_field(self, idx):
-        """Add a fresh, unused ``keyN`` field to a raw effect and redraw its card."""
-        if not self.selected or idx >= len(self.selected.effects):
-            return
-        fields = self.selected.effects[idx].setdefault("fields", {})
-        fields[_next_unused_raw_key(fields)] = "value"
-        self.focuses.mark_content_changed()
-        self._refresh_effects()
-
     def _live_eff_field(self, idx, fname, var):
         self._write_effect_field(idx, fname, var.get())
 
     def _live_eff_text(self, idx, fname, tw):
         self._write_effect_field(idx, fname, tw.get("1.0", "end-1c"))
+
+    def _live_raw_block(self, idx, tw):
+        """Store the stripped raw block text.
+
+        A key release that changes nothing pushes no entry; imported text may
+        carry trailing whitespace. No canvas redraw: mid-edit it resets zoom
+        and draws phantom arrows.
+        """
+        focus = self.selected
+        if not focus or idx >= len(focus.effects):
+            return
+        text = tw.get("1.0", "end-1c").strip()
+        if text == focus.effects[idx].get("fields", {}).get("raw", "").strip():
+            return
+        self._write_effect_field(idx, "raw", text)
+
+    def _rename_effect_key(self, idx, old, new):
+        focus = self.selected
+        if not focus or idx >= len(focus.effects):
+            return
+        fields = focus.effects[idx].get("fields", {})
+        if new == old or old not in fields:
+            return
+        self._push_undo("rename effect field", touched_ids=(focus.id,))
+        fields[new] = fields.pop(old)
+        self.focuses.mark_content_changed()
+        self._effects_sig = None
+
+    def _add_raw_effect_field(self, idx):
+        focus = self.selected
+        if not focus or idx >= len(focus.effects):
+            return
+        self._push_undo("add effect field", touched_ids=(focus.id,))
+        fields = focus.effects[idx].setdefault("fields", {})
+        fields[_next_unused_raw_key(fields)] = "value"
+        self.focuses.mark_content_changed()
+        self._refresh_effects()
 
     def _write_effect_field(self, idx, fname, value):
         """Store a typed value; one undo entry per run in the same field."""

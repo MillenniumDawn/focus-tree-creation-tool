@@ -14,6 +14,7 @@ from hoi4cm.core.i18n import tr
 UNDO_LABEL_KEYS: Mapping[str, str] = {
     "action": "undo.action",
     "add effect": "undo.add_effect",
+    "add effect field": "undo.add_effect_field",
     "add focus": "undo.add_focus",
     "add mutex": "undo.add_mutex",
     "add offset": "undo.add_offset",
@@ -21,6 +22,7 @@ UNDO_LABEL_KEYS: Mapping[str, str] = {
     "add prerequisite AND group": "undo.add_prerequisite_and_group",
     "add prerequisite OR group": "undo.add_prerequisite_or_group",
     "bulk_rename": "undo.bulk_rename",
+    "change icon": "undo.change_icon",
     "clear all": "undo.clear_all",
     "delete focus": "undo.delete_focus",
     "delete selected": "undo.delete_selected",
@@ -39,6 +41,7 @@ UNDO_LABEL_KEYS: Mapping[str, str] = {
     "remove mutex": "undo.remove_mutex",
     "remove offset": "undo.remove_offset",
     "remove prerequisite group": "undo.remove_prerequisite_group",
+    "rename effect field": "undo.rename_effect_field",
     "unload extra tree": "undo.unload_extra_tree",
 }
 

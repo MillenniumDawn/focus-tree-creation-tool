@@ -254,6 +254,7 @@ def test_on_mod_loaded_invalidates_canvas_and_wizard_images_on_ui_thread(
     ModLoadingMixin._on_mod_loaded(app, "/mods/sample-mod")
 
     assert app._mod_lbl.configurations[0]["text"].startswith("📂 sample-mod")
+    assert app._mod_label_base == app._mod_lbl.configurations[0]["text"]
     assert app.visibility_updates == 1
     assert app.dropdown_refreshes == 1
     assert app.status_updates == 1
@@ -266,6 +267,33 @@ def test_on_mod_loaded_invalidates_canvas_and_wizard_images_on_ui_thread(
     assert image_loads == [("GFX_sample", ui_thread)]
     assert len(app.after_calls) == 1
     assert app.after_calls[0][0] == 150
+
+
+def test_format_mod_label_appends_targets_without_parsing_the_base(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        mod_loading,
+        "tr",
+        lambda key, default=None, **kwargs: (default or key).format(**kwargs),
+    )
+    base = "📂 sample-mod  |  edit: stale"
+
+    text = mod_loading.format_mod_label(
+        base,
+        {
+            "ideas": "/mods/sample/common/ideas/spirits.txt",
+            "events": "  ",
+            "focus": "/mods/sample/common/national_focus/tree.txt",
+            "sloc": "/mods/sample/localisation/english/extra.yml",
+        },
+    )
+
+    assert text == (
+        "📂 sample-mod  |  edit: stale  |  edit: "
+        "ideas: spirits.txt  +  focus: tree.txt  +  sloc: extra.yml"
+    )
+    assert mod_loading.format_mod_label(base, {}) == base
 
 
 def _mod_loaded_app(monkeypatch: pytest.MonkeyPatch) -> tuple[AppFake, list[str]]:

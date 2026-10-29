@@ -471,7 +471,7 @@ def open_decision_wizard(app):
     _tbtn(tr("common.export_txt", "Export .txt"), lambda: _export_txt(), GOLD)
     _tbtn(tr("common.copy_yml", "Copy .yml"), lambda: _copy_yml(), GOLD)
     _tbtn(tr("common.save_to_mod", "Save to Mod"), lambda: _save_to_mod(), GREEN)
-    _tbtn(tr("common.undo", "↩ Undo"), lambda: _do_undo(), TEXT_DIM)
+    _tbtn(tr("common.undo", "Undo"), lambda: _do_undo(), TEXT_DIM)
 
     win.bind_all("<Control-z>", lambda e: _do_undo())
     win.bind_all("<Control-Z>", lambda e: _do_undo())
@@ -2920,7 +2920,7 @@ def open_decision_wizard(app):
     _rtab = tk.StringVar(value="preview")
     _tab_btns = {}
     for tid, tlbl in [
-        ("preview", tr("common.preview", "Preview")),
+        ("preview", tr("common.preview", "Preview:")),
         ("chain", tr("decision.tab.chain_view", "Chain View")),
         ("code", tr("tab.code", "Code")),
     ]:
@@ -4471,10 +4471,10 @@ def open_decision_wizard(app):
                 "Import decisions .txt (+ optionally loc .yml)",
             ),
             filetypes=[
-                ("HOI4 files", "*.txt *.yml"),
-                ("TXT", "*.txt"),
-                ("YML", "*.yml"),
-                ("All", "*.*"),
+                (tr("filetype.hoi4_files", "HOI4 files"), "*.txt *.yml"),
+                (tr("filetype.txt", "TXT"), "*.txt"),
+                (tr("filetype.yml", "YML"), "*.yml"),
+                (tr("filetype.all", "All"), "*.*"),
             ],
         )
         if not paths:
@@ -4786,7 +4786,10 @@ def open_decision_wizard(app):
                 "filedialog.import_scripted_localisation",
                 "Import scripted_localisation .txt files",
             ),
-            filetypes=[("HOI4 txt", "*.txt"), ("All", "*.*")],
+            filetypes=[
+                (tr("filetype.hoi4_txt", "HOI4 txt"), "*.txt"),
+                (tr("filetype.all", "All"), "*.*"),
+            ],
         )
         if not paths:
             return
@@ -4852,7 +4855,10 @@ def open_decision_wizard(app):
             title=tr(
                 "filedialog.import_localisation_yml", "Import localisation .yml files"
             ),
-            filetypes=[("YML localisation", "*.yml"), ("All", "*.*")],
+            filetypes=[
+                (tr("filetype.yml_localisation", "YML localisation"), "*.yml"),
+                (tr("filetype.all", "All"), "*.*"),
+            ],
         )
         if not paths:
             return
@@ -4902,7 +4908,10 @@ def open_decision_wizard(app):
             parent=win,
             title=tr("filedialog.export_decisions", "Export decisions .txt"),
             defaultextension=".txt",
-            filetypes=[("HOI4 decisions", "*.txt"), ("All", "*.*")],
+            filetypes=[
+                (tr("filetype.hoi4_decisions", "HOI4 decisions"), "*.txt"),
+                (tr("filetype.all", "All"), "*.*"),
+            ],
         )
         if not path:
             return
