@@ -712,6 +712,39 @@ def test_spotlight_background_click_dismisses_without_editing(app):
     assert len(app._undo_stack) == undo_count
 
 
+@pytest.mark.parametrize("route", ["escape", "window-close"])
+def test_dismissing_the_editor_asks_before_dropping_an_invalid_draft(
+    app, monkeypatch, route
+):
+    app._new_focus_at(190 + len(app.focuses) * 2, 60)
+    focus = app.selected
+    editor = app._focus_editor
+    editor.open()
+    app.update()
+    answers = []
+
+    def dismiss():
+        if route == "escape":
+            editor.window.event_generate("<Escape>")
+        else:
+            app.tk.call(editor.window.protocol("WM_DELETE_WINDOW"))
+        app.update()
+
+    monkeypatch.setattr("tkinter.messagebox.askyesno", lambda *a, **kw: answers.pop(0))
+    app._fv_cost.set("not a number")
+
+    answers.append(False)
+    dismiss()
+    assert editor.window.winfo_ismapped(), "No keeps the editor open"
+    assert app._fv_cost.get() == "not a number"
+
+    answers.append(True)
+    dismiss()
+    assert not editor.window.winfo_ismapped(), "Yes discards and closes"
+    assert app._fv_cost.get() == str(focus.cost)
+    assert not answers
+
+
 def test_tree_settings_keeps_loaded_trees_and_references_accessible(app):
     app._focus_editor.open_tree_settings()
     app.update()

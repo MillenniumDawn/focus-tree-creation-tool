@@ -87,6 +87,8 @@
   "dialog.clear_all.title": "Alle leeren",
   "dialog.delete_selected.body": "{count} ausgewählte Foki löschen?\n\n{names}\n\nDadurch werden auch alle Voraussetzungen zu und von diesen Foki entfernt.",
   "dialog.delete_selected.title": "Ausgewählte löschen",
+  "dialog.discard_draft.body": "Die ausstehenden Fokus-Änderungen können nicht übernommen werden.\n\nVerwerfen und fortfahren?",
+  "dialog.discard_draft.title": "Änderungen verwerfen?",
   "dialog.error.title": "Fehler",
   "dialog.error.details_hint": "Details findest du unter Einstellungen -> Fehlerprotokoll.",
   "dialog.focus_id_empty": "Die Fokus-ID darf nicht leer sein.",

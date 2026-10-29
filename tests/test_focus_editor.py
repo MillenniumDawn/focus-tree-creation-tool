@@ -4,12 +4,13 @@ from dataclasses import replace
 from types import SimpleNamespace
 from unittest.mock import Mock
 
+import pytest
 from builders import make_focus
 
 import hoi4_content_maker as main
 from hoi4cm.core.undo import UndoStack
 from hoi4cm.models import Focus, FocusDocument, FocusSidebarValues, apply_sidebar_values
-from hoi4cm.ui.focus_editor import flush_pending_editor
+from hoi4cm.ui.focus_editor import FocusEditor, flush_pending_editor
 
 
 def host(**changes):
@@ -93,7 +94,9 @@ def test_overlapping_focus_does_not_block_select_save_or_close(monkeypatch):
     def guard():
         return flush_pending_editor(app)
 
-    app._focus_editor = SimpleNamespace(flush=guard, close=guard)
+    app._focus_editor = SimpleNamespace(
+        flush=guard, close=guard, flush_or_discard=guard
+    )
     for name in ("_redraw", "_show_form", "_populate", "_update_focus_list_selection"):
         setattr(app, name, Mock())
 
@@ -160,3 +163,75 @@ def test_save_cancelled_when_editor_has_invalid_code():
     app = host()
     app._focus_editor = SimpleNamespace(flush=lambda: False)
     assert main.App._save(app) is False
+
+
+def draft_editor(cost="-"):
+    """A FocusEditor over a host whose cost field holds ``cost``."""
+    app = host()
+    app._fv_cost.get.return_value = cost
+    app._populate = Mock()
+    editor = object.__new__(FocusEditor)
+    editor.app = app
+    editor.window = Mock()
+    editor.window.winfo_viewable.return_value = False
+    return editor, app
+
+
+def test_valid_draft_is_applied_without_asking(monkeypatch):
+    editor, app = draft_editor(cost="10")
+    ask = Mock()
+    monkeypatch.setattr("hoi4cm.ui.focus_editor.messagebox.askyesno", ask)
+    assert editor.flush_or_discard()
+    ask.assert_not_called()
+    app._populate.assert_not_called()
+
+
+@pytest.mark.parametrize("answer", [True, False])
+def test_invalid_draft_asks_and_only_yes_discards(monkeypatch, answer):
+    editor, app = draft_editor()
+    ask = Mock(return_value=answer)
+    warning = Mock()
+    monkeypatch.setattr("hoi4cm.ui.focus_editor.messagebox.askyesno", ask)
+    monkeypatch.setattr("hoi4cm.ui.focus_editor.messagebox.showwarning", warning)
+    assert editor.flush_or_discard() is answer
+    ask.assert_called_once()
+    warning.assert_not_called()
+    assert app._populate.called is answer
+
+
+def test_discarding_an_unlocked_code_draft_relocks_it_from_the_focus():
+    editor, app = draft_editor()
+    app._code_edit_mode[0] = True
+    app._code_txt = Mock()
+    app._build_focus_code = Mock(return_value="focus = { id = keep }\n")
+    editor.discard_draft()
+    app._populate.assert_called_once_with(app.selected)
+    app._code_txt.insert.assert_called_once_with("1.0", "focus = { id = keep }")
+    app._code_edit_btn.invoke.assert_called_once()
+
+
+def test_save_and_select_away_still_warn_and_refuse(monkeypatch):
+    editor, app = draft_editor()
+    ask = Mock()
+    warning = Mock()
+    monkeypatch.setattr("hoi4cm.ui.focus_editor.messagebox.askyesno", ask)
+    monkeypatch.setattr("hoi4cm.ui.focus_editor.messagebox.showwarning", warning)
+    assert not editor.flush()
+    assert not editor.close()
+    assert warning.call_count == 2
+    ask.assert_not_called()
+    app._populate.assert_not_called()
+
+
+@pytest.mark.parametrize("answer", [True, False])
+def test_closing_the_app_asks_about_an_invalid_draft(monkeypatch, answer):
+    editor, app = draft_editor()
+    app._focus_editor = editor
+    app._is_dirty = lambda: False
+    app._lifecycle = Mock(begin_close=Mock(return_value=False))
+    monkeypatch.setattr(
+        "hoi4cm.ui.focus_editor.messagebox.askyesno", Mock(return_value=answer)
+    )
+    main.App._on_app_close(app)
+    assert app._lifecycle.begin_close.called is answer
+    assert app._populate.called is answer

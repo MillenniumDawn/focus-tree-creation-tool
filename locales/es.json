@@ -87,6 +87,8 @@
   "dialog.clear_all.title": "Borrar todo",
   "dialog.delete_selected.body": "¿Eliminar {count} foco(s) seleccionado(s)?\n\n{names}\n\nEsto también quitará todos los enlaces de prerrequisito hacia y desde estos focos.",
   "dialog.delete_selected.title": "Eliminar selección",
+  "dialog.discard_draft.body": "Los cambios pendientes del foco no se pueden aplicar.\n\n¿Descartarlos y continuar?",
+  "dialog.discard_draft.title": "¿Descartar cambios?",
   "dialog.error.title": "Error",
   "dialog.error.details_hint": "Mira en Configuración -> REGISTRO DE SESIÓN -> Abrir ventana de registro completo para más detalles.",
   "dialog.focus_id_empty": "El ID del foco no puede estar vacío.",

@@ -87,6 +87,8 @@
   "dialog.clear_all.title": "Clear All",
   "dialog.delete_selected.body": "Delete {count} selected focus(es)?\n\n{names}\n\nThis will also remove all prerequisite links to/from these focuses.",
   "dialog.delete_selected.title": "Delete Selected",
+  "dialog.discard_draft.body": "The pending focus edits cannot be applied.\n\nDiscard them and continue?",
+  "dialog.discard_draft.title": "Discard Edits?",
   "dialog.error.title": "Error",
   "dialog.error.details_hint": "See Settings -> SESSION LOG -> Open Full Log Window for details.",
   "dialog.focus_id_empty": "Focus ID cannot be empty.",

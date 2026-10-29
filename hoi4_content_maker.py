@@ -371,7 +371,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
 
     def _on_app_close(self):
         editor = self.__dict__.get("_focus_editor")
-        if editor is not None and not editor.flush():
+        if editor is not None and not editor.flush_or_discard():
             return
         if self._is_dirty():
             ans = messagebox.askyesnocancel(

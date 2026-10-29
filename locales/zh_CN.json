@@ -87,6 +87,8 @@
   "dialog.clear_all.title": "清空全部",
   "dialog.delete_selected.body": "删除选中的 {count} 个国策？\n\n{names}\n\n这也会移除这些国策相关的全部前置连接。",
   "dialog.delete_selected.title": "删除选中项",
+  "dialog.discard_draft.body": "待处理的国策更改无法应用。\n\n是否放弃并继续？",
+  "dialog.discard_draft.title": "放弃更改？",
   "dialog.error.title": "错误",
   "dialog.error.details_hint": "详细信息请参见“设置 -> 错误日志”。",
   "dialog.focus_id_empty": "国策 ID 不能为空。",

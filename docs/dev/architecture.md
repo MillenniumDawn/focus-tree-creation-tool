@@ -127,7 +127,9 @@ properties and the Conditions/Code tabs. Tree settings share that window and
 contain the loaded-tree controls, tree ID, and continuous-focus position.
 `flush_pending_editor` validates numeric and occupied-position drafts and applies
 unlocked code before selection, close, save, export, or undo can replace the form.
-Invalid drafts remain visible for correction. Widget builders and population
+Invalid drafts remain visible for correction. Escape, the editor's window button
+and quitting the app instead ask whether to discard an invalid draft; save, export,
+undo and selection changes keep refusing. Widget builders and population
 still live in `App`; this changes their host, not their ownership.
 
 `EditorChrome` keeps content navigation separate from focus-canvas tools, shows

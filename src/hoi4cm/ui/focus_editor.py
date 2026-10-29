@@ -12,11 +12,14 @@ from hoi4cm.ui.theme import BG_CARD, BG_DARK, BG_PANEL, BLUE, TEXT
 from hoi4cm.ui.widgets import Tooltip
 
 
-def flush_pending_editor(app: Any, *, autosave: bool = False) -> bool:
+def flush_pending_editor(
+    app: Any, *, autosave: bool = False, quiet: bool = False
+) -> bool:
     """Commit a valid draft, or keep it visible for correction.
 
     The form remains the sole owner of its widgets. In particular, an unlocked
     Code tab must be parsed before a selection change can replace those widgets.
+    ``quiet`` skips the warning so the caller can ask what to do instead.
     """
     focus = app.selected
     if focus is None:
@@ -26,7 +29,7 @@ def flush_pending_editor(app: Any, *, autosave: bool = False) -> bool:
         int(app._fv_x.get())
         int(app._fv_y.get())
     except ValueError, OverflowError:
-        if not autosave:
+        if not autosave and not quiet:
             messagebox.showwarning(
                 "Pending focus edits",
                 "Correct the cost and position before leaving this focus.",
@@ -39,7 +42,7 @@ def flush_pending_editor(app: Any, *, autosave: bool = False) -> bool:
         (values.x, values.y) != (focus.x, focus.y)
         and not app.focuses.position_free(values.x, values.y, except_id=focus.id)
     ):
-        if not autosave:
+        if not autosave and not quiet:
             messagebox.showwarning(
                 "Pending focus edits",
                 "Enter a focus ID and an unoccupied position "
@@ -75,8 +78,8 @@ class FocusEditor:
         self.window.geometry("480x700")
         self.window.minsize(380, 320)
         self.window.transient(app)
-        self.window.protocol("WM_DELETE_WINDOW", self.close)
-        self.window.bind("<Escape>", lambda _event: self.close())
+        self.window.protocol("WM_DELETE_WINDOW", self.dismiss)
+        self.window.bind("<Escape>", lambda _event: self.dismiss())
         self.window.bind("<KeyPress>", self._local_shortcuts)
         for sequence in (
             "<Control-n>",
@@ -136,8 +139,42 @@ class FocusEditor:
             return "break"
         return None
 
-    def flush(self, *, autosave: bool = False) -> bool:
-        return flush_pending_editor(self.app, autosave=autosave)
+    def flush(self, *, autosave: bool = False, quiet: bool = False) -> bool:
+        return flush_pending_editor(self.app, autosave=autosave, quiet=quiet)
+
+    def flush_or_discard(self) -> bool:
+        """Commit the draft, or offer to drop one that cannot be applied.
+
+        False means the user chose to keep editing. Save and selection changes
+        never call this: they keep refusing until the draft is corrected.
+        """
+        if self.flush(quiet=True):
+            return True
+        shown = self.window.winfo_viewable()
+        if not messagebox.askyesno(
+            tr("dialog.discard_draft.title", "Discard Edits?"),
+            tr(
+                "dialog.discard_draft.body",
+                "The pending focus edits cannot be applied.\n\n"
+                "Discard them and continue?",
+            ),
+            parent=self.window if shown else self.app,
+        ):
+            return False
+        self.discard_draft()
+        return True
+
+    def discard_draft(self) -> None:
+        """Reset the form, and an unlocked Code tab, to the committed focus."""
+        app = self.app
+        focus = app.selected
+        if focus is None:
+            return
+        app._populate(focus)
+        if app._code_edit_mode[0]:
+            app._code_txt.delete("1.0", "end")
+            app._code_txt.insert("1.0", app._build_focus_code(focus).strip())
+            app._code_edit_btn.invoke()
 
     def open(self, *, tab: str = "Properties") -> None:
         if self.app.selected is None:
@@ -170,6 +207,10 @@ class FocusEditor:
         self.window.withdraw()
         self.app.cv.focus_set()
         return True
+
+    def dismiss(self) -> bool:
+        """Close for Escape or the window button; offer to drop an invalid draft."""
+        return self.flush_or_discard() and self.close()
 
     def reset(self) -> None:
         self.window.withdraw()
