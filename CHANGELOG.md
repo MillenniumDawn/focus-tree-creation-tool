@@ -8,33 +8,32 @@ the version by hand. See `AGENTS.md`.
 
 ## Unreleased
 
-- Enable Spotlight on Linux and macOS with a solid dark background while
-  preserving Windows color-key transparency.
-- Measure project-sidebar coverage in the isolated Tk smoke without lowering
-  the package floor, and run the Windows Spotlight smoke in CI. Preserve
-  translations for moved controls and add the Add Child undo label.
-- Correct UI host and Tk timer types, stop polling a released image broker,
-  and check event-import text and optional Pillow preview handling.
-
+- Replace the right-hand focus form and the left focus list with a resizable
+  content sidebar and a searchable project explorer. Switch between Focus Trees,
+  Decisions, Events, Ideas and Dynamic Modifiers, browse the loaded trees and
+  their focuses, and see the mod's localisation, graphics and scripted-effect
+  files. Enter on a source file reveals its folder. Unopened tree files under
+  `common/national_focus` open through the usual import prompts, and New Focus
+  Tree is one click.
+- Click a focus to open a Spotlight with six actions: Edit Focus, Add
+  Prerequisite, Add Effect, Add Child, Duplicate and Delete. Edit Focus opens the
+  existing form in its own window, with Conditions and Code under Advanced
+  settings. Escape, closing that window or quitting offers to discard an edit
+  that cannot be applied. On Linux and macOS the Spotlight sits on a solid dark
+  surface; Windows keeps color-key transparency.
+- Keep Save Project, Validate, Export and the Saved and Validation status in
+  view, wrap the canvas tools in narrow windows, and move the loaded trees, tree
+  ID and continuous focus position into Tree Settings. The German, Spanish and
+  Chinese strings added for this are machine translations and need native review.
+- Opening Validate no longer switches the whole app to the clam ttk theme.
+- Importing events whose id, picture or options are written as blocks no longer
+  raises an error.
 - Add a UI language by dropping `locales/<code>.json` into the folder: the
   language list is read from the files, each naming itself in `_meta`. Wrap the
   wizard, settings, undo, canvas and validation text that bypassed `tr()`, and
   add the keys the code used but the locale files lacked. The German, Spanish and
   Chinese strings added here are machine translations and need native review. A
   test now fails when a `tr()` key is missing from `en.json` or a locale drifts.
-- Keep the project explorer dark after opening Validate by preserving the app-wide
-  ttk theme and styling only the validation table.
-
-- Move content tools into a resizable navy sidebar with supplied icons and a
-  searchable project explorer; preserve tree ownership, focus selection and
-  Spotlight, and browse real source resources without changing files.
-- List all mod focus-tree source files in the project explorer and provide a
-  New Focus Tree action; open existing files through the guarded import workflow.
-
-- Float enlarged focus artwork and radial actions over the dimmed editor,
-  removing the Spotlight panel and card; reflow controls for small windows.
-- Add contextual focus actions and editing, content navigation, and visible save
-  and validation status with dedicated tree settings (#332).
 - Record a failed sibling autosave once in the error log, including its path.
   Repeated ticks for the same failure do not add another entry.
 
