@@ -14,6 +14,7 @@ from builders import make_focus
 
 import hoi4_content_maker as m
 from hoi4cm.core.undo import UndoStack
+from hoi4cm.editor.extra_tree_undo import ExtraTreeUndoHistory
 from hoi4cm.focus_tree.build import build_focuses
 from hoi4cm.focus_tree.parse import parse_focus_tree
 from hoi4cm.models import (
@@ -104,6 +105,8 @@ class _SidebarApp:
         self.focuses = FocusDocument([focus])
         self.selected = focus
         self._undo_stack = UndoStack()
+        self._tree_undo_history = ExtraTreeUndoHistory()
+        self._snapshot_extra_tree_state = Mock(return_value=None)
         self._pending_values: FocusSidebarValues | None = None
         self.populate_calls: list[Focus] = []
         self.cv = Mock()

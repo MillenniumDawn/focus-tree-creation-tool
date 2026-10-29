@@ -46,7 +46,11 @@ shapes cover what is here:
   `relativize_to_mod_root` in `ui/settings_dialog.py`.
 - **App and mixin methods** run unbound against a fake host. `AppFake` in
   `tests/ui_fakes.py` hosts the canvas, effects and mod-loading mixins with
-  mocked widgets; monolith methods are called as `App._save(fake)`.
+  mocked widgets and gets its canvas-owned state from the same shared
+  initializer production uses (`CanvasMixin._init_canvas_state`), so the
+  fake's contract matches the real host (defaults pinned by
+  `tests/test_canvas_state.py`); monolith methods are called as
+  `App._save(fake)`.
   `hoi4cm.ui.app_contracts` checks the real `App` against the mixin protocols.
 
 `tests/test_tk_smoke.py` is the one file marked `tk`. It builds the real `App`

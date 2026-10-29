@@ -25,6 +25,7 @@ import hoi4_content_maker as main_mod
 from hoi4cm.mod import MOD
 from hoi4cm.models import Focus
 from hoi4cm.ui import settings_dialog
+from hoi4cm.ui.canvas import CanvasMixin
 from hoi4cm.ui.canvas_scheduler import RedrawChannel
 from hoi4cm.ui.gfx_browser import (
     open_focus_icon_browser,
@@ -229,6 +230,122 @@ def test_tutorial_starts_and_closes(app, opened):
     app._tutorial.close()
 
 
+def test_canvas_state_initializes_and_pools_recover(app):
+    """#167: canvas-owned state is ready once and pools recover after a sweep."""
+    cv = tk.Canvas(app)
+    try:
+        fake = AppFake(cv=cv)
+        # One shared initializer must have produced the whole contract.
+        for attribute in (
+            "_canvas_probe",
+            "_scene_index",
+            "_redraw_state",
+            "_lines",
+            "_lines_used",
+            "_lines_key",
+            "_grid_pool",
+            "_grid_used",
+            "_grid_key",
+            "_legend_pool",
+            "_legend_used",
+            "_legend_key",
+            "_legend_stack_key",
+            "_coord_label_pools",
+            "_coord_label_key",
+            "_mm_visible",
+            "_mm_canvas",
+            "_image_broker",
+            "_image_poll_job",
+            "_focus_bounds_cache",
+        ):
+            assert hasattr(fake, attribute), attribute
+        assert fake._mm_visible is False and fake._mm_canvas is None
+        assert fake._cfp_x is None and fake._cfp_y is None
+
+        # Immediate first render: schedulers, scene index and pools all live.
+        CanvasMixin._redraw_now(
+            fake, RedrawChannel.VIEW | RedrawChannel.SCENE, reason="test"
+        )
+        assert fake._rendering_frame is False
+        probe = fake._canvas_probe
+        assert fake._canvas_item_exists(probe)
+
+        # An external cv.delete("all") sweep invalidates pooled item ids; the
+        # sentinel probe recovers and the pools reset without re-initializing.
+        cv.delete("all")
+        fake._validate_canvas_probe()
+        assert fake._canvas_probe != probe
+        assert fake._canvas_item_exists(fake._canvas_probe)
+        assert fake._lines == [] and fake._lines_used == 0
+        assert fake._grid_pool == [] and fake._grid_used == 0
+        assert fake._legend_pool == [] and fake._legend_used == 0
+    finally:
+        cv.destroy()
+        gc.collect()
+
+
+def test_minimap_toggle_and_cfp_are_optional_handles(app):
+    """#167: genuinely optional handles stay optional but typed."""
+    cv = tk.Canvas(app)
+    try:
+        fake = AppFake(cv=cv)
+        assert fake._mm_scale is None  # geometry only after a visible render
+        fake._toggle_minimap()
+        assert fake._mm_visible is True
+        assert fake._mm_canvas is not None
+        assert fake._mm_canvas in cv.winfo_children()
+        fake._draw_minimap()  # no focuses: overlay cleared, no geometry yet
+        assert fake._mm_scale is None or fake._mm_scale > 0
+        fake._toggle_minimap()
+        assert fake._mm_visible is False
+
+        # CFP values are host-owned document state drawn only when set.
+        fake._cfp_x, fake._cfp_y = 96, 260
+        fake.zoom = 1.0
+        fake._draw_cfp_markers()
+        assert cv.find_withtag("cfp_marker")
+    finally:
+        cv.destroy()
+        gc.collect()
+
+
+def test_real_app_recovers_a_populated_canvas_after_external_delete(monkeypatch):
+    monkeypatch.setattr(main_mod.App, "_run_startup_prompts", lambda self: None)
+    root = main_mod.App()
+    try:
+        parent = Focus(id=1, x=1, y=1)
+        child = Focus(id=2, x=2, y=2)
+        child.tree_idx = 1
+        child.prereqs = [[parent.id]]
+        root.focuses.extend([parent, child])
+        root._extra_trees = [
+            {"type": "shared", "tree_id": "EXTRA", "focus_ids": {child.id}}
+        ]
+        root.update_idletasks()
+        root._redraw_now(RedrawChannel.VIEW | RedrawChannel.SCENE, reason="test")
+        assert root._lines and root._grid_pool and root._legend_pool
+        assert set(root._focus_bundles) == {parent.id, child.id}
+        old_line = root._lines[0]
+        scene = root._scene_index
+        scheduler = root._redraw_state
+
+        root.cv.delete("all")
+        root._redraw_now(RedrawChannel.VIEW | RedrawChannel.SCENE, reason="test")
+
+        assert not root.cv.type(old_line)
+        assert root._scene_index is scene
+        assert root._redraw_state is scheduler
+        assert set(root._focus_bundles) == {parent.id, child.id}
+        assert root.focuses[child.id].prereqs == [[parent.id]]
+        for pool in (root._lines, root._grid_pool, root._legend_pool):
+            assert pool and all(root.cv.type(item) for item in pool)
+    finally:
+        assert root._lifecycle is not None
+        root._lifecycle.finish_close()
+        root.destroy()
+        gc.collect()
+
+
 def test_entry_point_smoke_check(tmp_path):
     # The real entry point in a fresh process, as the frozen build runs it.
     entry = Path(main_mod.__file__).resolve()
@@ -330,7 +447,6 @@ def test_scroll_burst_coalesces_and_keeps_pointer_anchor(app, monkeypatch):
     cv = tk.Canvas(app)
     try:
         fake = AppFake(cv=cv)
-        fake._canvas_runtime()
         jobs = []
         frames = []
         monkeypatch.setattr(cv, "after", lambda delay, cb: jobs.append(cb) or "job")

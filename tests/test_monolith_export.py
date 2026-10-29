@@ -65,6 +65,14 @@ class _App:
         self.focuses = {focus.id: focus for focus in focuses}
         self._tree_id = SimpleNamespace(get=lambda: "TST_focus_tree")
         self._extra_trees = []
+        self._shared_focuses = []
+        self._joint_focuses = []
+        self._tree_badge_table = None
+        # Continuous focus position defaults mirror App.__init__.
+        self._cfp_x = None
+        self._cfp_y = None
+        self._cfp_x_var = SimpleNamespace(get=lambda: "")
+        self._cfp_y_var = SimpleNamespace(get=lambda: "")
 
 
 class _Catalog:

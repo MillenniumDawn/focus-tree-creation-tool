@@ -5,6 +5,7 @@ from unittest.mock import Mock
 
 import hoi4_content_maker as app_module
 from hoi4cm.core.undo import UndoStack
+from hoi4cm.editor.extra_tree_undo import ExtraTreeUndoHistory
 from hoi4cm.models import (
     EditorWorkspace,
     Focus,
@@ -106,6 +107,8 @@ class _DocumentApp:
         self._last_project_path = None
         self._import_generation = 0
         self._undo_stack = UndoStack()
+        self._tree_undo_history = ExtraTreeUndoHistory()
+        self._snapshot_extra_tree_state = Mock(return_value=None)
         self._push_undo = lambda *args, **kwargs: app_module.App._push_undo(
             cast(app_module.App, app), *args, **kwargs
         )

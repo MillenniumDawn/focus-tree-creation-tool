@@ -603,7 +603,7 @@ def _live_undo_app(focus: Focus, *others: Focus) -> AppFake:
     app = AppFake([focus, *others])
     cast(Any, app).selected = focus
     app._undo_stack = UndoStack()
-    app._push_undo = lambda *args, **kwargs: app_module.App._push_undo(
+    cast(Any, app)._push_undo = lambda *args, **kwargs: app_module.App._push_undo(
         _as_app(app), *args, **kwargs
     )
     return app
