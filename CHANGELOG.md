@@ -16,6 +16,12 @@ the version by hand. See `AGENTS.md`.
   test now fails when a `tr()` key is missing from `en.json` or a locale drifts.
 - Record a failed sibling autosave once in the error log, including its path.
   Repeated ticks for the same failure do not add another entry.
+- Keep unsaved sidebar edits when you press Ctrl+Z or Ctrl+Y. The edit becomes
+  its own undo step first, so Ctrl+Y can bring it back. An untouched imported
+  focus no longer adds an undo entry or clears redo when you select away from
+  it, undo, or redo. That covers ids with characters outside letters, digits
+  and underscores, nested, duplicate or negative `ai_will_do` values, and
+  conditions, offsets or localization text with surrounding whitespace.
 
 ---
 

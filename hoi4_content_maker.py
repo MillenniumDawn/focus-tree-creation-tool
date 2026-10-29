@@ -1125,12 +1125,19 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         """Re-apply the most recently undone action after flushing edits."""
         # Same flush rationale as _undo.
         autosave = getattr(self, "_autosave", None)
+        flushed = False
         if self.selected is not None and autosave is not None:
+            revision = self.focuses.content_revision
             autosave()
+            flushed = self.focuses.content_revision != revision
         history = getattr(self, "_tree_undo_history", None)
         aligned = history is not None and history.is_aligned(len(self._undo_stack))
         result = self._undo_stack.redo(self.focuses, Focus.from_dict)
         if result is None:
+            if flushed:
+                # The flush clears redo, so nothing below redraws its edit.
+                self._redraw()
+                self._invalidate_focus_list_structure()
             self._hint(tr("hint.nothing_to_redo", "Nothing to redo."))
             return
         label, changed_ids, removed_ids = result

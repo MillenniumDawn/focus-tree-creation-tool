@@ -9,8 +9,11 @@ from unittest.mock import patch
 import pytest
 from builders import make_focus
 
+from hoi4cm.focus_tree.build import build_focuses
 from hoi4cm.focus_tree.codec import render_focus_block
+from hoi4cm.focus_tree.loc import hydrate_focus_localization
 from hoi4cm.focus_tree.operations import build_focus_name_lookup
+from hoi4cm.focus_tree.parse import parse_focus_tree
 from hoi4cm.models import (
     Focus,
     FocusDocument,
@@ -230,6 +233,95 @@ def test_each_form_field_counts_as_a_change(field, value):
 def test_ai_will_do_raw_strips_focus_whitespace_for_match():
     focus = make_focus(ai_will_do_raw="  base = 1\n")
     values = _values(focus, ai_will_do_raw="base = 1")
+    assert sidebar_values_match_focus(focus, values) is True
+
+
+_PADDED_TREE = """\
+focus_tree = {
+\tid = TST_tree
+\tfocus = {
+\t\tid = TST_padded
+\t\tx = 0
+\t\ty = 0
+\t\tavailable = {
+\t\t\thas_country_flag = foo
+\t\t}
+\t\tbypass = { has_war = yes }
+\t\tcancel = {
+\t\t\talways = no
+\t\t}
+\t\toffset = {
+\t\t\tx = 1
+\t\t\ty = -1
+\t\t\ttrigger = {
+\t\t\t\thas_dlc = "X"
+\t\t\t}
+\t\t}
+\t}
+}
+"""
+
+
+def _padded_focus():
+    parsed = parse_focus_tree(_PADDED_TREE, "/tmp/padded.txt")
+    return list(build_focuses(parsed, tree_idx=1))[0]
+
+
+def _padded_form(focus, **overrides):
+    """The values the form reads back for an untouched imported ``focus``."""
+    shown = {
+        "ai_will_do_raw": f"base = {focus.ai_will_do}",
+        "available_cond": focus.available_cond.strip(),
+        "bypass_cond": focus.bypass_cond.strip(),
+        "cancel_cond": focus.cancel_cond.strip(),
+        "offsets": tuple(
+            {**offset, "trigger": offset["trigger"].strip()} for offset in focus.offsets
+        ),
+    }
+    return _values(focus, **{**shown, **overrides})
+
+
+def test_untouched_imported_block_padding_is_not_dirty():
+    """Import keeps whitespace around blocks; the form reads every field back
+    stripped, so selecting away from an untouched focus must not look like an
+    edit."""
+    focus = _padded_focus()
+    assert focus.available_cond != focus.available_cond.strip()
+    assert focus.bypass_cond != focus.bypass_cond.strip()
+    assert focus.cancel_cond != focus.cancel_cond.strip()
+    assert focus.offsets[0]["trigger"] != focus.offsets[0]["trigger"].strip()
+    assert sidebar_values_match_focus(focus, _padded_form(focus)) is True
+
+
+@pytest.mark.parametrize(
+    "field",
+    ["available_cond", "bypass_cond", "cancel_cond"],
+)
+def test_padded_condition_with_changed_text_is_still_dirty(field):
+    focus = _padded_focus()
+    values = _padded_form(focus, **{field: "changed = yes"})
+    assert sidebar_values_match_focus(focus, values) is False
+
+
+def test_padded_offset_with_changed_trigger_is_still_dirty():
+    focus = _padded_focus()
+    values = _padded_form(
+        focus, offsets=({"x": 1, "y": -1, "trigger": "changed = yes"},)
+    )
+    assert sidebar_values_match_focus(focus, values) is False
+
+
+def test_untouched_hydrated_localization_padding_is_not_dirty():
+    """Loc values keep trailing spaces and newlines; the form strips them."""
+    focus = _padded_focus()
+    hydrate_focus_localization(
+        ' TST_padded:0 "Title "\n TST_padded_desc:0 "Text.\\n"\n', [focus]
+    )
+    assert focus.loc_name != focus.loc_name.strip()
+    assert focus.desc != focus.desc.strip()
+    values = _padded_form(
+        focus, loc_name=focus.loc_name.strip(), desc=focus.desc.strip()
+    )
     assert sidebar_values_match_focus(focus, values) is True
 
 

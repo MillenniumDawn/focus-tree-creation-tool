@@ -25,6 +25,8 @@ from hoi4cm.models import (
 )
 
 _REFRESH_MOCKS = ("_refresh_prereqs", "_refresh_mutex", "_refresh_effects")
+_DEFAULT_GFX = "GFX_goal_generic_political_pressure"
+_DEFAULT_SEARCH = "FOCUS_FILTER_POLITICAL"
 
 # Three imported ai_will_do shapes: duplicated factor keys, a nested modifier
 # factor alongside a top-level one, and a negative scalar.
@@ -54,6 +56,29 @@ focus_tree = {
 \t\tx = 2
 \t\ty = 0
 \t\tai_will_do = -1
+\t}
+\tfocus = {
+\t\tid = TST_cond
+\t\tx = 3
+\t\ty = 0
+\t\tavailable = {
+\t\t\thas_country_flag = foo
+\t\t\tOR = {
+\t\t\t\ttag = GER
+\t\t\t\ttag = FRA
+\t\t\t}
+\t\t}
+\t\tbypass = { has_war = yes }
+\t\tcancel = {
+\t\t\talways = no
+\t\t}
+\t\toffset = {
+\t\t\tx = 1
+\t\t\ty = -1
+\t\t\ttrigger = {
+\t\t\t\thas_dlc = "X"
+\t\t\t}
+\t\t}
 \t}
 }
 """
@@ -104,7 +129,8 @@ class _SidebarApp:
 def _untouched_sidebar_values(focus: Focus) -> FocusSidebarValues:
     """Snapshot of the populated form for an untouched ``focus``.
 
-    An empty raw block displays as ``base = N`` (see ``App._populate``); the
+    Mirrors ``App._read_sidebar_values``: text widgets read back stripped, an
+    empty raw block displays as ``base = N`` (see ``App._populate``), and the
     name field holds the id verbatim, so ``form_focus_id`` keeps it as-is.
     """
     raw_ai = (getattr(focus, "ai_will_do_raw", "") or "").strip() or (
@@ -113,23 +139,31 @@ def _untouched_sidebar_values(focus: Focus) -> FocusSidebarValues:
     return FocusSidebarValues(
         name=form_focus_id(focus.name, focus.name),
         icon=focus.icon,
-        gfx=focus.gfx,
+        gfx=focus.gfx.strip() or _DEFAULT_GFX,
         cost=focus.cost,
         ai_will_do=m.parse_ai_will_do(raw_ai),
         ai_will_do_raw=raw_ai,
         x=focus.x,
         y=focus.y,
-        loc_name=getattr(focus, "loc_name", ""),
-        desc=focus.desc,
-        search_filters=focus.search_filters,
-        available_cond=focus.available_cond,
-        bypass_cond=focus.bypass_cond,
-        cancel_cond=focus.cancel_cond,
+        loc_name=getattr(focus, "loc_name", "").strip(),
+        desc=focus.desc.strip(),
+        search_filters=focus.search_filters.strip() or _DEFAULT_SEARCH,
+        available_cond=focus.available_cond.strip(),
+        bypass_cond=focus.bypass_cond.strip(),
+        cancel_cond=focus.cancel_cond.strip(),
         cancel_if_invalid=focus.cancel_if_invalid,
         continue_if_invalid=focus.continue_if_invalid,
         available_if_capitulated=focus.available_if_capitulated,
-        offsets=tuple(dict(offset) for offset in focus.offsets),
+        offsets=tuple(
+            {**offset, "trigger": str(offset["trigger"]).strip()}
+            for offset in focus.offsets
+        ),
     )
+
+
+def _imported_focus(name: str) -> Focus:
+    parsed = parse_focus_tree(_IMPORTED_TREE, "/tmp/t343.txt")
+    return {f.name: f for f in build_focuses(parsed, tree_idx=1)}[name]
 
 
 def _app(focus: Focus) -> _SidebarApp:
@@ -248,15 +282,18 @@ def test_history_navigation_with_untouched_form_pushes_no_undo_entry():
         ("TST_dup", 1),
         ("TST_nested", 4),
         ("TST_neg", -1),
+        # Condition blocks and offset triggers import with surrounding
+        # whitespace that the stripped form never shows back.
+        ("TST_cond", 1),
     ],
 )
-def test_untouched_imported_ai_blocks_do_not_disturb_history(
+def test_untouched_imported_blocks_do_not_disturb_history(
     focus_name: str, ai_will_do: int
 ):
-    """Imported duplicate/nested/negative ai_will_do blocks read back through
-    the real sidebar autosave without adding history or clearing redo."""
-    parsed = parse_focus_tree(_IMPORTED_TREE, "/tmp/t343.txt")
-    focus = {f.name: f for f in build_focuses(parsed, tree_idx=1)}[focus_name]
+    """Imported duplicate/nested/negative ai_will_do blocks and padded
+    condition or offset blocks read back through the real sidebar autosave
+    without adding history or clearing redo."""
+    focus = _imported_focus(focus_name)
     assert focus.ai_will_do == ai_will_do
     app = _app(focus)
     _seed_redo_step(app)
@@ -270,3 +307,37 @@ def test_untouched_imported_ai_blocks_do_not_disturb_history(
 
     assert app.focuses[focus.id].desc == "typed"
     assert len(app._undo_stack._redo) == 0
+
+
+def test_undo_walks_real_history_over_a_padded_imported_focus():
+    """A false-dirty flush would pop its own push and never reach these."""
+    app = _app(_imported_focus("TST_cond"))
+    for desc in ("one", "two"):
+        app._push_undo("edit focus", touched_ids=(app.selected.id,))
+        app.selected.desc = desc
+
+    app._undo()
+    assert app.selected.desc == "one"
+
+    app._undo()
+    assert app.selected.desc == ""
+    assert len(app._undo_stack) == 0
+
+
+def test_redo_redraws_when_the_flush_commits_a_pending_edit():
+    app = _app(make_focus(desc="old"))
+    _armed_with_desc(app, "typed")
+
+    app._redo()  # nothing to redo, but the committed edit must reach the canvas
+
+    app._redraw.assert_called_once()
+    app._invalidate_focus_list_structure.assert_called_once()
+
+
+def test_redo_with_untouched_form_does_not_redraw():
+    app = _app(make_focus(desc="old"))
+
+    app._redo()
+
+    app._redraw.assert_not_called()
+    app._invalidate_focus_list_structure.assert_not_called()
