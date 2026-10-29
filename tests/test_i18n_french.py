@@ -64,7 +64,6 @@ _IDENTICAL_KEYS = frozenset(
         "gfx.images_count",
         "load_all.column.type",
         "load_all.type.joint",
-        "settings.event_picture_profiles.vanilla_hint",
         "spirit.change.description",
         "spirit.field.ai_will_do",
         "spirit.field.allowed",
@@ -75,8 +74,6 @@ _IDENTICAL_KEYS = frozenset(
         "spirit.field.rule",
         "spirit.field.visible",
         "spirit.section.localisation",
-        "status.mod",
-        "status.zoom",
         "tab.code",
         "tab.conditions",
         "toolbar.add_focus",
@@ -158,6 +155,20 @@ def test_french_locale_values_are_strings():
     assert all(isinstance(value, str) for value in french.values())
 
 
+def test_french_prerequisite_groups_use_one_vocabulary():
+    """The AND/OR buttons and undo labels use the words the group row shows."""
+    _english, french = _locales()
+    and_word = french["focus.prereq.group_label"].split()[0]
+    or_word = french["focus.prereq.group_separator"].strip()
+
+    assert french["focus.prereq.add_and"].endswith(f" {and_word}")
+    assert french["focus.prereq.add_or"].endswith(f" {or_word}")
+    assert f" {and_word} " in french["undo.add_prerequisite_and_group"]
+    assert f" {or_word} " in french["undo.add_prerequisite_or_group"]
+    assert f"Groupe {and_word} :" in french["focus.prereq.and_or_explanation"]
+    assert f"Groupe {or_word} :" in french["focus.prereq.and_or_explanation"]
+
+
 def test_french_meta_declares_display_name():
     meta = json.loads((LOCALE_DIR / "fr.json").read_text(encoding="utf-8"))["_meta"]
 
@@ -190,6 +201,8 @@ def test_french_strings_interpolate_kwargs(restore_i18n_state):
         i18n_mod.tr("app.title.tree", tree="SOV")
         == "HOI4 Content Maker  -  SOV  [Wiki Accurate v2]"
     )
+    assert i18n_mod.tr("status.mod", mod="MD") == "Mod : MD"
+    assert i18n_mod.tr("status.zoom", zoom=50) == "Zoom : 50 %"
     # Literal brace groups still survive a failed format lookup untouched.
     assert i18n_mod.tr("focus.view_code") == "Voir le code du focus  { }"
 
