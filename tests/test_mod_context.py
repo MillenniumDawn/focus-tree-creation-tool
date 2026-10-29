@@ -1093,6 +1093,41 @@ def test_scan_records_failed_step_label(mod_index, tmp_path, monkeypatch):
     assert candidate.unparsable_files == []
 
 
+@pytest.mark.parametrize(
+    ("directory", "label", "attribute"),
+    [
+        ("events", "Events", "event_ids"),
+        ("common/national_focus", "Focus IDs", "focus_ids"),
+        ("common/ideas", "Ideas/Spirits", "idea_ids"),
+        ("common/decisions/categories", "Decisions", "decision_cats"),
+    ],
+)
+def test_scan_records_unreadable_directory_and_continues(
+    mod_index, mod_tree, monkeypatch, directory, label, attribute
+):
+    blocked = str(mod_tree / directory)
+    original_listdir = os.listdir
+
+    def listdir(path):
+        if path == blocked:
+            raise PermissionError("denied")
+        return original_listdir(path)
+
+    monkeypatch.setattr(os, "listdir", listdir)
+    candidate = mod_index.new_scan_candidate()
+
+    assert candidate.scan(str(mod_tree)) is True
+    assert candidate.loaded
+    assert candidate.failed_steps == [label]
+    assert not getattr(candidate, attribute)
+    assert "GFX_focus_USA_first_focus" in candidate.sprites
+    assert candidate.country_tags == ["USA", "GER", "SOV"]
+
+    mod_index.adopt_scan(candidate)
+    assert mod_index.failed_steps == [label]
+    assert mod_index.country_tags == ["USA", "GER", "SOV"]
+
+
 def test_scan_records_unparsable_file_and_keeps_its_siblings(mod_index, tmp_path):
     ideas = _ideas_tree(tmp_path)
     candidate = mod_index.new_scan_candidate()

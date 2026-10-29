@@ -128,10 +128,7 @@ class ModIndex:
     @staticmethod
     def _txt_paths(directory):
         """Sorted absolute paths of ``*.txt`` files directly in *directory*."""
-        try:
-            names = os.listdir(directory)
-        except OSError:
-            return []
+        names = os.listdir(directory)
         return [
             os.path.join(directory, name)
             for name in sorted(names)
