@@ -29,10 +29,7 @@ def test_build_basic_fields():
     # extract_raw_block keeps trailing block indentation; the renderer strips it.
     assert len(alpha.effects) == 1
     assert alpha.effects[0]["type"] == "_raw_block"
-    fields = alpha.effects[0].get("fields")
-    assert isinstance(fields, dict)
-    raw = fields.get("raw")
-    assert isinstance(raw, str) and raw.strip() == "add_political_power = 120"
+    assert alpha.effects[0]["fields"]["raw"].strip() == "add_political_power = 120"
     assert alpha._raw_gx == 4 and alpha._raw_gy == 0
 
 
@@ -353,7 +350,7 @@ def _tree_with_ai(ai_clause):
     )
 
 
-@pytest.mark.parametrize("literal", ["inf", "-inf", "1e999", "-1e999"])
+@pytest.mark.parametrize("literal", ["inf", "-inf", "nan", "1e999", "-1e999"])
 @pytest.mark.parametrize("form", ["scalar", "factor", "base"])
 def test_nonfinite_ai_will_do_falls_back_to_one(literal, form):
     if form == "scalar":
@@ -386,46 +383,59 @@ def test_finite_ai_will_do_precedence_and_values(ai_clause, expected):
     assert _by_name(focuses)["TST_alpha"].ai_will_do == expected
 
 
-def test_nonfinite_ai_will_do_raw_block_round_trips():
-    src = (
-        "focus_tree = {\n"
-        "\tid = AI_tree\n"
-        "\tfocus = {\n"
-        "\t\tid = TST_alpha\n"
-        "\t\tx = 1\n"
-        "\t\ty = 1\n"
-        "\t\tcompletion_reward = {\n"
+def _export_ai_tree(parsed, focuses):
+    return export_focus_tree(
+        focuses,
+        _info(parsed, "shared"),
+        focus_lookup={f.id: f for f in focuses},
+        effect_renderer=raw_block_renderer,
+    )
+
+
+@pytest.mark.parametrize("key", ["factor", "base"])
+@pytest.mark.parametrize(
+    "literal,expected",
+    [
+        ("inf", 1),
+        ("-inf", 1),
+        ("nan", 1),
+        ("1e999", 1),
+        ("-1e999", 1),
+        ("-3", -3),
+        ("0.5", 0),
+        ("1e308", int(1e308)),
+    ],
+)
+def test_ai_will_do_block_text_round_trips(key, literal, expected):
+    entry = f"{key} = {literal}"
+    ai_clause = (
+        "completion_reward = {\n"
         "\t\t\tadd_political_power = 120\n"
         "\t\t}\n"
-        "\t\tai_will_do = { factor = 1e999 "
-        "modifier = { factor = 2 has_war = yes } }\n"
-        "\t}\n"
-        "}\n"
+        f"\t\tai_will_do = {{ {entry} modifier = {{ factor = 2 has_war = yes }} }}"
     )
-    parsed = parse_focus_tree(src, "/tmp/ai.txt")
+    parsed = parse_focus_tree(_tree_with_ai(ai_clause), "/tmp/ai.txt")
     focuses = build_focuses(parsed, tree_idx=1)
     alpha = _by_name(focuses)["TST_alpha"]
-    assert alpha.ai_will_do == 1
-    assert "factor = 1e999" in alpha.ai_will_do_raw
+    assert alpha.ai_will_do == expected
+    assert entry in alpha.ai_will_do_raw
 
-    def _export(tree):
-        lookup = {f.id: f for f in tree}
-        return export_focus_tree(
-            tree,
-            _info(parsed, "shared"),
-            focus_lookup=lookup,
-            effect_renderer=raw_block_renderer,
-        )
-
-    t1 = _export(focuses)
-    assert "factor = 1e999" in t1
+    t1 = _export_ai_tree(parsed, focuses)
+    for needle in (entry, "has_war = yes", "add_political_power = 120"):
+        assert needle in t1
     reparsed = parse_focus_tree(t1, "/tmp/ai.txt")
     assert (
         reparsed.focuses_data[0]["ai_will_do"] == parsed.focuses_data[0]["ai_will_do"]
     )
     rebuilt = build_focuses(reparsed, tree_idx=1)
     rebuilt_alpha = _by_name(rebuilt)["TST_alpha"]
-    assert rebuilt_alpha.ai_will_do == 1
-    assert "factor = 1e999" in rebuilt_alpha.ai_will_do_raw
-    t2 = _export(rebuilt)
-    assert t1 == t2
+    assert rebuilt_alpha.ai_will_do == expected
+    assert entry in rebuilt_alpha.ai_will_do_raw
+    assert _export_ai_tree(parsed, rebuilt) == t1
+
+
+@pytest.mark.parametrize("literal", ["inf", "-inf", "nan", "1e999", "-1e999"])
+def test_nonfinite_scalar_ai_will_do_exports_the_fallback(literal):
+    parsed = parse_focus_tree(_tree_with_ai(f"ai_will_do = {literal}"), "/tmp/ai.txt")
+    text = _export_ai_tree(parsed, build_focuses(parsed, tree_idx=1))
+    assert "ai_will_do = {\n\t\t\tbase = 1\n\t\t}" in text
