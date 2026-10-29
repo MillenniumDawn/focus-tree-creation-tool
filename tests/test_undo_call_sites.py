@@ -209,6 +209,18 @@ def test_remove_mutex_pushes_selected_and_partner_ids():
     assert partner.mutex == []
 
 
+def test_add_effect_type_pushes_focus_id_and_refreshes_the_list():
+    focus = Focus(id=18)
+    app = AppFake([focus])
+    app.selected = focus
+
+    app_module.App._add_effect_type(_as_app(app), "add_ideas", {"idea": "x"})
+
+    app._push_undo.assert_called_once_with("add effect", touched_ids=(focus.id,))
+    assert focus.effects == [{"type": "add_ideas", "fields": {"idea": "x"}}]
+    app._invalidate_focus_list_structure.assert_called_once_with()
+
+
 def test_rm_effect_pushes_focus_id():
     focus = Focus(id=15)
     focus.effects = [{"type": "add_ideas", "fields": {}}]

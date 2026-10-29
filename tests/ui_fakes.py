@@ -91,7 +91,6 @@ class AppFake(CanvasMixin, ModLoadingMixin, EffectsMixin):
         self._refresh_prereqs = Mock()
         self._refresh_mutex = Mock()
         self.__dict__["_refresh_effects"] = Mock()
-        self._focus_list_cache = Mock()
         self._save_offsets_to_focus = Mock()
         self._refresh_offsets = Mock()
         self._begin_document_generation = Mock()

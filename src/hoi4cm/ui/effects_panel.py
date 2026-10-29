@@ -520,7 +520,6 @@ class EffectsMixin:
         self.selected.effects.append({"type": etype, "fields": dict(fields)})
         self.focuses.mark_content_changed()
         self._refresh_effects()
-        self._focus_list_cache.invalidate()
         self._invalidate_focus_list_structure()
 
     def _refresh_effects(self, force=False):
@@ -882,7 +881,6 @@ class EffectsMixin:
         self.selected.effects.pop(idx)
         self.focuses.mark_content_changed()
         self._refresh_effects()
-        self._focus_list_cache.invalidate()
         self._invalidate_focus_list_structure()
 
     def _live_eff_field(self, idx, fname, var):

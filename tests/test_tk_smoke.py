@@ -576,6 +576,44 @@ def test_spotlight_buttons_run_existing_actions(app, opened, action):
         assert set(app.focuses) == after_ids
 
 
+def _buttons(widget: tk.Misc) -> list[tk.Button]:
+    found = [widget] if isinstance(widget, tk.Button) else []
+    for child in widget.winfo_children():
+        found.extend(_buttons(child))
+    return found
+
+
+def test_effects_add_and_remove_through_the_real_app(app, opened):
+    from hoi4cm.core.i18n import tr
+    from hoi4cm.data.effects import EFFECT_DEFS
+
+    plain = next(key for key, defn in EFFECT_DEFS.items() if not defn.get("fields"))
+    with_fields = next(key for key, defn in EFFECT_DEFS.items() if defn.get("fields"))
+    app._new_focus_at(120 + len(app.focuses) * 2, 44)
+    focus = app.selected
+    undo_count = len(app._undo_stack)
+
+    app._open_effect_params(plain)
+    assert [effect["type"] for effect in focus.effects] == [plain]
+
+    app._open_effect_params(with_fields)
+    (form,) = opened()
+    add = next(
+        button
+        for button in _buttons(form)
+        if button.cget("text") == tr("focus.effects.add_this", "＋  Add Effect")
+    )
+    add.invoke()
+    app.update()
+    assert not form.winfo_exists(), "the parameter form must close after Add"
+    assert [effect["type"] for effect in focus.effects] == [plain, with_fields]
+
+    app._rm_effect(1)
+    app._rm_effect(0)
+    assert focus.effects == []
+    assert len(app._undo_stack) == undo_count + 4
+
+
 def test_spotlight_background_click_dismisses_without_editing(app):
     x = max((item.x for item in app.focuses.values()), default=0) + 1
     app._new_focus_at(x, 44)
