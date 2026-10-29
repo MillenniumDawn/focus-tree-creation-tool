@@ -62,22 +62,24 @@ its parameter list when you add one. Do not add click-through tests.
 `hoi4_content_maker.py` Tk shell, with branch coverage on. The source list is
 in `[tool.coverage.run]` in `pyproject.toml`; `--cov` without a value uses
 that list. `pytest --cov --cov-report=term-missing` prints per-file gaps.
-CI then runs Tk smoke in a separate process and appends coverage for
-`ui/project_sidebar.py` only. The sidebar stays in the package floor; Tk
-execution does not raise the headless monolith measurement. The filtered
-reports keep independent floors rather than one blended percentage:
+CI then runs the Tk smoke in a separate process and appends coverage for
+`ui/project_sidebar.py`, `ui/focus_editor.py` and `ui/editor_chrome.py` only.
+Those stay in the package floor; Tk execution does not raise the headless
+monolith measurement. The filtered reports keep independent floors rather than
+one blended percentage:
 
 ```sh
-xvfb-run -a pytest -m tk --cov=hoi4cm.ui.project_sidebar --cov-append
+xvfb-run -a pytest -m tk --cov=hoi4cm.ui.project_sidebar \
+  --cov=hoi4cm.ui.focus_editor --cov=hoi4cm.ui.editor_chrome --cov-append
 coverage report --include='src/hoi4cm/*' --fail-under=91
 coverage report --include='hoi4_content_maker.py' --fail-under=34
 ```
 
-Measured with sidebar Tk coverage appended: 92% for the package and 38% for
-the headless monolith. The floors remain 91% and 34%. These are floors, not
-targets: raise them as coverage climbs. The package and monolith must stay separately included in
-`pyproject.toml` so a future change cannot silently stop measuring either
-source.
+Measured with that Tk coverage appended: 91% for the package and 39% for the
+headless monolith. The floors remain 91% and 34%. These are floors, not
+targets: raise them as coverage climbs. The package and monolith must stay
+separately included in `pyproject.toml` so a future change cannot silently stop
+measuring either source.
 
 The package floor leaves out most modules that build Tk widgets. They are
 listed under `omit` in `[tool.coverage.report]`: the wizard dialogs, the
@@ -86,8 +88,9 @@ The headless suite reaches 2% to 77% of each, so including them would turn
 the floor back into a number nobody can move. `tests/test_coverage_gates.py`
 fails if an omitted module does not import tkinter, so a pure module cannot
 be hidden there. A new pure module is gated automatically. A new widget
-module needs either real Tk coverage, as the project sidebar has, or an
-entry in `omit` if its logic is already covered through extracted helpers.
+module needs either real Tk coverage, as the project sidebar, focus editor and
+editor chrome have, or an entry in `omit` if its logic is already covered
+through extracted helpers.
 
 The way to raise real coverage is extraction: move logic out of a dialog
 closure into a pure module (the `_generators.py` pattern), where it is gated
@@ -390,11 +393,14 @@ tests. Widget construction still needs a live `App` against a loaded mod:
   intended rows, and leave those commands non-interactive. Resize or move the
   app between steps, finish with "Don't show this again" selected, restart to
   confirm it stays hidden, then use Help > Start Tutorial to relaunch it.
-- **Toolbar sweep**: click every toolbar row 2 button (Prereq, Mutex,
-  wizard shortcuts, Multi, Del Selected, Clear All, +Shared, +Joint, Load
-  All, Save All) and confirm each still opens the right dialog or performs
-  the right canvas action. Type into the Continuous Focus Position x/y
-  fields, tab out, and confirm the value commits (`_cfp_commit`).
+- **Toolbar sweep**: click every canvas toolbar button (Prereq, Mutex, Search
+  Focuses, Reveal Selected, Focus Actions, Fit, zoom, Multi, Del Selected,
+  Clear All) and each content entry in the sidebar (Decisions, Events, Ideas,
+  Dyn Mod), and confirm each opens the right dialog or performs the right
+  canvas action. In Tree Settings, try +Shared, +Joint, Load All and Save All,
+  and type into the Continuous Focus Position x/y fields, tab out, and confirm
+  the value commits (`_commit_tree_settings`). Narrow the window until the
+  toolbar wraps and confirm every button stays reachable by keyboard.
 - **GFX browser parity**: from the sidebar's Icon GFX field, open the
   browser with a mod loaded (should show only `gfx/interface/goals/` and
   its subfolders) and with no mod loaded (should fall back to a folder
@@ -406,49 +412,27 @@ tests. Widget construction still needs a live `App` against a loaded mod:
   interface, custom) still all show up, unaffected by the sidebar picker's
   narrower scope.
 
-## Sidebar phase 2 verification (2026-10-22)
+### Project explorer, Spotlight and Edit Focus
 
-On Windows / Python 3.14.7, the real application was launched with the existing
-`project_roundtrip.txt` fixture for before/after, empty, narrow (760×640), and
-simulated 200% DPI captures. The supplied sidebar icons were checked byte-for-byte
-against their originals. The Spotlight renderer and its six action assets are unchanged.
+The Tk smoke covers explorer navigation, search and expansion restore, selection
+sync, multiple trees, resource and tree-file discovery, collapse and resize, a
+simulated 200% DPI layout, the Spotlight actions and dismissal, adding and removing
+effects, and the invalid-draft prompts. Two regressions are worth remembering when
+changing this area:
 
-- 35 Tk smoke tests passed, including explorer keyboard navigation without moving
-  nodes, selection synchronization, search expansion restoration, multiple trees,
-  long labels, invalid drafts, resource discovery caching/reveal, resizing/collapse,
-  simulated DPI, Spotlight and recovery regressions.
-- 40 focused headless tests passed. The full headless run had 1,651 passed,
-  7 skipped and 7 failures. Each failure also reproduced on the starting commit:
-  three graphics-catalog path assertions, one graphics-browser search assertion,
-  one image-broker path assertion, one settings path assertion and a CRLF assertion.
-- Ruff, Black's library formatting check (233 Python files), mypy and pylint on
-  changed modules/tests passed. The full pylint invocation retains existing
-  canvas return-consistency and character-editor maxsplit messages.
-- A cached query over 20,000 synthetic focus records took 3.3 ms on this machine;
-  this measures filtering and ancestor retention, not drawing 20,000 canvas nodes.
+- Validate must style only `Val.Treeview`. Calling `ttk.Style.theme_use("clam")`
+  replaces the application-wide theme (`vista` on Windows) and drops the explorer's
+  named styles.
+- A rebuild of the explorer must not act on the selection it restores, or the canvas
+  recenters on every search keystroke and document change.
 
-Physical monitor-to-monitor DPI transitions, macOS/Linux folder-viewer launches,
-and full-scale interactive mod inventories were not manually tested. Source-folder
-launches are mocked in the Tk regression test; source discovery and real script
-import are exercised. Save/export/undo/recovery checks remain in the existing suites.
+Left to manual checks, because the smoke cannot see them:
 
-### All-tree catalog follow-up
-
-The application was launched against the configured Millennium Dawn source folder:
-114 tree-definition files were listed, with the styles-only file excluded. Search
-for Germany was captured in the real application. The follow-up passed 36 Tk smoke
-tests, 12 focused catalog/import tests, Ruff, mypy and changed-module pylint. Tests
-cover recursive discovery, utility/comment/string exclusion, tolerant reads, read
-failures, loaded-file deduplication, explicit file opening, cancellation before reads,
-import undo recording, and opening the existing New Focus Tree dialog. Catalog
-selection/search do not mutate the workspace. The full headless suite was not rerun
-for this follow-up; the prior full-run baseline is recorded above.
-
-### Validation theme regression
-
-Opening Validate previously called `ttk.Style.theme_use("clam")`, replacing the
-application-wide Windows `vista` theme and losing the Project.Treeview's named
-styles. A real Tk regression reproduced this theme change before the fix. Validate
-now configures only Val.Treeview in the current theme. All 37 Tk smoke tests pass,
-including validation refresh, explorer colors/row height, scrollbar colors and
-Spotlight behavior. Existing running processes need restarting to load the fix.
+- Enter on a source file opens the platform folder viewer (the smoke mocks
+  `reveal_source`), on Windows, macOS and Linux.
+- Moving the window between monitors with different DPI.
+- Against Millennium Dawn: the Focus Trees group lists every tree file with the
+  utility files excluded, and searching a country name finds its tree. The listing
+  is cached text, so search does not rescan.
+- Drag a focus in a tree of several thousand focuses and confirm the explorer does
+  not stutter; it should not rebuild while only positions change.

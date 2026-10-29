@@ -901,6 +901,41 @@ def test_tutorial_starts_and_closes(app, opened):
     app._tutorial.close()
 
 
+def test_content_navigation_tracks_a_wizard_window_and_returns_to_trees(app, opened):
+    chrome = app._editor_chrome
+    created = []
+
+    def command():
+        created.append(tk.Toplevel(app))
+
+    chrome.navigate("Decisions", command)
+    app.update()
+    assert chrome.active_content == "Decisions"
+    assert chrome.windows["Decisions"] is created[0]
+    assert app._editor_context_lbl.cget("text").startswith(chrome.titles["Decisions"])
+
+    chrome.navigate("Focus Trees")
+    assert chrome.active_content == "Focus Trees"
+    chrome.navigate("Decisions", command)
+    assert chrome.active_content == "Decisions" and len(created) == 1
+
+    created[0].destroy()
+    app.update()
+    assert "Decisions" not in chrome.windows
+    assert chrome.active_content == "Focus Trees"
+
+
+def test_zoom_and_search_buttons_update_the_chrome(app):
+    chrome = app._editor_chrome
+    before = app.zoom
+    chrome.zoom(1.2)
+    assert app.zoom > before
+    assert app._editor_zoom_lbl.cget("text") == f"{int(app.zoom * 100)}%"
+    chrome.zoom(1 / 1.2)
+    chrome.search()
+    assert app._left_panel_visible
+
+
 def test_tutorial_steps_highlight_widgets_that_are_on_screen(app):
     from hoi4cm.ui.tutorial import TUTORIAL_STEPS
 

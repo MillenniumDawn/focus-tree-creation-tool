@@ -469,14 +469,18 @@ The supplied transparent sidebar symbols live under `ui/assets/sidebar/` and loa
 through Tk alone. Tk draws all text, backgrounds, accents and selection states.
 The project bar retains save/validate/export; canvas commands wrap above the canvas.
 Resource discovery lists existing localisation, graphics and scripted-effect source
-files on a worker. Enter on a file reveals its containing folder. Discovery reads
-no source contents and writes no files. Unloaded, empty and failed discovery states
-are explicit. Refresh beside PROJECT reruns discovery after external file changes.
+files on a worker. Enter on a file reveals its containing folder. Listing those
+three folders reads no file contents, and no discovery writes files. Unloaded, empty
+and failed discovery states are explicit. Refresh beside PROJECT reruns discovery
+after external file changes.
 
 The Focus Trees explorer group also lists unopened `.txt` files discovered under
-`common/national_focus/`, including subdirectories. A lightweight scan of actual
-block declarations excludes utility files and ignores comments/quoted strings.
-These are source filenames,
+`common/national_focus/`, including subdirectories. This is the one scan that reads
+contents: `discover_focus_files` reads every `.txt` there once per mod root or
+Refresh, on the worker, with the tolerant `read_file_with_encoding`, and looks for
+real block declarations (comments and quoted strings are ignored) so utility files
+are excluded. It does not parse or build any focus. The entries
+are source filenames,
 not guessed country ownership or parsed tree IDs. Enter/double-click delegates to
 `App._import_txt(path=...)` with the same draft/save/discard guards as File > Import.
 Loaded main/shared/joint source paths are excluded from the unopened list. A

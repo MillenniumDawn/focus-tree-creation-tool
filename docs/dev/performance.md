@@ -432,5 +432,7 @@ revision change. A structural change (add, delete, rename, tree move) still rebu
 every row; that cost is unchanged and happens once per edit, not once per tick.
 
 The unopened focus-tree file catalog uses the same worker inventory and refresh
-boundary. Filtering does not rescan files or parse every tree in the mod. Inventory
+boundary. It reads each `.txt` under `common/national_focus` once to look for tree
+declarations, which is the only content read, and parses no focus. Filtering does not
+rescan files or parse every tree in the mod. Inventory
 results carry a generation token so a stale refresh cannot replace a newer result.

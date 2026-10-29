@@ -63,15 +63,17 @@ jobs:
           --cov
           --cov-report=term-missing
       - name: Tk smoke
-        # Keep Tk objects in their own process; measure the sidebar without
-        # adding widget coverage to the headless monolith measurement.
+        # Keep Tk objects in their own process; measure the widget modules that
+        # only the smoke builds without adding to the headless monolith measurement.
         run: >
           xvfb-run -a pytest -m tk
           --cov=hoi4cm.ui.project_sidebar
+          --cov=hoi4cm.ui.focus_editor
+          --cov=hoi4cm.ui.editor_chrome
           --cov-append
           --cov-report=term-missing
       - name: Coverage gate (hoi4cm package)
-        # Keep the sidebar measured alongside the headless package logic.
+        # Keep those modules measured alongside the headless package logic.
         run: coverage report --include='src/hoi4cm/*' --fail-under=91
       - name: Coverage gate (monolith)
         # Independent floor, one point below the measured 35%. Keeps existing

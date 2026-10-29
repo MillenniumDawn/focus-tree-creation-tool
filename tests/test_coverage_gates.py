@@ -49,19 +49,23 @@ def test_ci_measures_both_sources_and_applies_independent_floors():
     assert "xvfb-run -a pytest -m tk" in workflow
 
 
-def test_ci_collects_sidebar_tk_coverage_before_the_package_gate():
+TK_MEASURED = ("project_sidebar", "focus_editor", "editor_chrome")
+
+
+def test_ci_collects_tk_coverage_before_the_package_gate():
     workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
     smoke = re.search(
         r"run: >\s+xvfb-run -a pytest -m tk\s+"
-        r"--cov=hoi4cm\.ui\.project_sidebar\s+--cov-append\b",
+        + r"\s+".join(rf"--cov=hoi4cm\.ui\.{name}" for name in TK_MEASURED)
+        + r"\s+--cov-append\b",
         workflow,
     )
 
     assert smoke is not None
     assert smoke.start() < workflow.index("Coverage gate (hoi4cm package)")
-    assert "src/hoi4cm/ui/project_sidebar.py" not in (
-        PYPROJECT["tool"]["coverage"]["report"]["omit"]
-    )
+    omitted = PYPROJECT["tool"]["coverage"]["report"]["omit"]
+    for name in TK_MEASURED:
+        assert f"src/hoi4cm/ui/{name}.py" not in omitted
 
 
 def test_windows_runs_the_native_spotlight_smoke():
