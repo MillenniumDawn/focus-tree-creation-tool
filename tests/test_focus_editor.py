@@ -61,6 +61,57 @@ def test_flush_commits_non_geometry_fields_with_one_undo():
     assert app.focuses[app.selected.id].cost != 35
 
 
+def overlapping_host(**changes):
+    """A host whose selected focus shares its cell, as an imported tree can."""
+    app = host(**changes)
+    app.focuses.add(make_focus(id=2))
+    return app
+
+
+def test_unedited_focus_sharing_a_cell_flushes_without_warning(monkeypatch):
+    app = overlapping_host()
+    warning = Mock()
+    monkeypatch.setattr("hoi4cm.ui.focus_editor.messagebox.showwarning", warning)
+    assert flush_pending_editor(app)
+    warning.assert_not_called()
+    assert len(app._undo_stack) == 0
+
+
+def test_moving_onto_an_occupied_cell_is_still_refused(monkeypatch):
+    app = host(x=5)
+    app.focuses.add(make_focus(id=2, x=5, y=0))
+    warning = Mock()
+    monkeypatch.setattr("hoi4cm.ui.focus_editor.messagebox.showwarning", warning)
+    assert not flush_pending_editor(app)
+    warning.assert_called_once()
+    assert app.selected.x == 0
+
+
+def test_overlapping_focus_does_not_block_select_save_or_close(monkeypatch):
+    app = overlapping_host()
+    other = app.focuses[2]
+
+    def guard():
+        return flush_pending_editor(app)
+
+    app._focus_editor = SimpleNamespace(flush=guard, close=guard)
+    for name in ("_redraw", "_show_form", "_populate", "_update_focus_list_selection"):
+        setattr(app, name, Mock())
+
+    assert main.App._select(app, other) is True
+    assert app.selected is other
+
+    chosen = Mock(return_value="")
+    monkeypatch.setattr(main, "choose_project_save_path", chosen)
+    assert main.App._save(app) is False
+    chosen.assert_called_once()
+
+    app._is_dirty = lambda: False
+    app._lifecycle = Mock(begin_close=Mock(return_value=False))
+    main.App._on_app_close(app)
+    app._lifecycle.begin_close.assert_called_once()
+
+
 def test_untouched_flush_does_not_create_undo_or_revision():
     app = host()
     revision = app.focuses.revision

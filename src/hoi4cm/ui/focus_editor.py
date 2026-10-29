@@ -43,8 +43,10 @@ def flush_pending_editor(app: Any, *, autosave: bool = False) -> bool:
             )
         return False
     values = app._read_sidebar_values()
-    if values is None or not app.focuses.position_free(
-        values.x, values.y, except_id=focus.id
+    # Imported trees may already share a cell; only a move needs a free one.
+    if values is None or (
+        (values.x, values.y) != (focus.x, focus.y)
+        and not app.focuses.position_free(values.x, values.y, except_id=focus.id)
     ):
         if not autosave:
             messagebox.showwarning(
