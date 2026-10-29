@@ -2922,7 +2922,7 @@ def open_decision_wizard(app):
     _rtab = tk.StringVar(value="preview")
     _tab_btns = {}
     for tid, tlbl in [
-        ("preview", tr("common.preview", "Preview:")),
+        ("preview", tr("decision.tab.preview", "Preview")),
         ("chain", tr("decision.tab.chain_view", "Chain View")),
         ("code", tr("tab.code", "Code")),
     ]:
