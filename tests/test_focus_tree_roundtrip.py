@@ -10,7 +10,10 @@ import os
 
 import pytest
 from test_focus_tree_parse import (
+    COMMENT_NO_WRAPPER,
+    COMMENT_TREE,
     NO_WRAPPER,
+    SHALLOW_COMMENT_TREE,
     WRAPPED,
     WRAPPED_JOINT_ONLY,
     WRAPPED_MIXED,
@@ -51,6 +54,14 @@ def _info(parsed, tree_type):
     }
 
 
+def _load_and_export_default(src, tree_type, path="/tmp/x.txt"):
+    parsed = parse_focus_tree(src, path)
+    focuses = build_focuses(parsed, tree_idx=1)
+    lookup = {f.id: f for f in focuses}
+    text = export_focus_tree(focuses, _info(parsed, tree_type), focus_lookup=lookup)
+    return focuses, text
+
+
 def _load_and_export(src, tree_type, path="/tmp/x.txt"):
     parsed = parse_focus_tree(src, path)
     focuses = build_focuses(parsed, tree_idx=1)
@@ -82,6 +93,39 @@ def _summary(focuses):
         )
         for f in focuses
     ]
+
+
+def test_reward_comments_survive_default_renderer_import_export():
+    """Issue #372: comments inside imported raw reward/condition blocks must
+    reach the exported text with the default effect renderer, and a second
+    import/export must not drift."""
+    _f1, t1 = _load_and_export_default(COMMENT_TREE, "shared")
+    assert "# policy note kept during import" in t1
+    assert "# war gate documented in place" in t1
+    assert "unknown_reward_effect = yes" in t1
+    assert 'log = "annotated # inside a string"' in t1
+    _f2, t2 = _load_and_export_default(t1, "shared")
+    assert "# policy note kept during import" in t2
+    assert "# war gate documented in place" in t2
+    assert t1 == t2
+
+
+def test_fallback_block_comments_survive_default_renderer():
+    _f1, t1 = _load_and_export_default(COMMENT_NO_WRAPPER, "joint")
+    assert "# reward note kept during import" in t1
+    assert "# trigger note kept during import" in t1
+    _f2, t2 = _load_and_export_default(t1, "joint")
+    assert t1 == t2
+
+
+def test_shallow_reward_and_offset_comments_survive_default_renderer():
+    _f1, t1 = _load_and_export_default(SHALLOW_COMMENT_TREE, "shared")
+    assert "# reward note at column zero" in t1
+    assert "# trigger note at column zero" in t1
+    _f2, t2 = _load_and_export_default(t1, "shared")
+    assert "# reward note at column zero" in t2
+    assert "# trigger note at column zero" in t2
+    assert t1 == t2
 
 
 @pytest.mark.parametrize(
@@ -159,6 +203,20 @@ def test_wrapped_content_present():
         assert needle in t1, needle
 
 
+def _unquoted_comment_tails(text):
+    """Return the tail text of every unquoted # comment, one per line."""
+    tails = []
+    for line in text.splitlines():
+        in_quote = False
+        for index, char in enumerate(line):
+            if char == '"':
+                in_quote = not in_quote
+            elif char == "#" and not in_quote:
+                tails.append(line[index:].strip())
+                break
+    return tails
+
+
 def test_scanner_edge_case_fixture_round_trips():
     """Quote/comment edge cases survive parse -> export -> parse unchanged.
 
@@ -172,11 +230,16 @@ def test_scanner_edge_case_fixture_round_trips():
 
     assert t1 == t2
     assert _summary(f1) == _summary(f2)
-    # Every comment is gone, and every surviving "#" is inside a quoted string
-    # (an odd number of quotes precedes it on its line).
-    for line in t1.splitlines():
-        if "#" in line:
-            assert line.split("#", 1)[0].count('"') % 2 == 1, line
+    # Comments inside captured raw blocks now survive import (issue #372);
+    # every other comment is gone, so the surviving unquoted comments are
+    # exactly the ones the fixture keeps inside its reward/condition blocks.
+    assert _unquoted_comment_tails(t1) == [
+        "# comment as the first line of a raw block",
+        "# comment after a nested block",
+        "# quoted, commented",
+        "# 2%",
+        "#",
+    ]
     for needle in (
         # The icon's quotes are dropped on export, but the trailing backslash
         # survives — the closing quote was never mistaken for an escape.

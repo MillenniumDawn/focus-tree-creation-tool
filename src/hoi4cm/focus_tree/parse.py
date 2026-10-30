@@ -13,6 +13,7 @@ import re
 from dataclasses import dataclass, field
 
 from hoi4cm.script.syntax import (
+    mask_comments,
     match_brace,
     parse_block,
     serialize_block,
@@ -95,15 +96,24 @@ _RAW_KEYS = ("completion_reward", *_COND_KEYS, "joint_trigger")
 _RAW_KEY_RE = re.compile(rf"(?P<key>{'|'.join(_RAW_KEYS)})\s*=\s*\{{")
 
 
-def _dedent_raw_block(source, start, end):
-    """Return ``source[start + 1:end]`` with its common tab indent removed."""
+def _dedent_raw_block(source, start, end, measure_source=None):
+    """Return the block contents with their common tab indent removed."""
     lines = source[start + 1 : end].split("\n")
+    measure = (
+        lines if measure_source is None else measure_source[start + 1 : end].split("\n")
+    )
     min_indent = min(
-        (len(ln) - len(ln.lstrip("\t")) for ln in lines if ln and not ln.isspace()),
+        (len(ln) - len(ln.lstrip("\t")) for ln in measure if ln and not ln.isspace()),
         default=0,
     )
-    if min_indent:  # a zero-indent (or all-blank) block needs no re-slicing
-        lines = [ln[min_indent:] if len(ln) >= min_indent else ln for ln in lines]
+    if min_indent:
+        dedented = []
+        for ln in lines:
+            cut = min_indent
+            if ln.lstrip("\t ").startswith("#"):
+                cut = min(len(ln) - len(ln.lstrip("\t")), min_indent)
+            dedented.append(ln[cut:] if len(ln) >= cut else ln)
+        lines = dedented
     return "\n".join(lines).strip("\n")
 
 
@@ -151,8 +161,14 @@ def _scan_brace(source, start, cancelled=None, budget=None):
     return end
 
 
-def extract_raw_block(source, key, cancelled=None, budget=None):
-    """Return the dedented inner text of ``key = { ... }`` in ``source``."""
+def extract_raw_block(source, key, cancelled=None, budget=None, raw_source=None):
+    """Return the dedented inner text of ``key = { ... }`` in ``source``.
+
+    ``raw_source``, when given, is an aligned comment-bearing text the block
+    content is sliced from; scanning stays on ``source`` so comments cannot
+    match the key. It defaults to ``source``.
+    """
+    raw_source = source if raw_source is None else raw_source
     m = re.search(key + r"\s*=\s*\{", source)
     if not m:
         return ""
@@ -160,16 +176,20 @@ def extract_raw_block(source, key, cancelled=None, budget=None):
     end = _scan_brace(source, start, cancelled, budget)
     if end is None or end >= len(source):
         return ""
-    return _dedent_raw_block(source, start, end)
+    return _dedent_raw_block(raw_source, start, end, measure_source=source)
 
 
-def _extract_raw_key_blocks(source, cancelled=None, budget=None):
+def _extract_raw_key_blocks(source, cancelled=None, budget=None, raw_source=None):
     """Return ``{key: dedented inner}`` for the first hit of each raw key.
 
     One pass over the focus block replaces eleven independent
     :func:`extract_raw_block` calls, most of which find nothing and pay a full
     scan of the block to say so.
+
+    ``raw_source``, when given, is an aligned comment-bearing text the dedented
+    blocks are sliced from; scanning stays on ``source``.
     """
+    raw_source = source if raw_source is None else raw_source
     found = {}
     for match in _RAW_KEY_RE.finditer(source):
         key = match.group("key")
@@ -179,7 +199,11 @@ def _extract_raw_key_blocks(source, cancelled=None, budget=None):
         end = _scan_brace(source, start, cancelled, budget)
         if end is None:
             break
-        found[key] = "" if end >= len(source) else _dedent_raw_block(source, start, end)
+        found[key] = (
+            ""
+            if end >= len(source)
+            else _dedent_raw_block(raw_source, start, end, measure_source=source)
+        )
         if len(found) == len(_RAW_KEYS):
             break
     return {key: text for key, text in found.items() if text}
@@ -203,29 +227,39 @@ def block_to_str(block, depth=1):
     return serialize_block(block, indent="\t" * depth, strip_strings=True)
 
 
-def _extract_raw_rewards(txt, block_starts=None, cancelled=None, budget=None):
+def _extract_raw_rewards(
+    source, block_starts=None, cancelled=None, budget=None, raw_source=None
+):
     """Pull verbatim reward/condition/offset blocks keyed by focus id.
 
-    ``block_starts`` are the ``{`` indices of every focus block, from
-    :data:`_FOCUS_BLOCK_RE`; :func:`parse_focus_tree` scans for them once and
-    shares the list with its own two passes.
+    ``source`` is the text the scan runs on (in practice the comment mask of
+    the normalized file, so block keys inside comments cannot match);
+    ``raw_source`` is the aligned comment-bearing text the blocks are sliced
+    from, so imported rewards keep their comments. ``block_starts`` are the
+    ``{`` indices of every focus block in ``source``, from
+    :data:`_FOCUS_BLOCK_RE`; :func:`parse_focus_tree` scans for them once per
+    text so its own passes and this one agree on content.
     """
+    raw_source = source if raw_source is None else raw_source
     raw_rewards = {}
     if block_starts is None:
-        block_starts = focus_block_starts(txt)
+        block_starts = focus_block_starts(source)
     if budget is None:
         budget = _RawRescanBudget()
     for fs in block_starts:
         _check_cancelled(cancelled)
-        block_end = _scan_brace(txt, fs, cancelled, budget)
+        block_end = _scan_brace(source, fs, cancelled, budget)
         if block_end is None:
             break
-        fblock = txt[fs + 1 : block_end]
-        id_m = re.search(r"\bid\s*=\s*(\S+)", fblock)
+        mask_block = source[fs + 1 : block_end]
+        fblock = raw_source[fs + 1 : block_end]
+        id_m = re.search(r"\bid\s*=\s*(\S+)", mask_block)
         if not id_m:
             continue
         fid = id_m.group(1)
-        blocks = _extract_raw_key_blocks(fblock, cancelled, budget)
+        blocks = _extract_raw_key_blocks(
+            mask_block, cancelled, budget, raw_source=fblock
+        )
         reward = blocks.get("completion_reward")
         if reward:
             raw_rewards[fid] = reward
@@ -235,18 +269,24 @@ def _extract_raw_rewards(txt, block_starts=None, cancelled=None, budget=None):
                 raw_rewards[(fid, ck)] = cv
         # offset = { x = N y = M trigger = { ... } } blocks as structured data
         offsets = []
-        for om in re.finditer(r"\boffset\s*=\s*\{", fblock):
+        for om in re.finditer(r"\boffset\s*=\s*\{", mask_block):
             _check_cancelled(cancelled)
             os_ = om.end() - 1
-            offset_end = _scan_brace(fblock, os_, cancelled, budget)
+            offset_end = _scan_brace(mask_block, os_, cancelled, budget)
             if offset_end is None:
                 break
             oinner = fblock[os_ + 1 : offset_end]
-            oxm = re.search(r"\bx\s*=\s*(-?\d+)", oinner)
-            oym = re.search(r"\by\s*=\s*(-?\d+)", oinner)
+            oxm = re.search(r"\bx\s*=\s*(-?\d+)", mask_block[os_ + 1 : offset_end])
+            oym = re.search(r"\by\s*=\s*(-?\d+)", mask_block[os_ + 1 : offset_end])
             ox = int(oxm.group(1)) if oxm else 0
             oy = int(oym.group(1)) if oym else 0
-            otrig = extract_raw_block(oinner, "trigger", cancelled, budget)
+            otrig = extract_raw_block(
+                mask_block[os_ + 1 : offset_end],
+                "trigger",
+                cancelled,
+                budget,
+                raw_source=oinner,
+            )
             offsets.append({"x": ox, "y": oy, "trigger": otrig})
         if offsets:
             raw_rewards[(fid, "_offsets")] = offsets
@@ -279,7 +319,12 @@ def parse_focus_tree(raw, path, cancelled=None):
     _check_cancelled(cancelled)
     if raw.startswith("\ufeff"):
         raw = raw[1:]
+    raw = "\n".join(raw.splitlines())
     txt = strip_comments(raw)
+    # The raw-block scan runs on the aligned comment mask so commented-out
+    # keys cannot match, then slices this comment-bearing text so imported
+    # rewards keep their comments (issue #372).
+    comment_mask = mask_comments(raw)
     _check_cancelled(cancelled)
     shared_refs = re.findall(r"\bshared_focus\s*=\s*([^\s{]\S*)", txt)
     joint_refs = re.findall(r"\bjoint_focus\s*=\s*([^\s{]\S*)", txt)
@@ -287,7 +332,13 @@ def parse_focus_tree(raw, path, cancelled=None):
     block_starts = focus_block_starts(txt)
     rescan_budget = _RawRescanBudget()
     _raise_if_budget_exhausted(path, rescan_budget, len(block_starts))
-    raw_rewards = _extract_raw_rewards(txt, block_starts, cancelled, rescan_budget)
+    raw_rewards = _extract_raw_rewards(
+        comment_mask,
+        focus_block_starts(comment_mask),
+        cancelled,
+        rescan_budget,
+        raw_source=raw,
+    )
     _check_cancelled(cancelled)
     _raise_if_budget_exhausted(path, rescan_budget)
 

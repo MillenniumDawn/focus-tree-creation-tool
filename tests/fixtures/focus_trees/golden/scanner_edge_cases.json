@@ -14,7 +14,6 @@
       "name": "TST_braces_in_string",
       "loc_name": "",
       "icon": "⚔",
-      "gfx": "gfx\\interface\\goals\\tst\\",
       "x": 0,
       "y": 0,
       "cost": 5,
@@ -36,7 +35,7 @@
       "ai_will_do_raw": "",
       "relative_position_id": null,
       "search_filters": "FOCUS_FILTER_POLITICAL",
-      "available_cond": "has_country_flag = \"flag_with_{_and_}_and_#_inside\"\nNOT = { has_war = yes }\t\n\t\t",
+      "available_cond": "# comment as the first line of a raw block\nhas_country_flag = \"flag_with_{_and_}_and_#_inside\"\nNOT = { has_war = yes }\t# comment after a nested block\n\t\t",
       "bypass_cond": "",
       "cancel_cond": "",
       "will_lead_to_war_with": "",
@@ -46,13 +45,13 @@
       "allow_branch": "",
       "text": "",
       "offsets": [],
-      "tree_idx": 0
+      "tree_idx": 0,
+      "gfx": "gfx\\interface\\goals\\tst\\"
     },
     "TST_comment_between_keys": {
       "name": "TST_comment_between_keys",
       "loc_name": "",
       "icon": "⚔",
-      "gfx": "GFX_goal_generic_political_pressure",
       "x": 1,
       "y": 1,
       "cost": 10,
@@ -88,13 +87,13 @@
       "allow_branch": "",
       "text": "",
       "offsets": [],
-      "tree_idx": 0
+      "tree_idx": 0,
+      "gfx": "GFX_goal_generic_political_pressure"
     },
     "TST_hash_heavy": {
       "name": "TST_hash_heavy",
       "loc_name": "",
       "icon": "⚔",
-      "gfx": "GFX_goal_generic_political_pressure",
       "x": 2,
       "y": 0,
       "cost": 7,
@@ -103,7 +102,7 @@
         {
           "type": "_raw_block",
           "fields": {
-            "raw": "add_war_support = 0.02\t\n\n\t\t"
+            "raw": "add_war_support = 0.02\t# 2%\n#\n\t\t"
           }
         }
       ],
@@ -118,7 +117,7 @@
       "search_filters": "FOCUS_FILTER_POLITICAL",
       "available_cond": "",
       "bypass_cond": "",
-      "cancel_cond": "has_country_flag = \"flag # with hash\"\t\n\t\t",
+      "cancel_cond": "has_country_flag = \"flag # with hash\"\t# quoted, commented\n\t\t",
       "will_lead_to_war_with": "",
       "complete_tooltip": "",
       "select_effect": " set_country_flag = \"selected\" ",
@@ -126,7 +125,8 @@
       "allow_branch": "",
       "text": "",
       "offsets": [],
-      "tree_idx": 0
+      "tree_idx": 0,
+      "gfx": "GFX_goal_generic_political_pressure"
     }
   }
 }
