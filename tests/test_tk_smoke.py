@@ -31,7 +31,7 @@ from hoi4cm.ui.gfx_browser import (
     open_gfx_placement_editor,
     open_universal_gfx_browser,
 )
-from hoi4cm.ui.theme import XGRID, YGRID
+from hoi4cm.ui.theme import BORDER_G, RED, TEXT_DIM, XGRID, YGRID
 from hoi4cm.ui.widgets import grab_when_visible
 from hoi4cm.wizards._shared import open_effect_picker, open_trigger_picker
 
@@ -484,3 +484,86 @@ def test_scroll_burst_coalesces_and_keeps_pointer_anchor(app, monkeypatch):
     finally:
         cv.destroy()
         gc.collect()
+
+
+# ── Raw effect field rows (#368) ─────────────────────────────────────────
+
+
+def _raw_row_entries(app):
+    """The key/value entry pairs of each raw field row, in card order."""
+    rows = []
+    for card in app._eff_box.winfo_children():
+        if not isinstance(card, tk.Frame):
+            continue
+        for child in card.winfo_children():
+            entries = [w for w in child.winfo_children() if isinstance(w, tk.Entry)]
+            if len(entries) == 2:
+                rows.append((entries[0], entries[1]))
+    return rows
+
+
+def _effect_fields(focus, idx=0):
+    """The field dict of the raw effect under test, narrowed for assertions."""
+    fields = focus.effects[idx]["fields"]
+    assert isinstance(fields, dict)
+    return fields
+
+
+def test_pending_raw_key_entry_is_flagged_until_it_resolves(app):
+    """Pending key text is flagged in red on the entry until a name commits."""
+    focus = Focus(id=901)
+    focus.effects = [{"type": "custom_imported", "fields": {"old": "1", "taken": "2"}}]
+    app.focuses[901] = focus
+    app.selected = focus
+    app._refresh_effects(force=True)
+
+    key_entry, _value = _raw_row_entries(app)[0]
+    name = key_entry.cget("textvariable")
+
+    app.setvar(name, "taken")
+
+    assert app.getvar(name) == "taken"  # pending text kept
+    assert key_entry.cget("fg") == str(RED)
+    assert key_entry.cget("highlightbackground") == str(RED)
+    assert _effect_fields(focus) == {"old": "1", "taken": "2"}
+
+    app.setvar(name, "freename")
+
+    assert key_entry.cget("fg") == str(TEXT_DIM)
+    assert key_entry.cget("highlightbackground") == str(BORDER_G)
+    assert list(_effect_fields(focus)) == ["freename", "taken"]
+
+
+def test_raw_list_and_dict_values_are_read_only(app):
+    """Dict/list raw values cannot be typed into a flat string on a raw row."""
+    focus = Focus(id=902)
+    focus.effects = [
+        {
+            "type": "custom_imported",
+            "fields": {
+                "add_ideas": ["idea_a", "idea_b"],
+                "block": {"x": "1"},
+                "scalar": "text",
+            },
+        }
+    ]
+    app.focuses[902] = focus
+    app.selected = focus
+    app._refresh_effects(force=True)
+
+    rows = _raw_row_entries(app)
+
+    assert len(rows) == 3
+    assert [(k.cget("state"), v.cget("state")) for k, v in rows] == [
+        ("normal", "readonly"),
+        ("normal", "readonly"),
+        ("normal", "normal"),
+    ]
+
+    scalar_key, scalar_value = rows[2]
+    app.setvar(scalar_value.cget("textvariable"), "rewritten")
+
+    assert _effect_fields(focus)["scalar"] == "rewritten"
+
+    app.selected = None
+    app._refresh_effects()
