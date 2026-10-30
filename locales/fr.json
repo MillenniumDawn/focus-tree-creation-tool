@@ -1086,6 +1086,7 @@
   "settings.event_profile.dimensions": "pays={country_w}×{country_h}  actualités={news_w}×{news_h}",
   "status.edit_targets": "  |  modification : {parts}",
   "undo.add_effect_field": "ajouter un champ d'effet",
+  "undo.change_gfx": "changer le gfx",
   "undo.change_icon": "changer l'icône",
   "undo.rename_effect_field": "renommer un champ d'effet"
 }

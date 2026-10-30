@@ -1024,6 +1024,7 @@
   "undo.add_prerequisite_and_group": "add prerequisite AND group",
   "undo.add_prerequisite_or_group": "add prerequisite OR group",
   "undo.bulk_rename": "bulk_rename",
+  "undo.change_gfx": "change gfx",
   "undo.change_icon": "change icon",
   "undo.clear_all": "clear all",
   "undo.delete_focus": "delete focus",

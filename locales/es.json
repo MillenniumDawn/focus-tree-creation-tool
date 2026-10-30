@@ -1024,6 +1024,7 @@
   "undo.add_prerequisite_and_group": "añadir grupo de prerrequisitos Y",
   "undo.add_prerequisite_or_group": "añadir grupo de prerrequisitos O",
   "undo.bulk_rename": "renombrado masivo",
+  "undo.change_gfx": "cambiar gfx",
   "undo.change_icon": "cambiar icono",
   "undo.clear_all": "borrar todo",
   "undo.delete_focus": "eliminar foco",

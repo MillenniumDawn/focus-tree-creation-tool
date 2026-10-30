@@ -2375,6 +2375,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
     def _set_gfx(self, name):
         self._fv_gfx.set(name)
         if self.selected and self.selected.gfx != name:
+            self._push_undo("change gfx", touched_ids=(self.selected.id,))
             self.selected.gfx = name
             self.focuses.mark_content_changed()
             self._redraw_now()

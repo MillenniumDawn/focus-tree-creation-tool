@@ -1024,6 +1024,7 @@
   "undo.add_prerequisite_and_group": "添加“且”前置组",
   "undo.add_prerequisite_or_group": "添加“或”前置组",
   "undo.bulk_rename": "批量重命名",
+  "undo.change_gfx": "更换GFX",
   "undo.change_icon": "更换图标",
   "undo.clear_all": "清空全部",
   "undo.delete_focus": "删除国策",
