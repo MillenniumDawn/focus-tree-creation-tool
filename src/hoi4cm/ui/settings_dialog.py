@@ -392,7 +392,11 @@ def open_settings(app):
             text=tr(
                 "settings.md_overridden",
                 "  Overridden:  MD = {state}",
-                state=("ON" if is_md else "OFF"),
+                state=(
+                    tr("settings.md_state_on", "ON")
+                    if is_md
+                    else tr("settings.md_state_off", "OFF")
+                ),
             ),
             fg="#a78bfa" if is_md else "#4ade80",
         )
@@ -682,14 +686,15 @@ def open_settings(app):
                 highlightbackground="#4ade80" if is_active else BORDER_G,
             )
             row.pack(fill="x", pady=2)
-            badge = "  ✓ ACTIVE  " if is_active else "           "
+            badge = (
+                tr("settings.event_profile.active", "  ✓ ACTIVE  ") if is_active else ""
+            )
             tk.Label(
                 row,
                 text=badge,
                 bg=BG_CARD,
                 fg="#4ade80" if is_active else TEXT_DIM,
                 font=("Helvetica", 8, "bold"),
-                width=10,
             ).pack(side="left")
             tk.Label(
                 row,
