@@ -138,7 +138,6 @@ def test_filesystem_image_pairs_deduplicates_stems_after_sorting(tmp_path):
     ]
 
 
-
 def test_uncatalogued_custom_groups_survive_catalog_refresh(tmp_path):
     custom = tmp_path / "custom"
     custom.mkdir()

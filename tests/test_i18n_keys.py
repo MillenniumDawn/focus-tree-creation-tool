@@ -15,6 +15,7 @@ from collections import Counter
 from collections.abc import Iterator
 from functools import cache
 from pathlib import Path
+from typing import TypeGuard
 
 import pytest
 from source_scan import ROOT, SOURCE_PATHS, source_calls
@@ -194,7 +195,7 @@ def test_literal_tr_defaults_match_english_locale():
     assert mismatches == []
 
 
-def _is_literal_file_filter(node: ast.AST) -> bool:
+def _is_literal_file_filter(node: ast.AST) -> TypeGuard[ast.Tuple]:
     """A ``("label", "*.ext")`` pair whose label is a bare string."""
     if not isinstance(node, ast.Tuple) or len(node.elts) != 2:
         return False
