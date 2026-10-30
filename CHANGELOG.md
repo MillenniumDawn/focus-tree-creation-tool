@@ -8,6 +8,12 @@ the version by hand. See `AGENTS.md`.
 
 ## Unreleased
 
+- Flag unsafe raw-effect key renames in red on the key entry until a usable
+  name commits: taken, empty and `_` names, and a rename to `raw` while
+  sibling fields exist, since the exporter would drop them. Dict and list
+  values in raw rows are read-only so an edit cannot store a flat string
+  that exports as invalid script.
+
 - Import focus trees containing non-finite `ai_will_do` values (`inf`,
   `-inf`, `1e999`, `-1e999`) instead of aborting the load: the field falls
   back to the existing default of 1 in both scalar and block form, and the

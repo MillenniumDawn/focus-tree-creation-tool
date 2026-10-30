@@ -97,6 +97,20 @@ def _rename_key_in_place(fields, old, new) -> None:
     fields.update(renamed)
 
 
+def _key_rename_pending(fields, key, new) -> bool:
+    """Whether typing ``new`` for the ``key`` row stays pending: taken, empty,
+    internal, or a rename to ``raw`` while sibling user fields exist."""
+    if new == key:
+        return False
+    if new in fields or not new.strip() or new.startswith("_"):
+        return True
+    if new == "raw" and any(
+        name != key and not str(name).startswith("_") for name in fields
+    ):
+        return True
+    return False
+
+
 class _RawFieldRow:
     """Row-key state shared by one raw effect's key and value entry bindings."""
 
@@ -104,24 +118,47 @@ class _RawFieldRow:
         self._panel = panel
         self._idx = idx
         self.key = key
+        self._pending = False
+        self._entry: tk.Entry | None = None
         # 4-tuple: cannot collide with _write_effect_field's fname tokens.
         self._run = ("key", getattr(panel.selected, "id", None), idx, key)
 
+    def attach(self, entry) -> None:
+        """Bind the key entry so pending text can be flagged on the widget."""
+        self._entry = entry
+        self._style_pending(self._pending)
+
+    def _set_pending(self, pending: bool) -> None:
+        """Flag unusable text on the key entry until the name resolves."""
+        if pending == self._pending:
+            return
+        self._pending = pending
+        self._style_pending(pending)
+
+    def _style_pending(self, pending: bool) -> None:
+        if self._entry is None:
+            return
+        self._entry.config(
+            fg=(RED if pending else TEXT_DIM),
+            highlightbackground=(RED if pending else BORDER_G),
+        )
+
     def on_key_text(self, var) -> bool:
-        """Commit one key write-trace: a free name moves the field, a taken,
-        empty or internal (``_``) name stays pending."""
+        """Commit one key write-trace: a free name moves the field, an unusable
+        name stays pending and flags the entry."""
         panel = self._panel
         focus = panel.selected
         if focus is None or self._idx >= len(focus.effects):
             return False
         new = var.get()
         if new == self.key:
+            self._set_pending(False)
             return False
         fields = focus.effects[self._idx].setdefault("fields", {})
-        if new in fields or not new.strip() or new.startswith("_"):
-            # Pending: keep the typed text, keep ``self.key`` committed and
-            # untouched, so both fields survive until typing reaches a free name.
-            # An empty or ``_`` name would export as invalid script or be skipped.
+        if _key_rename_pending(fields, self.key, new):
+            # Pending: keep the typed text and ``self.key`` committed and
+            # untouched until typing reaches a usable name.
+            self._set_pending(True)
             return False
         if self.key not in fields:
             var.set(self.key)
@@ -132,6 +169,7 @@ class _RawFieldRow:
         panel.focuses.mark_content_changed()
         # The cards no longer match the signature taken when they were built.
         panel._effects_sig = None
+        self._set_pending(False)
         return True
 
     def on_value_text(self, var) -> None:
@@ -740,6 +778,7 @@ class EffectsMixin:
                     width=12,
                 )
                 ke.pack(side="left", ipady=2, padx=(0, 2))
+                raw_row.attach(ke)
                 kvar.trace_add(
                     "write",
                     lambda *a, r=raw_row, kv=kvar: r.on_key_text(kv),
@@ -754,7 +793,9 @@ class EffectsMixin:
                     width=14,
                     anchor="w",
                 ).pack(side="left")
-            # value entry
+            # Value entry. Dict and list values on a raw row are read-only:
+            # an edit would store a flat string and export as invalid script.
+            structured = raw_row is not None and isinstance(val, (list, dict))
             vvar = tk.StringVar(
                 value=str(val) if not isinstance(val, dict) else json.dumps(val)
             )
@@ -762,21 +803,22 @@ class EffectsMixin:
                 row,
                 textvariable=vvar,
                 bg=BG_CARD,
-                fg=TEXT,
+                fg=(TEXT_DIM if structured else TEXT),
                 insertbackground=BLUE,
                 font=("Helvetica", 10),
                 relief="flat",
                 highlightthickness=1,
                 highlightbackground=BORDER_G,
+                state=("readonly" if structured else "normal"),
             )
             ve.pack(side="left", fill="x", expand=True, ipady=2, padx=2)
-            if raw_row is not None:
+            if raw_row is not None and not structured:
                 # Value binding goes through the row to the last committed key.
                 vvar.trace_add(
                     "write",
                     lambda *a, r=raw_row, v=vvar: r.on_value_text(v),
                 )
-            else:
+            elif raw_row is None:
                 vvar.trace_add(
                     "write",
                     lambda *a, efidx=idx, fn=fkey, v=vvar: self._live_eff_field(

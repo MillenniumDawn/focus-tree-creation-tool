@@ -4,10 +4,11 @@ The signature drives whether ``_refresh_effects`` tears down and rebuilds the
 effect cards. It covers everything a card renders, so a match means a rebuild
 would draw the same thing. These tests pin that contract, including that it
 survives CPython recycling a freed focus's memory address. The
-``test_typing_through_taken_prefix_reaches_free_key`` and
-``test_pending_collision_value_edit_then_continuing_rename`` cases exercise
+``test_typing_through_taken_prefix_reaches_free_key``
+and ``test_pending_collision_value_edit_then_continuing_rename`` cases exercise
 the raw-effect key/value row wiring headlessly through :class:`ui_fakes.AppFake`
-with a real :class:`UndoStack`.
+with a real :class:`UndoStack`. The #368 regressions pin the refused rename to
+``raw`` beside siblings and the pending classifier behind that refusal.
 """
 
 from collections.abc import Callable
@@ -20,8 +21,10 @@ from ui_fakes import AppFake
 import hoi4_content_maker as app_module
 from hoi4cm.core.undo import UndoStack
 from hoi4cm.models import Focus
+from hoi4cm.script.effects import render_effect
 from hoi4cm.ui.effects_panel import (
     _effects_signature,
+    _key_rename_pending,
     _next_unused_raw_key,
     _RawFieldRow,
 )
@@ -271,3 +274,124 @@ def test_next_unused_raw_key_scans_for_free_name():
     assert _next_unused_raw_key({"foo": 1}) == "key0"
     assert _next_unused_raw_key({"key0": ""}) == "key1"
     assert _next_unused_raw_key({"key0": "", "key2": ""}) == "key1"
+
+
+# ── Rename to raw beside siblings (#368) ─────────────────────────────────
+
+
+def test_rename_to_raw_with_siblings_is_refused():
+    """``raw`` beside siblings would suppress them on export once a value lands."""
+    app, focus = _raw_app({"old": "1", "other": "2"})
+    _row, kvar, vvar = _wired_row(app, "old")
+    revision = app.focuses.content_revision
+
+    kvar.set("raw")
+
+    assert kvar.value == "raw"  # pending text kept, fields untouched
+    assert _fields(focus) == {"old": "1", "other": "2"}
+    assert len(app._undo_stack) == 0
+    assert app.focuses.content_revision == revision
+
+    vvar.set("9")
+
+    assert _fields(focus) == {"old": "9", "other": "2"}
+
+    kvar.set("renamed")
+
+    assert _fields(focus) == {"renamed": "9", "other": "2"}
+    assert len(app._undo_stack) == 2
+
+
+def test_rename_empty_field_to_raw_with_sibling_stays_refused():
+    """An empty source must not smuggle ``raw`` past the guard: a later value
+    edit would land there and suppress the sibling on export."""
+    app, focus = _raw_app({"old": "", "other": "2"})
+    _row, kvar, vvar = _wired_row(app, "old")
+    revision = app.focuses.content_revision
+
+    kvar.set("raw")
+
+    assert kvar.value == "raw"
+    assert _fields(focus) == {"old": "", "other": "2"}
+    assert len(app._undo_stack) == 0
+    assert app.focuses.content_revision == revision
+
+    vvar.set("9")
+
+    assert _fields(focus) == {"old": "9", "other": "2"}
+
+    kvar.set("renamed")
+
+    assert _fields(focus) == {"renamed": "9", "other": "2"}
+    assert len(app._undo_stack) == 2
+
+
+@pytest.mark.parametrize("sibling", ["", "  ", [], {}])
+def test_rename_to_raw_with_any_sibling_is_refused(sibling):
+    """The refusal counts sibling user fields, not their current values."""
+    app, focus = _raw_app({"old": "1", "other": sibling})
+    _row, kvar, _vvar = _wired_row(app, "old")
+    revision = app.focuses.content_revision
+
+    kvar.set("raw")
+
+    assert kvar.value == "raw"
+    assert _fields(focus) == {"old": "1", "other": sibling}
+    assert len(app._undo_stack) == 0
+    assert app.focuses.content_revision == revision
+
+
+def test_rename_to_raw_without_user_siblings_still_commits():
+    """Internal keys are skipped by the exporter, so they do not block ``raw``."""
+    app, focus = _raw_app({"old": "1", "_note": "n"})
+    _row, kvar, _vvar = _wired_row(app, "old")
+
+    kvar.set("raw")
+
+    assert _fields(focus) == {"raw": "1", "_note": "n"}
+
+
+def test_rename_a_lone_field_to_raw_commits_and_exports():
+    """A lone field renamed to ``raw`` is the supported ``t = value`` path."""
+    app, focus = _raw_app({"old": "1"})
+    _row, kvar, _vvar = _wired_row(app, "old")
+
+    kvar.set("raw")
+
+    assert _fields(focus) == {"raw": "1"}
+    assert render_effect(focus.effects[0]) == "\t\t\tcustom_imported = 1"
+
+
+# ── Pending key feedback (#368) ─────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    ("new", "expected"),
+    [
+        ("taken", True),
+        ("", True),
+        ("  ", True),
+        ("_x", True),
+        ("raw", True),
+        ("free", False),
+    ],
+    ids=["taken", "empty", "blank", "internal", "suppressed-raw", "free"],
+)
+def test_key_rename_pending_classifier(new, expected):
+    assert _key_rename_pending({"old": "1", "taken": "2"}, "old", new) is expected
+
+
+def test_raw_row_pending_state_clears_when_the_rename_resolves():
+    """The flagged entry state follows the pending text, not the field."""
+    app, focus = _raw_app({"old": "1", "taken": "2"})
+    row, kvar, _vvar = _wired_row(app, "old")
+
+    kvar.set("taken")
+
+    assert row._pending is True
+
+    kvar.set("free")
+
+    assert row._pending is False
+    assert _fields(focus) == {"free": "1", "taken": "2"}
+    assert len(app._undo_stack) == 1
