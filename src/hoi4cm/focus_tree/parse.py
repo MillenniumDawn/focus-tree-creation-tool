@@ -107,20 +107,13 @@ def _dedent_raw_block(source, start, end, measure_source=None):
         default=0,
     )
     if min_indent:
-        lines = [
-            (
-                ln[
-                    (
-                        min(len(ln) - len(ln.lstrip("\t")), min_indent)
-                        if masked.isspace() and ln.lstrip("\t ").startswith("#")
-                        else min_indent
-                    ) :
-                ]
-                if len(ln) >= min_indent
-                else ln
-            )
-            for ln, masked in zip(lines, measure, strict=True)
-        ]
+        dedented = []
+        for ln in lines:
+            cut = min_indent
+            if ln.lstrip("\t ").startswith("#"):
+                cut = min(len(ln) - len(ln.lstrip("\t")), min_indent)
+            dedented.append(ln[cut:] if len(ln) >= cut else ln)
+        lines = dedented
     return "\n".join(lines).strip("\n")
 
 
