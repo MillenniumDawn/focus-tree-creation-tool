@@ -30,6 +30,7 @@ from hoi4cm.core.i18n import tr
 from hoi4cm.core.image import PIL_OK as _PIL_OK
 from hoi4cm.core.image import PILImage as _PILImage
 from hoi4cm.core.image import PILImageTk as _PILImageTk
+from hoi4cm.ui.error_report import report_error
 from hoi4cm.ui.theme import (
     BG_CARD,
     BG_DARK,
@@ -126,27 +127,28 @@ def _pairs_from_paths(paths, prefix, *, search=""):
 # Universal browser
 # ─────────────────────────────────────────────────────────────────
 def open_universal_gfx_browser(
-    win, on_select, title="GFX Browser", gfx_hints=None, mod=None
+    win,
+    on_select,
+    title="GFX Browser",
+    gfx_hints=None,
+    *,
+    index=None,
+    config=None,
 ):
     """Open the universal GFX picker dialog.
 
     ``on_select(gfx_key, abs_path)`` is called on Confirm.
     ``gfx_hints`` is an optional list of folder category hints to pre-select
     (e.g. ``["decisions", "ideas"]``).
-    ``mod`` is the :class:`ModContext` instance — passed in to keep this
-    module decoupled from the global mod singleton.
+    ``index`` and ``config`` are passed in so this dialog does not read a
+    process-wide mod object.
     """
-    if mod is None:
-        from hoi4cm.mod import MOD
-
-        mod = MOD
-
     # ── Collect scannable folder groups ──────────────────────────────────
     folder_groups = []  # (group_label, abs_folder_path, gfx_prefix, catalogued)
 
-    catalog = getattr(mod, "graphics_catalog", None)
-    if mod.loaded and catalog is not None:
-        r = mod.root
+    catalog = getattr(index, "graphics_catalog", None)
+    if index is not None and index.loaded and index.root and catalog is not None:
+        r = index.root
         candidates = [
             (
                 "decisions icons",
@@ -154,12 +156,22 @@ def open_universal_gfx_browser(
                 "GFX_decision_",
             ),
             ("decisions (root)", os.path.join("interface"), "GFX_decision_"),
-            ("ideas", mod.path_ideas_gfx, "GFX_idea_"),
-            ("focus goals", mod.path_goals, "GFX_focus_"),
+            (
+                "ideas",
+                config.path_ideas_gfx if config is not None else "gfx/interface/ideas",
+                "GFX_idea_",
+            ),
+            (
+                "focus goals",
+                config.path_goals if config is not None else "gfx/interface/goals",
+                "GFX_focus_",
+            ),
             (
                 "event pictures",
-                getattr(
-                    mod, "path_event_pictures", os.path.join("gfx", "event_pictures")
+                (
+                    config.path_event_pictures
+                    if config is not None
+                    else os.path.join("gfx", "event_pictures")
                 ),
                 "GFX_event_",
             ),
@@ -171,16 +183,15 @@ def open_universal_gfx_browser(
             (label, rel if os.path.isabs(rel) else os.path.join(r, rel), prefix)
             for label, rel, prefix in candidates
         ]
-        for cdir in getattr(mod, "custom_gfx_dirs", []):
+        custom_dirs = config.custom_gfx_dirs if config is not None else []
+        for cdir in custom_dirs:
             resolved_candidates.append(
                 (os.path.basename(os.path.normpath(cdir)) + " (custom)", cdir, "GFX_")
             )
         folder_groups = _catalog_folder_groups(
             resolved_candidates, catalog.directory_paths()
         )
-        folder_groups = _uncatalogued_custom_groups(
-            folder_groups, getattr(mod, "custom_gfx_dirs", [])
-        )
+        folder_groups = _uncatalogued_custom_groups(folder_groups, custom_dirs)
 
     if not folder_groups:
         folder = filedialog.askdirectory(
@@ -247,12 +258,12 @@ def open_universal_gfx_browser(
                 folder_lb.insert(
                     "end", "  " + os.path.basename(os.path.normpath(d)) + " (custom)"
                 )
+            custom_dirs = [] if config is None else config.custom_gfx_dirs
             configured_paths = {
-                os.path.normcase(os.path.abspath(path))
-                for path in getattr(mod, "custom_gfx_dirs", [])
+                os.path.normcase(os.path.abspath(path)) for path in custom_dirs
             }
-            if normalized not in configured_paths:
-                mod.custom_gfx_dirs.append(d)
+            if normalized not in configured_paths and config is not None:
+                config.custom_gfx_dirs.append(d)
 
     tk.Button(
         top_bar,
@@ -439,7 +450,9 @@ def open_universal_gfx_browser(
 # ─────────────────────────────────────────────────────────────────
 # Drag-to-place editor
 # ─────────────────────────────────────────────────────────────────
-def open_gfx_placement_editor(win, initial_items=None, on_confirm=None):
+def open_gfx_placement_editor(
+    win, initial_items=None, on_confirm=None, *, index=None, config=None
+):
     """Drag icons/pictures on a mock decision panel and emit matching GFX code.
 
     ``initial_items`` is a list of dicts ``{gfx_key, abs_path, role, x, y, w, h}``.
@@ -576,7 +589,12 @@ def open_gfx_placement_editor(win, initial_items=None, on_confirm=None):
 
     def _load_img(path, max_w, max_h):
         try:
-            if _PIL_OK and os.path.exists(path):
+            if (
+                _PIL_OK
+                and _PILImage is not None
+                and _PILImageTk is not None
+                and os.path.exists(path)
+            ):
                 alts = [path] + [
                     os.path.splitext(path)[0] + ext
                     for ext in (".png", ".tga", ".dds")
@@ -754,6 +772,8 @@ def open_gfx_placement_editor(win, initial_items=None, on_confirm=None):
             pwin,
             _on_sel,
             title=tr("gfx_placement.pick_for_role", "Pick GFX for {role}", role=role),
+            index=index,
+            config=config,
             gfx_hints=(
                 ["decisions", "ideas"]
                 if role == "icon"
@@ -1028,9 +1048,14 @@ def _browse_flat_folder(win, folder, on_select, current_gfx):
     Used when no mod is loaded: one already-chosen folder, no recursion into
     subfolders, always ``GFX_focus_``-prefixed keys.
     """
+    try:
+        filenames = os.listdir(folder)
+    except OSError as exc:
+        report_error(str(exc), exc, parent=win)
+        return
     all_files = sorted(
         (f, os.path.join(folder, f))
-        for f in os.listdir(folder)
+        for f in filenames
         if f.lower().endswith((".dds", ".png", ".tga"))
     )
     if not all_files:
@@ -1101,7 +1126,7 @@ def _browse_flat_folder(win, folder, on_select, current_gfx):
 # ─────────────────────────────────────────────────────────────────
 # Focus icon browser (sidebar "Icon GFX name" field)
 # ─────────────────────────────────────────────────────────────────
-def open_focus_icon_browser(win, on_select, current_gfx="", mod=None):
+def open_focus_icon_browser(win, on_select, current_gfx="", *, index=None, config=None):
     """Open the focus-goal icon picker for the sidebar's Icon GFX field.
 
     Narrower than :func:`open_universal_gfx_browser`: this dialog only ever
@@ -1116,12 +1141,11 @@ def open_focus_icon_browser(win, on_select, current_gfx="", mod=None):
     :func:`_browse_flat_folder` if no mod is loaded, or if the mod has no
     ``gfx/interface/goals/`` folder.
     """
-    if mod is None:
-        from hoi4cm.mod import MOD
-
-        mod = MOD
-
-    if not mod.loaded:
+    if config is None:
+        path_goals = os.path.join("gfx", "interface", "goals")
+    else:
+        path_goals = config.path_goals
+    if index is None or not index.loaded or not index.root:
         folder = filedialog.askdirectory(
             title=tr("filedialog.select_icon_folder", "Select folder with icon files")
         )
@@ -1129,16 +1153,15 @@ def open_focus_icon_browser(win, on_select, current_gfx="", mod=None):
             _browse_flat_folder(win, folder, on_select, current_gfx)
         return
 
-    catalog = getattr(mod, "graphics_catalog", None)
-    goals_root = (
-        mod.path_goals
-        if os.path.isabs(mod.path_goals)
-        else os.path.join(mod.root, mod.path_goals)
-    )
+    catalog = index.graphics_catalog
+    if os.path.isabs(path_goals):
+        goals_root = path_goals
+    else:
+        goals_root = os.path.join(index.root, path_goals)
     goals_root = os.path.normcase(os.path.abspath(goals_root))
     goal_paths = _catalog_image_paths(catalog, under=goals_root) if catalog else ()
     if not goal_paths:
-        fallback_root = os.path.join(mod.root, "gfx", "interface")
+        fallback_root = os.path.join(index.root, "gfx", "interface")
         fallback_paths = (
             _catalog_image_paths(catalog, under=fallback_root) if catalog else ()
         )

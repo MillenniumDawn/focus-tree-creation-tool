@@ -11,7 +11,6 @@ import tkinter as tk
 from typing import TYPE_CHECKING
 
 from hoi4cm.core.i18n import tr
-from hoi4cm.mod import MOD
 from hoi4cm.models import Focus
 from hoi4cm.ui.app_contracts import CanvasHost
 from hoi4cm.ui.canvas_renderer import FocusCanvasBundle
@@ -145,7 +144,8 @@ class CanvasMixin(_CanvasState):
         self._init_canvas_state()
         c = self.cv
         self._image_broker = ImageBroker(
-            get_executor(self), generation=lambda: MOD.graphics_catalog.generation
+            get_executor(self),
+            generation=lambda: self.index.graphics_catalog.generation,
         )
         lifecycle = self._lifecycle
         if lifecycle is not None:
@@ -1178,10 +1178,10 @@ class CanvasMixin(_CanvasState):
         gfx_name = getattr(f, "gfx", "")
         mod_img = None
         image_broker = self._image_broker
-        if image_broker is not None and MOD.loaded and gfx_name:
-            asset = MOD.graphics_catalog.resolve(gfx_name)
+        if image_broker is not None and self.index.loaded and gfx_name:
+            asset = self.index.graphics_catalog.resolve(gfx_name)
             if asset is not None:
-                path = MOD.graphics_catalog.path_for(asset)
+                path = self.index.graphics_catalog.path_for(asset)
                 lifecycle = self._lifecycle
                 document_token = (
                     lifecycle.token("document") if lifecycle is not None else None

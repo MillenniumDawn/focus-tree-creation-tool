@@ -18,6 +18,7 @@ from hoi4cm.wizards.decision import (
 )
 from hoi4cm.wizards.event import (
     EVENT_AUTOSAVE_FIELDS,
+    _scalar_text,
     event_autosave_records,
     restore_event_autosave,
 )
@@ -304,3 +305,10 @@ def test_spirit_snapshot_takes_collected_values_and_deep_copies_modifiers():
 
 def test_spirit_snapshot_accepts_empty_state():
     assert spirit_autosave_snapshot({}, []) == {"modifiers": []}
+
+
+@pytest.mark.parametrize("value", [None, {}, [], 1])
+def test_event_scalar_fields_reject_non_strings(value):
+    assert _scalar_text(value, "fallback") == "fallback"
+    assert _scalar_text("", "fallback") == ""
+    assert _scalar_text("event.1", "fallback") == "event.1"

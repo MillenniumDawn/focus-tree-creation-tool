@@ -24,7 +24,7 @@ class _LoadedTreeRow:
     def __init__(
         self,
         master: tk.Canvas,
-        on_export: Callable[[int], None],
+        on_export: Callable[[int], object],
         on_unload: Callable[[int], None],
     ) -> None:
         self.tree_idx: int | None = None
@@ -122,7 +122,7 @@ class VirtualLoadedTreesList(_PooledList[_LoadedTreeRow]):
         self,
         master,
         *,
-        on_export: Callable[[int], None],
+        on_export: Callable[[int], object],
         on_unload: Callable[[int], None],
         row_height: int = 48,
         overscan_rows: int = 2,

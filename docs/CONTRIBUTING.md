@@ -60,7 +60,7 @@ If you have been granted permission to submit code:
 | `_snapshot()` | Push current state onto the undo stack |
 | `_s(v)` | Safe string coercion for generator output |
 | `C_*` | Colour constants |
-| `MOD` | Global `ModContext` instance |
+| `app.index` / `app.app_config` / `app.images` | The App's mod index, saved settings, and PhotoImage cache |
 
 ### Tests and linting
 

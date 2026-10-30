@@ -108,10 +108,10 @@ max-complexity = 10
 
 # Type checking is scoped to the modular package + tests. The monolith and
 # build scripts stay out until they are refactored into the package. `mypy_path`
-# puts src/ on the search path so tests can import hoi4cm.
+# includes src/ for hoi4cm and tests/ for standalone benchmark host doubles.
 [tool.mypy]
 python_version = "3.14"
-mypy_path = ["src", "scripts"]
+mypy_path = ["src", "scripts", "tests"]
 files = ["src/hoi4cm", "tests", "scripts"]
 native_parser = true
 # The monolith and build scripts stay out until refactored. The native

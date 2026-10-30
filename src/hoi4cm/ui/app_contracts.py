@@ -11,13 +11,18 @@ import tkinter as tk
 from collections.abc import Callable
 from typing import Any, Protocol
 
+from hoi4cm.core.app_config import AppConfig
+from hoi4cm.core.undo import UndoStack
 from hoi4cm.focus_tree.validate import Severity
+from hoi4cm.mod.index import ModIndex
 from hoi4cm.models import Focus, FocusDocument
 from hoi4cm.ui.canvas_renderer import FocusCanvasBundle
 from hoi4cm.ui.canvas_scheduler import DirtyRedrawState
+from hoi4cm.ui.focus_list import FocusListCache
 from hoi4cm.ui.image_broker import ImageBroker
 from hoi4cm.ui.lifecycle import ApplicationLifecycle
 from hoi4cm.ui.scene_index import SceneIndex
+from hoi4cm.ui.sprite_images import SpriteImageCache
 
 # ``cv.after`` returns the Tcl job id that ``after_cancel`` round-trips.
 type AfterJob = str
@@ -50,6 +55,7 @@ class CanvasHost(Protocol):
     CANVAS_MIN_SIZE: int
     CANVAS_EXPAND_STEP: int
 
+    index: ModIndex
     cv: tk.Canvas
     focuses: FocusDocument
     offset: list[float]
@@ -134,6 +140,11 @@ class CanvasHost(Protocol):
 class EffectsHost(Protocol):
     """State required by the sidebar effects mixin."""
 
+    index: ModIndex
+    app_config: AppConfig
+    focuses: FocusDocument
+    _undo_stack: UndoStack
+    _focus_list_cache: FocusListCache
     selected: Focus | None
     _eb_win: tk.Toplevel | None
     _effects_sig: object | None
@@ -142,6 +153,17 @@ class EffectsHost(Protocol):
 class ModLoadingHost(Protocol):
     """State required by the mod-loading mixin."""
 
+    index: ModIndex
+    app_config: AppConfig
+    images: SpriteImageCache
+    edit_focus_file: str
+    edit_loc_file: str
+    edit_ideas_file: str
+    edit_events_file: str
+    edit_events_ns: str
+    edit_decisions_file: str
+    edit_decisions_cat_file: str
+    edit_scripted_loc_file: str
     _mod_lbl: tk.Label
     cv: tk.Canvas
     _focus_bundles: dict[int, FocusCanvasBundle]

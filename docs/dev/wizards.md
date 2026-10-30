@@ -15,7 +15,7 @@
 The Character Editor uses `character_codec.py`, a pure ordered script codec.
 It retains repeated keys in their original order, including multiple role and
 portrait blocks, and leaves unrecognized assignments in place. The dialog
-reuses `MOD.character_ids` from the common/characters scanner, offers role,
+reuses `app.index.character_ids` from the common/characters scanner, offers role,
 trait, and portrait insertion helpers, and saves through
 `notifying_workspace_files`. Its script editor remains available for
 version-specific character fields the UI does not model.
@@ -57,9 +57,10 @@ Tk-handling block, plus the picker popups shared across wizards:
 - `render_script_snippet(key, definition, values, *, is_trigger=False)`:
   renders one catalogue entry's script text from its field values, no Tk
   (`is_trigger=True` switches to the trigger insertion shapes).
-- `notifying_workspace_files(MOD, mod_root)`: the `WorkspaceFiles` factory
-  the wizards save through, with the `on_written` hook that pokes the
-  graphics catalog (see `architecture.md`'s "Writing mod files").
+- `notifying_workspace_files(index, mod_root, on_written=None)`: the
+  `WorkspaceFiles` factory the wizards save through. UI callers pass
+  `app.note_mod_file_written` to update the catalog and evict stale Tk
+  images (see `architecture.md`'s "Writing mod files").
 - `svar_get(var, default)`: safe variable read — coerces to `str` and
   returns `default` when the variable is missing or its read raises.
 - `make_scrolled_listbox(parent, **options)` and
@@ -156,8 +157,10 @@ overwrite question, then calls one function with plain values:
 - dynamic modifier: `save_dyn_mod`
 - decision: `save_decisions`
 
-The functions take the mod context as an argument, so a test passes a fresh
-`ModContext()` and a `tmp_path` tree. `tests/test_wizard_saves.py` pins what
+The functions take the index, config, edit-target owner, and an optional
+write callback explicitly. A test supplies a fresh `ModIndex`, `AppConfig`,
+a plain edit-target object, and a `tmp_path` tree.
+`tests/test_wizard_saves.py` pins what
 matters for user data: an existing file keeps its bytes, its encoding (one
 BOM) and its newline style; an ID or localisation key already in the file is
 skipped; an unreadable or missing selected file is reported and left alone.

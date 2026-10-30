@@ -5,8 +5,8 @@ import os
 import pytest
 from ui_fakes import AppFake
 
-from hoi4cm.mod import ModContext
 from hoi4cm.mod import scan_cache as scan_cache_mod
+from hoi4cm.mod.index import ModIndex
 from hoi4cm.ui.effects_panel import _augment_scripted_suggestions
 
 
@@ -29,7 +29,7 @@ def test_extract_scripted_names_uses_only_top_level_blocks():
     loose_token
     """
 
-    assert ModContext._extract_scripted_names(source) == [
+    assert ModIndex._extract_scripted_names(source) == [
         "first_effect",
         "second_effect",
         "_private",
@@ -46,12 +46,12 @@ def test_extract_on_actions_reads_wrapped_hook_names():
     }
     """
 
-    assert ModContext._extract_on_actions(source) == [
+    assert ModIndex._extract_on_actions(source) == [
         "on_game_start",
         "on_monthly_pulse",
         "_private",
     ]
-    assert ModContext._extract_on_actions("on_shutdown = { }") == ["on_shutdown"]
+    assert ModIndex._extract_on_actions("on_shutdown = { }") == ["on_shutdown"]
 
 
 def test_scan_scripted_names_reads_mixed_encoding_files(tmp_path):
@@ -61,7 +61,7 @@ def test_scan_scripted_names_reads_mixed_encoding_files(tmp_path):
         "# café\nlatin_effect = { }\n".encode("latin-1")
     )
 
-    context = ModContext()
+    context = ModIndex()
     context.scan(str(tmp_path))
 
     assert context.scripted_effect_ids == ["latin_effect"]
@@ -89,7 +89,7 @@ def test_scan_scripted_names_deduplicates_in_file_order_and_resets(tmp_path):
         "on_actions = { on_shared = { } on_end = { } }\n"
     )
 
-    context = ModContext()
+    context = ModIndex()
     context.scripted_effect_ids = ["stale_effect"]
     context.scripted_trigger_ids = ["stale_trigger"]
     context.on_action_ids = ["stale_action"]
@@ -120,7 +120,7 @@ def test_scan_scripted_names_uses_file_cache(tmp_path, monkeypatch):
     scripted_dir.mkdir(parents=True)
     effect_file = scripted_dir / "effects.txt"
     effect_file.write_text("first_effect = { }\n")
-    context = ModContext()
+    context = ModIndex()
 
     context.scan(str(tmp_path))
 
@@ -143,25 +143,22 @@ def test_scan_scripted_names_uses_file_cache(tmp_path, monkeypatch):
     assert context.scripted_effect_ids == ["changed_effect"]
 
 
-def test_effects_mixin_uses_scanned_scripted_suggestions(monkeypatch):
-    monkeypatch.setattr("hoi4cm.ui.effects_panel.MOD.loaded", True)
-    monkeypatch.setattr(
-        "hoi4cm.ui.effects_panel.MOD.scripted_effect_ids", ["custom_effect"]
-    )
-    monkeypatch.setattr(
-        "hoi4cm.ui.effects_panel.MOD.scripted_trigger_ids", ["custom_trigger"]
-    )
-    monkeypatch.setattr("hoi4cm.ui.effects_panel.MOD.on_action_ids", ["custom_action"])
+def test_effects_mixin_uses_scanned_scripted_suggestions():
+    app = AppFake()
+    app.index.loaded = True
+    app.index.scripted_effect_ids = ["custom_effect"]
+    app.index.scripted_trigger_ids = ["custom_trigger"]
+    app.index.on_action_ids = ["custom_action"]
 
-    assert AppFake()._get_effect_suggestions("x", "effect") == [
+    assert app._get_effect_suggestions("x", "effect") == [
         "built_in",
         "custom_effect",
     ]
-    assert AppFake()._get_effect_suggestions("x", "limit") == [
+    assert app._get_effect_suggestions("x", "limit") == [
         "built_in",
         "custom_trigger",
     ]
-    assert AppFake()._get_effect_suggestions("x", "on_action") == [
+    assert app._get_effect_suggestions("x", "on_action") == [
         "built_in",
         "custom_action",
     ]

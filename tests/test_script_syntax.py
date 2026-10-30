@@ -1,5 +1,5 @@
 from hoi4cm.focus_tree.parse import block_to_str
-from hoi4cm.mod.context import ModContext
+from hoi4cm.mod.index import ModIndex
 from hoi4cm.script import dict_to_raw
 from hoi4cm.script.syntax import (
     extract_block,
@@ -186,7 +186,7 @@ def test_recursive_serializer_supports_bare_values_and_duplicate_keys():
 def test_compatibility_consumers_share_parser_and_serializer_semantics():
     source = 'root = { value = one value = two text = "# { }" }'
 
-    assert ModContext._parse_text(source) == parse_script(source)
+    assert ModIndex._parse_text(source) == parse_script(source)
 
     value = {"enabled": True, "nested": {"item": ["a", "b"]}}
     assert dict_to_raw(value) == serialize_block(value)

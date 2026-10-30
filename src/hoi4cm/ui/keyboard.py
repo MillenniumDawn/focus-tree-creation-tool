@@ -29,9 +29,15 @@ class KeyboardNudgeHost(Protocol):
 
     selected: Focus | None
     _multi_sel: set[int]
-    _fv_x: StringValue
-    _fv_y: StringValue
-    focuses: NudgeDocument
+
+    @property
+    def _fv_x(self) -> StringValue: ...
+
+    @property
+    def _fv_y(self) -> StringValue: ...
+
+    @property
+    def focuses(self) -> NudgeDocument: ...
 
     def focus_get(self) -> tk.Misc | None: ...
 

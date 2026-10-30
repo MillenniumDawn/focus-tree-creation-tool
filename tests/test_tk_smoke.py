@@ -22,7 +22,6 @@ import pytest
 from ui_fakes import AppFake
 
 import hoi4_content_maker as main_mod
-from hoi4cm.mod import MOD
 from hoi4cm.models import Focus
 from hoi4cm.ui import settings_dialog
 from hoi4cm.ui.canvas import CanvasMixin
@@ -170,14 +169,14 @@ def test_app_command_opens_its_dialog(app, opened, command):
 
 
 def test_additional_income_wizard_opens_in_md_mode(app, opened, monkeypatch):
-    monkeypatch.setattr(MOD, "is_md", True)
+    monkeypatch.setattr(app.index, "is_md", True)
     app._additional_income_wizard()
     _assert_built(opened())
 
 
 def test_character_wizard_opens_with_a_loaded_mod(app, opened, tmp_path, monkeypatch):
-    monkeypatch.setattr(MOD, "loaded", True)
-    monkeypatch.setattr(MOD, "root", str(tmp_path))
+    monkeypatch.setattr(app.index, "loaded", True)
+    monkeypatch.setattr(app.index, "root", str(tmp_path))
     app._character_wizard()
     _assert_built(opened())
 
@@ -189,8 +188,8 @@ def test_edit_targets_prompt_opens_with_a_loaded_mod(
         path = tmp_path / rel
         path.parent.mkdir(parents=True)
         path.write_text("", encoding="utf-8")
-    monkeypatch.setattr(MOD, "loaded", True)
-    monkeypatch.setattr(MOD, "root", str(tmp_path))
+    monkeypatch.setattr(app.index, "loaded", True)
+    monkeypatch.setattr(app.index, "root", str(tmp_path))
     app._show_post_load_prompt()
     _assert_built(opened())
 
@@ -205,19 +204,35 @@ def test_script_picker_opens(app, opened, picker):
         target.destroy()
 
 
-def test_gfx_browsers_open(app, opened, tmp_path, monkeypatch):
+def test_gfx_browsers_open(app, opened, tmp_path, monkeypatch) -> None:
     image = pytest.importorskip("PIL.Image")
     goals = tmp_path / "gfx" / "interface" / "goals"
     goals.mkdir(parents=True)
     # A real image: a failed decode would log from a worker thread (#319).
     image.new("RGBA", (8, 8), "#123456").save(goals / "icon.png")
     monkeypatch.setattr("tkinter.filedialog.askdirectory", lambda **kw: str(goals))
-    monkeypatch.setattr(MOD, "root", str(tmp_path))
-    monkeypatch.setattr(MOD, "path_goals", os.path.join("gfx", "interface", "goals"))
+    monkeypatch.setattr(app.index, "root", str(tmp_path))
+    monkeypatch.setattr(
+        app.app_config, "path_goals", os.path.join("gfx", "interface", "goals")
+    )
 
-    open_universal_gfx_browser(app, on_select=lambda *a: None)
-    open_gfx_placement_editor(app, initial_items=[], on_confirm=lambda *a: None)
-    open_focus_icon_browser(app, on_select=lambda *a: None, current_gfx="")
+    open_universal_gfx_browser(
+        app, on_select=lambda *a: None, index=app.index, config=app.app_config
+    )
+    open_gfx_placement_editor(
+        app,
+        initial_items=[],
+        on_confirm=lambda *a: None,
+        index=app.index,
+        config=app.app_config,
+    )
+    open_focus_icon_browser(
+        app,
+        on_select=lambda *a: None,
+        current_gfx="",
+        index=app.index,
+        config=app.app_config,
+    )
 
     windows = opened()
     assert len(windows) == 3
@@ -372,6 +387,7 @@ def test_minimap_first_show_uses_requested_size_before_geometry_settles(monkeypa
         mm = root._mm_canvas
         assert mm is not None and mm.winfo_exists()
         assert root._mm_world_bounds == (0.0, 0.0, 3.0, 3.0)
+        assert root._mm_scale is not None
         assert root._mm_scale > 0
         assert root._mm_scale == pytest.approx(min(200 / 3, 130 / 3))
         assert len(root._mm_dot_pool) == 2
@@ -397,6 +413,7 @@ def test_minimap_first_show_uses_requested_size_before_geometry_settles(monkeypa
         assert root._mm_visible is False
         root._toggle_minimap()
         assert root._mm_canvas is mm
+        assert root._mm_scale is not None
         assert root._mm_scale > 0
     finally:
         assert root._lifecycle is not None

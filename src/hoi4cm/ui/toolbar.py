@@ -4,7 +4,6 @@
 import tkinter as tk
 
 from hoi4cm.core.i18n import tr
-from hoi4cm.mod import MOD
 from hoi4cm.ui.theme import BG_CARD, BLUE, BORDER_G, ORANGE, TEXT, TEXT_DIM
 from hoi4cm.ui.widgets import Tooltip
 
@@ -121,7 +120,7 @@ def build_toolbar_row2(app, toolbar):
         ),
     )
     app._additional_income_separator = _tb_sep()
-    if not MOD.is_md:
+    if not app.index.is_md:
         app._additional_income_btn.pack_forget()
     _tb_lbl(tr("toolbar.section.select", "Select"))
     app._msel_btn = _tb_btn(

@@ -13,7 +13,8 @@ from hoi4cm.ui.theme import BG_PANEL, BLUE, TEXT_DIM
 class _Revisioned(Protocol):
     """Minimal shape the cache keys on: a document with a revision counter."""
 
-    revision: int
+    @property
+    def revision(self) -> int: ...
 
 
 SELECTED_BG = "#1e2d4a"

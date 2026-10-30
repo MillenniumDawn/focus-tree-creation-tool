@@ -8,9 +8,12 @@ import pytest
 
 import hoi4_content_maker as m
 import hoi4cm.core.logger as logmod
+from hoi4cm.core.app_config import AppConfig
 from hoi4cm.focus_tree.export_plan import execute_export_plans
+from hoi4cm.mod.index import ModIndex
 from hoi4cm.mod.workspace_files import WorkspaceFiles
 from hoi4cm.models import FocusDocument
+from hoi4cm.ui.sprite_images import SpriteImageCache
 
 
 @pytest.fixture
@@ -45,11 +48,16 @@ def mod_files(tmp_path, monkeypatch):
     loc_file.parent.mkdir(parents=True)
     focus_file.write_text("focus_tree = { # the user's real tree }\n", encoding="utf-8")
     loc_file.write_text("l_english:\n", encoding="utf-8-sig")
-    monkeypatch.setattr(m.MOD, "root", str(tmp_path))
-    monkeypatch.setattr(m.MOD, "loaded", False)
-    monkeypatch.setattr(m.MOD, "edit_focus_file", str(focus_file))
-    monkeypatch.setattr(m.MOD, "edit_loc_file", str(loc_file))
-    return SimpleNamespace(root=tmp_path, focus=focus_file, loc=loc_file)
+    index = ModIndex()
+    index.root = str(tmp_path)
+    return SimpleNamespace(
+        root=tmp_path,
+        focus=focus_file,
+        loc=loc_file,
+        index=index,
+        focus_target=str(focus_file),
+        loc_target=str(loc_file),
+    )
 
 
 class _App:
@@ -60,7 +68,13 @@ class _App:
     def _begin_document_generation(self):
         pass
 
-    def __init__(self, focuses):
+    def __init__(self, focuses, *, mod_files):
+        self.index = mod_files.index
+        self.app_config = AppConfig()
+        self.images = SpriteImageCache()
+        self.edit_focus_file = mod_files.focus_target
+        self.edit_loc_file = mod_files.loc_target
+        self.note_mod_file_written = m.App.note_mod_file_written.__get__(self)
         self.selected = None
         self.focuses = {focus.id: focus for focus in focuses}
         self._tree_id = SimpleNamespace(get=lambda: "TST_focus_tree")
@@ -104,10 +118,10 @@ def _focus(name, x=0, y=0):
 
 
 def _configure_custom_focus_gfx(monkeypatch, mod_files, image=None):
-    monkeypatch.setattr(m.MOD, "loaded", True)
-    monkeypatch.setattr(m.MOD, "sprites", {})
+    mod_files.index.loaded = True
+    mod_files.index.sprites = {}
     catalog = _Catalog([image] if image is not None else [])
-    monkeypatch.setattr(m.MOD, "graphics_catalog", catalog)
+    mod_files.index.graphics_catalog = catalog
     return catalog
 
 
@@ -144,7 +158,7 @@ def _fail_replace(monkeypatch, message="No space left on device"):
 
 
 def test_export_writes_both_tracked_files(dialogs, mod_files):
-    _export(_App([_focus("TST_root")]))
+    _export(_App([_focus("TST_root")], mod_files=mod_files))
 
     assert "TST_root" in mod_files.focus.read_text(encoding="utf-8")
     assert "TST_root" in mod_files.loc.read_text(encoding="utf-8-sig")
@@ -161,15 +175,15 @@ def test_export_reprompts_for_targets_outside_loaded_mod(
     outside_loc.write_text("user file\n", encoding="utf-8")
     chosen_focus = mod_files.root / "common" / "national_focus" / "new.txt"
     prompts = []
-    monkeypatch.setattr(m.MOD, "edit_focus_file", str(outside_focus))
-    monkeypatch.setattr(m.MOD, "edit_loc_file", str(outside_loc))
+    mod_files.focus_target = str(outside_focus)
+    mod_files.loc_target = str(outside_loc)
     monkeypatch.setattr(
         m.filedialog,
         "asksaveasfilename",
         lambda **kwargs: prompts.append(kwargs) or str(chosen_focus),
     )
 
-    app = _App([_focus("TST_root")])
+    app = _App([_focus("TST_root")], mod_files=mod_files)
     _bind_export_shells(app)
     plan = app._make_main_export_plan(
         list(app.focuses.values()),
@@ -189,7 +203,7 @@ def test_export_reprompts_for_targets_outside_loaded_mod(
 def test_extra_export_reprompts_without_a_mod_root(dialogs, mod_files, monkeypatch):
     focus = _focus("TST_shared")
     focus.tree_idx = 1
-    app = _App([focus])
+    app = _App([focus], mod_files=mod_files)
     app._extra_trees = [
         {
             "type": "shared",
@@ -204,7 +218,7 @@ def test_extra_export_reprompts_without_a_mod_root(dialogs, mod_files, monkeypat
     ]
     chosen = mod_files.root / "new_shared.txt"
     prompts = []
-    monkeypatch.setattr(m.MOD, "root", None)
+    app.index.root = None
     monkeypatch.setattr(
         m.filedialog,
         "asksaveasfilename",
@@ -226,9 +240,8 @@ def test_extra_export_reprompts_without_a_mod_root(dialogs, mod_files, monkeypat
 
 
 def test_default_localisation_filename_is_generic(mod_files, monkeypatch):
-    MOD = m.MOD
-    MOD.edit_focus_file = ""
-    MOD.edit_loc_file = ""
+    mod_files.focus_target = ""
+    mod_files.loc_target = ""
     focus_path = mod_files.root / "common" / "national_focus" / "05_TST.txt"
     monkeypatch.setattr(
         m.filedialog,
@@ -236,7 +249,7 @@ def test_default_localisation_filename_is_generic(mod_files, monkeypatch):
         lambda **_kwargs: str(focus_path),
     )
 
-    app = _App([_focus("TST_root")])
+    app = _App([_focus("TST_root")], mod_files=mod_files)
     _bind_export_shells(app)
     focuses = list(app.focuses.values())
     names = {focus.name: focus for focus in focuses}
@@ -255,7 +268,7 @@ def test_export_accepts_custom_focus_icon_declaration(dialogs, mod_files, monkey
 
     focus = _focus("TST_root")
     focus.gfx = "GFX_focus_custom"
-    _export(_App([focus]))
+    _export(_App([focus], mod_files=mod_files))
 
     gfx = mod_files.root / "interface" / "TST_focus.gfx"
     assert gfx.exists()
@@ -279,7 +292,7 @@ def test_noninteractive_export_does_not_prompt_for_custom_focus_icon(
 
     focus = _focus("TST_root")
     focus.gfx = "GFX_focus_custom"
-    _export(_App([focus]), show_dialog=False)
+    _export(_App([focus], mod_files=mod_files), show_dialog=False)
 
     assert not (mod_files.root / "interface" / "TST_focus.gfx").exists()
 
@@ -295,7 +308,7 @@ def test_export_declining_custom_focus_icon_declaration_leaves_no_gfx_file(
 
     focus = _focus("TST_root")
     focus.gfx = "GFX_focus_custom"
-    _export(_App([focus]))
+    _export(_App([focus], mod_files=mod_files))
 
     assert not (mod_files.root / "interface" / "TST_focus.gfx").exists()
 
@@ -319,7 +332,7 @@ def test_export_deduplicates_existing_custom_focus_icon(
 
     focus = _focus("TST_root")
     focus.gfx = "GFX_focus_custom"
-    _export(_App([focus]))
+    _export(_App([focus], mod_files=mod_files))
 
     assert gfx.read_text().count('name = "GFX_focus_custom"') == 1
 
@@ -332,7 +345,7 @@ def test_export_does_not_generate_unresolved_custom_focus_icon(
 
     focus = _focus("TST_root")
     focus.gfx = "GFX_focus_missing"
-    _export(_App([focus]))
+    _export(_App([focus], mod_files=mod_files))
 
     assert not (mod_files.root / "interface" / "TST_focus.gfx").exists()
 
@@ -340,7 +353,7 @@ def test_export_does_not_generate_unresolved_custom_focus_icon(
 def test_failed_export_leaves_the_tracked_files_untouched(
     dialogs, mod_files, monkeypatch
 ):
-    app = _App([_focus("TST_root")])
+    app = _App([_focus("TST_root")], mod_files=mod_files)
     tree_before = mod_files.focus.read_text(encoding="utf-8")
     loc_before = mod_files.loc.read_text(encoding="utf-8-sig")
     _fail_replace(monkeypatch)
@@ -356,7 +369,7 @@ def test_failed_export_leaves_the_tracked_files_untouched(
 def test_failed_export_reports_instead_of_raising(dialogs, mod_files, monkeypatch):
     _fail_replace(monkeypatch, "Permission denied")
 
-    _export(_App([_focus("TST_root")]))
+    _export(_App([_focus("TST_root")], mod_files=mod_files))
 
     assert len(dialogs.error) == 1
     assert "05_TST.txt" in dialogs.error[0][1]
@@ -366,7 +379,7 @@ def test_failed_export_reports_instead_of_raising(dialogs, mod_files, monkeypatc
 
 
 def test_export_does_not_apply_half_the_pair(dialogs, mod_files, monkeypatch):
-    app = _App([_focus("TST_root")])
+    app = _App([_focus("TST_root")], mod_files=mod_files)
     tree_before = mod_files.focus.read_text(encoding="utf-8")
     real_replace = m.os.replace
     calls = []
@@ -386,12 +399,14 @@ def test_export_does_not_apply_half_the_pair(dialogs, mod_files, monkeypatch):
     assert len(dialogs.error) == 1
 
 
-def test_failed_extra_tree_export_keeps_the_source_file(dialogs, tmp_path, monkeypatch):
+def test_failed_extra_tree_export_keeps_the_source_file(
+    dialogs, mod_files, tmp_path, monkeypatch
+):
     shared = tmp_path / "MD_shared_focuses.txt"
     shared.write_text("shared_focus = { # real content }\n", encoding="utf-8")
     focus = _focus("TST_shared")
     focus.tree_idx = 1
-    app = _App([focus])
+    app = _App([focus], mod_files=mod_files)
     app._extra_trees = [
         {
             "type": "shared",
@@ -404,8 +419,8 @@ def test_failed_extra_tree_export_keeps_the_source_file(dialogs, tmp_path, monke
             "had_wrapper": False,
         }
     ]
-    monkeypatch.setattr(m.MOD, "loaded", False)
-    monkeypatch.setattr(m.MOD, "root", str(tmp_path))
+    app.index.loaded = False
+    app.index.root = str(tmp_path)
     _fail_replace(monkeypatch)
 
     _export_extra_tree(app, 1)
@@ -416,7 +431,7 @@ def test_failed_extra_tree_export_keeps_the_source_file(dialogs, tmp_path, monke
 
 
 def test_run_export_plans_uses_document_scope_and_closes_modal(monkeypatch, mod_files):
-    app = _App([_focus("TST_root")])
+    app = _App([_focus("TST_root")], mod_files=mod_files)
     _bind_export_shells(app)
     plan = m.App._make_main_export_plan.__get__(app, _App)(
         list(app.focuses.values()),
@@ -464,7 +479,7 @@ def test_save_all_uses_one_plan_per_loaded_tree(dialogs, mod_files, tmp_path):
     main = _focus("TST_main")
     extra = _focus("TST_shared")
     extra.tree_idx = 1
-    app = _App([main, extra])
+    app = _App([main, extra], mod_files=mod_files)
     app._extra_trees = [
         {
             "type": "shared",
@@ -492,7 +507,7 @@ def test_save_all_shares_one_lookup_across_plans(dialogs, mod_files, tmp_path):
     main = _focus("TST_main")
     extra = _focus("TST_shared")
     extra.tree_idx = 1
-    app = _App([main, extra])
+    app = _App([main, extra], mod_files=mod_files)
     app._extra_trees = [
         {
             "type": "shared",

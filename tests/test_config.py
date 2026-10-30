@@ -70,14 +70,11 @@ def test_cfg_save_failure_leaves_no_tmp(tmp_path, monkeypatch):
     assert not os.path.exists(str(bad) + ".tmp")
 
 
-def test_mod_context_save_config_propagates_failure(monkeypatch):
-    from hoi4cm.mod import context as ctx_mod
+def test_app_config_save_propagates_failure(monkeypatch):
+    from hoi4cm.core.app_config import AppConfig
 
-    monkeypatch.setattr(ctx_mod, "cfg_load", lambda: {})
-    monkeypatch.setattr(ctx_mod, "cfg_save", lambda data: False)
-    monkeypatch.setattr(ctx_mod.GraphicsCatalog, "flush_cache", lambda self: None)
-
-    assert ctx_mod.ModContext().save_config() is False
+    monkeypatch.setattr("hoi4cm.core.app_config.cfg_save", lambda data: False)
+    assert AppConfig().save() is False
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX file modes only")
@@ -89,51 +86,48 @@ def test_cfg_save_sets_owner_only_perms(tmp_path, monkeypatch):
 
 
 def test_sidebar_refresh_skip_flag_registered_and_honored(monkeypatch):
-    from hoi4cm.mod import context as ctx_mod
+    from hoi4cm.core.app_config import AppConfig
 
-    attrs = dict((k, a) for k, a, _ in ctx_mod.ModContext._PERSISTED_ATTRS)
-    assert attrs["sidebar_refresh_skip"] == "sidebar_refresh_skip"
-    # Default on when the config key is absent.
-    monkeypatch.setattr(ctx_mod, "cfg_load", lambda: {})
-    assert ctx_mod.ModContext().sidebar_refresh_skip is True
-    # A saved False is honored (allow_falsy) so the optimization can be disabled.
-    monkeypatch.setattr(ctx_mod, "cfg_load", lambda: {"sidebar_refresh_skip": False})
-    assert ctx_mod.ModContext().sidebar_refresh_skip is False
+    monkeypatch.setattr("hoi4cm.core.app_config.cfg_load", lambda: {})
+    assert AppConfig.load().sidebar_refresh_skip is True
+    monkeypatch.setattr(
+        "hoi4cm.core.app_config.cfg_load", lambda: {"sidebar_refresh_skip": False}
+    )
+    assert AppConfig.load().sidebar_refresh_skip is False
 
 
 def test_sidebar_refresh_skip_roundtrips_through_save_config(monkeypatch):
-    """save_config persists the flag and a fresh context reloads it."""
-    from hoi4cm.mod import context as ctx_mod
+    """Saving persists the flag and a fresh config reloads it."""
+    from hoi4cm.core.app_config import AppConfig
 
     saved = {}
-    monkeypatch.setattr(ctx_mod, "cfg_save", lambda data: (saved.update(data), True)[1])
-    monkeypatch.setattr(ctx_mod, "cfg_load", lambda: dict(saved))
-    monkeypatch.setattr(ctx_mod.GraphicsCatalog, "flush_cache", lambda self: None)
+    monkeypatch.setattr(
+        "hoi4cm.core.app_config.cfg_save", lambda data: (saved.update(data), True)[1]
+    )
+    monkeypatch.setattr("hoi4cm.core.app_config.cfg_load", lambda: dict(saved))
 
-    c = ctx_mod.ModContext()
-    c.sidebar_refresh_skip = False
-    assert c.save_config() is True
+    settings = AppConfig()
+    settings.sidebar_refresh_skip = False
+    assert settings.save() is True
     assert saved["sidebar_refresh_skip"] is False
-
-    c2 = ctx_mod.ModContext()
-    assert c2.sidebar_refresh_skip is False
+    assert AppConfig.load().sidebar_refresh_skip is False
 
 
 def test_loc_language_defaults_persists_and_normalizes(monkeypatch):
-    from hoi4cm.mod import context as ctx_mod
+    from hoi4cm.core.app_config import AppConfig
 
     saved = {}
-    monkeypatch.setattr(ctx_mod, "cfg_save", lambda data: (saved.update(data), True)[1])
-    monkeypatch.setattr(ctx_mod, "cfg_load", lambda: dict(saved))
-    monkeypatch.setattr(ctx_mod.GraphicsCatalog, "flush_cache", lambda self: None)
+    monkeypatch.setattr(
+        "hoi4cm.core.app_config.cfg_save", lambda data: (saved.update(data), True)[1]
+    )
+    monkeypatch.setattr("hoi4cm.core.app_config.cfg_load", lambda: dict(saved))
 
-    context = ctx_mod.ModContext()
-    assert context.loc_language == "english"
-
-    context.loc_language = "french"
-    assert context.save_config() is True
+    settings = AppConfig()
+    assert settings.loc_language == "english"
+    settings.loc_language = "french"
+    assert settings.save() is True
     assert saved["loc_language"] == "french"
-    assert ctx_mod.ModContext().loc_language == "french"
+    assert AppConfig.load().loc_language == "french"
 
     saved["loc_language"] = "invalid"
-    assert ctx_mod.ModContext().loc_language == "english"
+    assert AppConfig.load().loc_language == "english"

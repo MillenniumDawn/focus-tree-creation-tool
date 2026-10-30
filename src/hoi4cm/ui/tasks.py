@@ -9,8 +9,9 @@ Hard rules for anything that runs inside ``work`` (i.e. on a worker thread):
 
 - Never touch Tk objects: no widgets, ``StringVar``/``BooleanVar``, canvas
   items, dialogs. Tkinter is not thread-safe.
-- Never call ``MOD.get_image`` (or anything that constructs a
-  ``PhotoImage``) -- that's Tk-thread-only.
+- Never call ``SpriteImageCache.get_image`` or anything else that
+  constructs a ``PhotoImage``. That is Tk-thread-only.
+- A mod scan receives a ``ModIndex`` and a settings snapshot, not the App.
 - Never mutate ``App`` state (``self.focuses``, ``self._extra_trees``,
   ``self._shared_focuses``, ...). Read a snapshot taken on the Tk thread
   before submitting, compute against it, and hand the result to ``on_done``.

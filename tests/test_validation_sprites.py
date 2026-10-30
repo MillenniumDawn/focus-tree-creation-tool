@@ -3,11 +3,18 @@ from typing import cast
 
 import hoi4_content_maker as m
 from hoi4cm.focus_tree.validate import validate_document
+from hoi4cm.mod.index import ModIndex
 from hoi4cm.models import Focus
 
 
-def _host() -> m.App:
-    return cast(m.App, object())
+def _host(
+    loaded: bool = False, sprites: dict[str, str] | None = None
+) -> SimpleNamespace:
+    index = ModIndex()
+    index.loaded = loaded
+    if sprites is not None:
+        index.sprites = sprites
+    return SimpleNamespace(index=index, edit_loc_file="")
 
 
 def _focus(fid: int, gfx: str) -> Focus:
@@ -19,24 +26,18 @@ def _focus(fid: int, gfx: str) -> Focus:
     return f
 
 
-def test_validation_sprites_returns_none_when_unloaded(monkeypatch):
-    monkeypatch.setattr(m.MOD, "loaded", False)
-    monkeypatch.setattr(m.MOD, "sprites", {"GFX_foo": "/x"})
-    assert m.App._validation_sprites(_host()) is None
+def test_validation_sprites_returns_none_when_unloaded():
+    host = cast(m.App, _host(False, {"GFX_foo": "/x"}))
+    assert m.App._validation_sprites(host) is None
 
 
-def test_validation_sprites_returns_none_when_empty(monkeypatch):
-    monkeypatch.setattr(m.MOD, "loaded", True)
-    monkeypatch.setattr(m.MOD, "sprites", {})
-    assert m.App._validation_sprites(_host()) is None
+def test_validation_sprites_returns_none_when_empty():
+    assert m.App._validation_sprites(cast(m.App, _host(True, {}))) is None
 
 
-def test_validation_sprites_snapshot_survives_clear(monkeypatch):
+def test_validation_sprites_snapshot_survives_clear():
     live = {"GFX_foo": "/x"}
-    monkeypatch.setattr(m.MOD, "loaded", True)
-    monkeypatch.setattr(m.MOD, "sprites", live)
-
-    snapshot = m.App._validation_sprites(_host())
+    snapshot = m.App._validation_sprites(cast(m.App, _host(True, live)))
     assert snapshot == {"GFX_foo": "/x"}
     assert snapshot is not live
 
@@ -47,9 +48,6 @@ def test_validation_sprites_snapshot_survives_clear(monkeypatch):
 
 def test_run_validation_snapshots_sprites_before_worker(monkeypatch):
     live = {"GFX_foo": "/x"}
-    monkeypatch.setattr(m.MOD, "loaded", True)
-    monkeypatch.setattr(m.MOD, "sprites", live)
-
     captured: list[object] = []
 
     def fake_validate(_focuses, sprites=None, **_kwargs):
@@ -64,13 +62,12 @@ def test_run_validation_snapshots_sprites_before_worker(monkeypatch):
 
     monkeypatch.setattr(m, "run_bg", fake_run_bg)
 
-    host = SimpleNamespace(
-        focuses={1: _focus(1, "GFX_foo")},
-        _validation_job=object(),
-        _lifecycle=SimpleNamespace(begin=lambda scope: None),
-        _validation_loc_keys=lambda: None,
-        _apply_validation_result=lambda _issues: None,
-    )
+    host = _host(True, live)
+    host.focuses = {1: _focus(1, "GFX_foo")}
+    host._validation_job = object()
+    host._lifecycle = SimpleNamespace(begin=lambda scope: None)
+    host._validation_loc_keys = lambda: None
+    host._apply_validation_result = lambda _issues: None
     host._validation_sprites = m.App._validation_sprites.__get__(host)
     host._run_validation = m.App._run_validation.__get__(host)
 

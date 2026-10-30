@@ -20,6 +20,18 @@ the version by hand. See `AGENTS.md`.
   settings hint on how Millennium Dawn is detected names `00_money_system.txt`
   again in every language. The German, Spanish and Chinese strings added here
   are machine translations and need native review.
+- Separate mod scan results, saved preferences, and Tk image caches. Scans
+  receive frozen settings instead of sharing live UI data; image eviction
+  and shutdown cleanup stay on the Tk thread.
+- Report unreadable folders in the fallback focus-icon picker instead of
+  failing its Tk callback.
+- Remember the window size and position between launches. Every config save
+  used to overwrite the stored geometry with an empty string, so it never
+  restored.
+- Ignore a non-text event `id` or `picture` when importing events, and report a
+  failed events or localisation folder in the Save to Mod summary instead of
+  raising.
+
 - Add a UI language by dropping `locales/<code>.json` into the folder: the
   language list is read from the files, each naming itself in `_meta`. Wrap the
   wizard, settings, undo, canvas and validation text that bypassed `tr()`, and

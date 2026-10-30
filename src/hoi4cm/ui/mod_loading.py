@@ -9,9 +9,9 @@ methods here call it via ``self``.
 import os
 import re
 import tkinter as tk
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from tkinter import filedialog, messagebox
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from hoi4cm.core import (
     convert_newlines,
@@ -20,12 +20,15 @@ from hoi4cm.core import (
     read_file_with_encoding,
     tr,
 )
+from hoi4cm.core.app_config import AppConfig
 from hoi4cm.core.config import CONFIG_PATH
 from hoi4cm.core.logger import add_error, get_logger
-from hoi4cm.mod import MOD, find_loc_files, notifying_workspace_files
+from hoi4cm.mod import find_loc_files, notifying_workspace_files
+from hoi4cm.mod.index import ModIndex
 from hoi4cm.ui.canvas_renderer import FocusCanvasBundle
 from hoi4cm.ui.error_report import report_error
-from hoi4cm.ui.lifecycle import ApplicationLifecycle
+from hoi4cm.ui.lifecycle import ApplicationLifecycle, TkOwner
+from hoi4cm.ui.sprite_images import SpriteImageCache
 from hoi4cm.ui.tasks import make_progress, progress_modal, run_bg
 from hoi4cm.ui.theme import (
     BG_CARD,
@@ -85,7 +88,21 @@ class ModLoadingMixin:
     _lifecycle: ApplicationLifecycle | None
     _mod_image_resource_registered: bool
     _config_write_warned: bool
-    _schedule_validation: Callable[[], None]
+    app_config: AppConfig
+    index: ModIndex
+    images: SpriteImageCache
+    edit_ideas_file: str
+    edit_events_file: str
+    edit_events_ns: str
+    edit_focus_file: str
+    edit_decisions_file: str
+    edit_decisions_cat_file: str
+    edit_loc_file: str
+    edit_scripted_loc_file: str
+
+    if TYPE_CHECKING:
+
+        def _schedule_validation(self) -> None: ...
 
     def _warn_config_write_failed(self) -> None:
         """Show a one-time-per-session warning when a config write fails."""
@@ -116,9 +133,9 @@ class ModLoadingMixin:
                 title=tr("dialog.mod_not_found.title", "Mod Not Found"),
             )
             # Remove stale entry
-            if hasattr(MOD, "_recent_mods") and root in MOD._recent_mods:
-                MOD._recent_mods.remove(root)
-                if not MOD.save_config():
+            if root in self.app_config.recent_mods:
+                self.app_config.recent_mods.remove(root)
+                if not cast(Any, self).save_user_config():
                     self._warn_config_write_failed()
             return
         # Reuse _load_mod flow by temporarily monkeypatching the dialog
@@ -136,7 +153,7 @@ class ModLoadingMixin:
         if lifecycle is not None and not lifecycle.accepting:
             return
         _hoi4_mod_dir = _default_hoi4_mod_dir()
-        _custom = getattr(MOD, "custom_mod_path", "")
+        _custom = self.app_config.custom_mod_path
         _init_dir = (
             _custom
             if _custom and os.path.isdir(_custom)
@@ -156,7 +173,8 @@ class ModLoadingMixin:
         if not root:
             return
 
-        candidate = MOD.new_scan_candidate()
+        settings = self.app_config.scan_settings(use_cache=self.index.use_cache)
+        candidate = self.index.new_scan_candidate(settings)
         if lifecycle is not None:
             lifecycle.begin("mod")
         pw = progress_modal(
@@ -169,7 +187,11 @@ class ModLoadingMixin:
         )
         if lifecycle is not None and not self._mod_image_resource_registered:
             self._mod_image_resource_registered = True
-            lifecycle.add_resource(lambda: MOD.sprite_imgs.clear())
+
+            def _clear_sprite_images() -> None:
+                self.images.clear()
+
+            lifecycle.add_resource(_clear_sprite_images)
 
         def progress(i, total, label):
             pw.set_text(
@@ -184,6 +206,7 @@ class ModLoadingMixin:
             pw.set_fraction(i / total if total else 1.0)
 
         report_progress = make_progress(cast(Any, self), progress, scope="mod")
+        cancelled = pw.cancelled
 
         def cleanup():
             pw.close()
@@ -191,27 +214,29 @@ class ModLoadingMixin:
 
         def worker():
             return candidate.scan(
-                root, progress_cb=report_progress, cancelled=pw.cancelled
+                root,
+                settings,
+                progress_cb=report_progress,
+                cancelled=cancelled,
             )
 
         def on_loaded(scanned):
             # Cancel can land during the last step or after the worker returns.
             if scanned is None or pw.cancelled.is_set():
                 return
-            evicted_images = MOD.adopt_scan(candidate)
+            evicted_images = self.images.clear()
+            self.index.adopt_scan(candidate)
             remove_evicted_resource = (
                 lifecycle.add_resource(evicted_images.clear)
                 if lifecycle is not None
                 else lambda: None
             )
             try:
-                if not hasattr(MOD, "_recent_mods"):
-                    MOD._recent_mods = []
-                if root in MOD._recent_mods:
-                    MOD._recent_mods.remove(root)
-                MOD._recent_mods.insert(0, root)
-                MOD._recent_mods = MOD._recent_mods[:8]
-                if not MOD.save_config():
+                if root in self.app_config.recent_mods:
+                    self.app_config.recent_mods.remove(root)
+                self.app_config.recent_mods.insert(0, root)
+                self.app_config.recent_mods = self.app_config.recent_mods[:8]
+                if not cast(Any, self).save_user_config():
                     self._warn_config_write_failed()
                 self._on_mod_loaded(root)
             finally:
@@ -221,38 +246,39 @@ class ModLoadingMixin:
         run_bg(cast(Any, self), worker, on_loaded, scope="mod", on_finally=cleanup)
 
     def _on_mod_loaded(self, root):
+        host = cast(Any, self)
         mod_name = os.path.basename(root)
-        md_badge = "  ⚡MD" if MOD.is_md else ""
-        self._mod_label_base = f"📂 {mod_name}{md_badge}  |  {MOD.summary()}"
+        md_badge = "  ⚡MD" if self.index.is_md else ""
+        self._mod_label_base = f"📂 {mod_name}{md_badge}  |  {self.index.summary()}"
         self._mod_lbl.config(
             text=self._mod_label_base,
-            fg="#a78bfa" if MOD.is_md else GREEN,
+            fg="#a78bfa" if self.index.is_md else GREEN,
         )
-        self._apply_md_visibility()
+        host._apply_md_visibility()
         self._refresh_mod_dropdowns()
-        self._update_statusbar()
+        host._update_statusbar()
         # Invalidate all focus draw caches so mod images render on next frame
-        self._invalidate_canvas_images()
-        self._reclaim_focus_bundles(set())
+        host._invalidate_canvas_images()
+        host._reclaim_focus_bundles(set())
         self.cv.delete("focus")
-        self._redraw_now()
+        host._redraw_now()
         # Clear all wizard image caches so new mod GFX loads fresh. The live
         # caches live in hoi4cm.wizards._shared (the event and decision wizards
         # register theirs there), not in this module.
         for _c in _wiz_shared._app_img_caches:
             _c.clear()
         # Load first sprite as a quick PIL sanity check
-        test_names = list(MOD.sprites.keys())[:1]
+        test_names = list(self.index.sprites.keys())[:1]
         for tn in test_names:
-            MOD.get_image(tn)
+            self.images.get_image(self.index.sprites, tn)
 
-        sample = list(MOD.sprites.keys())[:5]
+        sample = list(self.index.sprites.keys())[:5]
         sample_txt = (
             "\n".join("  " + n for n in sample)
             if sample
             else tr("mod.loaded.no_sample_gfx", "  (none - check interface/*.gfx)")
         )
-        sampled_items = list(MOD.sprites.items())[:50]
+        sampled_items = list(self.index.sprites.items())[:50]
         missing_items = [(k, p) for k, p in sampled_items if not os.path.exists(p)]
         if missing_items:
             _lines = []
@@ -274,29 +300,29 @@ class ModLoadingMixin:
         else:
             disk_note = ""
         err_note = ""
-        if MOD._img_errors:
+        if self.images.errors:
             err_note = (
                 "\n\n"
                 + tr("mod.loaded.image_errors", "Image errors (first 3):")
                 + "\n"
-                + "\n".join(MOD._img_errors[:3])
+                + "\n".join(self.images.errors[:3])
             )
         scan_problems = []
-        if MOD.failed_steps:
+        if self.index.failed_steps:
             scan_problems.append(
                 tr(
                     "mod.loaded.failed_steps",
                     "Scan steps that failed: {steps}",
-                    steps=", ".join(MOD.failed_steps),
+                    steps=", ".join(self.index.failed_steps),
                 )
             )
-        if MOD.unparsable_files:
+        if self.index.unparsable_files:
             scan_problems.append(
                 tr(
                     "mod.loaded.unparsable_files",
                     "Files that could not be parsed ({count}, first 3):\n{paths}",
-                    count=len(MOD.unparsable_files),
-                    paths="\n".join(MOD.unparsable_files[:3]),
+                    count=len(self.index.unparsable_files),
+                    paths="\n".join(self.index.unparsable_files[:3]),
                 )
             )
         if scan_problems:
@@ -310,7 +336,7 @@ class ModLoadingMixin:
                 "Mod: {mod}\n\n{summary}\n\nSample GFX names:\n"
                 "{sample}{disk_note}{err_note}",
                 mod=mod_name,
-                summary=MOD.summary().replace("  •  ", "\n"),
+                summary=self.index.summary().replace("  •  ", "\n"),
                 sample=sample_txt,
                 disk_note=disk_note,
                 err_note=err_note,
@@ -324,10 +350,10 @@ class ModLoadingMixin:
         # Prompt user to pick edit targets for ideas/events files
         lifecycle = self._lifecycle
         if lifecycle is None:
-            self.after(150, self._show_post_load_prompt)
+            cast(Any, self).after(150, self._show_post_load_prompt)
         else:
             lifecycle.after(
-                self,
+                cast(TkOwner, self),
                 150,
                 self._show_post_load_prompt,
                 token=lifecycle.token("mod"),
@@ -335,14 +361,14 @@ class ModLoadingMixin:
 
     def _show_post_load_prompt(self):
         """Dialog to pick which existing ideas/events files to append new content to."""
-        if not (MOD.loaded and MOD.root):
+        if not (self.index.loaded and self.index.root):
             messagebox.showinfo(
                 tr("dialog.no_mod.title", "No Mod"),
                 tr("dialog.no_mod.body", "Please load a mod first."),
                 parent=cast(Any, self),  # type: ignore[arg-type]
             )
             return
-        root = MOD.root
+        root = self.index.root
         ideas_dir = os.path.join(root, "common", "ideas")
         events_dir = os.path.join(root, "events")
         try:
@@ -444,11 +470,11 @@ class ModLoadingMixin:
         body_pad.pack(fill="both", expand=True, padx=14, pady=10)
         body = body_pad  # sections use this as their parent
 
-        ideas_path_var = tk.StringVar(value=MOD.edit_ideas_file)
-        events_path_var = tk.StringVar(value=MOD.edit_events_file)
-        focus_path_var = tk.StringVar(value=MOD.edit_focus_file)
-        loc_path_var = tk.StringVar(value=MOD.edit_loc_file)
-        scripted_loc_path_var = tk.StringVar(value=MOD.edit_scripted_loc_file)
+        ideas_path_var = tk.StringVar(value=self.edit_ideas_file)
+        events_path_var = tk.StringVar(value=self.edit_events_file)
+        focus_path_var = tk.StringVar(value=self.edit_focus_file)
+        loc_path_var = tk.StringVar(value=self.edit_loc_file)
+        scripted_loc_path_var = tk.StringVar(value=self.edit_scripted_loc_file)
 
         txt_filetypes = (
             (tr("filetype.hoi4_txt", "HOI4 txt"), "*.txt"),
@@ -624,8 +650,8 @@ class ModLoadingMixin:
         # ── auto-detect national_focus files in the mod ───────────────
         focus_files = []
         focus_dir = ""
-        if MOD.root and os.path.isdir(MOD.root):
-            _fd = os.path.join(MOD.root, "common", "national_focus")
+        if self.index.root and os.path.isdir(self.index.root):
+            _fd = os.path.join(self.index.root, "common", "national_focus")
             if os.path.isdir(_fd):
                 focus_dir = _fd
                 try:
@@ -643,7 +669,7 @@ class ModLoadingMixin:
             ),
             focus_path_var,
             focus_files,
-            focus_dir or (MOD.root or ""),
+            focus_dir or (self.index.root or ""),
             tr(
                 "filedialog.select_national_focus_txt",
                 "Select national_focus .txt file",
@@ -655,11 +681,13 @@ class ModLoadingMixin:
         # ── auto-detect loc files in the mod ──────────────────────────
         loc_files = []
         loc_dir = ""
-        if MOD.root and os.path.isdir(MOD.root):
-            loc_dir = MOD.root
+        if self.index.root and os.path.isdir(self.index.root):
+            loc_dir = self.index.root
             loc_files = [
-                os.path.relpath(path, MOD.root)
-                for path in find_loc_files(MOD.root, language=MOD.loc_language)
+                os.path.relpath(path, self.index.root)
+                for path in find_loc_files(
+                    self.index.root, language=self.app_config.loc_language
+                )
             ]
 
         _make_section(
@@ -667,11 +695,11 @@ class ModLoadingMixin:
             tr(
                 "edit_targets.loc_file",
                 "Localisation file  (new {language} entries appended at end):",
-                language=MOD.loc_target.display_name,
+                language=self.app_config.loc_target.display_name,
             ),
             loc_path_var,
             loc_files,
-            loc_dir or (MOD.root or ""),
+            loc_dir or (self.index.root or ""),
             tr("filedialog.select_localisation_yml", "Select localisation .yml file"),
             browse_ftypes=(
                 (tr("filetype.yml_localisation", "YML localisation"), "*.yml"),
@@ -684,8 +712,8 @@ class ModLoadingMixin:
         # ── auto-detect scripted_localisation files ───────────────────
         sloc_files = []
         sloc_dir = ""
-        if MOD.root and os.path.isdir(MOD.root):
-            _sld = os.path.join(MOD.root, "common", "scripted_localisation")
+        if self.index.root and os.path.isdir(self.index.root):
+            _sld = os.path.join(self.index.root, "common", "scripted_localisation")
             if os.path.isdir(_sld):
                 sloc_dir = _sld
                 try:
@@ -703,7 +731,7 @@ class ModLoadingMixin:
             ),
             scripted_loc_path_var,
             sloc_files,
-            sloc_dir or (MOD.root or ""),
+            sloc_dir or (self.index.root or ""),
             tr(
                 "filedialog.select_scripted_localisation_txt",
                 "Select scripted_localisation .txt file",
@@ -730,28 +758,32 @@ class ModLoadingMixin:
         dlg.bind("<Escape>", lambda _event: _skip())
 
         def _confirm():
-            MOD.edit_ideas_file = ideas_path_var.get().strip()
-            MOD.edit_events_file = events_path_var.get().strip()
-            MOD.edit_focus_file = focus_path_var.get().strip()
-            MOD.edit_loc_file = loc_path_var.get().strip()
-            MOD.edit_scripted_loc_file = scripted_loc_path_var.get().strip()
+            self.edit_ideas_file = ideas_path_var.get().strip()
+            self.edit_events_file = events_path_var.get().strip()
+            self.edit_focus_file = focus_path_var.get().strip()
+            self.edit_loc_file = loc_path_var.get().strip()
+            self.edit_scripted_loc_file = scripted_loc_path_var.get().strip()
             # Auto-detect namespace from events file
-            MOD.edit_events_ns = ""
-            if MOD.edit_events_file and os.path.isfile(MOD.edit_events_file):
+            self.edit_events_ns = ""
+            if self.edit_events_file and os.path.isfile(self.edit_events_file):
                 try:
-                    raw, encoding = read_file_with_encoding(MOD.edit_events_file)
+                    raw, encoding = read_file_with_encoding(self.edit_events_file)
                     if raw is None or encoding is None:
                         raise OSError("events file could not be read")
                     m = re.search(r"add_namespace\s*=\s*(\S+)", raw[:4096])
-                    MOD.edit_events_ns = (
+                    self.edit_events_ns = (
                         m.group(1).strip()
                         if m
-                        else os.path.splitext(os.path.basename(MOD.edit_events_file))[0]
+                        else os.path.splitext(os.path.basename(self.edit_events_file))[
+                            0
+                        ]
                     )
                 except (OSError, ValueError, RuntimeError, UnicodeDecodeError) as exc:
-                    log.exception("could not read events file %s", MOD.edit_events_file)
+                    log.exception(
+                        "could not read events file %s", self.edit_events_file
+                    )
                     add_error(
-                        f"Could not read events file {MOD.edit_events_file}: {exc}"
+                        f"Could not read events file {self.edit_events_file}: {exc}"
                     )
             # Stored base, not a split of the label: "edit:" is translated.
             if hasattr(self, "_mod_lbl"):
@@ -763,11 +795,11 @@ class ModLoadingMixin:
                     text=format_mod_label(
                         base,
                         {
-                            "ideas": MOD.edit_ideas_file,
-                            "events": MOD.edit_events_file,
-                            "focus": MOD.edit_focus_file,
-                            "loc": MOD.edit_loc_file,
-                            "sloc": MOD.edit_scripted_loc_file,
+                            "ideas": self.edit_ideas_file,
+                            "events": self.edit_events_file,
+                            "focus": self.edit_focus_file,
+                            "loc": self.edit_loc_file,
+                            "sloc": self.edit_scripted_loc_file,
                         },
                     )
                 )
@@ -802,8 +834,9 @@ class ModLoadingMixin:
     def _refresh_mod_dropdowns(self):
         """Update all dynamic dropdowns that depend on mod data."""
         # Rebuild effect cards if open (they may have mod-aware dropdowns).
-        if self.selected:
-            self._refresh_effects(force=True)
+        host = cast(Any, self)
+        if host.selected:
+            host._refresh_effects(force=True)
 
     def _apply_md_additional_income(
         self, idea_id, variable_name, amount, tooltip_key, formula_type="fixed"
@@ -818,27 +851,31 @@ class ModLoadingMixin:
         """
         saved, errs = [], []
 
-        if not MOD.root or not MOD.loaded:
+        if not self.index.root or not self.index.loaded:
             errs.append("No mod loaded — load your mod first via File → Load Mod.")
             return saved, errs
 
-        if not MOD.is_md:
+        if not self.index.is_md:
             errs.append("MD mode is disabled; enable it in Settings first.")
             return saved, errs
 
         # Re-scan money files in case they weren't found on initial scan
-        MOD._scan_md_money_files()
+        self.index.rescan_md_money(self.app_config.loc_language)
 
         # Every step below rewrites a file the user already has. Route them
         # through the atomic writer so a mid-write failure can't leave a
         # truncated money-system script behind.
-        wf = notifying_workspace_files(MOD, MOD.root)
+        wf = notifying_workspace_files(
+            self.index,
+            self.index.root,
+            cast(Any, self).note_mod_file_written,
+        )
 
         # ── Step 1: 00_money_system.txt ──────────────────────────────
-        money_sys = MOD.md_money_system_file
+        money_sys = self.index.md_money_system_file
         if not money_sys:
             money_sys = os.path.join(
-                MOD.root, "common", "scripted_effects", "00_money_system.txt"
+                self.index.root, "common", "scripted_effects", "00_money_system.txt"
             )
         if os.path.isfile(money_sys):
             try:
@@ -904,7 +941,7 @@ class ModLoadingMixin:
                         )
                         sys_text = sys_text[:i] + inserted + sys_text[i:]
                         wf.write_text(money_sys, sys_text, encoding=sys_encoding)
-                        rel = os.path.relpath(money_sys, MOD.root)
+                        rel = os.path.relpath(money_sys, self.index.root)
                         saved.append(
                             f"✅ {rel}  — injected '{idea_id}' into "
                             f"calculate_additional_income_rate"
@@ -925,10 +962,10 @@ class ModLoadingMixin:
             )
 
         # ── Step 2: money_scripted_localization.txt ───────────────────
-        selected_sloc = bool(MOD.md_money_scripted_loc_file)
-        sloc = MOD.md_money_scripted_loc_file
+        selected_sloc = bool(self.index.md_money_scripted_loc_file)
+        sloc = self.index.md_money_scripted_loc_file
         if not selected_sloc:
-            sloc_dir = os.path.join(MOD.root, "common", "scripted_localisation")
+            sloc_dir = os.path.join(self.index.root, "common", "scripted_localisation")
             try:
                 os.makedirs(sloc_dir, exist_ok=True)
             except OSError:
@@ -961,18 +998,20 @@ class ModLoadingMixin:
                     f"}}\n"
                 )
                 wf.append_text(sloc, defined_text, encoding=sloc_encoding)
-                rel = os.path.relpath(sloc, MOD.root)
+                rel = os.path.relpath(sloc, self.index.root)
                 saved.append(f"✅ {rel}  — appended '{summary_name}'")
         except (OSError, ValueError, RuntimeError, UnicodeDecodeError) as exc:
             errs.append(f"❌ money_scripted_localization.txt: {exc}")
 
         # ── Step 3: configured-language MD_money localisation ────────
-        loc_target = MOD.loc_target
+        loc_target = self.app_config.loc_target
         yml_name = loc_target.filename("MD_money")
-        selected_yml = bool(MOD.md_money_yml_file)
-        yml = MOD.md_money_yml_file
+        selected_yml = bool(self.index.md_money_yml_file)
+        yml = self.index.md_money_yml_file
         if not selected_yml:
-            yml_dir = os.path.join(MOD.root, "localisation", loc_target.dirname())
+            yml_dir = os.path.join(
+                self.index.root, "localisation", loc_target.dirname()
+            )
             try:
                 os.makedirs(yml_dir, exist_ok=True)
             except OSError:
@@ -1010,7 +1049,7 @@ class ModLoadingMixin:
                         + yml_text[m2.start(3) :]
                     )
                     wf.write_text(yml, new_yml, encoding=yml_encoding)
-                    rel = os.path.relpath(yml, MOD.root)
+                    rel = os.path.relpath(yml, self.index.root)
                     saved.append(
                         f"✅ {rel}  — appended '{summary_token}' to {tooltip_loc_key}"
                     )
@@ -1020,7 +1059,7 @@ class ModLoadingMixin:
                     if not yml_text:
                         entry = loc_target.header() + "\n" + entry
                     wf.append_text(yml, entry, encoding=yml_encoding)
-                    rel = os.path.relpath(yml, MOD.root)
+                    rel = os.path.relpath(yml, self.index.root)
                     saved.append(
                         f"✅ {rel}  — appended new '{tooltip_loc_key}' entry "
                         f"(key not found, added at end)"

@@ -185,23 +185,23 @@ class WorkspaceFiles:
             self._on_written(str(path))
 
 
-def notifying_workspace_files(mod, mod_root) -> WorkspaceFiles:
-    """A ``WorkspaceFiles`` that tells the mod's catalog what it writes.
+def notifying_workspace_files(index, mod_root, on_written=None) -> WorkspaceFiles:
+    """A ``WorkspaceFiles`` that tells the index what it writes.
 
-    The ``on_written`` callback fires only when the save target is inside the
-    currently loaded mod, so writing into some other folder never pokes the
-    live catalog. This is the seam that keeps newly written images / .gfx
-    files visible without a full rescan.
+    The callback fires only when the save target is inside the loaded mod, so
+    writing into some other folder never pokes the live catalog. Pass the App
+    method that also evicts cached images; the index callback only updates
+    sprite maps.
     """
-    on_written = None
-    root = getattr(mod, "root", "") or ""
-    if getattr(mod, "loaded", False) and root and mod_root:
+    callback = None
+    root = getattr(index, "root", "") or ""
+    if getattr(index, "loaded", False) and root and mod_root:
         same_mod = os.path.normcase(os.path.abspath(root)) == os.path.normcase(
-            os.path.abspath(mod_root)
+            os.path.abspath(str(mod_root))
         )
         if same_mod:
-            on_written = mod.note_file_written
-    return WorkspaceFiles(on_written=on_written)
+            callback = on_written or index.note_file_written
+    return WorkspaceFiles(on_written=callback)
 
 
 __all__ = ["WorkspaceFiles", "WriteEntry", "notifying_workspace_files"]

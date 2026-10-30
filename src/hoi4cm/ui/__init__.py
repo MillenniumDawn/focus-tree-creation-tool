@@ -13,6 +13,7 @@ from hoi4cm.ui.lifecycle import ApplicationLifecycle
 from hoi4cm.ui.menubar import build_menubar
 from hoi4cm.ui.settings_dialog import open_settings
 from hoi4cm.ui.splash import show_splash
+from hoi4cm.ui.sprite_images import SpriteImageCache
 from hoi4cm.ui.startup_check import check_tk_startup
 from hoi4cm.ui.tasks import (
     get_executor,
@@ -92,6 +93,7 @@ __all__ = [
     "RED",
     "SEL_BG",
     "ScrollableDropdown",
+    "SpriteImageCache",
     "TEAL",
     "TEXT",
     "TEXT_DIM",

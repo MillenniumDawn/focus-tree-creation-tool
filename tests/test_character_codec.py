@@ -1,7 +1,10 @@
 """Round-trip tests for the ordered common/characters codec."""
 
+from types import SimpleNamespace
+
 import pytest
 
+from hoi4cm.mod.index import ModIndex
 from hoi4cm.wizards.character_codec import (
     new_character_script,
     parse_character_script,
@@ -104,11 +107,12 @@ def test_saving_imported_character_keeps_original_encoding_across_saves(
     wizard.current_encoding = "latin-1"
     wizard.mod_root = str(tmp_path)
     wizard.win = None
+    wizard.app = SimpleNamespace(index=ModIndex(), note_mod_file_written=lambda _: None)
     writer = _Writer()
     monkeypatch.setattr(
         character_mod,
         "notifying_workspace_files",
-        lambda _mod, _root: writer,
+        lambda _index, _root, _on_written: writer,
     )
     monkeypatch.setattr(character_mod.messagebox, "showinfo", lambda *_a, **_kw: None)
 
@@ -158,8 +162,7 @@ def test_character_save_preserves_comments_and_disabled_script(
     wizard.current_encoding = "utf-8"
     wizard.mod_root = str(tmp_path)
     wizard.win = None
-    monkeypatch.setattr(character_mod.MOD, "loaded", False)
-    monkeypatch.setattr(character_mod.MOD, "root", None)
+    wizard.app = SimpleNamespace(index=ModIndex(), note_mod_file_written=lambda _: None)
     monkeypatch.setattr(character_mod.messagebox, "showinfo", lambda *_a, **_kw: None)
 
     wizard._save()

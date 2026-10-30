@@ -13,6 +13,8 @@ import os
 import re
 import tkinter as tk
 from tkinter import filedialog, messagebox
+from types import ModuleType
+from typing import cast
 
 from hoi4cm.core import (
     autosave_path,
@@ -22,7 +24,7 @@ from hoi4cm.core import (
     tr,
 )
 from hoi4cm.core.image import PIL_OK, PILImage, PILImageTk
-from hoi4cm.mod import MOD, WorkspaceFiles
+from hoi4cm.mod import WorkspaceFiles
 from hoi4cm.script.syntax import parse_block, tokenize
 from hoi4cm.ui import (
     BG_CARD,
@@ -61,6 +63,10 @@ from hoi4cm.wizards._shared import (
     open_trigger_picker,
     pack_action_footer,
 )
+
+
+def _scalar_text(value, default: str) -> str:
+    return value if isinstance(value, str) else default
 
 
 def collect_event_state(events):
@@ -211,12 +217,8 @@ def open_event_wizard(app):
 
     # ── GFX helpers ──────────────────────────────────────────────────
     def _get_active_dims():
-        prof = getattr(
-            MOD,
-            "event_dim_profiles",
-            {"vanilla": {"country": (210, 176), "news": (397, 165)}},
-        )
-        active = getattr(MOD, "event_dim_active_profile", "vanilla")
+        prof = app.app_config.event_dim_profiles
+        active = app.app_config.event_dim_active_profile
         dims = prof.get(
             active, prof.get("vanilla", {"country": (210, 176), "news": (397, 165)})
         )
@@ -230,23 +232,21 @@ def open_event_wizard(app):
         if gfx_name in _ev_gfx_cache:
             return _ev_gfx_cache[gfx_name]
         path = None
-        if MOD.loaded:
+        if app.index.loaded:
             # 1. Exact match from scanned sprites dict
-            if gfx_name in MOD.sprites:
-                path = MOD.sprites[gfx_name]
+            if gfx_name in app.index.sprites:
+                path = app.index.sprites[gfx_name]
             else:
                 ev_dir = os.path.join(
-                    MOD.root,
-                    getattr(
-                        MOD,
-                        "path_event_pictures",
-                        os.path.join("gfx", "event_pictures"),
-                    ),
+                    app.index.root or "",
+                    app.app_config.path_event_pictures,
                 )
                 for prefix in ("GFX_report_event_", "GFX_news_event_", "GFX_"):
                     if gfx_name.startswith(prefix):
                         stem = gfx_name[len(prefix) :]
-                        path = find_catalog_image(MOD.graphics_catalog, ev_dir, stem)
+                        path = find_catalog_image(
+                            app.index.graphics_catalog, ev_dir, stem
+                        )
                         break
         _ev_gfx_cache[gfx_name] = path
         return path
@@ -273,7 +273,7 @@ def open_event_wizard(app):
         return result
 
     # ── Preview scheduler (defined early so all callbacks can reference it) ──
-    _prev_job = [None]
+    _prev_job: list[str | None] = [None]
     _prev_img_cache = {}  # (gfx_key, w, h) -> PhotoImage or None
     _prev_img_pending = set()
 
@@ -339,7 +339,6 @@ def open_event_wizard(app):
 
         # ── drop shadow ──────────────────────────────────────────────
         for off in (8, 5, 3):
-            80 + (8 - off) * 20
             cv.create_rectangle(
                 x0 + off,
                 y0 + off,
@@ -383,7 +382,6 @@ def open_event_wizard(app):
         if cache_key in _prev_img_cache:
             cached = _prev_img_cache[cache_key]
             if cached is not None:
-                cv._img_ref = cached
                 cv.create_image(cx, cy, image=cached, anchor="center")
                 pic_shown = True
             # else: already tried and failed, show placeholder
@@ -400,7 +398,8 @@ def open_event_wizard(app):
                     )
 
                 def _decode(path_to_decode):
-                    with PILImage.open(path_to_decode) as source:
+                    image_mod = cast(ModuleType, PILImage)
+                    with image_mod.open(path_to_decode) as source:
                         pil = source.convert("RGBA")
                     rs = getattr(PILImage, "LANCZOS", getattr(PILImage, "ANTIALIAS", 1))
                     pw, ph = pil.size
@@ -444,13 +443,14 @@ def open_event_wizard(app):
             def _realize_preview_image(decoded):
                 kind, value, *dimensions = decoded
                 if kind == "pil":
-                    return PILImageTk.PhotoImage(value)
+                    image_tk = cast(ModuleType, PILImageTk)
+                    return image_tk.PhotoImage(value)
                 wpw, wph = dimensions
                 raw = tk.PhotoImage(file=value)
                 sx = max(1, raw.width() // wpw)
                 sy = max(1, raw.height() // wph)
                 s = max(sx, sy)
-                return raw.subsample(s, s) if s > 1 else raw
+                return raw.subsample(s) if s > 1 else raw
 
             wev_uid = ev.uid if hasattr(ev, "uid") else id(ev)
 
@@ -959,7 +959,7 @@ def open_event_wizard(app):
 
     def _generate_yml():
         return _generators.generate_event_loc_yml(
-            collect_event_state(events), loc_language=MOD.loc_language
+            collect_event_state(events), loc_language=app.app_config.loc_language
         )
 
     # ── Top bar actions ───────────────────────────────────────────────
@@ -1043,8 +1043,8 @@ def open_event_wizard(app):
                 "event.dialog.copied.body",
                 "Localisation YML copied to clipboard.\n\nPaste into:\n"
                 "  localisation/{directory}/{filename}",
-                directory=MOD.loc_target.dirname(),
-                filename=MOD.loc_target.filename("[modname]"),
+                directory=app.app_config.loc_target.dirname(),
+                filename=app.app_config.loc_target.filename("[modname]"),
             ),
             parent=win,
         )
@@ -1061,9 +1061,9 @@ def open_event_wizard(app):
         ns = sanitize_component(events[0].eid.split(".")[0], fallback="TAG")
 
         # ── Determine mod root and target files ───────────────────────────
-        if MOD.edit_events_file:
-            ev_file = MOD.edit_events_file
-            mod_root = MOD.root or os.path.dirname(os.path.dirname(ev_file))
+        if app.edit_events_file:
+            ev_file = app.edit_events_file
+            mod_root = app.index.root or os.path.dirname(os.path.dirname(ev_file))
         else:
             mod_root = filedialog.askdirectory(
                 parent=win,
@@ -1077,9 +1077,12 @@ def open_event_wizard(app):
             ev_file = os.path.join(mod_root, "events", f"{ns}.txt")
 
         saved, warnings, errs = save_events(
-            MOD,
+            app.index,
+            app.app_config,
+            app,
             mod_root,
             ev_file,
+            on_written=app.note_mod_file_written,
             ns=ns,
             events=events,
             render_event=_render_event_txt,
@@ -1097,7 +1100,7 @@ def open_event_wizard(app):
             )
 
     def _browse_mod_events():
-        if not MOD.loaded or not MOD.root:
+        if not app.index.loaded or not app.index.root:
             messagebox.showinfo(
                 tr("dialog.no_mod_loaded.title", "No Mod Loaded"),
                 tr(
@@ -1107,7 +1110,7 @@ def open_event_wizard(app):
                 parent=win,
             )
             return
-        ev_dir = os.path.join(MOD.root, "events")
+        ev_dir = os.path.join(app.index.root, "events")
         if not os.path.isdir(ev_dir):
             messagebox.showinfo(
                 tr("dialog.not_found.title", "Not Found"),
@@ -1245,10 +1248,12 @@ def open_event_wizard(app):
                 blk, i = parse_block(tokens, i + 2)
                 ev = _Ev()
                 ev.etype = etype
-                ev.eid = blk.get("id", ev.eid)
+                ev.eid = _scalar_text(blk.get("id"), ev.eid)
                 ev.title_text = _str_val(blk.get("title", "")).replace(".", " ")
                 ev.desc_text = _str_val(blk.get("desc", "")).replace(".", " ")
-                ev.picture = blk.get("picture", "GFX_report_event_generic_handshake")
+                ev.picture = _scalar_text(
+                    blk.get("picture"), "GFX_report_event_generic_handshake"
+                )
                 ev.major = blk.get("major", "no") == "yes"
                 ev.fire_once = blk.get("fire_only_once", "no") == "yes"
                 ev.triggered = blk.get("is_triggered_only", "no") == "yes"
@@ -1258,7 +1263,7 @@ def open_event_wizard(app):
                     ev.mtth_days = mtth.get("days", "")
                     ev.mtth_months = mtth.get("months", "")
                 opts_raw = blk.get("option", [])
-                if isinstance(opts_raw, dict):
+                if not isinstance(opts_raw, list):
                     opts_raw = [opts_raw]
                 ev.options = []
                 for ob in opts_raw:
@@ -1327,16 +1332,14 @@ def open_event_wizard(app):
         # ── Resolve root folder ───────────────────────────────────────
         ev_root = None
         catalog = None
-        if MOD.loaded and MOD.root:
+        if app.index.loaded and app.index.root:
             candidate = os.path.join(
-                MOD.root,
-                getattr(
-                    MOD, "path_event_pictures", os.path.join("gfx", "event_pictures")
-                ),
+                app.index.root,
+                app.app_config.path_event_pictures,
             )
             if os.path.isdir(candidate):
                 ev_root = candidate
-                catalog = MOD.graphics_catalog
+                catalog = app.index.graphics_catalog
         if not ev_root:
             ev_root = filedialog.askdirectory(
                 title=tr(
@@ -1400,7 +1403,7 @@ def open_event_wizard(app):
 
     _tb_btn(tr("event.new", "+ New"), _new_event, GREEN)
     _tb_btn(tr("common.import_txt", "Import .txt"), _import_txt, BLUE)
-    if MOD.loaded:
+    if app.index.loaded:
         _tb_btn(tr("common.browse_mod", "Browse Mod"), _browse_mod_events, BLUE)
     _tb_btn(tr("common.export_txt", "Export .txt"), _export_txt, TEXT)
     _tb_btn(tr("common.copy_yml", "Copy .yml"), _copy_yml, GOLD)
@@ -1493,7 +1496,6 @@ def open_event_wizard(app):
     form_cv = tk.Canvas(form_wrap, bg=BG_PANEL, highlightthickness=0)
     form_sb = tk.Scrollbar(form_wrap, orient="vertical", command=form_cv.yview)
     F = tk.Frame(form_cv, bg=BG_PANEL)
-    PAD = {"padx": 8, "pady": 2}
     _fwid = form_cv.create_window((0, 0), window=F, anchor="nw")
     form_cv.configure(yscrollcommand=form_sb.set)
     F.bind("<Configure>", lambda e: form_cv.configure(scrollregion=form_cv.bbox("all")))
@@ -1700,7 +1702,7 @@ def open_event_wizard(app):
     def _refresh_gfx_list(*_):
         ev_type = sel[0].etype if sel[0] else "country_event"
         cw, ch, nw, nh = _get_active_dims()
-        pname = getattr(MOD, "event_dim_active_profile", "vanilla")
+        pname = app.app_config.event_dim_active_profile
         if ev_type == "news_event":
             gfx_dim_lbl.config(
                 text=tr(
@@ -1723,12 +1725,10 @@ def open_event_wizard(app):
                 ),
                 fg=TEXT_DIM,
             )
-        if MOD.loaded and MOD.root:
+        if app.index.loaded and app.index.root:
             ev_dir = os.path.join(
-                MOD.root,
-                getattr(
-                    MOD, "path_event_pictures", os.path.join("gfx", "event_pictures")
-                ),
+                app.index.root,
+                app.app_config.path_event_pictures,
             )
             if os.path.isdir(ev_dir):
                 prefix = (
@@ -1740,7 +1740,7 @@ def open_event_wizard(app):
                     ev_dir,
                     prefix,
                     search=v_gfx_search.get(),
-                    catalog=MOD.graphics_catalog,
+                    catalog=app.index.graphics_catalog,
                 )
                 gfx_grid.set_items(
                     [ThumbnailItem(key, path) for key, path in pairs],
@@ -1763,7 +1763,7 @@ def open_event_wizard(app):
         ev_type = sel[0].etype if sel[0] else "country_event"
         cw, ch, nw, nh = _get_active_dims()
         exp_w, exp_h = (cw, ch) if ev_type == "country_event" else (nw, nh)
-        pname = getattr(MOD, "event_dim_active_profile", "vanilla")
+        pname = app.app_config.event_dim_active_profile
         fpath = _find_gfx_file(gfx_name)
         if fpath:
             dims = _read_image_size(fpath)
@@ -1917,7 +1917,7 @@ def open_event_wizard(app):
     # ── Type ──────────────────────────────────────────────────────
     _sec(tr("event.section.type", "TYPE"))
     type_row = tk.Frame(F, bg=BG_PANEL)
-    type_row.pack(fill="x", **PAD)
+    type_row.pack(fill="x", padx=8, pady=2)
     v_etype = tk.StringVar(value="country_event")
     for val, lbl in [
         ("country_event", tr("event.type.country_event", "Country Event")),
