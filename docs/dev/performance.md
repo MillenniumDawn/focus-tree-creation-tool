@@ -282,6 +282,17 @@ did: `custom_available = {` still registers as `available`. Regex
 alternation backtracks at each start position, so listing `bypass` before
 `bypass_effect` does not shadow the longer key.
 
+Since issue #372, raw-block extraction scans a comment **mask**
+(`script/syntax.py`'s `mask_comments`, the same `_COMMENT_RE` with each
+comment blanked to same-length spaces) instead of the comment-stripped
+text, then slices the aligned comment-bearing source. This keeps imported
+`completion_reward` comments while making commented-out keys unmatchable —
+slicing the raw text directly would let `# completion_reward = { ...`
+register as a real raw key. `match_brace` already skips `#` comments and
+strings, so brace bounds are identical in all three texts; the extra cost
+is one `mask_comments` substitution plus a second `focus_block_starts`
+pass per parse.
+
 The rewrite was validated by differential fuzzing against the pre-rewrite
 implementations — 200k randomized inputs across all five scanners, 60k
 across `_extract_raw_rewards`, and 40k whole-file `parse_focus_tree` runs,

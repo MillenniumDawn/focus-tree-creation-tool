@@ -80,6 +80,60 @@ joint_focus = {
 }
 """
 
+# A standalone comment and a commented-out duplicate key inside the reward
+# and condition blocks, plus a quoted # marker the strip must not touch.
+COMMENT_TREE = """\
+focus_tree = {
+	id = comment_tree
+	country = {
+		factor = 0
+	}
+	continuous_focus_position = { x = 0 y = 0 }
+
+	focus = {
+		id = TST_commented
+		icon = GFX_goal_generic_demand_territory
+		x = 0
+		y = 0
+		available = {
+			# war gate documented in place
+			has_war = no
+		}
+		# completion_reward = { add_political_power = 1 }
+		completion_reward = {
+			# policy note kept during import
+			log = "annotated # inside a string"
+			unknown_reward_effect = yes
+			custom_flag = {
+				flag = TST_note
+			}
+		}
+		completion_reward = {
+			add_political_power = 120
+		}
+	}
+}
+"""
+
+# Fallback path: top-level shared/joint blocks with comments inside each raw key.
+COMMENT_NO_WRAPPER = """\
+joint_focus = {
+	id = JNT_commented
+	icon = GFX_goal_generic_political_pressure
+	x = 0
+	y = 0
+	cost = 10
+	joint_trigger = {
+		# trigger note kept during import
+		is_ai = no
+	}
+	completion_reward = {
+		# reward note kept during import
+		add_political_power = 50
+	}
+}
+"""
+
 COUNTRY_BUDGET_TREE = """\
 focus_tree = {
 \tid = bounded_country
@@ -289,6 +343,34 @@ def test_raw_key_scan_keeps_the_first_occurrence_of_a_repeated_key():
 
     assert "first" in rewards[("dup_focus", "available")]
     assert "second" not in rewards[("dup_focus", "available")]
+
+
+def test_parse_preserves_reward_and_condition_comments():
+    p = parse_focus_tree(COMMENT_TREE, "/tmp/comment_tree.txt")
+    reward = p.raw_rewards["TST_commented"]
+    assert "# policy note kept during import" in reward
+    assert 'log = "annotated # inside a string"' in reward
+    assert "unknown_reward_effect = yes" in reward
+    assert "flag = TST_note" in reward
+    # The commented-out duplicate key stays a comment (the mask scan cannot
+    # hit it) and the real first completion_reward keeps first-hit priority.
+    assert "add_political_power = 1" not in reward
+    assert "add_political_power = 120" not in reward
+    assert (
+        "# war gate documented in place"
+        in p.raw_rewards[("TST_commented", "available")]
+    )
+    assert "has_war = no" in p.raw_rewards[("TST_commented", "available")]
+
+
+def test_parse_preserves_comments_in_fallback_blocks():
+    p = parse_focus_tree(COMMENT_NO_WRAPPER, "/tmp/joint_commented.txt")
+    reward = p.raw_rewards["JNT_commented"]
+    assert "# reward note kept during import" in reward
+    assert "add_political_power = 50" in reward
+    joint_extra = p.raw_rewards[("JNT_commented", "_joint_extra")]
+    assert "# trigger note kept during import" in joint_extra
+    assert "is_ai = no" in joint_extra
 
 
 def test_parse_structured_offsets():

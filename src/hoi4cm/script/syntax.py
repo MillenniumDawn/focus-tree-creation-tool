@@ -10,6 +10,7 @@ __all__ = [
     "extract_block",
     "extract_named_block",
     "find_blocks",
+    "mask_comments",
     "match_brace",
     "parse_block",
     "parse_script",
@@ -67,6 +68,23 @@ def strip_comments(source: str) -> str:
     it, which downstream raw-block dedenting depends on.
     """
     return _COMMENT_RE.sub(r"\1", "\n".join(source.splitlines()))
+
+
+def mask_comments(source: str) -> str:
+    """Blank comments outside quoted strings, preserving every offset.
+
+    Like :func:`strip_comments`, line endings are normalized to ``\n`` and
+    each comment is replaced by spaces of the same length (quoted strings and
+    newlines untouched), so the result has exactly the length of that
+    normalized source. Scanning this mask cannot match block keys inside
+    comments, while every index remains valid for slicing the normalized
+    comment-bearing source. Used by raw-block extraction in
+    :mod:`hoi4cm.focus_tree.parse` so imported blocks keep their comments.
+    """
+    return _COMMENT_RE.sub(
+        lambda match: match.group(1) or " " * len(match.group(0)),
+        "\n".join(source.splitlines()),
+    )
 
 
 def _unquote(token: str) -> str:

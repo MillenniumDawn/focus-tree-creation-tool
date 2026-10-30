@@ -5,6 +5,7 @@ from hoi4cm.script.syntax import (
     extract_block,
     extract_named_block,
     find_blocks,
+    mask_comments,
     match_brace,
     parse_block,
     parse_script,
@@ -12,6 +13,23 @@ from hoi4cm.script.syntax import (
     strip_comments,
     tokenize,
 )
+
+
+def test_mask_comments_blanks_comments_and_preserves_every_offset():
+    """Issue #372 support: the mask keeps every index of the normalized
+    source valid while making comment text unmatchable, so raw-block
+    extraction can scan the mask and slice the comment-bearing source."""
+    source = 'a = 1 # keep me }\nb # x\nc = "quoted # stays"\n'
+
+    masked = mask_comments(source)
+
+    # Same normalization base as strip_comments: splitlines drops the trailing
+    # newline, so the mask aligns with that joined text, byte for byte.
+    assert len(masked) == len("\n".join(source.splitlines()))
+    assert masked == "a = 1 " + " " * 11 + "\nb " + " " * 3 + '\nc = "quoted # stays"'
+    assert masked.index("c =") == source.index("c =")
+    # Keys hidden inside comments cannot match on the mask.
+    assert "completion_reward" not in mask_comments("# completion_reward = {\na = 1\n")
 
 
 def test_tokenize_ignores_comments_only_outside_quotes():
