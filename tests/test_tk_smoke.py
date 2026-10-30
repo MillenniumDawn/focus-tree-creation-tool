@@ -188,6 +188,18 @@ def test_decision_wizard_releases_its_preview_cache_when_closed(app, opened):
         assert len(app.wiz_img_caches.window_caches) == baseline
 
 
+def test_destroyed_decision_wizard_releases_its_preview_cache(app, opened):
+    """Direct win.destroy() without the WM protocol must still release."""
+    baseline = len(app.wiz_img_caches.window_caches)
+    app._decision_wizard()
+    windows = opened()
+    assert len(windows) == 1
+    assert len(app.wiz_img_caches.window_caches) == baseline + 1
+    windows[0].destroy()
+    app.update()
+    assert len(app.wiz_img_caches.window_caches) == baseline
+
+
 def test_additional_income_wizard_opens_in_md_mode(app, opened, monkeypatch):
     monkeypatch.setattr(app.index, "is_md", True)
     app._additional_income_wizard()

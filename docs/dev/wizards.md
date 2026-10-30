@@ -33,9 +33,9 @@ Tk-handling block, plus the picker popups shared across wizards:
 
 - `WizardImageCaches`: the image caches one App instance owns (#349 moved
   the mod state the same way). `event_gfx` and `event_imgsize` serve the
-  event wizard for the App's lifetime; each wizard window registers its
-  own preview dict through `register_window_cache` and must release it
-  with `release_window_cache` when it closes, so closed windows stop
+  event wizard for the App's lifetime; the decision wizard registers each
+  window's preview dict through `register_window_cache` and releases it with
+  `release_window_cache` when the window is destroyed, so closed windows stop
   keeping PhotoImages alive and repeated opens do not grow any retained
   registry. `clear()` invalidates everything on mod reload while keeping
   open windows' registrations. The monolith owns one instance as

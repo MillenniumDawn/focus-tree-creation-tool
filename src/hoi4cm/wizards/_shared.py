@@ -146,10 +146,10 @@ class WizardImageCaches:
     """Image caches owned by one App instance.
 
     ``event_gfx`` and ``event_imgsize`` serve the event wizard for the
-    App's lifetime. Each wizard window registers its own preview dict
-    in ``window_caches`` and must release it when it closes, so closed
-    windows stop keeping PhotoImages alive and repeated opens do not
-    grow any retained registry.
+    App's lifetime. The decision wizard registers each window's preview
+    dict in ``window_caches`` and must release it when the window is
+    destroyed, so closed windows stop keeping PhotoImages alive and
+    repeated opens do not grow any retained registry.
     """
 
     def __init__(self) -> None:
@@ -162,11 +162,15 @@ class WizardImageCaches:
         self.window_caches.append(cache)
 
     def release_window_cache(self, cache: dict) -> None:
-        """Untrack a closed window's preview cache and drop its images."""
-        try:
-            self.window_caches.remove(cache)
-        except ValueError:
-            pass
+        """Untrack a closed window's preview cache and drop its images.
+
+        Matching is by identity: two empty dicts are different windows'
+        caches, so an equal dict must never be released instead.
+        """
+        for index, tracked in enumerate(self.window_caches):
+            if tracked is cache:
+                del self.window_caches[index]
+                break
         cache.clear()
 
     def clear(self) -> None:

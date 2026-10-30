@@ -291,15 +291,18 @@ def new_decision_record(cat_uid: object = "") -> dict[str, object]:
     )
 
 
-def _release_decision_preview_cache(app, cache):
-    """Release a closed decision window's preview cache, tolerating a
-    closure that never got as far as creating the cache."""
-    if cache is None:
-        return
-    try:
-        app.wiz_img_caches.release_window_cache(cache)
-    except (tk.TclError, ValueError, RuntimeError) as exc:
-        get_logger("decision").debug("preview release on close failed: %s", exc)
+def _bind_preview_cache_release(win, app, cache):
+    """Release a decision window's preview cache when the window itself
+    is destroyed, so wm-protocol close, direct destroy() and parent
+    teardown all release it exactly once."""
+
+    def _release_on_destroy(event):
+        # <Destroy> fires for every child widget; only the window itself
+        # releases the cache.
+        if event.widget is win:
+            app.wiz_img_caches.release_window_cache(cache)
+
+    win.bind("<Destroy>", _release_on_destroy)
 
 
 def open_decision_wizard(app):
@@ -315,9 +318,9 @@ def open_decision_wizard(app):
     # above; this closure only wires them to the live lists and repaints.
     _autosave_path = autosave_path("decision.json")
     _undo_stack = []  # detached (cats, decs) snapshots, bounded below
-    # Created before the window body so the close handler can always reach it.
     _dec_prev_img_cache: dict = {}
     app.wiz_img_caches.register_window_cache(_dec_prev_img_cache)
+    _bind_preview_cache_release(win, app, _dec_prev_img_cache)
 
     def _snapshot():
         """Push current state onto undo stack."""
@@ -367,7 +370,6 @@ def open_decision_wizard(app):
                 _as_fn()
         except (OSError, ValueError) as exc:
             get_logger("decision").debug("autosave on close failed: %s", exc)
-        _release_decision_preview_cache(app, _dec_prev_img_cache)
         try:
             win.destroy()
         except tk.TclError:

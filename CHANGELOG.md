@@ -8,14 +8,8 @@ the version by hand. See `AGENTS.md`.
 
 ## Unreleased
 
-- Stop wizard image caches from outliving their windows: the decision
-  wizard's preview cache is now registered on the owning App while its
-  window is open and released when the window closes, and the event
-  wizard's gfx-path and image-size caches moved from module globals to
-  App-owned `WizardImageCaches` (`App.wiz_img_caches`), matching the
-  #182 app-owned mod-state split. Repeated wizard opens no longer grow
-  a retained cache registry, and one App's caches stay separate from
-  another's.
+- Make wizard image caches App-owned, invalidate them on mod reload, and
+  release each decision window's preview cache when that window is destroyed.
 
 - Import focus trees containing non-finite `ai_will_do` values (`inf`,
   `-inf`, `1e999`, `-1e999`) instead of aborting the load: the field falls

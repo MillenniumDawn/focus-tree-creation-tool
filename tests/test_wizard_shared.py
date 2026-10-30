@@ -53,6 +53,63 @@ def test_unloaded_mod_does_not_notify(tmp_path):
     assert mod.written == []
 
 
+def test_release_matches_caches_by_identity_not_equality():
+    """Two empty window caches are equal dicts but different windows."""
+    caches = WizardImageCaches()
+    first: dict = {}
+    second: dict = {}
+    caches.register_window_cache(first)
+    caches.register_window_cache(second)
+
+    caches.release_window_cache(second)
+
+    assert len(caches.window_caches) == 1
+    assert caches.window_caches[0] is first
+
+    # The still-open cache received an image; mod reload invalidates it.
+    image = object()
+    first["GFX_a"] = image
+    caches.clear()
+    assert len(caches.window_caches) == 1
+    assert caches.window_caches[0] is first
+    assert first == {}
+
+    caches.release_window_cache(first)
+    assert caches.window_caches == []
+
+
+def test_release_is_idempotent_for_both_close_orders():
+    caches = WizardImageCaches()
+    first: dict = {}
+    second: dict = {}
+    caches.register_window_cache(first)
+    caches.register_window_cache(second)
+
+    caches.release_window_cache(first)
+    caches.release_window_cache(first)
+    assert len(caches.window_caches) == 1
+    assert caches.window_caches[0] is second
+
+    caches.release_window_cache(second)
+    caches.release_window_cache(second)
+    assert caches.window_caches == []
+
+    caches = WizardImageCaches()
+    first = {}
+    second = {}
+    caches.register_window_cache(first)
+    caches.register_window_cache(second)
+
+    caches.release_window_cache(second)
+    caches.release_window_cache(second)
+    assert len(caches.window_caches) == 1
+    assert caches.window_caches[0] is first
+
+    caches.release_window_cache(first)
+    caches.release_window_cache(first)
+    assert caches.window_caches == []
+
+
 def test_window_cache_release_unregisters_and_empties():
     caches = WizardImageCaches()
     cache: dict = {"k": object()}
