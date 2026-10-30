@@ -31,12 +31,16 @@ second copy.
 State that used to be plain module-level globals in the monolith's
 Tk-handling block, plus the picker popups shared across wizards:
 
-- `_app_img_caches`: a registry list every wizard appends its own image
-  caches to, so the App can clear all of them in one place on mod reload
-  instead of reaching into each wizard module individually.
-- `_ev_gfx_cache` / `_ev_imgsize_cache`: the event wizard's gfx-name to
-  path and path to (width, height) caches, registered into
-  `_app_img_caches` at import time.
+- `WizardImageCaches`: the image caches one App instance owns (#349 moved
+  the mod state the same way). `event_gfx` and `event_imgsize` serve the
+  event wizard for the App's lifetime; each wizard window registers its
+  own preview dict through `register_window_cache` and must release it
+  with `release_window_cache` when it closes, so closed windows stop
+  keeping PhotoImages alive and repeated opens do not grow any retained
+  registry. `clear()` invalidates everything on mod reload while keeping
+  open windows' registrations. The monolith owns one instance as
+  `App.wiz_img_caches`; `ui/mod_loading.py` and the lifecycle-clear path
+  call `wiz_img_caches.clear()` instead of reaching into wizard modules.
 - `_LOC_KEY_RE`: a pre-compiled regex the additional-income wizard uses to
   pull a localisation key out of a quoted HOI4 string.
 - `open_effect_picker(parent, target_text, on_insert=None)`: the popup
@@ -75,8 +79,8 @@ its own folder list and key prefix. The decision wizard uses
 `open_universal_gfx_browser`.
 
 Pulling these into one module keeps the wizards free of cross-wizard
-coupling (no wizard imports another wizard's globals directly) while still
-giving the App a single invalidation point.
+coupling (no wizard imports another wizard's globals directly) while
+still giving the App a single invalidation point.
 
 ## Verbatim-extraction convention
 

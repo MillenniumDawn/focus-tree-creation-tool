@@ -176,7 +176,7 @@ from hoi4cm.ui.sprite_images import SpriteImageCache  # noqa: E402
 from hoi4cm.ui.toolbar import build_toolbar_row2  # noqa: E402
 from hoi4cm.ui.tree_badges import build_tree_badges  # noqa: E402
 from hoi4cm.ui.undo_labels import undo_label_text  # noqa: E402
-from hoi4cm.wizards._shared import open_trigger_picker  # noqa: E402
+from hoi4cm.wizards._shared import WizardImageCaches, open_trigger_picker  # noqa: E402
 
 log_startup()
 
@@ -273,6 +273,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
     app_config: AppConfig
     index: ModIndex
     images: SpriteImageCache
+    wiz_img_caches: WizardImageCaches
     edit_ideas_file: str
     edit_events_file: str
     edit_events_ns: str
@@ -303,6 +304,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         if isinstance(self.app_config.md_mode_override, bool):
             self.index.is_md = self.app_config.md_mode_override
         self.images = SpriteImageCache()
+        self.wiz_img_caches = WizardImageCaches()
         self.edit_ideas_file = ""
         self.edit_events_file = ""
         self.edit_events_ns = ""
@@ -647,11 +649,8 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             clear_workspace_autosave(path)
 
     def _close_app_caches(self):
-        from hoi4cm.wizards import _shared as _wiz_shared
-
         self.images.clear()
-        for cache in _wiz_shared._app_img_caches:
-            cache.clear()
+        self.wiz_img_caches.clear()
 
     def _begin_document_generation(self):
         assert self._lifecycle is not None
