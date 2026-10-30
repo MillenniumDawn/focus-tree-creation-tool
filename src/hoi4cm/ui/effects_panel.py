@@ -16,7 +16,6 @@ from hoi4cm.core.app_config import AppConfig
 from hoi4cm.core.undo import UndoStack
 from hoi4cm.mod.index import ModIndex
 from hoi4cm.models import Focus, FocusDocument
-from hoi4cm.script.effects import rename_to_raw_suppresses_siblings
 from hoi4cm.ui.focus_list import FocusListCache
 from hoi4cm.ui.theme import (
     BG_CARD,
@@ -99,17 +98,15 @@ def _rename_key_in_place(fields, old, new) -> None:
 
 
 def _key_rename_pending(fields, key, new) -> bool:
-    """Whether typing ``new`` for the ``key`` row stays pending.
-
-    Pending covers a taken name, an empty or internal (``_``) name, and a
-    rename to ``raw`` whose non-empty value would suppress sibling fields on
-    export. The typed text stays in the entry; nothing is stored.
-    """
+    """Whether typing ``new`` for the ``key`` row stays pending: taken, empty,
+    internal, or a rename to ``raw`` while sibling user fields exist."""
     if new == key:
         return False
     if new in fields or not new.strip() or new.startswith("_"):
         return True
-    if new == "raw" and rename_to_raw_suppresses_siblings(fields, key):
+    if new == "raw" and any(
+        name != key and not str(name).startswith("_") for name in fields
+    ):
         return True
     return False
 
@@ -147,9 +144,8 @@ class _RawFieldRow:
         )
 
     def on_key_text(self, var) -> bool:
-        """Commit one key write-trace: a free name moves the field, a taken,
-        empty, internal (``_``) or disallowed name stays pending and flags
-        the entry."""
+        """Commit one key write-trace: a free name moves the field, an unusable
+        name stays pending and flags the entry."""
         panel = self._panel
         focus = panel.selected
         if focus is None or self._idx >= len(focus.effects):
@@ -160,11 +156,8 @@ class _RawFieldRow:
             return False
         fields = focus.effects[self._idx].setdefault("fields", {})
         if _key_rename_pending(fields, self.key, new):
-            # Pending: keep the typed text, keep ``self.key`` committed and
-            # untouched, so both fields survive until typing reaches a usable
-            # name. An empty or ``_`` name would export as invalid script or
-            # be skipped; a taken name would drop the other field; ``raw``
-            # beside siblings would suppress them on export.
+            # Pending: keep the typed text and ``self.key`` committed and
+            # untouched until typing reaches a usable name.
             self._set_pending(True)
             return False
         if self.key not in fields:
@@ -800,10 +793,8 @@ class EffectsMixin:
                     width=14,
                     anchor="w",
                 ).pack(side="left")
-            # Value entry. On a raw row a dict or list value is shown read-
-            # only: an edit would store a plain string and export as invalid
-            # script. The dedicated raw-script editor (_raw_block) stays
-            # editable.
+            # Value entry. Dict and list values on a raw row are read-only:
+            # an edit would store a flat string and export as invalid script.
             structured = raw_row is not None and isinstance(val, (list, dict))
             vvar = tk.StringVar(
                 value=str(val) if not isinstance(val, dict) else json.dumps(val)
