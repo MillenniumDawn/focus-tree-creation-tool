@@ -134,6 +134,68 @@ joint_focus = {
 }
 """
 
+# Comments shallower than the code they sit next to: column-zero comments,
+# a comment line holding a commented-out key, and a comment-only raw block.
+SHALLOW_COMMENT_TREE = """\
+focus_tree = {
+	id = shallow_tree
+	country = {
+		factor = 0
+	}
+	continuous_focus_position = { x = 0 y = 0 }
+
+	focus = {
+		id = TST_shallow
+		icon = GFX_goal_generic_demand_territory
+		x = 0
+		y = 3
+		available = {
+# war gate at column zero
+			has_war = no
+		}
+		completion_reward = {
+# reward note at column zero
+			unknown_reward_effect = yes
+			# completion_reward = { add_political_power = 1 }
+			custom_flag = {
+				flag = TST_shallow
+			}
+		}
+		offset = {
+			x = 2
+			y = 0
+			trigger = {
+				original_tag = TST
+# trigger note at column zero
+			}
+		}
+	}
+
+	focus = {
+		id = TST_noteonly
+		icon = GFX_goal_generic_political_pressure
+		x = 4
+		y = 0
+		completion_reward = {
+# only notes in this block
+		}
+	}
+
+	focus = {
+		id = TST_mixed
+		icon = GFX_goal_generic_political_pressure
+		x = 2
+		y = 0
+		completion_reward = {
+			add_political_power = 10
+\t\t    # spaced under tabbed code
+		# shallower than the closing brace
+			add_stability = 0.05
+		}
+	}
+}
+"""
+
 COUNTRY_BUDGET_TREE = """\
 focus_tree = {
 \tid = bounded_country
@@ -371,6 +433,34 @@ def test_parse_preserves_comments_in_fallback_blocks():
     joint_extra = p.raw_rewards[("JNT_commented", "_joint_extra")]
     assert "# trigger note kept during import" in joint_extra
     assert "is_ai = no" in joint_extra
+
+
+def test_parse_preserves_shallow_and_column_zero_comments():
+    p = parse_focus_tree(SHALLOW_COMMENT_TREE, "/tmp/shallow.txt")
+    reward = p.raw_rewards["TST_shallow"]
+    assert reward.startswith("# reward note at column zero")
+    assert "unknown_reward_effect = yes" in reward
+    assert "# completion_reward = { add_political_power = 1 }" in reward
+    assert "flag = TST_shallow" in reward
+    available = p.raw_rewards[("TST_shallow", "available")]
+    assert available.startswith("# war gate at column zero")
+    assert "has_war = no" in available
+    # The repeated comment-only block keeps its comment, # included.
+    assert p.raw_rewards["TST_noteonly"].startswith("# only notes in this block")
+    trigger = p.raw_rewards[("TST_shallow", "_offsets")][0]["trigger"]
+    assert "original_tag = TST" in trigger
+    assert "# trigger note at column zero" in trigger
+
+
+def test_parse_preserves_mixed_indent_rewards():
+    p = parse_focus_tree(SHALLOW_COMMENT_TREE, "/tmp/shallow_mixed.txt")
+    reward = p.raw_rewards["TST_mixed"]
+    assert "add_political_power = 10" in reward
+    assert "add_stability = 0.05" in reward
+    # A spaces-indented comment keeps its spaces; a shallower tabbed comment
+    # keeps only its own tabs, never its #.
+    assert "    # spaced under tabbed code" in reward
+    assert "# shallower than the closing brace" in reward
 
 
 def test_parse_structured_offsets():

@@ -13,6 +13,7 @@ from test_focus_tree_parse import (
     COMMENT_NO_WRAPPER,
     COMMENT_TREE,
     NO_WRAPPER,
+    SHALLOW_COMMENT_TREE,
     WRAPPED,
     WRAPPED_JOINT_ONLY,
     WRAPPED_MIXED,
@@ -114,6 +115,16 @@ def test_fallback_block_comments_survive_default_renderer():
     assert "# reward note kept during import" in t1
     assert "# trigger note kept during import" in t1
     _f2, t2 = _load_and_export_default(t1, "joint")
+    assert t1 == t2
+
+
+def test_shallow_reward_and_offset_comments_survive_default_renderer():
+    _f1, t1 = _load_and_export_default(SHALLOW_COMMENT_TREE, "shared")
+    assert "# reward note at column zero" in t1
+    assert "# trigger note at column zero" in t1
+    _f2, t2 = _load_and_export_default(t1, "shared")
+    assert "# reward note at column zero" in t2
+    assert "# trigger note at column zero" in t2
     assert t1 == t2
 
 

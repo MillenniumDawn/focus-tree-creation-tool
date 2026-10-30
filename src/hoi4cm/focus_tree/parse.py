@@ -97,13 +97,7 @@ _RAW_KEY_RE = re.compile(rf"(?P<key>{'|'.join(_RAW_KEYS)})\s*=\s*\{{")
 
 
 def _dedent_raw_block(source, start, end, measure_source=None):
-    """Return ``source[start + 1:end]`` with its common tab indent removed.
-
-    ``measure_source`` supplies the lines the indent is measured from when
-    ``source`` is a comment-bearing slice: a comment line blanked to spaces in
-    the aligned mask measures as blank exactly like its comment-stripped form,
-    so the dedent stays identical to what comment-free files always got.
-    """
+    """Return the block contents with their common tab indent removed."""
     lines = source[start + 1 : end].split("\n")
     measure = (
         lines if measure_source is None else measure_source[start + 1 : end].split("\n")
@@ -112,8 +106,21 @@ def _dedent_raw_block(source, start, end, measure_source=None):
         (len(ln) - len(ln.lstrip("\t")) for ln in measure if ln and not ln.isspace()),
         default=0,
     )
-    if min_indent:  # a zero-indent (or all-blank) block needs no re-slicing
-        lines = [ln[min_indent:] if len(ln) >= min_indent else ln for ln in lines]
+    if min_indent:
+        lines = [
+            (
+                ln[
+                    (
+                        min(len(ln) - len(ln.lstrip("\t")), min_indent)
+                        if masked.isspace() and ln.lstrip("\t ").startswith("#")
+                        else min_indent
+                    ) :
+                ]
+                if len(ln) >= min_indent
+                else ln
+            )
+            for ln, masked in zip(lines, measure, strict=True)
+        ]
     return "\n".join(lines).strip("\n")
 
 
