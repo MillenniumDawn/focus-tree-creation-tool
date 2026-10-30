@@ -831,6 +831,62 @@ def test_icon_change_without_a_selected_focus_writes_nothing():
     assert len(app._undo_stack) == 0
 
 
+def _gfx_app(focus: Focus) -> AppFake:
+    """A host wired like the sidebar: the browser callback writes the gfx var."""
+    app = _live_undo_app(focus)
+    host = cast(Any, app)
+    host._redraw_now = Mock()
+    host._fv_gfx = Mock()
+    return app
+
+
+def test_gfx_pick_pushes_before_writing_and_round_trips_through_undo_redo():
+    focus = Focus(id=46)
+    focus.gfx = "GFX_A"
+    app = _gfx_app(focus)
+    revision = app.focuses.content_revision
+
+    app_module.App._set_gfx(_as_app(app), "GFX_B")
+
+    assert focus.gfx == "GFX_B"
+    cast(Any, app)._fv_gfx.set.assert_called_once_with("GFX_B")
+    assert app.focuses.content_revision > revision
+    assert len(app._undo_stack) == 1
+    cast(Any, app)._redraw_now.assert_called_once_with()
+    app_module.App._undo(_as_app(app))
+    assert app.focuses[46].gfx == "GFX_A"
+    assert len(app._undo_stack) == 0
+    app_module.App._redo(_as_app(app))
+    assert app.focuses[46].gfx == "GFX_B"
+
+
+def test_gfx_pick_of_the_current_gfx_pushes_nothing():
+    focus = Focus(id=46)
+    focus.gfx = "GFX_A"
+    app = _gfx_app(focus)
+    revision = app.focuses.content_revision
+
+    app_module.App._set_gfx(_as_app(app), "GFX_A")
+
+    assert focus.gfx == "GFX_A"
+    assert app.focuses.content_revision == revision
+    assert len(app._undo_stack) == 0
+    cast(Any, app)._redraw_now.assert_not_called()
+
+
+def test_gfx_pick_without_a_selected_focus_writes_only_the_form_variable():
+    focus = Focus(id=46)
+    focus.gfx = "GFX_A"
+    app = _gfx_app(focus)
+    cast(Any, app).selected = None
+
+    app_module.App._set_gfx(_as_app(app), "GFX_B")
+
+    assert focus.gfx == "GFX_A"
+    cast(Any, app)._fv_gfx.set.assert_called_once_with("GFX_B")
+    assert len(app._undo_stack) == 0
+
+
 def test_select_populates_the_icon_without_pushing_or_writing_the_previous_focus():
     first = _icon_focus(44, "A")
     second = _icon_focus(45, "B")
