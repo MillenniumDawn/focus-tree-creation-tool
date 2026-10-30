@@ -1024,6 +1024,7 @@
   "undo.add_prerequisite_and_group": "UND-Voraussetzungsgruppe hinzufügen",
   "undo.add_prerequisite_or_group": "ODER-Voraussetzungsgruppe hinzufügen",
   "undo.bulk_rename": "Massenumbenennung",
+  "undo.change_gfx": "GFX ändern",
   "undo.change_icon": "Icon ändern",
   "undo.clear_all": "Alles löschen",
   "undo.delete_focus": "Fokus löschen",

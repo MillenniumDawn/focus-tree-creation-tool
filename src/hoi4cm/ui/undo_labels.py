@@ -22,6 +22,7 @@ UNDO_LABEL_KEYS: Mapping[str, str] = {
     "add prerequisite AND group": "undo.add_prerequisite_and_group",
     "add prerequisite OR group": "undo.add_prerequisite_or_group",
     "bulk_rename": "undo.bulk_rename",
+    "change gfx": "undo.change_gfx",
     "change icon": "undo.change_icon",
     "clear all": "undo.clear_all",
     "delete focus": "undo.delete_focus",
