@@ -54,7 +54,6 @@ from hoi4cm.wizards._graphics import find_catalog_image
 from hoi4cm.wizards._image_loader import TkImageLoader
 from hoi4cm.wizards._saves import save_decisions
 from hoi4cm.wizards._shared import (
-    _app_img_caches,
     format_save_summary,
     make_scrolled_listbox,
     open_effect_picker,
@@ -292,6 +291,20 @@ def new_decision_record(cat_uid: object = "") -> dict[str, object]:
     )
 
 
+def _bind_preview_cache_release(win, app, cache):
+    """Release a decision window's preview cache when the window itself
+    is destroyed, so wm-protocol close, direct destroy() and parent
+    teardown all release it exactly once."""
+
+    def _release_on_destroy(event):
+        # <Destroy> fires for every child widget; only the window itself
+        # releases the cache.
+        if event.widget is win:
+            app.wiz_img_caches.release_window_cache(cache)
+
+    win.bind("<Destroy>", _release_on_destroy)
+
+
 def open_decision_wizard(app):
     """HOI4 Decision / Decision Category maker — matches mockup layout."""
     win = tk.Toplevel(app)
@@ -305,6 +318,9 @@ def open_decision_wizard(app):
     # above; this closure only wires them to the live lists and repaints.
     _autosave_path = autosave_path("decision.json")
     _undo_stack = []  # detached (cats, decs) snapshots, bounded below
+    _dec_prev_img_cache: dict = {}
+    app.wiz_img_caches.register_window_cache(_dec_prev_img_cache)
+    _bind_preview_cache_release(win, app, _dec_prev_img_cache)
 
     def _snapshot():
         """Push current state onto undo stack."""
@@ -3007,8 +3023,7 @@ def open_decision_wizard(app):
 
     # ── PREVIEW ──────────────────────────────────────────────────────────────
     # ── shared preview image cache: gfx_key -> PhotoImage|None ─────────────
-    _dec_prev_img_cache = {}
-    _app_img_caches.append(_dec_prev_img_cache)  # register for mod-reload invalidation
+    # Registered on app.wiz_img_caches near the top of this closure.
 
     _dds_supported = False
     if PILImage is not None:

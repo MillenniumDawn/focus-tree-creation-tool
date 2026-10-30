@@ -42,7 +42,7 @@ from hoi4cm.ui.theme import (
     TEXT_DIM,
 )
 from hoi4cm.ui.widgets import grab_when_visible
-from hoi4cm.wizards import _shared as _wiz_shared
+from hoi4cm.wizards._shared import WizardImageCaches
 
 log = get_logger("mod_loading")
 
@@ -91,6 +91,7 @@ class ModLoadingMixin:
     app_config: AppConfig
     index: ModIndex
     images: SpriteImageCache
+    wiz_img_caches: WizardImageCaches
     edit_ideas_file: str
     edit_events_file: str
     edit_events_ns: str
@@ -263,10 +264,8 @@ class ModLoadingMixin:
         self.cv.delete("focus")
         host._redraw_now()
         # Clear all wizard image caches so new mod GFX loads fresh. The live
-        # caches live in hoi4cm.wizards._shared (the event and decision wizards
-        # register theirs there), not in this module.
-        for _c in _wiz_shared._app_img_caches:
-            _c.clear()
+        # caches are owned by the App (see hoi4cm.wizards._shared).
+        self.wiz_img_caches.clear()
         # Load first sprite as a quick PIL sanity check
         test_names = list(self.index.sprites.keys())[:1]
         for tn in test_names:

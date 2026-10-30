@@ -168,6 +168,38 @@ def test_app_command_opens_its_dialog(app, opened, command):
     _assert_built(opened())
 
 
+def _close_wizard_window(win: tk.Toplevel, app: tk.Tk) -> None:
+    """Run the window's registered close handler like the window manager does."""
+    handler = win.protocol("WM_DELETE_WINDOW")
+    win.tk.call(handler)
+    app.update()
+    assert not win.winfo_exists()
+
+
+def test_decision_wizard_releases_its_preview_cache_when_closed(app, opened):
+    """Repeated open/close cycles must not grow the app's cache registry."""
+    baseline = len(app.wiz_img_caches.window_caches)
+    for _ in range(2):
+        app._decision_wizard()
+        windows = opened()
+        assert len(windows) == 1
+        assert len(app.wiz_img_caches.window_caches) == baseline + 1
+        _close_wizard_window(windows[0], app)
+        assert len(app.wiz_img_caches.window_caches) == baseline
+
+
+def test_destroyed_decision_wizard_releases_its_preview_cache(app, opened):
+    """Direct win.destroy() without the WM protocol must still release."""
+    baseline = len(app.wiz_img_caches.window_caches)
+    app._decision_wizard()
+    windows = opened()
+    assert len(windows) == 1
+    assert len(app.wiz_img_caches.window_caches) == baseline + 1
+    windows[0].destroy()
+    app.update()
+    assert len(app.wiz_img_caches.window_caches) == baseline
+
+
 def test_additional_income_wizard_opens_in_md_mode(app, opened, monkeypatch):
     monkeypatch.setattr(app.index, "is_md", True)
     app._additional_income_wizard()

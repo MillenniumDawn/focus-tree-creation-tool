@@ -55,8 +55,6 @@ from hoi4cm.wizards._graphics import (
 from hoi4cm.wizards._image_loader import TkImageLoader
 from hoi4cm.wizards._saves import save_events
 from hoi4cm.wizards._shared import (
-    _ev_gfx_cache,
-    _ev_imgsize_cache,
     format_save_summary,
     make_scrolled_listbox,
     open_effect_picker,
@@ -229,8 +227,8 @@ def open_event_wizard(app):
     def _find_gfx_file(gfx_name):
         if not gfx_name:
             return None
-        if gfx_name in _ev_gfx_cache:
-            return _ev_gfx_cache[gfx_name]
+        if gfx_name in app.wiz_img_caches.event_gfx:
+            return app.wiz_img_caches.event_gfx[gfx_name]
         path = None
         if app.index.loaded:
             # 1. Exact match from scanned sprites dict
@@ -248,12 +246,12 @@ def open_event_wizard(app):
                             app.index.graphics_catalog, ev_dir, stem
                         )
                         break
-        _ev_gfx_cache[gfx_name] = path
+        app.wiz_img_caches.event_gfx[gfx_name] = path
         return path
 
     def _read_image_size(path):
-        if path in _ev_imgsize_cache:
-            return _ev_imgsize_cache[path]
+        if path in app.wiz_img_caches.event_imgsize:
+            return app.wiz_img_caches.event_imgsize[path]
         result = None
         try:
             with open(path, "rb") as f:
@@ -269,7 +267,7 @@ def open_event_wizard(app):
                 result = img.width(), img.height()
         except OSError, tk.TclError, ValueError, RuntimeError, AttributeError:
             pass
-        _ev_imgsize_cache[path] = result
+        app.wiz_img_caches.event_imgsize[path] = result
         return result
 
     # ── Preview scheduler (defined early so all callbacks can reference it) ──
