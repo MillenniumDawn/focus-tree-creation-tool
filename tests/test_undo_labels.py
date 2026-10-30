@@ -4,18 +4,13 @@ from __future__ import annotations
 
 import ast
 import json
-from pathlib import Path
 
 import pytest
+from source_scan import ROOT, SOURCE_PATHS, source_calls
 
 from hoi4cm.core import i18n as i18n_mod
 from hoi4cm.ui.undo_labels import UNDO_LABEL_KEYS, undo_label_text
 
-ROOT = Path(__file__).parents[1]
-SOURCE_PATHS = [
-    *sorted((ROOT / "src" / "hoi4cm").rglob("*.py")),
-    ROOT / "hoi4_content_maker.py",
-]
 # Argument position of the label for each call that puts one on the stack.
 _LABEL_ARG = {"_push_undo": 0, "record": 0, "track": 1}
 
@@ -31,9 +26,7 @@ def _literals(node: ast.expr) -> set[str]:
 def _pushed_labels() -> set[str]:
     labels: set[str] = set()
     for path in SOURCE_PATHS:
-        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
-            if not isinstance(node, ast.Call):
-                continue
+        for node in source_calls(path):
             func = node.func
             name = (
                 func.attr

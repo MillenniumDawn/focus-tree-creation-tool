@@ -5,6 +5,12 @@ This package does not construct a process-wide mix of those lifetimes.
 """
 
 from hoi4cm.mod.context import detect_loc_file, find_loc_files
+from hoi4cm.mod.discovery import (
+    flat_image_paths,
+    glob_script_paths,
+    script_paths,
+    walk_image_paths,
+)
 from hoi4cm.mod.gfx_writer import (
     DEFAULT_FOCUS_ICON,
     SpriteTypeEntry,
@@ -20,6 +26,7 @@ from hoi4cm.mod.graphics_catalog import (
     GraphicsScanConfig,
 )
 from hoi4cm.mod.index import ModIndex, ScanSettings
+from hoi4cm.mod.localisation import lookup_localisation
 from hoi4cm.mod.workspace_files import (
     WorkspaceFiles,
     WriteEntry,
@@ -41,7 +48,12 @@ __all__ = [
     "build_sprite_type",
     "detect_loc_file",
     "find_loc_files",
+    "flat_image_paths",
+    "glob_script_paths",
+    "lookup_localisation",
     "notifying_workspace_files",
     "resolve_focus_image_paths",
     "resolve_mod_texture_path",
+    "script_paths",
+    "walk_image_paths",
 ]

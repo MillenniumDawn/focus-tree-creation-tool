@@ -7,7 +7,6 @@
 """National Spirit / Idea builder wizard."""
 
 import copy
-import glob
 import json
 import os
 import re
@@ -28,7 +27,7 @@ from hoi4cm.core import (
     sanitize_component,
     tr,
 )
-from hoi4cm.mod import find_loc_files
+from hoi4cm.mod import glob_script_paths, lookup_localisation
 from hoi4cm.script.syntax import parse_script, serialize_block
 from hoi4cm.ui import (
     BG_CARD,
@@ -1379,7 +1378,7 @@ def open_national_spirit_wizard(app):
 
         # Scan all .txt files for spirit/idea IDs
         spirits = []  # list of (spirit_id, slot, file_path)
-        for fp in sorted(glob.glob(os.path.join(ideas_dir, "*.txt"))):
+        for fp in glob_script_paths(ideas_dir):
             try:
                 src, encoding = read_file_with_encoding(fp)
                 if not src:
@@ -1570,27 +1569,9 @@ def open_national_spirit_wizard(app):
                     spirit_modifiers.append({"key": mk, "value": str(mv)})
             _refresh_mod_cards()
 
-            # Look up loc strings
-            loc_name = loc_desc = ""
-            for loc_path in find_loc_files(
-                app.index.root, language=app.app_config.loc_language
-            ):
-                try:
-                    loc_src, encoding = read_file_with_encoding(loc_path)
-                    if loc_src is None:
-                        continue
-                    for m in re.finditer(
-                        r'^\s+(\S+?)(?::\d+)?\s+"(.*)"', loc_src, re.MULTILINE
-                    ):
-                        k, v = m.group(1), m.group(2)
-                        if k == spirit_id and not loc_name:
-                            loc_name = v
-                        elif k == f"{spirit_id}_desc" and not loc_desc:
-                            loc_desc = v
-                    if loc_name and loc_desc:
-                        break
-                except OSError, ValueError, UnicodeDecodeError:
-                    pass
+            loc_name, loc_desc = lookup_localisation(
+                app.index.root, spirit_id, language=app.app_config.loc_language
+            )
             v_loc_name.set(loc_name)
             v_loc_desc.set(loc_desc)
 

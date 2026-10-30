@@ -1,6 +1,5 @@
 """Tests for hoi4cm.core.image — Pillow import gate (opt-in auto-install)."""
 
-import builtins
 import os
 import re
 from pathlib import Path
@@ -8,17 +7,6 @@ from pathlib import Path
 import pytest
 
 from hoi4cm.core import image
-
-
-def _force_pil_missing(monkeypatch):
-    real_import = builtins.__import__
-
-    def fake_import(name, *a, **k):
-        if name == "PIL" or name.startswith("PIL."):
-            raise ImportError("forced missing for test")
-        return real_import(name, *a, **k)
-
-    monkeypatch.setattr(builtins, "__import__", fake_import)
 
 
 def test_ci_pillow_matches_dev_pin():
@@ -42,8 +30,7 @@ def test_ci_pillow_matches_dev_pin():
     assert PIL.__version__ == match.group(1)
 
 
-def test_no_auto_install_without_env(monkeypatch):
-    _force_pil_missing(monkeypatch)
+def test_no_auto_install_without_env(monkeypatch, missing_pillow):
     monkeypatch.delenv("HOI4CM_AUTO_INSTALL_PILLOW", raising=False)
     calls = []
     monkeypatch.setattr(
@@ -56,8 +43,7 @@ def test_no_auto_install_without_env(monkeypatch):
     assert calls == []  # pip was never invoked
 
 
-def test_auto_install_attempted_with_env(monkeypatch):
-    _force_pil_missing(monkeypatch)
+def test_auto_install_attempted_with_env(monkeypatch, missing_pillow):
     monkeypatch.setenv("HOI4CM_AUTO_INSTALL_PILLOW", "1")
     calls = []
     monkeypatch.setattr(
