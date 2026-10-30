@@ -7,37 +7,7 @@ from collections.abc import Mapping
 
 from hoi4cm.data import EFFECT_DEFS
 
-__all__ = ["render_effect", "rename_to_raw_suppresses_siblings"]
-
-
-def _renders_in_export(value: object) -> bool:
-    """Whether a field value survives into render_effect's generic fallback."""
-    if isinstance(value, Mapping):
-        return True
-    if isinstance(value, (list, tuple)):
-        return len(value) > 0
-    if isinstance(value, bool):
-        return True
-    return bool(str(value).strip())
-
-
-def rename_to_raw_suppresses_siblings(fields: Mapping[str, object], key: str) -> bool:
-    """Whether renaming ``key`` to ``raw`` would drop sibling fields on export.
-
-    The generic fallback in :func:`render_effect` emits ``t = <raw>`` alone
-    once the raw value is non-empty and ignores every other field. Renaming a
-    lone field to ``raw`` is the supported way to spell ``t = value``, so only
-    a non-empty raw value beside a sibling that still renders needs a refusal.
-    """
-    if not _renders_in_export(fields.get(key)):
-        return False
-    return any(
-        name != key
-        and not str(name).startswith("_")
-        and name != "raw"
-        and _renders_in_export(value)
-        for name, value in fields.items()
-    )
+__all__ = ["render_effect"]
 
 
 def render_effect(eff: Mapping[str, object]) -> str:
@@ -187,7 +157,7 @@ def render_effect(eff: Mapping[str, object]) -> str:
             f"{IND}\tregiments = {{\n"
             + "\n".join(
                 f"{IND}\t\t{ln.strip()}"
-                for ln in str(g("regiments", "infantry = { x = 0 y = 0 }"))
+                for ln in g("regiments", "infantry = { x = 0 y = 0 }")
                 .strip()
                 .splitlines()
                 if ln.strip()
@@ -359,19 +329,19 @@ def render_effect(eff: Mapping[str, object]) -> str:
             ("type", g("type", "infantry_equipment_1")),
             ("amount", g("amount", "500")),
         ]
-        if str(g("producer", "")).strip():
+        if g("producer", "").strip():
             pairs.append(("producer", g("producer")))
         return block("add_equipment_to_stockpile", pairs)
 
     if t in ("country_event", "news_event"):
         pairs = [("id", g("id", "my_event.1"))]
-        d = str(g("days", "0")).strip()
+        d = g("days", "0").strip()
         if d and d != "0":
             pairs.append(("days", d))
         return block(t, pairs)
 
     if t in ("hidden_effect", "effect_tooltip"):
-        raw = str(g("raw", "")).strip()
+        raw = g("raw", "").strip()
         if not raw and "_list" in f:
             items = f["_list"]
             if isinstance(items, list):
@@ -386,13 +356,13 @@ def render_effect(eff: Mapping[str, object]) -> str:
         return f"{IND}{t} = {{\n{inner}\n{IND}}}"
 
     if t == "_raw_block":
-        raw = str(g("raw", "")).strip()
+        raw = g("raw", "").strip()
         return "\n".join(f"{IND}{ln}" for ln in raw.splitlines()) if raw else ""
 
     if t == "add_to_variable":
         vn = g("var", "AM_my_stat_var")
         val = g("value", "0.05")
-        tt = str(g("tooltip", "")).strip()
+        tt = g("tooltip", "").strip()
         base = f"{IND}add_to_variable = {{ {vn} = {val}"
         return base + (f" tooltip = {tt} }}" if tt else " }")
 
@@ -448,8 +418,8 @@ def render_effect(eff: Mapping[str, object]) -> str:
             f"{IND}add_dynamic_modifier = {{",
             f"{IND}\tmodifier = {g('modifier', 'TAG_modifier')}",
         ]
-        sc = str(g("scope", "")).strip()
-        dy = str(g("days", "")).strip()
+        sc = g("scope", "").strip()
+        dy = g("days", "").strip()
         if sc:
             out.append(f"{IND}\tscope = {sc}")
         if dy:
@@ -461,8 +431,8 @@ def render_effect(eff: Mapping[str, object]) -> str:
         # Generates add_dynamic_modifier + adds_dynamic_modifier_tt tooltip together
         # Per skill rules: use adds_ when the block contains add_dynamic_modifier
         mod = g("modifier", "TAG_modifier")
-        sc = str(g("scope", "")).strip()
-        dy = str(g("days", "")).strip()
+        sc = g("scope", "").strip()
+        dy = g("days", "").strip()
         out = [f"{IND}add_dynamic_modifier = {{", f"{IND}\tmodifier = {mod}"]
         if sc:
             out.append(f"{IND}\tscope = {sc}")

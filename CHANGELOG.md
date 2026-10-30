@@ -8,14 +8,11 @@ the version by hand. See `AGENTS.md`.
 
 ## Unreleased
 
-- Make raw-effect field editing safe again on unsafe names: a rename to
-  `raw` beside sibling fields now stays pending in red on the key entry
-  instead of committing, because the exporter would drop the siblings and
-  emit `t = <raw>` alone. Taken, empty and `_` names flag the entry in red
-  the same way until a usable name commits, and dict/list values in raw
-  rows are read-only so an edit can no longer store a flat string that
-  exports as invalid script. Scalar edits, field order and undo behavior
-  are unchanged.
+- Flag unsafe raw-effect key renames in red on the key entry until a usable
+  name commits: taken, empty and `_` names, and a rename to `raw` while
+  sibling fields exist, since the exporter would drop them. Dict and list
+  values in raw rows are read-only so an edit cannot store a flat string
+  that exports as invalid script.
 
 - Import focus trees containing non-finite `ai_will_do` values (`inf`,
   `-inf`, `1e999`, `-1e999`) instead of aborting the load: the field falls
