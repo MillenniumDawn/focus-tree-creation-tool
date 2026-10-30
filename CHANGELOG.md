@@ -18,6 +18,15 @@ the version by hand. See `AGENTS.md`.
   a running pass, keep detached snapshots, and refresh after localisation-file,
   graphics-catalog, or language changes. Explicit Refresh still forces a pass.
 
+- Stop wizard image caches from outliving their windows: the decision
+  wizard's preview cache is now registered on the owning App while its
+  window is open and released when the window closes, and the event
+  wizard's gfx-path and image-size caches moved from module globals to
+  App-owned `WizardImageCaches` (`App.wiz_img_caches`), matching the
+  #182 app-owned mod-state split. Repeated wizard opens no longer grow
+  a retained cache registry, and one App's caches stay separate from
+  another's.
+
 - Import focus trees containing non-finite `ai_will_do` values (`inf`,
   `-inf`, `1e999`, `-1e999`) instead of aborting the load: the field falls
   back to the existing default of 1 in both scalar and block form, and the

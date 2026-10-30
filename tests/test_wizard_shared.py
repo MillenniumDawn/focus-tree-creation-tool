@@ -1,4 +1,6 @@
-from hoi4cm.wizards._shared import notifying_workspace_files
+"""Regression coverage for the wizard-shared state and image caches."""
+
+from hoi4cm.wizards._shared import WizardImageCaches, notifying_workspace_files
 
 
 class FakeMod:
@@ -49,6 +51,56 @@ def test_unloaded_mod_does_not_notify(tmp_path):
     files.write_text(tmp_path / "note.txt", "content", encoding="utf-8")
 
     assert mod.written == []
+
+
+def test_window_cache_release_unregisters_and_empties():
+    caches = WizardImageCaches()
+    cache: dict = {"k": object()}
+    caches.register_window_cache(cache)
+
+    caches.release_window_cache(cache)
+
+    assert caches.window_caches == []
+    assert cache == {}
+
+
+def test_window_cache_release_is_idempotent():
+    caches = WizardImageCaches()
+    cache: dict = {"k": object()}
+    caches.register_window_cache(cache)
+    caches.release_window_cache(cache)
+
+    caches.release_window_cache(cache)
+
+    assert caches.window_caches == []
+    assert cache == {}
+
+
+def test_clear_invalidates_every_cache_without_losing_registration():
+    caches = WizardImageCaches()
+    window_cache: dict = {"k": object()}
+    caches.register_window_cache(window_cache)
+    caches.event_gfx["GFX_a"] = "/gfx/a.png"
+    caches.event_imgsize["/gfx/a.png"] = (64, 64)
+
+    caches.clear()
+
+    assert caches.event_gfx == {}
+    assert caches.event_imgsize == {}
+    assert caches.window_caches == [window_cache]
+    assert window_cache == {}
+
+
+def test_caches_are_owned_by_one_app_instance():
+    first = WizardImageCaches()
+    second = WizardImageCaches()
+    first.event_gfx["GFX_a"] = "/gfx/a.png"
+    first.register_window_cache({})
+
+    second.clear()
+
+    assert first.event_gfx == {"GFX_a": "/gfx/a.png"}
+    assert len(first.window_caches) == 1
 
 
 def test_helper_is_reachable_from_the_mod_package():
