@@ -288,7 +288,7 @@ def build_focuses(
         try:
             cost = float(rf.get("cost", "10"))
             f.cost = cost if cost != int(cost) else int(cost)
-        except ValueError, TypeError:
+        except ValueError, TypeError, OverflowError:
             f.cost = 10
         aiblock = rf.get("ai_will_do", {})
         if isinstance(aiblock, dict):
