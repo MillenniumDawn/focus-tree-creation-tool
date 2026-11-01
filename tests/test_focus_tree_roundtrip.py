@@ -332,6 +332,30 @@ def test_will_lead_to_war_with_block_round_trips():
     assert getattr(_f2[0], "will_lead_to_war_with", "").strip() == "tag = GER"
 
 
+@pytest.mark.parametrize(
+    "content",
+    [
+        "#TODO",
+        "#TODO\n#NEXT",
+        "#TODO\nGER",
+        "GER\n#TODO\nSOV",
+        "GER #TODO\nSOV",
+        "# TODO = { }\nGER\nSOV",
+        'tag = "GER#tag"\n#TODO',
+    ],
+)
+def test_will_lead_to_war_with_commented_block_round_trips(content):
+    block = "\n".join(f"\t\t\t{line}" for line in content.splitlines())
+    source = _WAR_TARGET_BLOCK.replace("\t\t\ttag = GER", block)
+    first_focuses, first_text = _load_and_export_default(source, "shared")
+    second_focuses, second_text = _load_and_export_default(first_text, "shared")
+
+    assert f"\t\twill_lead_to_war_with = {{\n{block}\n\t\t}}" in first_text
+    assert first_focuses[0].will_lead_to_war_with.strip() == content
+    assert second_focuses[0].will_lead_to_war_with.strip() == content
+    assert first_text == second_text
+
+
 def test_will_lead_to_war_with_bare_tag_stays_inline():
     """Vanilla bare-tag form (will_lead_to_war_with = VEN) stays inline.
 

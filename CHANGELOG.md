@@ -11,7 +11,8 @@ the version by hand. See `AGENTS.md`.
 - Preserve comments inside imported focus reward and condition blocks
   (`completion_reward`, `available`, `cancel`, and the other raw keys)
   through parse, build, export and repeated round trips. Comments used to be
-  stripped before the verbatim block capture.
+  stripped before the verbatim block capture. Keep commented war-target blocks
+  braced so their comments cannot become target assignments.
 
 - Import focus trees containing non-finite `ai_will_do` values (`inf`,
   `-inf`, `1e999`, `-1e999`) instead of aborting the load: the field falls

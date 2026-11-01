@@ -102,6 +102,8 @@ def _dedent_raw_block(source, start, end, measure_source=None):
     measure = (
         lines if measure_source is None else measure_source[start + 1 : end].split("\n")
     )
+    if not any(ln.strip() for ln in measure):
+        measure = lines
     min_indent = min(
         (len(ln) - len(ln.lstrip("\t")) for ln in measure if ln and not ln.isspace()),
         default=0,

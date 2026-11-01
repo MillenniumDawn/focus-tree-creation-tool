@@ -291,7 +291,10 @@ slicing the raw text directly would let `# completion_reward = { ...`
 register as a real raw key. `match_brace` already skips `#` comments and
 strings, so brace bounds are identical in all three texts; the extra cost
 is one `mask_comments` substitution plus a second `focus_block_starts`
-pass per parse.
+pass per parse. War-target rendering uses `strip_comments` to recognize
+comment-bearing content and keep it in a block; comment lines must not be
+classified as repeated bare country tags. Comment-only blocks measure their
+indentation from the original lines because their mask has no content.
 
 The rewrite was validated by differential fuzzing against the pre-rewrite
 implementations — 200k randomized inputs across all five scanners, 60k
