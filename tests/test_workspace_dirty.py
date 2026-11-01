@@ -45,6 +45,10 @@ def immediate_recovery_worker(monkeypatch):
 class _Var:
     def __init__(self, v=""):
         self._v = v
+        self.configured = {}
+
+    def config(self, **kwargs):
+        self.configured.update(kwargs)
 
     def get(self, *_args):
         return self._v
@@ -482,6 +486,89 @@ def test_autosave_timer_persists_sidebar_cost_and_description_edits(
 
     timer.tick()
     assert len(writes) == 6
+
+
+def _sidebar_read_app(focus):
+    app = type("Fake", (), {})()
+    for name in (
+        "_autosave",
+        "_read_sidebar_values",
+        "_coerce_numeric",
+        "_set_field_error",
+        "_read_offsets_from_form",
+    ):
+        setattr(app, name, getattr(m.App, name).__get__(app))
+    app.selected = focus
+    app.focuses = FocusDocument([focus])
+    app._push_undo = Mock()
+    app._offset_entries = []
+    app._log_error = lambda _message: None
+    app._fv_name = _Var(focus.name)
+    app._fv_icon = _Var(focus.icon)
+    app._fv_gfx = _Var(focus.gfx)
+    app._fv_cost = _Var(str(focus.cost))
+    app._fv_ai_raw = _Var("base = 1")
+    app._fv_x = _Var(str(focus.x))
+    app._fv_y = _Var(str(focus.y))
+    app._fv_loc_name = _Var(focus.loc_name)
+    app._fv_desc = _Var(focus.desc)
+    app._fv_search = _Var(focus.search_filters)
+    app._fv_avail = _Var(focus.available_cond)
+    app._fv_bypass = _Var(focus.bypass_cond)
+    app._fv_cancel2 = _Var(focus.cancel_cond)
+    app._fv_cancel = _Var(focus.cancel_if_invalid)
+    app._fv_continue = _Var(focus.continue_if_invalid)
+    app._fv_cap = _Var(focus.available_if_capitulated)
+    app._fv_cost_entry = _Var()
+    app._fv_x_entry = _Var()
+    app._fv_y_entry = _Var()
+    return app
+
+
+@pytest.mark.parametrize("raw", ["inf", "-inf", "1e999", "-1e999", "nan", "invalid"])
+def test_invalid_cost_keeps_unrelated_sidebar_edits(raw):
+    focus = Focus(id=1, x=0, y=0)
+    focus.name = "focus_one"
+    focus.cost = 7.5
+    app = _sidebar_read_app(focus)
+    app._fv_cost.set(raw)
+    app._fv_desc.set("edited description")
+
+    app._autosave()
+
+    assert focus.cost == 7.5
+    assert focus.desc == "edited description"
+    app._push_undo.assert_called_once_with("edit focus", touched_ids=(focus.id,))
+    assert app._fv_cost_entry.configured["highlightbackground"] == m.RED
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "base = not_a_number",
+        "base = .",
+        "base = 1.2.3",
+        "base = nan",
+        "base = inf",
+        "base = -1e999",
+        "base = " + "9" * 400,
+        "base = { factor = 3 }",
+        "base = 2\nbase = 3",
+    ],
+)
+def test_invalid_ai_input_marks_field_and_corrected_input_clears_it(raw):
+    focus = Focus(id=1, x=0, y=0)
+    focus.name = "focus_one"
+    app = _sidebar_read_app(focus)
+    app._fv_ai_raw.set(raw)
+    values = app._read_sidebar_values()
+    assert values.ai_will_do == 1
+    assert app._fv_ai_raw.configured["highlightbackground"] == m.RED
+
+    app._fv_ai_raw.set("base = -2e1")
+    values = app._read_sidebar_values()
+    assert values.ai_will_do == -20
+    assert app._fv_ai_raw.configured["highlightbackground"] == m.BORDER_G
 
 
 def populate_sidebar(app, focus):
