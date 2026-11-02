@@ -1,5 +1,9 @@
 # Recovery serialization (#323)
 
+These are the synchronous writer's original measurements. The App's later
+background-write pipeline and complete callback measurements are recorded in
+[Changed recovery callbacks (#385)](perf-385-recovery.md).
+
 `AutosaveWriter` serializes a changed workspace once for both atomic recovery
 writes. It skips an unchanged pair only when document identity, revision,
 deep-copied non-focus metadata and targets match the last successful pair and
