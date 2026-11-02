@@ -8,6 +8,10 @@ the version by hand. See `AGENTS.md`.
 
 ## Unreleased
 
+- Refresh script-ID suggestions after a successful mod save without reloading
+  the mod. Replacing or removing IDs keeps definitions from other files and
+  invalidates the saved file's scan cache.
+
 ---
 
 ## [0.4.5] — 2026-11-08

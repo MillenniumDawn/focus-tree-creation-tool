@@ -155,6 +155,18 @@ class ScanCache:
         except sqlite3.Error, OSError, ValueError, TypeError:
             pass
 
+    def invalidate(self, domain, path):
+        """Forget a successfully replaced or deleted file, even if its stamp matches."""
+        if not self._conn:
+            return
+        try:
+            self._conn.execute(
+                "DELETE FROM file_cache WHERE domain=? AND path=?", (domain, path)
+            )
+            self._conn.commit()
+        except sqlite3.Error, OSError:
+            pass
+
     def prune(self, domain, keep_paths):
         """Drop rows in *domain* whose path is absent from *keep_paths*."""
         if not self._conn:
