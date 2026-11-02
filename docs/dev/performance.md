@@ -445,6 +445,34 @@ language changes, coalesced in-flight requests, stale completions, explicit
 refresh, failure recovery, and shutdown. The existing detached-snapshot and
 sprite-copy tests remain in place at the extracted worker seam.
 
+### Existing-image overwrites (#384)
+
+`GraphicsCatalog.note_written` retains the path query index when the image's
+`PathReference` is already indexed. It still replaces the image record, updates
+its stamp and dependent sprite maps, advances the catalog generation, and marks
+the persistent snapshot dirty. New paths and deletions still rebuild the path
+index. Queries read current stamps from the image records, not from the retained
+path tuples.
+
+Same-workload comparison on Linux, Python 3.14.4, baseline `0d7ef48`:
+64,000 five-byte `.dds` files under `gfx/interface/goals`, one initial refresh,
+then 11 same-path overwrites, 11 additions, and deletion of those 11 additions.
+Each write used different revision text. Only the notification was timed; file
+writes, fixture setup, and the initial refresh were excluded. Filesystem caches
+were not flushed. No coverage, GUI, or concurrent validators ran during timing.
+
+| Operation | Baseline median ms | Patched median ms | Path-index rebuilds before / after |
+| --- | ---: | ---: | ---: |
+| Existing-path overwrite | 60.245 | 0.060 | 11 / 0 |
+| Addition | 55.396 | 52.353 | 11 / 11 |
+| Deletion | 123.719 | 118.035 | 11 / 11 |
+
+This is one synthetic notification comparison, not whole-save or presented-frame
+latency. Additions and deletions are unchanged paths, not claimed improvements.
+The regression forbids a rebuild for overwrites in both mod and external roots;
+the seeded incremental test compares queries, stamps, and sprite maps with fresh
+catalogs after writes and deletions.
+
 ### Callback lifetime follow-up (#322)
 
 Focus bundles now release their registered Tcl callbacks on reclamation, LOD
