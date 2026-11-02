@@ -8,6 +8,12 @@ the version by hand. See `AGENTS.md`.
 
 ## Unreleased
 
+- Preserve comments inside imported focus reward and condition blocks
+  (`completion_reward`, `available`, `cancel`, and the other raw keys)
+  through parse, build, export and repeated round trips. Comments used to be
+  stripped before the verbatim block capture. Keep commented war-target blocks
+  braced so their comments cannot become target assignments.
+
 - Skip repeated background validation for unchanged inputs. Coalesce edits during
   a running pass, keep detached snapshots, and refresh after localisation-file,
   graphics-catalog, or language changes. Explicit Refresh still forces a pass.
