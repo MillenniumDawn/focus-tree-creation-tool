@@ -313,6 +313,21 @@ its settings into frozen `ScanSettings` and creates a separate `ModIndex`
 on Tk, then scans that candidate off-thread. Only the Tk completion callback
 adopts the candidate into `App.index`.
 
+### Validation inputs
+
+`ui/validation.py` owns the App's background validation scheduling. It compares
+document identity and `content_revision`, catalog identity and generation, loaded
+state, localisation path and file metadata, localisation language, and UI language
+before copying anything. One worker owns a detached snapshot at a time. Edits
+while it runs are coalesced into a latest-input follow-up; completion rechecks
+those inputs before applying results. Unchanged redraws do not take snapshots or
+read localisation again. Badge-result redraws use the visual channel only.
+
+A one-second metadata poll catches external localisation changes and changes
+without a redraw. It reads no file contents on Tk. The existing explicit Refresh
+bypasses deduplication, coalescing repeated refreshes during a running pass. The
+controller cancels its pending timer and poll when the App lifecycle closes.
+
 ### The `run_bg` contract
 
 `run_bg(widget, work, on_done, on_error=None)` submits

@@ -2,9 +2,12 @@ from types import SimpleNamespace
 from typing import cast
 
 import hoi4_content_maker as m
+from hoi4cm.core.app_config import AppConfig
 from hoi4cm.focus_tree.validate import validate_document
 from hoi4cm.mod.index import ModIndex
-from hoi4cm.models import Focus
+from hoi4cm.models import Focus, FocusDocument
+from hoi4cm.ui import validation as validation_ui
+from hoi4cm.ui.lifecycle import ApplicationLifecycle
 
 
 def _host(
@@ -54,19 +57,19 @@ def test_run_validation_snapshots_sprites_before_worker(monkeypatch):
         captured.append(sprites)
         return []
 
-    monkeypatch.setattr(m, "validate_document", fake_validate)
+    monkeypatch.setattr(validation_ui, "validate_document", fake_validate)
 
     def fake_run_bg(_widget, work, _on_done, **_kwargs):
         live.clear()
         work()
 
-    monkeypatch.setattr(m, "run_bg", fake_run_bg)
+    monkeypatch.setattr(validation_ui, "run_bg", fake_run_bg)
 
     host = _host(True, live)
-    host.focuses = {1: _focus(1, "GFX_foo")}
-    host._validation_job = object()
-    host._lifecycle = SimpleNamespace(begin=lambda scope: None)
-    host._validation_loc_keys = lambda: None
+    host.focuses = FocusDocument([_focus(1, "GFX_foo")])
+    host.app_config = AppConfig()
+    host._lifecycle = ApplicationLifecycle(None)
+    host._validation = validation_ui.ValidationController(host)
     host._apply_validation_result = lambda _issues: None
     host._validation_sprites = m.App._validation_sprites.__get__(host)
     host._run_validation = m.App._run_validation.__get__(host)

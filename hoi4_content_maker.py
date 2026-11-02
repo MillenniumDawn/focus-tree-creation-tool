@@ -66,7 +66,6 @@ from hoi4cm.core import (  # noqa: E402
     build_drawio_focuses,
     build_focus_name_lookup,
     build_focuses,
-    capture_validation_snapshot,
     collect_loc_keys_from_file,
     drawio_to_focus_data,
     execute_export_plans,
@@ -140,6 +139,7 @@ from hoi4cm.ui import (  # noqa: E402
     ApplicationLifecycle,
     Tooltip,
     TutorialController,
+    ValidationController,
     _safe_after,
     grab_when_visible,
     make_progress,
@@ -150,6 +150,7 @@ from hoi4cm.ui import (  # noqa: E402
     show_splash,
 )
 from hoi4cm.ui.canvas import CanvasMixin  # noqa: E402
+from hoi4cm.ui.canvas_scheduler import RedrawChannel  # noqa: E402
 from hoi4cm.ui.checklist import (  # noqa: E402
     ChecklistItem,
     VirtualChecklist,
@@ -347,7 +348,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         self._sash_x = 0
         self._validation_issues = []
         self._validation_worst = {}
-        self._validation_job = None
+        self._validation = ValidationController(self)
         self._validation_win = None
         # Continuous focus position — stored as integers when read from file.
         self._cfp_x = None  # None = no value read; use fallback on export
@@ -362,7 +363,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         self.protocol("WM_DELETE_WINDOW", self._on_app_close)
         self._build_ui()
         self._redraw()
-        self._schedule_validation()
+        self._validation.start()
         self._update_title()
         self._schedule_autosave()
         self.after(800, self._run_startup_prompts)
@@ -1199,34 +1200,10 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         return collect_loc_keys_from_file(self.edit_loc_file)
 
     def _schedule_validation(self):
-        if self._validation_job is not None:
-            return
-        try:
-            self._validation_job = self.after(150, self._run_validation)
-        except Exception:
-            self._run_validation()
+        self._validation.schedule()
 
     def _run_validation(self):
-        """Validate a dispatch-time snapshot in a worker and apply its result on Tk.
-
-        Localisation I/O runs in ``work``. Starting a new validation run
-        invalidates any older result in the ``validation`` lifecycle scope.
-        """
-        self._validation_job = None
-        assert self._lifecycle is not None
-        self._lifecycle.begin("validation")
-        sprites = self._validation_sprites()
-        loc_path = self.edit_loc_file
-        snapshot = capture_validation_snapshot(self.focuses)
-
-        def work():
-            return validate_document(
-                snapshot,
-                sprites=sprites,
-                loc_keys=collect_loc_keys_from_file(loc_path),
-            )
-
-        run_bg(self, work, self._apply_validation_result, scope="validation")
+        self._validation.run(force=True)
 
     def _apply_validation_result(self, issues):
         try:
@@ -1241,7 +1218,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         if changed:
             # refresh UI surfaces that depend on validation
             try:
-                self._redraw()
+                self._redraw(channels=RedrawChannel.VIEW)
             except Exception:
                 pass
             try:
@@ -2652,7 +2629,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
     def _deselect(self):
         self.selected = None
         self._hide_form()
-        self._redraw()
+        self._redraw(channels=RedrawChannel.VIEW | RedrawChannel.FOCUS_LIST)
 
     def _populate(self, f):
         # Update tree source label in header
@@ -6498,7 +6475,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             issues = validate_document(self.focuses, sprites=sprites, loc_keys=loc_keys)
             self._validation_issues = issues
             self._validation_worst = worst_severity_per_focus(issues)
-            self._redraw()
+            self._redraw(channels=RedrawChannel.VIEW)
             self._invalidate_focus_list_structure()
         except Exception:
             issues = self._validation_issues
