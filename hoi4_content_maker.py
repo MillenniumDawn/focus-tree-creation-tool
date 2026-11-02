@@ -89,7 +89,6 @@ from hoi4cm.core import (  # noqa: E402
     worst_severity_per_focus,
 )
 from hoi4cm.editor import (  # noqa: E402
-    AutosaveWriter,
     ExtraTreeState,
     ExtraTreeUndoHistory,
     choose_project_save_path,
@@ -137,11 +136,13 @@ from hoi4cm.ui import (  # noqa: E402
     TEXT_DIM,
     YELLOW,
     ApplicationLifecycle,
+    RecoveryController,
     Tooltip,
     TutorialController,
     ValidationController,
     _safe_after,
     grab_when_visible,
+    invalidate_recovery,
     make_progress,
     progress_modal,
     report_error,
@@ -362,6 +363,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         self._autosave_job = None
         self._autosave_interval_ms = _AUTOSAVE_INTERVAL_MS
         self._last_project_path = None
+        self._recovery = RecoveryController(self)
         self.protocol("WM_DELETE_WINDOW", self._on_app_close)
         self._build_ui()
         self._redraw()
@@ -542,43 +544,8 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             self._autosave_job = None
 
     def _autosave_tick(self) -> None:
-        self._autosave_job = None
-        sibling_failed = False
-        try:
-            if self._is_dirty():
-                path = workspace_autosave_path()
-                self._capture_workspace()
-                writer = getattr(self, "_autosave_writer", None)
-                if writer is None:
-                    writer = self._autosave_writer = AutosaveWriter()
-                sibling = self._last_project_path
-                sibling_path = sibling_autosave_path(sibling) if sibling else None
-                paths = (path, sibling_path) if sibling_path else (path,)
-
-                def sibling_error() -> None:
-                    nonlocal sibling_failed
-                    sibling_failed = True
-                    log.exception("sibling autosave failed")
-                    if getattr(self, "_sibling_autosave_failing", None) != sibling_path:
-                        self._sibling_autosave_failing = sibling_path
-                        self._log_error(
-                            f"Sibling autosave failed for {sibling_path}: "
-                            f"{sys.exception()}"
-                        )
-
-                writer.save(self.workspace, paths, sibling_error)
-                if not sibling_failed:
-                    self._sibling_autosave_failing = None
-            else:
-                self._sibling_autosave_failing = None
-            self._autosave_failing = False
-        except Exception as ex:
-            log.exception("workspace autosave failed")
-            if not getattr(self, "_autosave_failing", False):
-                self._autosave_failing = True
-                self._log_error(f"Workspace autosave failed: {ex}")
-        finally:
-            self._schedule_autosave()
+        """Queue recovery without changing the manual-save dirty state."""
+        self._recovery.tick()
 
     def _maybe_offer_autosave_restore(self) -> None:
         path = workspace_autosave_path()
@@ -647,6 +614,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
                     title=tr("dialog.autosave_restore_error.title", "Restore Failed"),
                 )
         else:
+            invalidate_recovery(self)
             clear_workspace_autosave(path)
 
     def _close_app_caches(self):
@@ -654,6 +622,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         self.wiz_img_caches.clear()
 
     def _begin_document_generation(self):
+        invalidate_recovery(self)
         assert self._lifecycle is not None
         self._lifecycle.begin("document")
         self._invalidate_canvas_images()
@@ -5870,6 +5839,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             log.error("project save failed: %s", e, exc_info=True)
             report_write_failure(self, path, e)
             return False
+        invalidate_recovery(self)
         self._last_project_path = path
         try:
             self._mark_clean()

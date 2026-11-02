@@ -21,6 +21,10 @@ the version by hand. See `AGENTS.md`.
 - Make wizard image caches App-owned, invalidate them on mod reload, and
   release each decision window's preview cache when that window is destroyed.
 
+- Reduce blocking during changed recovery saves with compact snapshots and
+  background atomic writes. Cancel older writes before manual save, document
+  replacement, restore dismissal, or shutdown can leave stale recovery data.
+
 - Import focus trees containing non-finite `ai_will_do` values (`inf`,
   `-inf`, `1e999`, `-1e999`) instead of aborting the load: the field falls
   back to the existing default of 1 in both scalar and block form, and the

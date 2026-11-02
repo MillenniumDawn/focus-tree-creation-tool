@@ -12,6 +12,8 @@ that).
   recipe, what's still deferred and why.
 - **[performance.md](performance.md)**: scale targets, the profiling
   harness, the hot-path ledger, GIL guidance, cache inventory.
+- **[perf-385-recovery.md](perf-385-recovery.md)**: bounded background recovery
+  writes, callback timings, timer intervals, and memory measurements.
 - **[issue-331-autosave.md](issue-331-autosave.md)**: sidebar recovery regression
   reproduction and verification evidence.
 - **[testing.md](testing.md)**: fixture/isolation patterns, the headless

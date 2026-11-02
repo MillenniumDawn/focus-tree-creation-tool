@@ -3,7 +3,8 @@ from __future__ import annotations
 import os
 import secrets
 import stat
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 from hoi4cm.core.logger import get_logger
@@ -122,6 +123,23 @@ def _restore(committed: list[tuple[Path, bytes | None]]) -> None:
 class WorkspaceFiles:
     def __init__(self, *, on_written: Callable[[str], None] | None = None) -> None:
         self._on_written = on_written
+
+    @contextmanager
+    def stage_bytes(
+        self, path: str | Path, content: bytes
+    ) -> Iterator[Callable[[], None]]:
+        """Stage and fsync outside a caller's commit lock; always remove the temp."""
+        target = Path(path)
+        temporary = _stage_bytes(target, content)
+
+        def commit() -> None:
+            os.replace(temporary, target)
+            self._notify(target)
+
+        try:
+            yield commit
+        finally:
+            _unlink(temporary)
 
     def write_text(self, path: str | Path, text: str, *, encoding: str) -> None:
         """Replace ``path`` with ``text`` atomically (temp file + ``os.replace``)."""

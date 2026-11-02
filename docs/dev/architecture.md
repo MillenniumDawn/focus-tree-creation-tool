@@ -120,10 +120,14 @@
   `project_codec.py` (`write_project`/`read_project`/`encode_project`/
   `decode_project`, plus project-file-path validation) and
   `workspace_autosave.py` (the `~/.hoi4cm/autosave/workspace.json` primary
-  and sibling `.autosave.json` paths, and their clearing).
+  and sibling `.autosave.json` paths, and their clearing). `recovery.py` captures
+  compact immutable UTF-8 recovery bytes and guards atomic replacement by a
+  generation, with no live workspace objects passed to workers.
 - **`perf/`**: the deterministic profiling harness (`tracking.py`, stdlib
   only, no tkinter) that `scripts/track_perf.py` drives; see
-  `performance.md` for the areas and how to read a report.
+  `performance.md` for the areas and how to read a report. The separate
+  `recovery_callback.py` probe measures full recovery callbacks and Tk timer gaps
+  under an isolated display; it is not part of the headless tracking harness.
 
 ## Dataflow
 
@@ -327,6 +331,23 @@ A one-second metadata poll catches external localisation changes and changes
 without a redraw. It reads no file contents on Tk. The existing explicit Refresh
 bypasses deduplication, coalescing repeated refreshes during a running pass. The
 controller cancels its pending timer and poll when the App lifecycle closes.
+
+### Recovery saves
+
+`ui/recovery.py` owns the App's recovery scheduling and error streaks. It captures
+one immutable UTF-8 snapshot on Tk, dispatches file work through `run_bg`, and
+coalesces ticks during that work into one latest-state follow-up. Its successful
+token holds detached metadata and document identity/revision, not another focus
+snapshot. Completion does not change the manual-save dirty state.
+
+`editor/recovery.py` stages each destination through `WorkspaceFiles.stage_bytes`.
+Staging and fsync run outside the commit gate; only atomic replacement is locked.
+Manual save, document replacement, declined restore, and shutdown invalidate the
+generation before recovery is cleared or abandoned. A staged older write then
+cannot recreate a cleared file. Primary and sibling destinations share identical
+bytes, and partial failure retries the complete pair. See
+[the callback measurements](perf-385-recovery.md) for the remaining snapshot pause
+and memory cost.
 
 ### The `run_bg` contract
 
