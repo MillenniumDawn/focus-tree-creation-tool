@@ -2629,7 +2629,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
     def _deselect(self):
         self.selected = None
         self._hide_form()
-        self._redraw(channels=RedrawChannel.VIEW)
+        self._redraw(channels=RedrawChannel.VIEW | RedrawChannel.FOCUS_LIST)
 
     def _populate(self, f):
         # Update tree source label in header
