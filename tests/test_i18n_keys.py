@@ -15,19 +15,16 @@ from collections import Counter
 from collections.abc import Iterator
 from functools import cache
 from pathlib import Path
+from typing import TypeGuard
 
 import pytest
+from source_scan import ROOT, SOURCE_PATHS, source_calls
 
 from hoi4cm.ui import tutorial as tutorial_mod
 from hoi4cm.ui.undo_labels import UNDO_LABEL_KEYS
 
-ROOT = Path(__file__).parents[1]
 ENGLISH_PATH = ROOT / "locales" / "en.json"
 LOCALE_PATHS = sorted((ROOT / "locales").glob("*.json"))
-SOURCE_PATHS = [
-    *sorted((ROOT / "src" / "hoi4cm").rglob("*.py")),
-    ROOT / "hoi4_content_maker.py",
-]
 _PLACEHOLDER_RE = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}")
 
 _PICKERS = ("effect", "trigger")
@@ -76,8 +73,8 @@ def _strings(path: Path) -> dict[str, str]:
 
 
 def _tr_calls(path: Path) -> Iterator[ast.Call]:
-    for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
-        if not isinstance(node, ast.Call) or not node.args:
+    for node in source_calls(path):
+        if not node.args:
             continue
         func = node.func
         if (isinstance(func, ast.Name) and func.id == "tr") or (
@@ -198,7 +195,7 @@ def test_literal_tr_defaults_match_english_locale():
     assert mismatches == []
 
 
-def _is_literal_file_filter(node: ast.AST) -> bool:
+def _is_literal_file_filter(node: ast.AST) -> TypeGuard[ast.Tuple]:
     """A ``("label", "*.ext")`` pair whose label is a bare string."""
     if not isinstance(node, ast.Tuple) or len(node.elts) != 2:
         return False

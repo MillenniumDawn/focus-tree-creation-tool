@@ -414,6 +414,37 @@ SQLite store runs at the next refresh or at shutdown (`flush_cache`), so a
 wizard save that writes an image plus a `.gfx` entry pays nothing per file and
 the decoded-image LRU is evicted per changed sprite name, not wholesale.
 
+### Validation deduplication (#383)
+
+Background validation now keys dispatches on current document content and the
+external validation inputs, rather than treating every scene redraw as a change.
+It retains detached snapshots, bounds work to one running pass, and checks the
+inputs again on completion. A changed input gets one coalesced follow-up. A
+one-second metadata poll detects localisation-file changes without reading file
+contents on Tk. Explicit Refresh still forces a pass.
+
+Controlled same-workload comparison on Linux, Python 3.14.4, baseline `0d7ef48`:
+20,000 focuses, 64,000 sprite entries, a warm 20,000-key localisation file, and 11
+sequential unchanged validation requests. Each scheduled callback was executed
+immediately and its worker completed before the next request. No GUI, coverage,
+or concurrent validators ran. This isolates dispatch/copy cost, not actual Tk
+timer gaps or presented-frame latency.
+
+| Metric | Baseline | Patched |
+| --- | ---: | ---: |
+| Full snapshot / localisation read / validation passes | 11 | 1 |
+| Median pre-dispatch request time, including copies | 9.497 ms | 0.0015 ms |
+| First request, which still copies a snapshot | 12.936 ms | 10.379 ms |
+| Median worker time per executed pass | 78.492 ms (11 passes) | 68.306 ms (1 pass) |
+
+The reduced work count is the optimization. Snapshot construction is unchanged,
+and the single patched worker sample does not establish a throughput improvement.
+Regression tests cover content-only edits, replacement documents at equal
+revisions, catalog changes, localisation file creation/replacement/deletion,
+language changes, coalesced in-flight requests, stale completions, explicit
+refresh, failure recovery, and shutdown. The existing detached-snapshot and
+sprite-copy tests remain in place at the extracted worker seam.
+
 ### Callback lifetime follow-up (#322)
 
 Focus bundles now release their registered Tcl callbacks on reclamation, LOD

@@ -17,6 +17,7 @@ from hoi4cm.core.concurrency import DaemonThreadPoolExecutor
 from hoi4cm.core.logger import get_logger
 from hoi4cm.core.paths import read_file
 from hoi4cm.mod.context import find_loc_files
+from hoi4cm.mod.discovery import script_paths
 from hoi4cm.mod.graphics_catalog import (
     GraphicsCatalog,
     GraphicsScanConfig,
@@ -124,16 +125,6 @@ class ModIndex:
 
     def _read(self, path):
         return read_file(path)
-
-    @staticmethod
-    def _txt_paths(directory):
-        """Sorted absolute paths of ``*.txt`` files directly in *directory*."""
-        names = os.listdir(directory)
-        return [
-            os.path.join(directory, name)
-            for name in sorted(names)
-            if name.endswith(".txt")
-        ]
 
     def _scan_files_cached(self, domain, paths, extract_fn):
         """Read and extract each file, serving unchanged files from the cache."""
@@ -351,7 +342,7 @@ class ModIndex:
         directory = os.path.join(root, "common", "national_focus")
         if not os.path.isdir(directory):
             return
-        paths = self._txt_paths(directory)
+        paths = script_paths(directory)
         results = self._scan_files_cached("focus", paths, self._extract_national_focus)
         focus_seen = dict.fromkeys(self.focus_ids)
         for path in paths:
@@ -368,7 +359,7 @@ class ModIndex:
         directory = os.path.join(root, "events")
         if not os.path.isdir(directory):
             return
-        paths = self._txt_paths(directory)
+        paths = script_paths(directory)
         results = self._scan_files_cached("events", paths, self._extract_events)
         for path in paths:
             ids = results[path]
@@ -383,7 +374,7 @@ class ModIndex:
         directory = os.path.join(root, *subdir)
         if not os.path.isdir(directory):
             return
-        paths = self._txt_paths(directory)
+        paths = script_paths(directory)
         results = self._scan_files_cached(domain, paths, extract_fn)
         seen = dict.fromkeys(item for path in paths for item in results[path])
         setattr(self, attr, list(seen))
@@ -410,10 +401,10 @@ class ModIndex:
             directory = os.path.join(root, sub.replace("/", os.sep))
             if not os.path.isdir(directory):
                 continue
-            dec_paths.extend(self._txt_paths(directory))
+            dec_paths.extend(script_paths(directory))
             cats_dir = os.path.join(directory, "categories")
             if os.path.isdir(cats_dir):
-                cat_paths.extend(self._txt_paths(cats_dir))
+                cat_paths.extend(script_paths(cats_dir))
         dec_res = self._scan_files_cached(
             "decisions", dec_paths, self._extract_decision_ids
         )

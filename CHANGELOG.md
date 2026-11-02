@@ -14,6 +14,10 @@ the version by hand. See `AGENTS.md`.
   stripped before the verbatim block capture. Keep commented war-target blocks
   braced so their comments cannot become target assignments.
 
+- Skip repeated background validation for unchanged inputs. Coalesce edits during
+  a running pass, keep detached snapshots, and refresh after localisation-file,
+  graphics-catalog, or language changes. Explicit Refresh still forces a pass.
+
 - Import focus trees containing non-finite `ai_will_do` values (`inf`,
   `-inf`, `1e999`, `-1e999`) instead of aborting the load: the field falls
   back to the existing default of 1 in both scalar and block form, and the
@@ -38,6 +42,8 @@ the version by hand. See `AGENTS.md`.
   failed events or localisation folder in the Save to Mod summary instead of
   raising.
 
+- Share mod-file discovery, image enumeration, wizard localisation lookup and
+  test helpers without changing file selection or export behavior.
 - Add a UI language by dropping `locales/<code>.json` into the folder: the
   language list is read from the files, each naming itself in `_meta`. Wrap the
   wizard, settings, undo, canvas and validation text that bypassed `tr()`, and

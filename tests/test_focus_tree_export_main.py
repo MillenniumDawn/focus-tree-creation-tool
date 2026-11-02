@@ -3,6 +3,7 @@
 import os
 
 import pytest
+from focus_tree_helpers import focus_summary, raw_block_renderer
 
 from hoi4cm.core import read_file
 from hoi4cm.focus_tree.build import build_focuses
@@ -12,14 +13,6 @@ from hoi4cm.focus_tree.parse import parse_focus_tree
 from hoi4cm.models import Focus
 
 FIX_DIR = os.path.join(os.path.dirname(__file__), "fixtures", "focus_trees")
-
-
-def raw_block_renderer(eff):
-    """Mirror the monolith's _raw_block effect rendering (3-tab base indent)."""
-    if eff.get("type") != "_raw_block":
-        return ""
-    raw = eff.get("fields", {}).get("raw", "").strip()
-    return "\n".join(f"\t\t\t{ln}" for ln in raw.splitlines()) if raw else ""
 
 
 def _info(**overrides):
@@ -294,26 +287,6 @@ def test_tree_extras_omitted_when_empty():
     assert "default" not in text
 
 
-def _summary(focuses):
-    by_id = {f.id: f.name for f in focuses}
-    return [
-        (
-            f.name,
-            f.gfx,
-            f.cost,
-            f.x,
-            f.y,
-            getattr(f, "relative_position_id", None),
-            tuple(tuple(by_id.get(i, i) for i in grp) for grp in f.prereqs),
-            tuple(by_id.get(i, i) for i in f.mutex),
-            tuple((o["x"], o["y"]) for o in f.offsets),
-            f.ai_will_do,
-            f.search_filters,
-        )
-        for f in focuses
-    ]
-
-
 def _main_info(parsed):
     return {
         "tree_id": parsed.tree_id,
@@ -345,7 +318,7 @@ def test_fixture_structural_fields_survive_round_trip():
     raw = read_file(path)
     f1, t1 = _load_and_export_main(raw, path)
     f2, t2 = _load_and_export_main(t1)
-    assert _summary(f1) == _summary(f2)
+    assert focus_summary(f1) == focus_summary(f2)
     assert t1 == t2
 
 
@@ -424,7 +397,7 @@ def test_main_tree_roundtrip_preserves_unknown_focus_keys_and_is_idempotent():
     f2, t2 = _load_and_export_main(t1)
 
     assert t1 == t2
-    assert _summary(f1) == _summary(f2)
+    assert focus_summary(f1) == focus_summary(f2)
     assert "original_tag" in t1  # country_raw survived
     assert "some_unknown_field = mystery" in t1
     assert "another_unknown = {" in t1

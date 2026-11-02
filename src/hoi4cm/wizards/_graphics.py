@@ -2,17 +2,25 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Protocol
 
-from hoi4cm.mod.graphics_catalog import GraphicsCatalog
+from hoi4cm.mod.discovery import IMAGE_EXTENSIONS, walk_image_paths
+from hoi4cm.mod.graphics_catalog import AssetRef
 
-IMAGE_EXTENSIONS = (".dds", ".png", ".tga")
+
+class ImageCatalog(Protocol):
+    def query(
+        self, *, under: str | None = None, search: str = ""
+    ) -> tuple[AssetRef, ...]: ...
+
+    def path_for(self, asset: AssetRef) -> str: ...
 
 
 def browser_folders(
     folder: str,
     root_label: str,
     *,
-    catalog: GraphicsCatalog | None,
+    catalog: ImageCatalog | None,
 ) -> list[tuple[str, str]]:
     if catalog is None:
         return _filesystem_browser_folders(folder, root_label)
@@ -41,15 +49,15 @@ def collect_image_pairs(
     prefix: str,
     *,
     search: str = "",
-    catalog: GraphicsCatalog | None,
+    catalog: ImageCatalog | None,
     recursive: bool = True,
 ) -> list[tuple[str, str]]:
     if catalog is None:
-        paths = _walk_image_paths(folder, recursive=recursive)
+        paths = walk_image_paths(folder, recursive=recursive)
     else:
         paths = catalog_image_paths(catalog, under=folder)
         if not paths:
-            paths = _walk_image_paths(folder, recursive=recursive)
+            paths = walk_image_paths(folder, recursive=recursive)
 
     search_text = search.casefold()
     pairs = []
@@ -64,7 +72,7 @@ def collect_image_pairs(
 
 
 def find_catalog_image(
-    catalog: GraphicsCatalog,
+    catalog: ImageCatalog,
     folder: str,
     stem: str,
     *,
@@ -99,7 +107,7 @@ def find_catalog_image(
     return min(candidates)[-1]
 
 
-def catalog_image_paths(catalog: GraphicsCatalog, *, under: str) -> tuple[str, ...]:
+def catalog_image_paths(catalog: ImageCatalog, *, under: str) -> tuple[str, ...]:
     return tuple(catalog.path_for(asset) for asset in catalog.query(under=under))
 
 
@@ -117,18 +125,6 @@ def _filesystem_browser_folders(folder: str, root_label: str) -> list[tuple[str,
         if os.path.isdir(path):
             folders.append((name, path))
     return folders
-
-
-def _walk_image_paths(folder: str, *, recursive: bool) -> tuple[str, ...]:
-    paths = []
-    for root, directories, filenames in os.walk(folder):
-        directories.sort()
-        for filename in sorted(filenames):
-            if filename.lower().endswith(IMAGE_EXTENSIONS):
-                paths.append(os.path.join(root, filename))
-        if not recursive:
-            break
-    return tuple(paths)
 
 
 def _same_directory(path: str, folder: str) -> bool:

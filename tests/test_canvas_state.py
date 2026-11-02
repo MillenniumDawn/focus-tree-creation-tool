@@ -5,9 +5,14 @@ optional minimap handles)."""
 from __future__ import annotations
 
 import tkinter as tk
+from typing import cast
 from unittest.mock import Mock, call
 
 from ui_fakes import AppFake
+
+import hoi4_content_maker as app_module
+from hoi4cm.models import Focus
+from hoi4cm.ui.focus_list import VirtualFocusList
 
 
 def _contract_defaults() -> dict[str, object]:
@@ -177,6 +182,48 @@ def test_close_canvas_tasks_finishes_after_a_cancel_error():
     assert fake._redraw_job is None
     assert fake._lines_job is None
     broker.close.assert_called_once_with()
+
+
+def test_deselect_render_clears_materialized_focus_list_highlight():
+    focus = Focus(id=1)
+    cv = Mock()
+    cv.winfo_width.return_value = 800
+    cv.winfo_height.return_value = 600
+    fake = AppFake([focus], cv=cv)
+    fake.selected = focus
+    row = Mock()
+    focus_list = VirtualFocusList.__new__(VirtualFocusList)
+    focus_list._multi_select = False
+    focus_list._selected_key = focus.id
+    focus_list._materialized = {focus.id: row}
+    fake.__dict__["_focus_list"] = focus_list
+    fake.__dict__["_update_focus_list_selection"] = (
+        lambda: app_module.App._update_focus_list_selection(cast(app_module.App, fake))
+    )
+    for name in (
+        "_validate_canvas_probe",
+        "_draw_grid",
+        "_draw_canvas_bounds",
+        "_draw_coord_labels",
+        "_draw_lines",
+        "_reclaim_focus_bundles",
+        "_draw_focus",
+        "_draw_cfp_markers",
+        "_draw_canvas_legend",
+        "_draw_minimap",
+    ):
+        setattr(fake, name, Mock())
+    fake._visible_rect = Mock(return_value=None)
+    fake._grow_canvas_to_focuses = Mock()
+
+    app_module.App._deselect(cast(app_module.App, fake))
+    fake._do_redraw()
+
+    assert fake.selected is None
+    assert focus_list._selected_key is None
+    row.apply_selection.assert_called_once_with(False)
+    fake._hide_form.assert_called_once_with()
+    fake._grow_canvas_to_focuses.assert_not_called()
 
 
 def test_validate_canvas_probe_resets_pools_not_scheduler():

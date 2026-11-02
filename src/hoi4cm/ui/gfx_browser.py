@@ -30,6 +30,7 @@ from hoi4cm.core.i18n import tr
 from hoi4cm.core.image import PIL_OK as _PIL_OK
 from hoi4cm.core.image import PILImage as _PILImage
 from hoi4cm.core.image import PILImageTk as _PILImageTk
+from hoi4cm.mod.discovery import flat_image_paths, walk_image_paths
 from hoi4cm.ui.error_report import report_error
 from hoi4cm.ui.theme import (
     BG_CARD,
@@ -121,6 +122,18 @@ def _pairs_from_paths(paths, prefix, *, search=""):
         seen_stems.add(stem)
         pairs.append((prefix + stem, path))
     return pairs
+
+
+def _filesystem_image_pairs(folder, prefix, *, search=""):
+    search_text = search.strip().lower()
+    paths = [
+        path
+        for path in walk_image_paths(folder)
+        if not search_text
+        or search_text in os.path.basename(path).lower()
+        or search_text in os.path.dirname(path).lower()
+    ]
+    return _pairs_from_paths(paths, prefix, search=search_text)
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -396,19 +409,6 @@ def open_universal_gfx_browser(
             text=tr("gfx.images_count", "{count} images", count=len(pairs))
         )
 
-    def _collect_images(folder_path, prefix):
-        ft = search_var.get().strip().lower()
-        paths = []
-        for rd, dirs, fnames in os.walk(folder_path):
-            dirs.sort()
-            for fname in sorted(fnames):
-                if not fname.lower().endswith((".dds", ".png", ".tga")):
-                    continue
-                if ft and ft not in fname.lower() and ft not in rd.lower():
-                    continue
-                paths.append(os.path.join(rd, fname))
-        return _pairs_from_paths(paths, prefix, search=ft)
-
     def _load_folder(idx):
         if idx < 0 or idx >= len(folder_groups):
             return
@@ -419,7 +419,7 @@ def open_universal_gfx_browser(
             paths = _catalog_image_paths(catalog, under=fpath, search=search_var.get())
             pairs = _pairs_from_paths(paths, pfx)
         else:
-            pairs = _collect_images(fpath, pfx)
+            pairs = _filesystem_image_pairs(fpath, pfx, search=search_var.get())
         _rebuild_grid(pairs)
 
     def _on_folder_select(evt=None):
@@ -1049,22 +1049,20 @@ def _browse_flat_folder(win, folder, on_select, current_gfx):
     subfolders, always ``GFX_focus_``-prefixed keys.
     """
     try:
-        filenames = os.listdir(folder)
+        all_files = flat_image_paths(folder)
     except OSError as exc:
         report_error(str(exc), exc, parent=win)
         return
-    all_files = sorted(
-        (f, os.path.join(folder, f))
-        for f in filenames
-        if f.lower().endswith((".dds", ".png", ".tga"))
-    )
     if not all_files:
         messagebox.showinfo(
             tr("dialog.no_files.title", "No Files"),
             tr("dialog.no_gfx_files", "No .dds/.png/.tga files found."),
         )
         return
-    pairs = [("GFX_focus_" + os.path.splitext(f)[0], p) for f, p in all_files]
+    pairs = [
+        ("GFX_focus_" + os.path.splitext(os.path.basename(path))[0], path)
+        for path in all_files
+    ]
     fwin = tk.Toplevel(win)
     fwin.title(tr("gfx.browser.title", "GFX Browser"))
     fwin.configure(bg=BG_DARK)

@@ -51,7 +51,14 @@
   stores the graphics snapshot that warm load restats, and `gfx_writer.py`
   preserves and extends sprite declarations. `workspace_files.py` is the
   single writer every mod-file save goes through (see "Writing mod files"
-  below).
+  below). `discovery.py` shares direct script listings and image enumeration
+  with the dialogs. Strict listings retain hidden entries and propagate errors;
+  wizard glob searches retain platform matching and suppress directory errors.
+  Recursive image walks and strict flat listings stay separate. The graphics
+  catalog keeps its own cancellable inventory walk. `localisation.py` shares
+  the spirit and dynamic-modifier browsers' raw title/description lookup,
+  preserving discovery order and their existing versioned-key matching rather
+  than substituting the focus localisation decoder.
 - **`wizards/`**: the `open_*_wizard(app)` entry points (decision,
   event, national spirit, dynamic modifier, additional income, character) plus
   `_shared.py` for cross-wizard state, including shared effect/trigger pickers.
@@ -305,6 +312,21 @@ parsing use `ui/tasks.py`'s shared `run_bg` worker pool. A mod load snapshots
 its settings into frozen `ScanSettings` and creates a separate `ModIndex`
 on Tk, then scans that candidate off-thread. Only the Tk completion callback
 adopts the candidate into `App.index`.
+
+### Validation inputs
+
+`ui/validation.py` owns the App's background validation scheduling. It compares
+document identity and `content_revision`, catalog identity and generation, loaded
+state, localisation path and file metadata, localisation language, and UI language
+before copying anything. One worker owns a detached snapshot at a time. Edits
+while it runs are coalesced into a latest-input follow-up; completion rechecks
+those inputs before applying results. Unchanged redraws do not take snapshots or
+read localisation again. Badge-result redraws use the visual channel only.
+
+A one-second metadata poll catches external localisation changes and changes
+without a redraw. It reads no file contents on Tk. The existing explicit Refresh
+bypasses deduplication, coalescing repeated refreshes during a running pass. The
+controller cancels its pending timer and poll when the App lifecycle closes.
 
 ### The `run_bg` contract
 
