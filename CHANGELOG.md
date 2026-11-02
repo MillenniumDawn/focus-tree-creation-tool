@@ -8,6 +8,10 @@ the version by hand. See `AGENTS.md`.
 
 ## Unreleased
 
+- Keep the graphics path index when overwriting an already indexed image,
+  while refreshing its stamp and dependent previews. New images and deletions
+  still update path queries.
+
 ---
 
 ## [0.4.5] — 2026-11-08

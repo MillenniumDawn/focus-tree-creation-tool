@@ -574,6 +574,47 @@ def test_note_written_adds_image_without_rescanning(graphics_tree, monkeypatch):
     ]
 
 
+@pytest.mark.parametrize("external", [False, True])
+def test_image_overwrite_keeps_query_index_and_refreshes_stamp(
+    graphics_tree, tmp_path_factory, monkeypatch, external
+):
+    folder = (
+        tmp_path_factory.mktemp("external")
+        if external
+        else graphics_tree / "gfx" / "interface" / "goals"
+    )
+    folder.mkdir(parents=True, exist_ok=True)
+    image = folder / "overwrite.dds"
+    image.write_bytes(b"first")
+    config = _config(custom_gfx_dirs=(str(folder),) if external else ())
+    catalog = GraphicsCatalog()
+    catalog.refresh(str(graphics_tree), config, read_text=read_file)
+    old_keys = catalog._image_query_keys
+    old_refs = catalog._image_query_refs
+    old_asset = catalog.query(under=str(folder), search="overwrite.dds")[0]
+    monkeypatch.setattr(
+        catalog,
+        "_rebuild_image_query_index",
+        lambda: pytest.fail("same-path overwrite must not rebuild the path index"),
+    )
+
+    image.write_bytes(b"new contents with a different size")
+    delta = catalog.note_written(str(image), read_text=read_file)
+
+    assert delta is not None
+    assert (
+        str(image) in delta.sprites.values()
+        or str(image) in delta.idea_sprites.values()
+    )
+    assert catalog._image_query_keys is old_keys
+    assert catalog._image_query_refs is old_refs
+    asset = catalog.query(under=str(folder), search="OVERWRITE.DDS")[0]
+    assert catalog.path_for(asset) == str(image)
+    assert asset.stamp != old_asset.stamp
+    assert asset.generation == old_asset.generation + 1
+    assert catalog._cache_dirty
+
+
 def test_note_written_reparses_only_changed_gfx_file(graphics_tree, monkeypatch):
     catalog = GraphicsCatalog()
     catalog.refresh(str(graphics_tree), _config(), read_text=read_file)
@@ -917,6 +958,17 @@ def test_incremental_fuzz_matches_full_refresh(graphics_tree, tmp_path):
         assert applied.sprites == maps.sprites
         assert applied.idea_sprites == maps.idea_sprites
         assert applied.decision_sprites == maps.decision_sprites
+        for under in (None, str(graphics_tree), *(str(root) for root in roots)):
+            for search in ("", "IMG_", "disk"):
+                expected = fresh.query(under=under, search=search)
+                actual = catalog.query(under=under, search=search)
+                assert [
+                    (asset.source_id, asset.relative_path, asset.stamp)
+                    for asset in actual
+                ] == [
+                    (asset.source_id, asset.relative_path, asset.stamp)
+                    for asset in expected
+                ]
 
     for _ in range(120):
         roll = rng.random()
