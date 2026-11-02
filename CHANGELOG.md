@@ -21,6 +21,10 @@ the version by hand. See `AGENTS.md`.
 - Make wizard image caches App-owned, invalidate them on mod reload, and
   release each decision window's preview cache when that window is destroyed.
 
+- Refresh script-ID suggestions after a successful mod save without reloading
+  the mod. Replacing or removing IDs keeps definitions from other files and
+  invalidates the saved file's scan cache.
+
 - Import focus trees containing non-finite `ai_will_do` values (`inf`,
   `-inf`, `1e999`, `-1e999`) instead of aborting the load: the field falls
   back to the existing default of 1 in both scalar and block form, and the
