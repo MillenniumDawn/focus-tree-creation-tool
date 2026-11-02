@@ -8,6 +8,10 @@ the version by hand. See `AGENTS.md`.
 
 ## Unreleased
 
+- Skip repeated background validation for unchanged inputs. Coalesce edits during
+  a running pass, keep detached snapshots, and refresh after localisation-file,
+  graphics-catalog, or language changes. Explicit Refresh still forces a pass.
+
 - Import focus trees containing non-finite `ai_will_do` values (`inf`,
   `-inf`, `1e999`, `-1e999`) instead of aborting the load: the field falls
   back to the existing default of 1 in both scalar and block form, and the

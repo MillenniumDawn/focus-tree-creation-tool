@@ -4,13 +4,16 @@ from types import SimpleNamespace
 
 import hoi4_content_maker as m
 import hoi4cm.focus_tree.validate as validate_mod
+from hoi4cm.core.app_config import AppConfig
 from hoi4cm.focus_tree.validate import (
     ValidationSnapshot,
     capture_validation_snapshot,
     collect_loc_keys_from_file,
     validate_document,
 )
+from hoi4cm.mod.index import ModIndex
 from hoi4cm.models import Focus, FocusDocument
+from hoi4cm.ui import validation as validation_ui
 from hoi4cm.ui.lifecycle import ApplicationLifecycle
 
 
@@ -197,11 +200,13 @@ def _fake_host(focuses, loc_path="") -> SimpleNamespace:
     host = SimpleNamespace(
         edit_loc_file=loc_path,
         focuses=focuses,
-        _validation_job=None,
-        _lifecycle=SimpleNamespace(begin=lambda scope: None),
+        index=ModIndex(),
+        app_config=AppConfig(),
+        _lifecycle=ApplicationLifecycle(None),
         _validation_sprites=lambda: None,
         _apply_validation_result=lambda _issues: None,
     )
+    host._validation = validation_ui.ValidationController(host)
     host._run_validation = m.App._run_validation.__get__(host)
     return host
 
@@ -237,7 +242,7 @@ def test_run_validation_reads_loc_only_inside_worker(monkeypatch, tmp_path):
     def fake_run_bg(_widget, work, _on_done, **kwargs):
         dispatched.append((work, kwargs))
 
-    monkeypatch.setattr(m, "run_bg", fake_run_bg)
+    monkeypatch.setattr(validation_ui, "run_bg", fake_run_bg)
     host = _fake_host(doc, str(loc_file))
     host._run_validation()
 
@@ -257,7 +262,7 @@ def test_run_validation_missing_loc_file_skips_loc_checks(monkeypatch, tmp_path)
     def fake_run_bg(_widget, work, _on_done, **_kwargs):
         dispatched.append(work)
 
-    monkeypatch.setattr(m, "run_bg", fake_run_bg)
+    monkeypatch.setattr(validation_ui, "run_bg", fake_run_bg)
     _fake_host(_tree_doc(), str(tmp_path / "nope.yml"))._run_validation()
 
     issues = dispatched[0]()
@@ -276,8 +281,8 @@ def test_run_validation_dispatches_snapshot_with_occupied_positions(monkeypatch)
     def fake_run_bg(_widget, work, _on_done, **_kwargs):
         dispatched.append(work)
 
-    monkeypatch.setattr(m, "validate_document", fake_validate)
-    monkeypatch.setattr(m, "run_bg", fake_run_bg)
+    monkeypatch.setattr(validation_ui, "validate_document", fake_validate)
+    monkeypatch.setattr(validation_ui, "run_bg", fake_run_bg)
     _fake_host(doc)._run_validation()
     dispatched[0]()
 
@@ -290,11 +295,13 @@ class _ValidationHost:
         self.master = None
         self.edit_loc_file = ""
         self.focuses = focuses
-        self._validation_job = None
+        self.index = ModIndex()
+        self.app_config = AppConfig()
         self._validation_issues = []
         self._validation_worst = {}
         self._validation_win = None
         self._lifecycle = ApplicationLifecycle(None)
+        self._validation = validation_ui.ValidationController(self)
         self.after_callbacks = []
         self.after_count = 0
         self.applied = []
@@ -328,14 +335,14 @@ def test_stale_validation_result_never_reaches_apply(monkeypatch):
     host = _ValidationHost(doc)
     try:
         futures = []
-        real_run_bg = m.run_bg
+        real_run_bg = validation_ui.run_bg
 
         def capturing_run_bg(widget, work, on_done, **kwargs):
             future = real_run_bg(widget, work, on_done, **kwargs)
             futures.append(future)
             return future
 
-        monkeypatch.setattr(m, "run_bg", capturing_run_bg)
+        monkeypatch.setattr(validation_ui, "run_bg", capturing_run_bg)
         started = threading.Event()
         release_first = threading.Event()
         real_validate = validate_mod.validate_document
@@ -348,13 +355,17 @@ def test_stale_validation_result_never_reaches_apply(monkeypatch):
                 assert release_first.wait(timeout=5)
             return real_validate(doc_arg, **kwargs)
 
-        monkeypatch.setattr(m, "validate_document", gated_validate)
+        monkeypatch.setattr(validation_ui, "validate_document", gated_validate)
         host._run_validation()
         assert started.wait(timeout=5)
         doc.move(2, 5, 5, allow_occupied=True)
         host._run_validation()
+        assert len(futures) == 1
         release_first.set()
         futures[0].result(timeout=5)
+        host.after_callbacks.pop(0)()
+        assert host.applied == []
+        assert len(futures) == 2
         futures[1].result(timeout=5)
         assert len(validate_calls) == 2
         assert [issue.code for issue in real_validate(validate_calls[0])] == [
@@ -362,10 +373,10 @@ def test_stale_validation_result_never_reaches_apply(monkeypatch):
         ]
         assert validate_document(validate_calls[1]) == []
 
-        for callback in list(host.after_callbacks):
-            callback()
+        host.after_callbacks.pop(0)()
 
         assert host.applied == [[]]
-        assert len(host.after_callbacks) == 2
+        assert host.after_callbacks == []
+        assert host.after_count == 2
     finally:
         host._lifecycle.close()
