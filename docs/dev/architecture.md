@@ -51,7 +51,14 @@
   stores the graphics snapshot that warm load restats, and `gfx_writer.py`
   preserves and extends sprite declarations. `workspace_files.py` is the
   single writer every mod-file save goes through (see "Writing mod files"
-  below).
+  below). `discovery.py` shares direct script listings and image enumeration
+  with the dialogs. Strict listings retain hidden entries and propagate errors;
+  wizard glob searches retain platform matching and suppress directory errors.
+  Recursive image walks and strict flat listings stay separate. The graphics
+  catalog keeps its own cancellable inventory walk. `localisation.py` shares
+  the spirit and dynamic-modifier browsers' raw title/description lookup,
+  preserving discovery order and their existing versioned-key matching rather
+  than substituting the focus localisation decoder.
 - **`wizards/`**: the `open_*_wizard(app)` entry points (decision,
   event, national spirit, dynamic modifier, additional income, character) plus
   `_shared.py` for cross-wizard state, including shared effect/trigger pickers.

@@ -24,6 +24,7 @@ from hoi4cm.core.app_config import AppConfig
 from hoi4cm.core.config import CONFIG_PATH
 from hoi4cm.core.logger import add_error, get_logger
 from hoi4cm.mod import find_loc_files, notifying_workspace_files
+from hoi4cm.mod.discovery import script_paths
 from hoi4cm.mod.index import ModIndex
 from hoi4cm.ui.canvas_renderer import FocusCanvasBundle
 from hoi4cm.ui.error_report import report_error
@@ -371,22 +372,14 @@ class ModLoadingMixin:
         root = self.index.root
         ideas_dir = os.path.join(root, "common", "ideas")
         events_dir = os.path.join(root, "events")
-        try:
-            idea_files = (
-                sorted([f for f in os.listdir(ideas_dir) if f.endswith(".txt")])
-                if os.path.isdir(ideas_dir)
-                else []
-            )
-        except OSError:
-            idea_files = []
-        try:
-            event_files = (
-                sorted([f for f in os.listdir(events_dir) if f.endswith(".txt")])
-                if os.path.isdir(events_dir)
-                else []
-            )
-        except OSError:
-            event_files = []
+        idea_files = [
+            os.path.basename(path)
+            for path in script_paths(ideas_dir, ignore_errors=True)
+        ]
+        event_files = [
+            os.path.basename(path)
+            for path in script_paths(events_dir, ignore_errors=True)
+        ]
 
         dlg = tk.Toplevel(cast(Any, self))  # type: ignore[arg-type]
         dlg.title(tr("edit_targets.title", "Set Edit Targets"))
@@ -654,12 +647,12 @@ class ModLoadingMixin:
             _fd = os.path.join(self.index.root, "common", "national_focus")
             if os.path.isdir(_fd):
                 focus_dir = _fd
-                try:
-                    focus_files = sorted(
-                        f for f in os.listdir(_fd) if f.lower().endswith(".txt")
+                focus_files = [
+                    os.path.basename(path)
+                    for path in script_paths(
+                        _fd, case_sensitive=False, ignore_errors=True
                     )
-                except OSError:
-                    focus_files = []
+                ]
 
         _make_section(
             body,
@@ -716,12 +709,12 @@ class ModLoadingMixin:
             _sld = os.path.join(self.index.root, "common", "scripted_localisation")
             if os.path.isdir(_sld):
                 sloc_dir = _sld
-                try:
-                    sloc_files = sorted(
-                        f for f in os.listdir(_sld) if f.lower().endswith(".txt")
+                sloc_files = [
+                    os.path.basename(path)
+                    for path in script_paths(
+                        _sld, case_sensitive=False, ignore_errors=True
                     )
-                except OSError:
-                    sloc_files = []
+                ]
 
         _make_section(
             body,

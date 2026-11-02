@@ -9,6 +9,8 @@ survive and that key content actually made it into the exported text.
 import os
 
 import pytest
+from focus_tree_helpers import focus_summary as _summary
+from focus_tree_helpers import raw_block_renderer
 from test_focus_tree_parse import (
     NO_WRAPPER,
     WRAPPED,
@@ -24,14 +26,6 @@ from hoi4cm.focus_tree.parse import parse_focus_tree
 from hoi4cm.models import Focus, FocusDocument
 
 FIX_DIR = os.path.join(os.path.dirname(__file__), "fixtures", "focus_trees")
-
-
-def raw_block_renderer(eff):
-    """Mirror the monolith's _raw_block effect rendering (3-tab base indent)."""
-    if eff.get("type") != "_raw_block":
-        return ""
-    raw = eff.get("fields", {}).get("raw", "").strip()
-    return "\n".join(f"\t\t\t{ln}" for ln in raw.splitlines()) if raw else ""
 
 
 def _info(parsed, tree_type):
@@ -62,26 +56,6 @@ def _load_and_export(src, tree_type, path="/tmp/x.txt"):
         effect_renderer=raw_block_renderer,
     )
     return focuses, text
-
-
-def _summary(focuses):
-    by_id = {f.id: f.name for f in focuses}
-    return [
-        (
-            f.name,
-            f.gfx,
-            f.cost,
-            f.x,
-            f.y,
-            getattr(f, "relative_position_id", None),
-            tuple(tuple(by_id.get(i, i) for i in grp) for grp in f.prereqs),
-            tuple(by_id.get(i, i) for i in f.mutex),
-            tuple((o["x"], o["y"]) for o in f.offsets),
-            f.ai_will_do,
-            f.search_filters,
-        )
-        for f in focuses
-    ]
 
 
 @pytest.mark.parametrize(

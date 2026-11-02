@@ -7,7 +7,6 @@
 """Decision / Decision Category builder wizard."""
 
 import copy
-import glob
 import json
 import os
 import re
@@ -26,7 +25,7 @@ from hoi4cm.core import (
 )
 from hoi4cm.core.image import PIL_OK, PILImage, PILImageTk
 from hoi4cm.core.logger import get_logger
-from hoi4cm.mod import WorkspaceFiles, find_loc_files
+from hoi4cm.mod import WorkspaceFiles, find_loc_files, glob_script_paths
 from hoi4cm.script.syntax import extract_named_block, find_blocks, tokenize
 from hoi4cm.ui import (
     BG_CARD,
@@ -4377,7 +4376,7 @@ def open_decision_wizard(app):
                 parent=win,
             )
             return
-        files = sorted(glob.glob(os.path.join(dec_dir, "*.txt")))
+        files = glob_script_paths(dec_dir)
         if not files:
             messagebox.showinfo(
                 tr("dialog.no_files_found.title", "No Files Found"),

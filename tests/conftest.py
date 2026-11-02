@@ -1,6 +1,7 @@
 """Import-time user-home isolation and a headless default for every test."""
 
 import atexit
+import builtins
 import logging
 import os
 import sys
@@ -59,6 +60,18 @@ atexit.register(_cleanup_isolated_home)
 def pytest_unconfigure(config):
     """Restore the caller's home after pytest has finished the session."""
     _cleanup_isolated_home()
+
+
+@pytest.fixture
+def missing_pillow(monkeypatch):
+    real_import = builtins.__import__
+
+    def fake_import(name, *args, **kwargs):
+        if name == "PIL" or name.startswith("PIL."):
+            raise ImportError("forced missing for test")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
 
 
 @pytest.fixture(autouse=True)

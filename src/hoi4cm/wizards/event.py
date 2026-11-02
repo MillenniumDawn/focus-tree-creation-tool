@@ -7,14 +7,13 @@
 """Event builder wizard."""
 
 import copy
-import glob
 import json
 import os
 import re
 import tkinter as tk
 from tkinter import filedialog, messagebox
 from types import ModuleType
-from typing import cast
+from typing import TYPE_CHECKING, Any, cast
 
 from hoi4cm.core import (
     autosave_path,
@@ -24,7 +23,7 @@ from hoi4cm.core import (
     tr,
 )
 from hoi4cm.core.image import PIL_OK, PILImage, PILImageTk
-from hoi4cm.mod import WorkspaceFiles
+from hoi4cm.mod import WorkspaceFiles, glob_script_paths
 from hoi4cm.script.syntax import parse_block, tokenize
 from hoi4cm.ui import (
     BG_CARD,
@@ -63,6 +62,11 @@ from hoi4cm.wizards._shared import (
     open_trigger_picker,
     pack_action_footer,
 )
+
+if TYPE_CHECKING:
+
+    class _PreviewCanvas(tk.Canvas):
+        _img_ref: object
 
 
 def _scalar_text(value, default: str) -> str:
@@ -285,7 +289,7 @@ def open_event_wizard(app):
     # ── Preview renderer (forward-references canvas widget, safe as lambda'd) ──
     def _render_preview():
         _prev_job[0] = None
-        cv = preview_cv
+        cv = cast("_PreviewCanvas", preview_cv)
         cv.delete("all")
         ev = sel[0]
         W = max(cv.winfo_width(), 420)
@@ -1118,7 +1122,7 @@ def open_event_wizard(app):
                 parent=win,
             )
             return
-        files = sorted(glob.glob(os.path.join(ev_dir, "*.txt")))
+        files = glob_script_paths(ev_dir)
         if not files:
             messagebox.showinfo(
                 tr("dialog.no_files_found.title", "No Files Found"),
@@ -1236,6 +1240,7 @@ def open_event_wizard(app):
             return default
 
         tokens = tokenize(raw)
+        blk: dict[str, Any]
         imported = []
         i = 0
         while i < len(tokens):

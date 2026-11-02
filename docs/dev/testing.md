@@ -15,9 +15,13 @@ per-run home before test modules are collected, then restores the original
 environment and removes the temporary tree at session end. On Windows it also
 sets USERPROFILE because that is what `expanduser("~")` prefers. The same
 module forbids Tk construction (see "The headless rule"). Plain helpers
-shared by several test files live in `tests/builders.py` (`make_focus`,
-`default_decision`) and `tests/ui_fakes.py` (`AppFake`), imported by bare
-name. Mypy and Pyright also include `tests/` on their search paths so standalone
+shared by several test files are imported by bare name: `tests/builders.py`
+holds sample records, `tests/ui_fakes.py` holds `AppFake`, and
+`tests/focus_tree_helpers.py` holds the raw-effect renderer and structural
+summary used by both exporter suites. `tests/source_scan.py` shares the sorted
+package-plus-monolith source inventory and caches each file's AST call nodes
+for the translation and undo-label guards. The guards keep separate assertions.
+Mypy and Pyright also include `tests/` on their search paths so standalone
 benchmarks can import these doubles. Everything else lives in the file that
 uses it.
 
@@ -139,7 +143,7 @@ labels work the same way: the stack keeps English identifiers, and
 ## Fixture / isolation patterns
 
 Every module with import-time or process-lifetime state needs isolation, or
-state leaks between tests. Six patterns cover what's here today:
+state leaks between tests. The patterns here are:
 
 - **Pytest-startup HOME isolation.** `tests/conftest.py` installs a temporary
   HOME while the conftest is imported, before collection imports application
@@ -161,6 +165,10 @@ state leaks between tests. Six patterns cover what's here today:
   or Tk. Cancellation and image-lifetime tests keep cached images on the Tk
   thread through success, failure, supersession, and shutdown. The old
   `mod_state_isolation` snapshot fixture is gone.
+- **Missing Pillow.** Image-gate tests opt in to `missing_pillow` from
+  `tests/conftest.py`. It intercepts Pillow imports through monkeypatch and
+  restores the import function at teardown. Tests still control install opt-in
+  and installer outcomes themselves.
 - **Monkeypatch of module path constants.** `tests/test_config.py` points
   `config.CONFIG_PATH` at a `tmp_path` file via `monkeypatch.setattr`
   before calling `cfg_load`/`cfg_save`, so no test ever touches the real
