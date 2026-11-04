@@ -2,6 +2,9 @@
 
 import json
 import threading
+from concurrent.futures import ThreadPoolExecutor
+from functools import partial
+from queue import Queue
 from typing import cast
 from unittest.mock import Mock
 
@@ -56,10 +59,17 @@ def dispatch(tmp_path, monkeypatch):
     owner._lifecycle.close()
 
 
-def _finish(tasks):
+def _finish_one(tasks):
     work, done, _ = tasks.pop(0)
     result = work()
     done(result)
+    return result
+
+
+def _finish(tasks):
+    result = _finish_one(tasks)
+    if result == recovery_editor.RecoveryResult():
+        return _finish_one(tasks)
     return result
 
 
@@ -129,6 +139,92 @@ def test_in_flight_edits_queue_one_latest_capture_without_marking_clean(dispatch
     assert read_project(primary).focuses[1].desc == "19"
     assert owner.dirty
     assert owner.saved_revision == -1
+    assert not owner._recovery.busy
+
+
+@pytest.mark.parametrize("phase", ["stage", "replace"])
+def test_stalled_sibling_does_not_block_new_primary_snapshots(
+    dispatch, monkeypatch, phase
+):
+    owner, _, captures, primary = dispatch
+    sibling = primary.with_name("project.autosave.json")
+    ready = threading.Event()
+    release = threading.Event()
+    callbacks: Queue = Queue()
+    original_stage = workspace_files._stage_bytes
+    original_replace = workspace_files.os.replace
+
+    def wait(target):
+        if target == sibling and not release.is_set():
+            ready.set()
+            assert release.wait(timeout=5)
+
+    def blocked_stage(target, *args):
+        temporary = original_stage(target, *args)
+        wait(target)
+        return temporary
+
+    def blocked_replace(source, target):
+        wait(target)
+        return original_replace(source, target)
+
+    if phase == "stage":
+        monkeypatch.setattr(workspace_files, "_stage_bytes", blocked_stage)
+    else:
+        monkeypatch.setattr(workspace_files.os, "replace", blocked_replace)
+    with ThreadPoolExecutor(max_workers=2) as executor:
+
+        def submit(_owner, work, on_done, *, on_error):
+            def run():
+                try:
+                    result = work()
+                except Exception as error:
+                    callbacks.put(partial(on_error, error))
+                else:
+                    callbacks.put(partial(on_done, result))
+
+            executor.submit(run)
+
+        monkeypatch.setattr(recovery_ui, "run_bg", submit)
+        try:
+            owner._recovery.tick()
+            callbacks.get(timeout=5)()
+            assert ready.wait(timeout=5)
+            for number in range(5):
+                owner.focuses[1].desc = str(number)
+                owner.focuses.mark_content_changed()
+                owner._recovery.tick()
+                callbacks.get(timeout=5)()
+                assert read_project(primary).focuses[1].desc == str(number)
+            owner._recovery.tick()
+            assert captures.call_count == 6
+            assert callbacks.empty()
+        finally:
+            release.set()
+        callbacks.get(timeout=5)()
+        callbacks.get(timeout=5)()
+    assert sibling.read_bytes() == primary.read_bytes()
+    assert not owner._recovery.busy
+
+
+def test_invalidation_discards_queued_sibling_and_staged_old_write(dispatch):
+    owner, tasks, _, primary = dispatch
+    owner._recovery.tick()
+    _finish_one(tasks)
+    sibling_task = tasks.pop(0)
+    owner.focuses[1].desc = "latest"
+    owner.focuses.mark_content_changed()
+    owner._recovery.tick()
+    _finish_one(tasks)
+    assert tasks == []
+    owner._recovery.invalidate()
+    clear_workspace_autosave(str(primary))
+    clear_workspace_autosave(str(primary.with_name("project.autosave.json")))
+    tasks.append(sibling_task)
+    assert _finish_one(tasks).cancelled
+    assert tasks == []
+    assert not primary.exists()
+    assert not primary.with_name("project.autosave.json").exists()
     assert not owner._recovery.busy
 
 
