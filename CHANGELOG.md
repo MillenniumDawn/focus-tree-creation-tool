@@ -22,7 +22,8 @@ the version by hand. See `AGENTS.md`.
   release each decision window's preview cache when that window is destroyed.
 
 - Keep unrelated focus sidebar edits when a cost is non-finite, and highlight
-  invalid `ai_will_do` input until it is corrected.
+  invalid `ai_will_do` input until it is corrected. Refresh validation borders
+  when switching focuses so they match the displayed values.
 
 - Import focus trees containing non-finite `ai_will_do` values (`inf`,
   `-inf`, `1e999`, `-1e999`) instead of aborting the load: the field falls
