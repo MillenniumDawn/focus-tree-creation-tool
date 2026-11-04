@@ -24,6 +24,7 @@ the version by hand. See `AGENTS.md`.
 - Reduce blocking during changed recovery saves with compact snapshots and
   background atomic writes. Cancel older writes before manual save, document
   replacement, restore dismissal, or shutdown can leave stale recovery data.
+  Keep primary recovery saves running when the sibling destination stalls.
 
 - Import focus trees containing non-finite `ai_will_do` values (`inf`,
   `-inf`, `1e999`, `-1e999`) instead of aborting the load: the field falls

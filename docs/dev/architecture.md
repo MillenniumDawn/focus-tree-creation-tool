@@ -336,12 +336,15 @@ controller cancels its pending timer and poll when the App lifecycle closes.
 
 `ui/recovery.py` owns the App's recovery scheduling and error streaks. It captures
 one immutable UTF-8 snapshot on Tk, dispatches file work through `run_bg`, and
-coalesces ticks during that work into one latest-state follow-up. Its successful
+coalesces ticks during primary writes into one latest-state follow-up. The sibling
+writer runs independently, retaining at most one running and one latest pending
+snapshot, so a stalled sibling cannot starve primary saves. The successful primary
 token holds detached metadata and document identity/revision, not another focus
 snapshot. Completion does not change the manual-save dirty state.
 
 `editor/recovery.py` stages each destination through `WorkspaceFiles.stage_bytes`.
-Staging and fsync run outside the commit gate; only atomic replacement is locked.
+Staging and fsync run outside the commit gates; each destination locks only its
+own atomic replacement, so a blocked sibling replacement cannot block primary writes.
 Manual save, document replacement, declined restore, and shutdown invalidate the
 generation before recovery is cleared or abandoned. A staged older write then
 cannot recreate a cleared file. Primary and sibling destinations share identical

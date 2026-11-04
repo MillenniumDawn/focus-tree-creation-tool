@@ -11,19 +11,22 @@ measurements on an isolated display, not presented-frame latency.
 `ui/recovery.py` owns the App's recovery controller. It captures compact project
 JSON and encodes UTF-8 on Tk, then sends only immutable bytes, paths, and a commit
 generation to the worker. The worker never reads live focuses or widgets. One
-snapshot runs at a time; repeated ticks retain one pending flag, not a queue of
-snapshots. A follow-up captures the latest state only after the worker finishes.
+primary write runs at a time; repeated ticks retain one pending flag. After each
+primary success, a separate sibling writer receives those same bytes. While that
+writer is busy, only its latest pending snapshot is retained. Primary saves keep
+running even if sibling staging or replacement stalls.
 
-The successful token retains document identity, content revision, detached
-metadata, and targets. Unchanged successful pairs skip capture while both files
-exist. A partial failure invalidates the token and retries the complete pair,
-even after a metadata revert. Primary and sibling failures still have separate,
+The successful primary token retains document identity, content revision, detached
+metadata, and targets. Unchanged snapshots skip capture while the primary exists
+and the sibling exists or is pending. A partial failure invalidates the token and
+retries the complete pair, even after a metadata revert. Primary and sibling
+failures still have separate,
 deduplicated error reporting. Completion never marks the manual-save state clean.
 
 `WorkspaceFiles.stage_bytes` stages and fsyncs outside the commit gate. Only the
-final replacement is guarded. Manual save, document replacement, declined
-restore, and shutdown advance the gate before clearing or abandoning recovery
-state. An older staged write cannot replace a cleared file afterward. This avoids
+final replacement is guarded, with an independent gate per destination. Manual
+save, document replacement, declined restore, and shutdown advance both gates
+before clearing or abandoning recovery state. An older staged write cannot replace a cleared file afterward. This avoids
 waiting for a worker's fsync on Tk when invalidating it. Each destination retains
 atomic replacement and both successful destinations use the same bytes.
 
@@ -63,8 +66,11 @@ The largest observed interval across the pair samples was 338.86 ms before and
 
 Separate tracemalloc samples peaked at 201.08 MB before and 211.69 MB after,
 a 5.3% increase in traced Python allocations, not process RSS. The pipeline is
-bounded to one owned byte snapshot plus metadata. Recovery files were 57.48 MB
-before and 41.85 MB after; smaller output alone is not evidence of lower latency.
+bounded to one owned byte snapshot plus metadata in these measurements. The
+independent sibling follow-up can now retain up to three byte snapshots during
+an overlapping primary write. That overlap has not been remeasured. Recovery
+files were 57.48 MB before and 41.85 MB after; smaller output alone is not
+evidence of lower latency.
 Every sample checked decoded project equality and identical primary/sibling bytes.
 
 Earlier backing-disk runs had multi-second write outliers in both arms, including
