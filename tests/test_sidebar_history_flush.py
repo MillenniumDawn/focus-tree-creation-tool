@@ -6,7 +6,8 @@ clear the redo trail — including on freshly imported focuses whose ai_will_do
 blocks hold duplicate, nested, or negative factors.
 """
 
-from typing import Any
+from dataclasses import replace
+from typing import Any, cast
 from unittest.mock import Mock
 
 import pytest
@@ -100,6 +101,8 @@ class _SidebarApp:
     _refresh_prereqs: Mock
     _refresh_mutex: Mock
     _refresh_effects: Mock
+    _fv_gfx: Mock
+    _redraw_now: Mock
 
     def __init__(self, focus: Focus) -> None:
         self.focuses = FocusDocument([focus])
@@ -214,6 +217,34 @@ def test_undo_flushes_pending_sidebar_edit_so_it_stays_undoable():
     result = app._undo_stack.undo(app.focuses, Focus.from_dict)
     assert result is not None and result[0] == "edit focus"
     assert app.focuses[focus.id].desc == "old"
+
+
+def test_gfx_pick_undoes_before_pending_sidebar_name_edit():
+    focus = make_focus(name="original", gfx="GFX_A")
+    app = _app(focus)
+    app._pending_values = replace(app._read_sidebar_values(), name="renamed")
+
+    def set_gfx(name):
+        app._pending_values = replace(app._read_sidebar_values(), gfx=name)
+
+    app._fv_gfx = Mock()
+    app._fv_gfx.set.side_effect = set_gfx
+    app._redraw_now = Mock()
+
+    m.App._set_gfx(cast(m.App, app), "GFX_B")
+    app._undo()
+
+    assert (app.selected.name, app.selected.gfx) == ("renamed", "GFX_A")
+    app._undo()
+    assert (app.selected.name, app.selected.gfx) == ("original", "GFX_A")
+    app._redo()
+    assert (app.selected.name, app.selected.gfx) == ("renamed", "GFX_A")
+    app._redo()
+    assert (app.selected.name, app.selected.gfx) == ("renamed", "GFX_B")
+    assert [entry[0] for entry in app._undo_stack._stack] == [
+        "edit focus",
+        "change gfx",
+    ]
 
 
 def test_redo_does_not_replay_stale_redo_across_a_fresh_pending_edit():

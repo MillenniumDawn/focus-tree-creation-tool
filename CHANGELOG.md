@@ -23,8 +23,9 @@ the version by hand. See `AGENTS.md`.
 
 - Make a pick in the Focus Icon GFX browser undoable: confirming a pick that
   changes the GFX now pushes a `change gfx` undo entry before writing, so
-  Ctrl+Z reverts it and Ctrl+Y reapplies it. Picking the current value still
-  changes nothing.
+  Ctrl+Z reverts it and Ctrl+Y reapplies it. Save pending sidebar edits first
+  so Undo reverses the GFX pick before those earlier edits. Picking the current
+  value adds no GFX history entry.
 
 - Import focus trees containing non-finite `ai_will_do` values (`inf`,
   `-inf`, `1e999`, `-1e999`) instead of aborting the load: the field falls

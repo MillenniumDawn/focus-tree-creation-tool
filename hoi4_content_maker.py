@@ -2349,6 +2349,8 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         return var
 
     def _set_gfx(self, name):
+        if self.selected:
+            self._autosave()
         self._fv_gfx.set(name)
         if self.selected and self.selected.gfx != name:
             self._push_undo("change gfx", touched_ids=(self.selected.id,))
@@ -5400,9 +5402,9 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
                     add_error(f"Write failed: {result.plan.focus_path}: {result.error}")
                 continue
             if result.plan.extra_tree_idx is not None:
-                self._extra_trees[result.plan.extra_tree_idx - 1]["file_path"] = (
-                    result.plan.focus_path
-                )
+                self._extra_trees[result.plan.extra_tree_idx - 1][
+                    "file_path"
+                ] = result.plan.focus_path
             if self.index.loaded and self.index.root:
                 for path in result.written_paths:
                     self.note_mod_file_written(path)
@@ -6452,9 +6454,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             sev_icon = (
                 "🔴"
                 if it.severity == "error"
-                else "🟡"
-                if it.severity == "warning"
-                else "🔵"
+                else "🟡" if it.severity == "warning" else "🔵"
             )
             focus_txt = it.focus_name or "—"
             tree.insert(

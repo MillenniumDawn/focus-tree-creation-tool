@@ -836,6 +836,7 @@ def _gfx_app(focus: Focus) -> AppFake:
     app = _live_undo_app(focus)
     host = cast(Any, app)
     host._redraw_now = Mock()
+    host._autosave = Mock()
     host._fv_gfx = Mock()
     return app
 
