@@ -268,8 +268,14 @@ class ModIndex:
         target = Path(path).resolve()
         if target.suffix != ".txt" or not target.is_relative_to(root):
             return
-        directory = target.parent.relative_to(root).as_posix()
-        spec = _SCRIPT_DIRECTORIES.get(directory)
+        spec = next(
+            (
+                spec
+                for folder, spec in _SCRIPT_DIRECTORIES.items()
+                if (root / folder).resolve() == target.parent
+            ),
+            None,
+        )
         if spec is None:
             return
         domain, attr, extractor = spec
@@ -292,12 +298,16 @@ class ModIndex:
             except (ValueError, TypeError, RuntimeError, OSError) as exc:
                 _log.warning("could not parse %s: %s", filename, exc)
                 return
-        paths = [
-            filename
+        directories = [
+            (root / folder).resolve()
             for folder, (other_domain, _, _) in _SCRIPT_DIRECTORIES.items()
             if other_domain == domain
+        ]
+        paths = [
+            filename
+            for directory in directories
             for filename in sorted(contributions)
-            if Path(filename).parent == root / folder
+            if Path(filename).parent == directory
         ]
         if domain == "focus":
             self.focus_ids = list(

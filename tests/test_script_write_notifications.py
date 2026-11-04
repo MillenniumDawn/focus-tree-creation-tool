@@ -42,12 +42,22 @@ def isolated_cache(tmp_path, monkeypatch):
         ),
     ],
 )
+@pytest.mark.parametrize("symlink_domain", [False, True])
 def test_saved_ids_replace_one_contributor_and_refresh_suggestions(
-    tmp_path, monkeypatch, folder, source, attr, effect, field
+    tmp_path, monkeypatch, folder, source, attr, effect, field, symlink_domain
 ):
     root = tmp_path / "mod"
     directory = root / folder
-    directory.mkdir(parents=True)
+    if symlink_domain:
+        shared = root / "shared"
+        shared.mkdir(parents=True)
+        directory.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            directory.symlink_to(shared, target_is_directory=True)
+        except OSError:
+            pytest.skip("directory symlinks are unavailable")
+    else:
+        directory.mkdir(parents=True)
     target = directory / "a.txt"
     target.write_text(source % "old.1")
     (directory / "b.txt").write_text(source % "shared.1")
@@ -70,7 +80,7 @@ def test_saved_ids_replace_one_contributor_and_refresh_suggestions(
     assert suggestions() == ["new.1", "shared.1"]
     writer.write_text(target, "", encoding="utf-8")
     assert suggestions() == ["shared.1"]
-    assert reads == [str(target), str(target)]
+    assert reads == [str(target.resolve()), str(target.resolve())]
 
     fresh = ModIndex()
     fresh.scan(str(root), ScanSettings(use_cache=False))
@@ -95,10 +105,23 @@ def test_save_after_scan_through_symlinked_root_replaces_contribution(tmp_path):
 
 
 @pytest.mark.parametrize("cache_enabled", [True, False])
-def test_save_invalidates_same_stamp_persistent_contribution(tmp_path, cache_enabled):
+@pytest.mark.parametrize("symlink_domain", [False, True])
+def test_save_invalidates_same_stamp_persistent_contribution(
+    tmp_path, cache_enabled, symlink_domain
+):
     root = tmp_path / "mod"
-    target = root / "common" / "characters" / "a.txt"
-    target.parent.mkdir(parents=True)
+    directory = root / "common" / "characters"
+    if symlink_domain:
+        shared = root / "shared"
+        shared.mkdir(parents=True)
+        directory.parent.mkdir(parents=True)
+        try:
+            directory.symlink_to(shared, target_is_directory=True)
+        except OSError:
+            pytest.skip("directory symlinks are unavailable")
+    else:
+        directory.mkdir(parents=True)
+    target = directory / "a.txt"
     target.write_text("characters = { FIRST = {} }")
     stamp = target.stat()
     candidate = ModIndex()
