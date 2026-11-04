@@ -4,8 +4,8 @@ import os
 
 import pytest
 
-from hoi4cm.mod import ModContext
 from hoi4cm.mod import scan_cache as scan_cache_mod
+from hoi4cm.mod.index import ModIndex
 from hoi4cm.ui.effects_panel import _augment_character_suggestions
 
 
@@ -33,7 +33,7 @@ def test_extract_characters_returns_only_direct_root_keys():
     }
     """
 
-    assert ModContext._extract_characters(source) == ["ALICE", "BOB"]
+    assert ModIndex._extract_characters(source) == ["ALICE", "BOB"]
 
 
 def test_scan_characters_deduplicates_in_file_order_and_resets(tmp_path):
@@ -41,7 +41,7 @@ def test_scan_characters_deduplicates_in_file_order_and_resets(tmp_path):
     characters_dir.mkdir(parents=True)
     (characters_dir / "a.txt").write_text("characters = { ALPHA = { } SHARED = { } }")
     (characters_dir / "b.txt").write_text("characters = { SHARED = { } BETA = { } }")
-    context = ModContext()
+    context = ModIndex()
     context.character_ids = ["STALE"]
 
     context.scan(str(tmp_path))
@@ -58,7 +58,7 @@ def test_scan_characters_uses_file_cache(tmp_path, monkeypatch):
     characters_dir.mkdir(parents=True)
     character_file = characters_dir / "characters.txt"
     character_file.write_text("characters = { ALPHA = { } }")
-    context = ModContext()
+    context = ModIndex()
     context.scan(str(tmp_path))
 
     reads = []

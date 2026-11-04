@@ -1,10 +1,14 @@
 import os
 from pathlib import Path
 
+import pytest
+
 from hoi4cm.mod.graphics_catalog import AssetRef, FileStamp
+from hoi4cm.ui import gfx_browser
 from hoi4cm.ui.gfx_browser import (
     _catalog_folder_groups,
     _catalog_image_paths,
+    _filesystem_image_pairs,
     _pairs_from_paths,
     _uncatalogued_custom_groups,
 )
@@ -76,6 +80,61 @@ def test_pairs_from_paths_preserves_first_stem_after_sorting(tmp_path):
     assert pairs == [
         ("GFX_other", str(tmp_path / "a" / "other.tga")),
         ("GFX_same", str(tmp_path / "a" / "same.dds")),
+    ]
+
+
+@pytest.mark.parametrize("error_type", [PermissionError, FileNotFoundError])
+def test_flat_folder_browser_reports_unreadable_folder(
+    tmp_path, monkeypatch, error_type
+):
+    error = error_type(13, "cannot read folder", str(tmp_path))
+    reports = []
+    window = object()
+
+    def fail_listdir(_folder):
+        raise error
+
+    def report(message, exc, *, parent):
+        reports.append((message, exc, parent))
+
+    monkeypatch.setattr(gfx_browser.os, "listdir", fail_listdir)
+    monkeypatch.setattr(gfx_browser, "report_error", report)
+
+    gfx_browser._browse_flat_folder(window, str(tmp_path), lambda _key: None, "")
+
+    assert reports == [(str(error), error, window)]
+
+
+def test_filesystem_image_pairs_searches_filenames_and_folders(tmp_path):
+    nested = tmp_path / "needle-folder"
+    nested.mkdir()
+    paths = (
+        tmp_path / "needle.tga",
+        nested / "other.PNG",
+        tmp_path / "ignored.dds",
+        nested / "ignored.jpg",
+    )
+    for path in paths:
+        path.touch()
+
+    assert _filesystem_image_pairs(str(tmp_path), "GFX_", search=" NEEDLE ") == [
+        ("GFX_other", str(paths[1])),
+        ("GFX_needle", str(paths[0])),
+    ]
+
+
+def test_filesystem_image_pairs_keeps_lowercase_filter_before_casefold(tmp_path):
+    (tmp_path / "Straße.png").touch()
+
+    assert _filesystem_image_pairs(str(tmp_path), "GFX_", search="STRASSE") == []
+
+
+def test_filesystem_image_pairs_deduplicates_stems_after_sorting(tmp_path):
+    for name in ("same.PNG", "same.dds"):
+        (tmp_path / name).touch()
+
+    assert _filesystem_image_pairs(str(tmp_path), "GFX_") == [
+        ("GFX_same", str(tmp_path / "same.dds"))
     ]
 
 

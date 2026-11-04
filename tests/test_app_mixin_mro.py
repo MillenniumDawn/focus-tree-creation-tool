@@ -36,5 +36,7 @@ def test_app_initializer_reaches_tk_before_ui_setup(monkeypatch) -> None:
 
     assert tk_initializations == [True]
     assert app._extra_trees == []
-    assert app._grid_on is True
+    # Canvas-owned state moved to the shared initializer (#167); App-owned
+    # attributes are what this bootstrap test pins before _build_ui.
+    assert app._canvas_min == [0, 0]
     assert Protocol not in app_module.App.__mro__

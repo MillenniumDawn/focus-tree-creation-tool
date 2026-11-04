@@ -32,7 +32,7 @@ if not os.environ.get("DISPLAY"):
 sys.path[:0] = [args.repo + "/src", args.repo + "/tests"]
 import tkinter as tk  # noqa: E402
 
-from ui_fakes import AppFake  # noqa: E402
+from ui_fakes import AppFake  # noqa: E402  (runtime: tests/ on sys.path above)
 
 from hoi4cm.models import Focus  # noqa: E402
 
@@ -44,6 +44,11 @@ def rss_bytes():
     return None
 
 
+def tcl_commands(cv: tk.Canvas) -> set[str]:
+    """tk.Canvas._tclCommands is a private Tk attribute (not in stubs)."""
+    return set(getattr(cv, "_tclCommands", None) or ())
+
+
 def run(cleanup):
     root = tk.Tk()
     root.withdraw()
@@ -53,25 +58,24 @@ def run(cleanup):
         focus.name = f"TEST_{i}"
     app = AppFake(focuses, cv=cv)
     rect = (-1, -1, args.focuses + 1, 3)
-    app._canvas_runtime()
     gc.collect()
     if args.memory:
         tracemalloc.start()
     baseline_rss = rss_bytes()
     rows = []
     times = []
-    baseline_commands = set(cv._tclCommands or ())
+    baseline_commands = tcl_commands(cv)
     for cycle in range(args.rounds + 1):
         if cycle:
             started = time.perf_counter_ns()
-            before = set(cv._tclCommands or ()) if cleanup else set()
+            before = tcl_commands(cv) if cleanup else set()
             for focus in focuses:
                 app._draw_focus(focus, rect)
             bundles = len(app._focus_bundles)
             item_count_before_reclaim = len(cv.find_all())
             app._reclaim_focus_bundles(set())
             if cleanup:
-                for command in set(cv._tclCommands or ()) - before:
+                for command in tcl_commands(cv) - before:
                     cv.deletecommand(command)
             times.append((time.perf_counter_ns() - started) / 1e6)
             assert bundles == args.focuses and not app._focus_bundles
@@ -80,7 +84,7 @@ def run(cleanup):
             item_count_before_reclaim = 1
         if cycle in {0, 1, 5, 10, 20, args.rounds}:
             gc.collect()
-            commands = tuple(cv._tclCommands or ())
+            commands = tuple(tcl_commands(cv))
             actual = sum(bool(cv.tk.call("info", "commands", cmd)) for cmd in commands)
             current, peak = (
                 tracemalloc.get_traced_memory() if args.memory else (None, None)
@@ -103,7 +107,7 @@ def run(cleanup):
         samples=rows,
         cycle_times_ms=times,
         cycle_median_ms=statistics.median(times),
-        callback_increase=len(cv._tclCommands or ()) - len(baseline_commands),
+        callback_increase=len(tcl_commands(cv)) - len(baseline_commands),
     )
     root.destroy()
     del app, cv, root

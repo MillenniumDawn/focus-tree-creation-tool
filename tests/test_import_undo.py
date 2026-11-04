@@ -8,11 +8,13 @@ import pytest
 
 import hoi4_content_maker as m
 from hoi4cm.core.undo import UndoStack
+from hoi4cm.editor.extra_tree_undo import ExtraTreeUndoHistory
+from hoi4cm.mod.index import ModIndex
 from hoi4cm.models import Focus, FocusDocument
 
 
 class _Var:
-    def __init__(self, value=""):
+    def __init__(self, value: str = "") -> None:
         self.value = value
 
     def set(self, value):
@@ -50,11 +52,15 @@ def test_import_txt_pushes_undo_before_replacing_document(
     new_focus = Focus(id=2)
     new_focus.name = "imported_focus"
     app = SimpleNamespace(
+        index=ModIndex(),
+        edit_focus_file="",
         _confirm_discard=Mock(return_value=True),
         _begin_document_generation=Mock(),
         _import_generation=0,
         focuses=FocusDocument([old_focus]),
         _undo_stack=UndoStack(),
+        _tree_undo_history=ExtraTreeUndoHistory(),
+        _snapshot_extra_tree_state=Mock(return_value=None),
         _extra_trees=[{"tree_id": "existing_shared"}],
         cv=Mock(),
         _reset_canvas_bounds=Mock(),
@@ -115,9 +121,6 @@ def test_import_txt_pushes_undo_before_replacing_document(
         lambda *_args, **_kwargs: SimpleNamespace(close=Mock()),
     )
     monkeypatch.setattr(m.messagebox, "showinfo", Mock())
-    monkeypatch.setattr(m.MOD, "loaded", False)
-    monkeypatch.setattr(m.MOD, "root", None)
-    monkeypatch.setattr(m.MOD, "edit_focus_file", "", raising=False)
 
     if from_explorer:
         monkeypatch.setattr(

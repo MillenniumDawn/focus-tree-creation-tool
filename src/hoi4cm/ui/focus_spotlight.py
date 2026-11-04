@@ -10,7 +10,6 @@ from tkinter import font as tkfont
 from typing import Any
 
 from hoi4cm.core.i18n import tr
-from hoi4cm.mod import MOD
 from hoi4cm.ui.image_broker import ImageTransform
 
 TRANSPARENT = "#010203"
@@ -428,10 +427,9 @@ class FocusSpotlight:
         self._art_size = size
         focus = self.app.focuses[self.focus_id]
         broker = self.app._image_broker
+        catalog = self.app.index.graphics_catalog
         asset = (
-            MOD.graphics_catalog.resolve(focus.gfx)
-            if MOD.loaded and focus.gfx
-            else None
+            catalog.resolve(focus.gfx) if self.app.index.loaded and focus.gfx else None
         )
         if asset is None or broker is None:
             return
@@ -447,7 +445,7 @@ class FocusSpotlight:
 
         image = broker.request(
             asset,
-            MOD.graphics_catalog.path_for(asset),
+            catalog.path_for(asset),
             transform=ImageTransform(size=size, preserve_aspect=True),
             owner=self._owner,
             callback=ready,

@@ -10,7 +10,7 @@ from typing import Any, cast
 import pytest
 from ui_fakes import AppFake
 
-from hoi4cm.mod.context import ModContext
+from hoi4cm.mod.index import ModIndex
 from hoi4cm.ui import mod_loading, tasks
 from hoi4cm.ui.lifecycle import ApplicationLifecycle
 
@@ -49,11 +49,7 @@ def test_mod_load_finalizes_images_on_tk(
     resume = threading.Event()
     futures = []
     app = AppFake()
-    mod = ModContext()
-    mod.use_cache = False
-    mod._recent_mods = []
-    monkeypatch.setattr(mod, "save_config", lambda: True)
-    monkeypatch.setattr(mod_loading, "MOD", mod)
+    app.index.use_cache = False
     monkeypatch.setattr(
         mod_loading.filedialog, "askdirectory", lambda **_kw: str(tmp_path)
     )
@@ -62,19 +58,20 @@ def test_mod_load_finalizes_images_on_tk(
         def __del__(self):
             finalized_on.append(threading.get_ident())
 
-    mod.sprite_imgs["old"] = TrackedImage()
-    original_scan = ModContext.scan
+    app.images.images["old"] = TrackedImage()
+    original_scan = ModIndex.scan
 
-    def blocked_scan(context, root, **kwargs):
+    def blocked_scan(index, root, settings, **kwargs):
         assert threading.get_ident() != main_thread
-        result = original_scan(context, root, **kwargs)
+        assert not hasattr(index, "get_image")
+        result = original_scan(index, root, settings, **kwargs)
         scanned.set()
         assert resume.wait(5)
         if failing:
             raise ValueError("scan failed")
         return result
 
-    monkeypatch.setattr(ModContext, "scan", blocked_scan)
+    monkeypatch.setattr(ModIndex, "scan", blocked_scan)
     original_run_bg = tasks.run_bg
 
     def capture_job(*args, **kwargs):
@@ -117,7 +114,7 @@ def test_mod_load_finalizes_images_on_tk(
                 app.flush()
                 assert app.loaded_roots == ([] if failing else [str(tmp_path)])
                 if failing:
-                    assert mod.sprite_imgs.get("old") is not None
+                    assert app.images.images.get("old") is not None
                     assert finalized_on == []
                 else:
                     assert finalized_on == [main_thread]

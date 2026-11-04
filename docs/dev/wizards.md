@@ -15,7 +15,7 @@
 The Character Editor uses `character_codec.py`, a pure ordered script codec.
 It retains repeated keys in their original order, including multiple role and
 portrait blocks, and leaves unrecognized assignments in place. The dialog
-reuses `MOD.character_ids` from the common/characters scanner, offers role,
+reuses `app.index.character_ids` from the common/characters scanner, offers role,
 trait, and portrait insertion helpers, and saves through
 `notifying_workspace_files`. Its script editor remains available for
 version-specific character fields the UI does not model.
@@ -31,12 +31,16 @@ second copy.
 State that used to be plain module-level globals in the monolith's
 Tk-handling block, plus the picker popups shared across wizards:
 
-- `_app_img_caches`: a registry list every wizard appends its own image
-  caches to, so the App can clear all of them in one place on mod reload
-  instead of reaching into each wizard module individually.
-- `_ev_gfx_cache` / `_ev_imgsize_cache`: the event wizard's gfx-name to
-  path and path to (width, height) caches, registered into
-  `_app_img_caches` at import time.
+- `WizardImageCaches`: the image caches one App instance owns (#349 moved
+  the mod state the same way). `event_gfx` and `event_imgsize` serve the
+  event wizard for the App's lifetime; the decision wizard registers each
+  window's preview dict through `register_window_cache` and releases it with
+  `release_window_cache` when the window is destroyed, so closed windows stop
+  keeping PhotoImages alive and repeated opens do not grow any retained
+  registry. `clear()` invalidates everything on mod reload while keeping
+  open windows' registrations. The monolith owns one instance as
+  `App.wiz_img_caches`; `ui/mod_loading.py` and the lifecycle-clear path
+  call `wiz_img_caches.clear()` instead of reaching into wizard modules.
 - `_LOC_KEY_RE`: a pre-compiled regex the additional-income wizard uses to
   pull a localisation key out of a quoted HOI4 string.
 - `open_effect_picker(parent, target_text, on_insert=None)`: the popup
@@ -57,9 +61,10 @@ Tk-handling block, plus the picker popups shared across wizards:
 - `render_script_snippet(key, definition, values, *, is_trigger=False)`:
   renders one catalogue entry's script text from its field values, no Tk
   (`is_trigger=True` switches to the trigger insertion shapes).
-- `notifying_workspace_files(MOD, mod_root)`: the `WorkspaceFiles` factory
-  the wizards save through, with the `on_written` hook that pokes the
-  graphics catalog (see `architecture.md`'s "Writing mod files").
+- `notifying_workspace_files(index, mod_root, on_written=None)`: the
+  `WorkspaceFiles` factory the wizards save through. UI callers pass
+  `app.note_mod_file_written` to update the catalog and evict stale Tk
+  images (see `architecture.md`'s "Writing mod files").
 - `svar_get(var, default)`: safe variable read — coerces to `str` and
   returns `default` when the variable is missing or its read raises.
 - `make_scrolled_listbox(parent, **options)` and
@@ -74,8 +79,8 @@ its own folder list and key prefix. The decision wizard uses
 `open_universal_gfx_browser`.
 
 Pulling these into one module keeps the wizards free of cross-wizard
-coupling (no wizard imports another wizard's globals directly) while still
-giving the App a single invalidation point.
+coupling (no wizard imports another wizard's globals directly) while
+still giving the App a single invalidation point.
 
 ## Verbatim-extraction convention
 
@@ -156,8 +161,10 @@ overwrite question, then calls one function with plain values:
 - dynamic modifier: `save_dyn_mod`
 - decision: `save_decisions`
 
-The functions take the mod context as an argument, so a test passes a fresh
-`ModContext()` and a `tmp_path` tree. `tests/test_wizard_saves.py` pins what
+The functions take the index, config, edit-target owner, and an optional
+write callback explicitly. A test supplies a fresh `ModIndex`, `AppConfig`,
+a plain edit-target object, and a `tmp_path` tree.
+`tests/test_wizard_saves.py` pins what
 matters for user data: an existing file keeps its bytes, its encoding (one
 BOM) and its newline style; an ID or localisation key already in the file is
 skipped; an unreadable or missing selected file is reported and left alone.

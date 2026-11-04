@@ -1,8 +1,9 @@
 """Key drift guard for the UI translations (issue #21).
 
 ``tr(key, default)`` falls back to the inline English default, so a key that is
-missing from ``locales/en.json`` never fails at run time. These tests read the
-``tr()`` calls out of the source and compare them with the locale files.
+missing from ``locales/en.json``, or a default that differs from it, changes
+the text when the locale fails to load. These tests read the ``tr()`` calls
+out of the source and compare them with the locale files.
 """
 
 from __future__ import annotations
@@ -14,19 +15,16 @@ from collections import Counter
 from collections.abc import Iterator
 from functools import cache
 from pathlib import Path
+from typing import TypeGuard
 
 import pytest
+from source_scan import ROOT, SOURCE_PATHS, source_calls
 
 from hoi4cm.ui import tutorial as tutorial_mod
 from hoi4cm.ui.undo_labels import UNDO_LABEL_KEYS
 
-ROOT = Path(__file__).parents[1]
 ENGLISH_PATH = ROOT / "locales" / "en.json"
 LOCALE_PATHS = sorted((ROOT / "locales").glob("*.json"))
-SOURCE_PATHS = [
-    *sorted((ROOT / "src" / "hoi4cm").rglob("*.py")),
-    ROOT / "hoi4_content_maker.py",
-]
 _PLACEHOLDER_RE = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}")
 
 _PICKERS = ("effect", "trigger")
@@ -75,8 +73,8 @@ def _strings(path: Path) -> dict[str, str]:
 
 
 def _tr_calls(path: Path) -> Iterator[ast.Call]:
-    for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
-        if not isinstance(node, ast.Call) or not node.args:
+    for node in source_calls(path):
+        if not node.args:
             continue
         func = node.func
         if (isinstance(func, ast.Name) and func.id == "tr") or (
@@ -167,6 +165,60 @@ def test_every_literal_tr_key_is_in_the_english_locale():
     )
 
     assert missing == []
+
+
+def test_literal_tr_defaults_match_english_locale():
+    """A string-literal default must equal the English value for its key."""
+    english = _strings(ENGLISH_PATH)
+    mismatches = []
+    for path in SOURCE_PATHS:
+        rel = path.relative_to(ROOT).as_posix()
+        for call in _tr_calls(path):
+            if len(call.args) < 2:
+                continue
+            keys = _literal_keys(call.args[0])
+            default = call.args[1]
+            if (
+                keys is None
+                or not isinstance(default, ast.Constant)
+                or not isinstance(default.value, str)
+            ):
+                continue
+            for key in keys:
+                expected = english.get(key)
+                if expected != default.value:
+                    mismatches.append(
+                        f"{rel}:{call.lineno} {key}: "
+                        f"{default.value!r} != {expected!r}"
+                    )
+
+    assert mismatches == []
+
+
+def _is_literal_file_filter(node: ast.AST) -> TypeGuard[ast.Tuple]:
+    """A ``("label", "*.ext")`` pair whose label is a bare string."""
+    if not isinstance(node, ast.Tuple) or len(node.elts) != 2:
+        return False
+    label, pattern = node.elts
+    return (
+        isinstance(label, ast.Constant)
+        and isinstance(label.value, str)
+        and isinstance(pattern, ast.Constant)
+        and isinstance(pattern.value, str)
+        and pattern.value.startswith("*")
+    )
+
+
+def test_file_dialog_filter_labels_go_through_tr():
+    """Tk shows a file-type filter's label, so it must be translated."""
+    untranslated = [
+        f"{path.relative_to(ROOT).as_posix()}:{node.lineno}"
+        for path in SOURCE_PATHS
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
+        if _is_literal_file_filter(node)
+    ]
+
+    assert untranslated == []
 
 
 def test_dynamic_tr_calls_are_all_declared():

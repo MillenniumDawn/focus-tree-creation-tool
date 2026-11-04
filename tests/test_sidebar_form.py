@@ -9,17 +9,23 @@ from unittest.mock import patch
 import pytest
 from builders import make_focus
 
+from hoi4cm.focus_tree.build import build_focuses
 from hoi4cm.focus_tree.codec import render_focus_block
+from hoi4cm.focus_tree.loc import hydrate_focus_localization
 from hoi4cm.focus_tree.operations import build_focus_name_lookup
+from hoi4cm.focus_tree.parse import parse_focus_tree
 from hoi4cm.models import (
     Focus,
     FocusDocument,
     FocusSidebarValues,
     apply_sidebar_values,
+    form_focus_id,
     parse_ai_will_do,
     parse_focus_cost,
     sidebar_values_match_focus,
 )
+from hoi4cm.script import dict_to_raw
+from hoi4cm.script.syntax import parse_script
 
 
 def _values(focus=None, **overrides):
@@ -55,12 +61,62 @@ def _values(focus=None, **overrides):
         ("base = 3", 3),
         ("factor = 2.5", 2),
         ("base = 1.9", 1),
-        ("modifier = {\n\tfactor = 2\n}", 2),
         ("", 1),
-        ("base = 4\nfactor = 9", 4),
+        # Import reads the parsed dict factor-first, not base-first.
+        ("base = 4\n\tfactor = 9", 9),
+        # A factor only nested inside a modifier block is not the top value.
+        ("modifier = {\n\tfactor = 2\n}", 1),
+        ("modifier = { factor = 100 }\nbase = 3", 3),
+        # Negatives and fractions survive like build()'s int(float(...)).
+        ("base = -2", -2),
+        ("factor = -1.5", -1),
+        ("base = +3", 3),
+        # Comments and quoted strings never count as assignments.
+        ("# factor = 9\nbase = 2", 2),
+        ('base = "5"', 5),
+        # A key assigned a whole block falls back to 1, like import.
+        ("factor = { modifier = { factor = 100 } }", 1),
+        # Identifiers merely containing the key are not assignments.
+        ("ai_factor = 6\nbase = 4", 4),
+        ("factorial = 2\nbase = 4", 4),
+        # Duplicated keys parse as lists and fall back to 1, like import.
+        ("factor = 2\nfactor = 3", 1),
+        ("base = 2\nbase = 3", 1),
+        # Inline comments end at the value.
+        ("factor = 3# comment\nbase = 2", 3),
+        # Infinite float tokens are not int()-able and fall back to 1.
+        ("factor = inf", 1),
+        ("base = -inf", 1),
+        ("factor = 1e999", 1),
+        ("base = -1e999", 1),
     ],
 )
-def test_parse_ai_will_do_accepts_base_or_factor(raw, expected):
+def test_parse_ai_will_do_matches_import_semantics(raw, expected):
+    assert parse_ai_will_do(raw) == expected
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        # Paradox strings carry no escapes, so the quoted text ends at the
+        # first closing quote and what follows parses as script.
+        'note = "escaped \\" factor = 9 rest"\nbase = 2',
+        "factor = 2\nfactor = 3",
+        "base = 2\nbase = 3",
+        "factor = 3# comment\nbase = 2",
+    ],
+)
+def test_parse_ai_will_do_agrees_with_the_script_parser(raw):
+    """The sidebar read reuses parse_script, not homemade token rules."""
+    parsed = parse_script(raw)
+    value = parsed.get("factor", parsed.get("base", 1))
+    if not isinstance(value, str | int | float):
+        expected = 1
+    else:
+        try:
+            expected = int(float(value))
+        except ValueError:
+            expected = 1
     assert parse_ai_will_do(raw) == expected
 
 
@@ -82,6 +138,63 @@ def test_parse_focus_cost_keeps_fractions_and_normalizes_whole_numbers(raw, expe
 def test_parse_focus_cost_rejects_non_numeric():
     with pytest.raises(ValueError):
         parse_focus_cost("not-a-number")
+
+
+@pytest.mark.parametrize(
+    ("current", "expected"),
+    [
+        # An untouched imported id keeps characters sanitizing would eat.
+        ("allied-focus.2", "allied-focus.2"),
+        ("tag:shared_focus", "tag:shared_focus"),
+        ("plain_id", "plain_id"),
+    ],
+)
+def test_form_focus_id_keeps_an_untouched_imported_id(current, expected):
+    assert form_focus_id(current, current) == expected
+
+
+def test_untouched_imported_unsanitized_id_selectaway_is_not_dirty():
+    """Selecting away on an imported colon/dash id must not read as a rename."""
+    focus = make_focus(name="allied-focus.2")
+    values = _values(focus, name=form_focus_id(focus.name, focus.name))
+    assert values.name == "allied-focus.2"
+    assert sidebar_values_match_focus(focus, values) is True
+
+
+@pytest.mark.parametrize(
+    ("raw", "current", "expected"),
+    [
+        # Editing the field triggers the usual sanitization.
+        ("my focus", "my_focus", "my_focus"),
+        ("untouched", "other", "untouched"),
+        # No current id (new focus) still sanitizes.
+        ("weird id", None, "weird_id"),
+    ],
+)
+def test_form_focus_id_sanitizes_edited_or_new_ids(raw, current, expected):
+    assert form_focus_id(raw, current) == expected
+
+
+@pytest.mark.parametrize(
+    "aiblock",
+    [
+        {"factor": 2},
+        {"base": "-2"},
+        {"factor": 2.5},
+        {"base": 4, "factor": 9},
+        {"modifier": {"factor": 2}},
+        {"base": 3, "modifier": {"factor": 100}},
+        {},
+    ],
+)
+def test_parse_ai_will_do_matches_build_import_semantics(aiblock):
+    """Sidebar read must agree with build_focuses over the parsed dict."""
+    try:
+        factor = aiblock.get("factor", aiblock.get("base", 1))
+        expected = int(float(factor)) if factor is not None else 1
+    except ValueError, TypeError:
+        expected = 1
+    assert parse_ai_will_do(dict_to_raw(aiblock)) == expected
 
 
 def test_matching_form_is_noop():
@@ -120,6 +233,95 @@ def test_each_form_field_counts_as_a_change(field, value):
 def test_ai_will_do_raw_strips_focus_whitespace_for_match():
     focus = make_focus(ai_will_do_raw="  base = 1\n")
     values = _values(focus, ai_will_do_raw="base = 1")
+    assert sidebar_values_match_focus(focus, values) is True
+
+
+_PADDED_TREE = """\
+focus_tree = {
+\tid = TST_tree
+\tfocus = {
+\t\tid = TST_padded
+\t\tx = 0
+\t\ty = 0
+\t\tavailable = {
+\t\t\thas_country_flag = foo
+\t\t}
+\t\tbypass = { has_war = yes }
+\t\tcancel = {
+\t\t\talways = no
+\t\t}
+\t\toffset = {
+\t\t\tx = 1
+\t\t\ty = -1
+\t\t\ttrigger = {
+\t\t\t\thas_dlc = "X"
+\t\t\t}
+\t\t}
+\t}
+}
+"""
+
+
+def _padded_focus():
+    parsed = parse_focus_tree(_PADDED_TREE, "/tmp/padded.txt")
+    return list(build_focuses(parsed, tree_idx=1))[0]
+
+
+def _padded_form(focus, **overrides):
+    """The values the form reads back for an untouched imported ``focus``."""
+    shown = {
+        "ai_will_do_raw": f"base = {focus.ai_will_do}",
+        "available_cond": focus.available_cond.strip(),
+        "bypass_cond": focus.bypass_cond.strip(),
+        "cancel_cond": focus.cancel_cond.strip(),
+        "offsets": tuple(
+            {**offset, "trigger": offset["trigger"].strip()} for offset in focus.offsets
+        ),
+    }
+    return _values(focus, **{**shown, **overrides})
+
+
+def test_untouched_imported_block_padding_is_not_dirty():
+    """Import keeps whitespace around blocks; the form reads every field back
+    stripped, so selecting away from an untouched focus must not look like an
+    edit."""
+    focus = _padded_focus()
+    assert focus.available_cond != focus.available_cond.strip()
+    assert focus.bypass_cond != focus.bypass_cond.strip()
+    assert focus.cancel_cond != focus.cancel_cond.strip()
+    assert focus.offsets[0]["trigger"] != focus.offsets[0]["trigger"].strip()
+    assert sidebar_values_match_focus(focus, _padded_form(focus)) is True
+
+
+@pytest.mark.parametrize(
+    "field",
+    ["available_cond", "bypass_cond", "cancel_cond"],
+)
+def test_padded_condition_with_changed_text_is_still_dirty(field):
+    focus = _padded_focus()
+    values = _padded_form(focus, **{field: "changed = yes"})
+    assert sidebar_values_match_focus(focus, values) is False
+
+
+def test_padded_offset_with_changed_trigger_is_still_dirty():
+    focus = _padded_focus()
+    values = _padded_form(
+        focus, offsets=({"x": 1, "y": -1, "trigger": "changed = yes"},)
+    )
+    assert sidebar_values_match_focus(focus, values) is False
+
+
+def test_untouched_hydrated_localization_padding_is_not_dirty():
+    """Loc values keep trailing spaces and newlines; the form strips them."""
+    focus = _padded_focus()
+    hydrate_focus_localization(
+        ' TST_padded:0 "Title "\n TST_padded_desc:0 "Text.\\n"\n', [focus]
+    )
+    assert focus.loc_name != focus.loc_name.strip()
+    assert focus.desc != focus.desc.strip()
+    values = _padded_form(
+        focus, loc_name=focus.loc_name.strip(), desc=focus.desc.strip()
+    )
     assert sidebar_values_match_focus(focus, values) is True
 
 

@@ -1,7 +1,7 @@
 """A tiny bounded LRU mapping.
 
-Backs the two in-memory ``PhotoImage`` caches (``mod.context.ModContext.
-sprite_imgs`` and the GFX browser's ``img_cache``) that used to grow without
+Backs the UI-owned ``SpriteImageCache.images`` and the GFX browser's
+``img_cache``. These ``PhotoImage`` caches used to grow without
 limit for a process's whole lifetime. Both also memoize ``None`` on a failed
 load so a bad path isn't retried every frame; that still counts as a cache
 hit here; a ``None`` value is not treated specially.

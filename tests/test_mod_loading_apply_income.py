@@ -13,17 +13,23 @@ import os
 import pytest
 from ui_fakes import AppFake
 
-from hoi4cm.mod import MOD
 from hoi4cm.mod import scan_cache as scan_cache_mod
 
 
 @pytest.fixture(autouse=True)
-def isolate_mod(tmp_path, monkeypatch, mod_state_isolation):
+def isolate_scan_cache(tmp_path, monkeypatch):
     monkeypatch.setattr(scan_cache_mod, "STATE_DIR", str(tmp_path / "scan_cache"))
-    MOD.loaded = True
-    MOD.root = str(tmp_path)
-    MOD.is_md = True
-    MOD.loc_language = "english"
+
+
+def _md_app(
+    root: str | None, *, loaded: bool = True, language: str = "english"
+) -> AppFake:
+    app = AppFake()
+    app.index.root = root
+    app.index.loaded = loaded
+    app.index.is_md = loaded
+    app.app_config.loc_language = language
+    return app
 
 
 def _write(path: str, text: str) -> None:
@@ -51,21 +57,19 @@ def _money_system_without_block(root: str) -> str:
 
 def test_apply_income_injects_into_money_system_fixed(tmp_path):
     root = str(tmp_path)
-    MOD.root = root
-    MOD.loaded = True
+    app = _md_app(root)
     p = _money_system_with_block(root)
-    MOD.md_money_system_file = p
+    app.index.md_money_system_file = p
     # ensure the other two files exist so the method doesn't create them
     sloc = os.path.join(
         root, "common", "scripted_localisation", "money_scripted_localization.txt"
     )
     _write(sloc, "")
-    MOD.md_money_scripted_loc_file = sloc
+    app.index.md_money_scripted_loc_file = sloc
     yml = os.path.join(root, "localisation", "english", "MD_money_l_english.yml")
     _write(yml, 'l_english:\n ADDITIONAL_INCOME_REVENUES_TOOLTIP: "base"\n')
-    MOD.md_money_yml_file = yml
+    app.index.md_money_yml_file = yml
 
-    app = AppFake()
     saved, errs = app._apply_md_additional_income(
         "TAG_spirit", "var_test", "0.5", "TAG_spirit_tt", formula_type="fixed"
     )
@@ -79,8 +83,7 @@ def test_apply_income_injects_into_money_system_fixed(tmp_path):
 
 def test_apply_income_preserves_latin1_bytes_around_insertion(tmp_path):
     root = str(tmp_path)
-    MOD.root = root
-    MOD.loaded = True
+    app = _md_app(root)
     p = os.path.join(root, "common", "scripted_effects", "00_money_system.txt")
     os.makedirs(os.path.dirname(p), exist_ok=True)
     prefix = b"header = 1\r\ncalculate_additional_income_rate = {\r\n\t# caf\xe9\r\n"
@@ -88,20 +91,20 @@ def test_apply_income_preserves_latin1_bytes_around_insertion(tmp_path):
     original = prefix + suffix
     with open(p, "wb") as fh:
         fh.write(original)
-    MOD.md_money_system_file = p
+    app.index.md_money_system_file = p
     sloc = os.path.join(
         root, "common", "scripted_localisation", "money_scripted_localization.txt"
     )
     _write(sloc, "")
-    MOD.md_money_scripted_loc_file = sloc
+    app.index.md_money_scripted_loc_file = sloc
     yml = os.path.join(root, "localisation", "english", "MD_money_l_english.yml")
     yml_original = b"l_english:\r\n # caf\xe9\r\n"
     os.makedirs(os.path.dirname(yml), exist_ok=True)
     with open(yml, "wb") as fh:
         fh.write(yml_original)
-    MOD.md_money_yml_file = yml
+    app.index.md_money_yml_file = yml
 
-    saved, errs = AppFake()._apply_md_additional_income(
+    saved, errs = app._apply_md_additional_income(
         "TAG_spirit", "var_test", "0.5", "TAG_spirit_tt"
     )
 
@@ -126,23 +129,21 @@ def test_apply_income_preserves_latin1_bytes_around_insertion(tmp_path):
 
 def test_apply_income_gdp_pct_and_population(tmp_path):
     root = str(tmp_path)
-    MOD.root = root
-    MOD.loaded = True
+    app = _md_app(root)
     for formula, expected in [
         ("gdp_pct", "gdp_total"),
         ("population", "population_total"),
     ]:
         p = _money_system_with_block(root)
-        MOD.md_money_system_file = p
+        app.index.md_money_system_file = p
         sloc = os.path.join(
             root, "common", "scripted_localisation", "money_scripted_localization.txt"
         )
         _write(sloc, "")
-        MOD.md_money_scripted_loc_file = sloc
+        app.index.md_money_scripted_loc_file = sloc
         yml = os.path.join(root, "localisation", "english", "MD_money_l_english.yml")
         _write(yml, 'l_english:\n ADDITIONAL_INCOME_REVENUES_TOOLTIP: "x"\n')
-        MOD.md_money_yml_file = yml
-        app = AppFake()
+        app.index.md_money_yml_file = yml
         saved, errs = app._apply_md_additional_income(
             f"ID_{formula}", f"var_{formula}", "1.0", "tt", formula_type=formula
         )
@@ -154,19 +155,17 @@ def test_apply_income_gdp_pct_and_population(tmp_path):
 
 def test_apply_income_idempotent_skips_duplicate(tmp_path):
     root = str(tmp_path)
-    MOD.root = root
-    MOD.loaded = True
+    app = _md_app(root)
     p = _money_system_with_block(root)
-    MOD.md_money_system_file = p
+    app.index.md_money_system_file = p
     sloc = os.path.join(
         root, "common", "scripted_localisation", "money_scripted_localization.txt"
     )
     _write(sloc, "")
-    MOD.md_money_scripted_loc_file = sloc
+    app.index.md_money_scripted_loc_file = sloc
     yml = os.path.join(root, "localisation", "english", "MD_money_l_english.yml")
     _write(yml, 'l_english:\n ADDITIONAL_INCOME_REVENUES_TOOLTIP: "x"\n')
-    MOD.md_money_yml_file = yml
-    app = AppFake()
+    app.index.md_money_yml_file = yml
     app._apply_md_additional_income("TAG_spirit", "var_test", "0.5", "tt")
     saved2, errs2 = app._apply_md_additional_income(
         "TAG_spirit", "var_test", "0.5", "tt"
@@ -179,27 +178,23 @@ def test_apply_income_idempotent_skips_duplicate(tmp_path):
 
 def test_apply_income_missing_block_reports_error(tmp_path):
     root = str(tmp_path)
-    MOD.root = root
-    MOD.loaded = True
+    app = _md_app(root)
     p = _money_system_without_block(root)
-    MOD.md_money_system_file = p
+    app.index.md_money_system_file = p
     sloc = os.path.join(
         root, "common", "scripted_localisation", "money_scripted_localization.txt"
     )
     _write(sloc, "")
-    MOD.md_money_scripted_loc_file = sloc
+    app.index.md_money_scripted_loc_file = sloc
     yml = os.path.join(root, "localisation", "english", "MD_money_l_english.yml")
     _write(yml, 'l_english:\n ADDITIONAL_INCOME_REVENUES_TOOLTIP: "x"\n')
-    MOD.md_money_yml_file = yml
-    app = AppFake()
+    app.index.md_money_yml_file = yml
     saved, errs = app._apply_md_additional_income("TAG_spirit", "var_test", "0.5", "tt")
     assert any("Could not find" in e for e in errs)
 
 
 def test_apply_income_no_mod_loaded(tmp_path):
-    MOD.loaded = False
-    MOD.root = None
-    app = AppFake()
+    app = _md_app(None, loaded=False)
     saved, errs = app._apply_md_additional_income("TAG_spirit", "var_test", "0.5", "tt")
     assert saved == []
     assert any("No mod loaded" in e for e in errs)
@@ -207,16 +202,14 @@ def test_apply_income_no_mod_loaded(tmp_path):
 
 def test_apply_income_creates_missing_sloc_and_yml(tmp_path):
     root = str(tmp_path)
-    MOD.root = root
-    MOD.loaded = True
+    app = _md_app(root)
     p = _money_system_with_block(root)
-    MOD.md_money_system_file = p
+    app.index.md_money_system_file = p
     # do not create sloc/yml beforehand — let the method create them
-    MOD.md_money_scripted_loc_file = ""
-    MOD.md_money_yml_file = ""
+    app.index.md_money_scripted_loc_file = ""
+    app.index.md_money_yml_file = ""
     # ensure scan finds nothing
-    MOD._scan_md_money_files()
-    app = AppFake()
+    app.index.rescan_md_money(app.app_config.loc_language)
     saved, errs = app._apply_md_additional_income(
         "NEW_spirit", "var_new", "2.0", "NEW_tt"
     )
@@ -233,14 +226,12 @@ def test_apply_income_creates_missing_sloc_and_yml(tmp_path):
 
 def test_apply_income_creates_configured_language_yml(tmp_path):
     root = str(tmp_path)
-    MOD.root = root
-    MOD.loaded = True
-    MOD.loc_language = "french"
-    MOD.md_money_system_file = _money_system_with_block(root)
-    MOD.md_money_scripted_loc_file = ""
-    MOD.md_money_yml_file = ""
+    app = _md_app(root, language="french")
+    app.index.md_money_system_file = _money_system_with_block(root)
+    app.index.md_money_scripted_loc_file = ""
+    app.index.md_money_yml_file = ""
 
-    saved, errs = AppFake()._apply_md_additional_income(
+    saved, errs = app._apply_md_additional_income(
         "NEW_spirit", "var_new", "2.0", "NEW_tt"
     )
 
@@ -252,19 +243,17 @@ def test_apply_income_creates_configured_language_yml(tmp_path):
 
 def test_apply_income_appends_to_existing_tooltip(tmp_path):
     root = str(tmp_path)
-    MOD.root = root
-    MOD.loaded = True
+    app = _md_app(root)
     p = _money_system_with_block(root)
-    MOD.md_money_system_file = p
+    app.index.md_money_system_file = p
     sloc = os.path.join(
         root, "common", "scripted_localisation", "money_scripted_localization.txt"
     )
     _write(sloc, "")
-    MOD.md_money_scripted_loc_file = sloc
+    app.index.md_money_scripted_loc_file = sloc
     yml = os.path.join(root, "localisation", "english", "MD_money_l_english.yml")
     _write(yml, 'l_english:\n ADDITIONAL_INCOME_REVENUES_TOOLTIP: "first line"\n')
-    MOD.md_money_yml_file = yml
-    app = AppFake()
+    app.index.md_money_yml_file = yml
     app._apply_md_additional_income("SPIRIT_A", "var_a", "0.1", "tt_a")
     app._apply_md_additional_income("SPIRIT_B", "var_b", "0.2", "tt_b")
     txt = _read(yml)

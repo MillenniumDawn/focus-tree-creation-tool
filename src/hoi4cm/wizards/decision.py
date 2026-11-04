@@ -7,7 +7,6 @@
 """Decision / Decision Category builder wizard."""
 
 import copy
-import glob
 import json
 import os
 import re
@@ -26,7 +25,7 @@ from hoi4cm.core import (
 )
 from hoi4cm.core.image import PIL_OK, PILImage, PILImageTk
 from hoi4cm.core.logger import get_logger
-from hoi4cm.mod import MOD, WorkspaceFiles, find_loc_files
+from hoi4cm.mod import WorkspaceFiles, find_loc_files, glob_script_paths
 from hoi4cm.script.syntax import extract_named_block, find_blocks, tokenize
 from hoi4cm.ui import (
     BG_CARD,
@@ -54,7 +53,6 @@ from hoi4cm.wizards._graphics import find_catalog_image
 from hoi4cm.wizards._image_loader import TkImageLoader
 from hoi4cm.wizards._saves import save_decisions
 from hoi4cm.wizards._shared import (
-    _app_img_caches,
     format_save_summary,
     make_scrolled_listbox,
     open_effect_picker,
@@ -292,6 +290,20 @@ def new_decision_record(cat_uid: object = "") -> dict[str, object]:
     )
 
 
+def _bind_preview_cache_release(win, app, cache):
+    """Release a decision window's preview cache when the window itself
+    is destroyed, so wm-protocol close, direct destroy() and parent
+    teardown all release it exactly once."""
+
+    def _release_on_destroy(event):
+        # <Destroy> fires for every child widget; only the window itself
+        # releases the cache.
+        if event.widget is win:
+            app.wiz_img_caches.release_window_cache(cache)
+
+    win.bind("<Destroy>", _release_on_destroy)
+
+
 def open_decision_wizard(app):
     """HOI4 Decision / Decision Category maker — matches mockup layout."""
     win = tk.Toplevel(app)
@@ -305,6 +317,9 @@ def open_decision_wizard(app):
     # above; this closure only wires them to the live lists and repaints.
     _autosave_path = autosave_path("decision.json")
     _undo_stack = []  # detached (cats, decs) snapshots, bounded below
+    _dec_prev_img_cache: dict = {}
+    app.wiz_img_caches.register_window_cache(_dec_prev_img_cache)
+    _bind_preview_cache_release(win, app, _dec_prev_img_cache)
 
     def _snapshot():
         """Push current state onto undo stack."""
@@ -459,7 +474,7 @@ def open_decision_wizard(app):
         lambda: _import_scripted_loc(),
         TEAL,
     )
-    if MOD.loaded:
+    if app.index.loaded:
         # Lazy lambda: _browse_mod_decisions is defined later in this function,
         # so referencing it directly here raises UnboundLocalError and blanks
         # the whole window. Resolve the name at click time instead.
@@ -471,7 +486,7 @@ def open_decision_wizard(app):
     _tbtn(tr("common.export_txt", "Export .txt"), lambda: _export_txt(), GOLD)
     _tbtn(tr("common.copy_yml", "Copy .yml"), lambda: _copy_yml(), GOLD)
     _tbtn(tr("common.save_to_mod", "Save to Mod"), lambda: _save_to_mod(), GREEN)
-    _tbtn(tr("common.undo", "↩ Undo"), lambda: _do_undo(), TEXT_DIM)
+    _tbtn(tr("common.undo", "Undo"), lambda: _do_undo(), TEXT_DIM)
 
     win.bind_all("<Control-z>", lambda e: _do_undo())
     win.bind_all("<Control-Z>", lambda e: _do_undo())
@@ -1205,6 +1220,8 @@ def open_decision_wizard(app):
                 _on_sel,
                 title=tr("gfx.browser_for", "GFX Browser - {label}", label=label),
                 gfx_hints=["decisions", "ideas"],
+                index=app.index,
+                config=app.app_config,
             )
 
         tk.Button(
@@ -2920,7 +2937,7 @@ def open_decision_wizard(app):
     _rtab = tk.StringVar(value="preview")
     _tab_btns = {}
     for tid, tlbl in [
-        ("preview", tr("common.preview", "Preview")),
+        ("preview", tr("common.preview", "Preview:")),
         ("chain", tr("decision.tab.chain_view", "Chain View")),
         ("code", tr("tab.code", "Code")),
     ]:
@@ -3005,8 +3022,7 @@ def open_decision_wizard(app):
 
     # ── PREVIEW ──────────────────────────────────────────────────────────────
     # ── shared preview image cache: gfx_key -> PhotoImage|None ─────────────
-    _dec_prev_img_cache = {}
-    _app_img_caches.append(_dec_prev_img_cache)  # register for mod-reload invalidation
+    # Registered on app.wiz_img_caches near the top of this closure.
 
     _dds_supported = False
     if PILImage is not None:
@@ -3027,9 +3043,9 @@ def open_decision_wizard(app):
         if not gfx_key or PILImage is None:
             return None
         path = (
-            MOD.decision_sprites.get(gfx_key)
-            or MOD.idea_sprites.get(gfx_key)
-            or MOD.sprites.get(gfx_key)
+            app.index.decision_sprites.get(gfx_key)
+            or app.index.idea_sprites.get(gfx_key)
+            or app.index.sprites.get(gfx_key)
         )
         if not path:
             stem = gfx_key
@@ -3037,7 +3053,7 @@ def open_decision_wizard(app):
                 if gfx_key.startswith(pfx):
                     stem = gfx_key[len(pfx) :]
                     break
-            if MOD.root:
+            if app.index.root:
                 for sub in (
                     "gfx/interface/decisions",
                     "gfx/interface/decisions/categories",
@@ -3045,8 +3061,8 @@ def open_decision_wizard(app):
                     "gfx/interface/ideas",
                 ):
                     path = find_catalog_image(
-                        MOD.graphics_catalog,
-                        os.path.join(MOD.root, sub.replace("/", os.sep)),
+                        app.index.graphics_catalog,
+                        os.path.join(app.index.root, sub.replace("/", os.sep)),
                         stem,
                         recursive=False,
                     )
@@ -3054,8 +3070,8 @@ def open_decision_wizard(app):
                         break
                 if not path:
                     path = find_catalog_image(
-                        MOD.graphics_catalog,
-                        os.path.join(MOD.root, "gfx", "interface", "decisions"),
+                        app.index.graphics_catalog,
+                        os.path.join(app.index.root, "gfx", "interface", "decisions"),
                         stem,
                     )
         if path:
@@ -3077,7 +3093,7 @@ def open_decision_wizard(app):
         else:
             get_logger("ico").warning(
                 f"no path for {gfx_key!r}  "
-                f"(decision_sprites={len(MOD.decision_sprites)}, root={bool(MOD.root)})"
+                f"(decision_sprites={len(app.index.decision_sprites)}, root={bool(app.index.root)})"
             )
         return None
 
@@ -3101,12 +3117,14 @@ def open_decision_wizard(app):
             return None
         # Try key as-is, then with common category prefixes
         path = (
-            MOD.decision_sprites.get(gfx_key)
-            or MOD.idea_sprites.get(gfx_key)
-            or MOD.sprites.get(gfx_key)
-            or MOD.decision_sprites.get("GFX_decision_cat_" + gfx_key.split("_")[-1])
+            app.index.decision_sprites.get(gfx_key)
+            or app.index.idea_sprites.get(gfx_key)
+            or app.index.sprites.get(gfx_key)
+            or app.index.decision_sprites.get(
+                "GFX_decision_cat_" + gfx_key.split("_")[-1]
+            )
         )
-        if not path and MOD.root:
+        if not path and app.index.root:
             stem = gfx_key
             for pfx in (
                 "GFX_decision_category_",
@@ -3126,7 +3144,9 @@ def open_decision_wizard(app):
                 "gfx",
             ):
                 for ext in (".dds", ".tga", ".png"):
-                    p = os.path.join(MOD.root, sub.replace("/", os.sep), stem + ext)
+                    p = os.path.join(
+                        app.index.root, sub.replace("/", os.sep), stem + ext
+                    )
                     if os.path.isfile(p):
                         path = p
                         break
@@ -3296,7 +3316,7 @@ def open_decision_wizard(app):
             if bare_tag is not None:
                 # [TAG]Word  or  [TAG] (standalone)
                 word = bare_word or bare_tag  # fallback to tag itself
-                name = MOD.country_tag_names.get(bare_tag, None)
+                name = app.app_config.country_tag_names.get(bare_tag, None)
                 label = f"\U0001f3f3 {name or word}"
                 txt.insert("end", label, ("scrloc",))
                 continue
@@ -3307,7 +3327,7 @@ def open_decision_wizard(app):
                 mc = re.match(r"([A-Z]{2,5})[:·\.](\w+)", inner)
                 if mc:
                     tag = mc.group(1)
-                    name = MOD.country_tag_names.get(tag, None)
+                    name = app.app_config.country_tag_names.get(tag, None)
                     label = name or tag
                 else:
                     label = inner[:20]
@@ -3336,14 +3356,14 @@ def open_decision_wizard(app):
         if (
             PIL_OK
             and not _dds_supported
-            and MOD.loaded
-            and MOD.decision_sprites
+            and app.index.loaded
+            and app.index.decision_sprites
             and not _dds_warned[0]
         ):
             # Check if any sprites are .dds — show warning only once per session
             has_dds = any(
                 str(v).lower().endswith(".dds")
-                for v in list(MOD.decision_sprites.values())[:20]
+                for v in list(app.index.decision_sprites.values())[:20]
             )
             if has_dds:
                 _dds_warned[0] = True
@@ -3977,17 +3997,17 @@ def open_decision_wizard(app):
                 )
                 return
             if tab == "scripted_loc":
-                if MOD.edit_scripted_loc_file:
+                if app.edit_scripted_loc_file:
                     try:
                         existing, encoding = read_file_with_encoding(
-                            MOD.edit_scripted_loc_file
+                            app.edit_scripted_loc_file
                         )
                         if existing is None or encoding is None:
                             raise OSError(
                                 "selected scripted loc file could not be read"
                             )
                         WorkspaceFiles().write_text(
-                            MOD.edit_scripted_loc_file,
+                            app.edit_scripted_loc_file,
                             convert_newlines(raw, newline_style(existing)),
                             encoding=encoding,
                         )
@@ -3995,13 +4015,13 @@ def open_decision_wizard(app):
                             text=tr(
                                 "decision.status.scripted_loc_saved",
                                 "  ✓  Scripted loc saved to {file}",
-                                file=os.path.basename(MOD.edit_scripted_loc_file),
+                                file=os.path.basename(app.edit_scripted_loc_file),
                             )
                         )
                     except (OSError, ValueError, TypeError, RuntimeError) as _ex:
                         report_write_failure(
                             win,
-                            MOD.edit_scripted_loc_file,
+                            app.edit_scripted_loc_file,
                             _ex,
                             title=tr("dialog.save_error.title", "Save Error"),
                         )
@@ -4274,7 +4294,9 @@ def open_decision_wizard(app):
     def _open_placement_cat(cat):
         existing = []
         if cat.get("icon"):
-            p = MOD.idea_sprites.get(cat["icon"], MOD.sprites.get(cat["icon"], ""))
+            p = app.index.idea_sprites.get(
+                cat["icon"], app.index.sprites.get(cat["icon"], "")
+            )
             existing.append(
                 {
                     "gfx_key": cat["icon"],
@@ -4287,8 +4309,8 @@ def open_decision_wizard(app):
                 }
             )
         if cat.get("picture"):
-            p = MOD.idea_sprites.get(
-                cat["picture"], MOD.sprites.get(cat["picture"], "")
+            p = app.index.idea_sprites.get(
+                cat["picture"], app.index.sprites.get(cat["picture"], "")
             )
             existing.append(
                 {
@@ -4311,7 +4333,13 @@ def open_decision_wizard(app):
             _collect()
             _rebuild_right()
 
-        open_gfx_placement_editor(win, initial_items=existing, on_confirm=_on_confirm)
+        open_gfx_placement_editor(
+            win,
+            initial_items=existing,
+            on_confirm=_on_confirm,
+            index=app.index,
+            config=app.app_config,
+        )
 
     # ════════════════════════════════════════════════════════════════════════
     # CODE GENERATION
@@ -4337,12 +4365,12 @@ def open_decision_wizard(app):
     def _gen_yml():
         _collect()
         return _generators.generate_decision_loc_yml(
-            dm_cats, dm_decs, loc_language=MOD.loc_language
+            dm_cats, dm_decs, loc_language=app.app_config.loc_language
         )
 
     # ── import / export ───────────────────────────────────────────────────────
     def _browse_mod_decisions():
-        if not MOD.loaded or not MOD.root:
+        if not app.index.loaded or not app.index.root:
             messagebox.showinfo(
                 tr("dialog.no_mod_loaded.title", "No Mod Loaded"),
                 tr(
@@ -4352,7 +4380,7 @@ def open_decision_wizard(app):
                 parent=win,
             )
             return
-        dec_dir = os.path.join(MOD.root, "common", "decisions")
+        dec_dir = os.path.join(app.index.root, "common", "decisions")
         if not os.path.isdir(dec_dir):
             messagebox.showinfo(
                 tr("dialog.not_found.title", "Not Found"),
@@ -4363,7 +4391,7 @@ def open_decision_wizard(app):
                 parent=win,
             )
             return
-        files = sorted(glob.glob(os.path.join(dec_dir, "*.txt")))
+        files = glob_script_paths(dec_dir)
         if not files:
             messagebox.showinfo(
                 tr("dialog.no_files_found.title", "No Files Found"),
@@ -4471,10 +4499,10 @@ def open_decision_wizard(app):
                 "Import decisions .txt (+ optionally loc .yml)",
             ),
             filetypes=[
-                ("HOI4 files", "*.txt *.yml"),
-                ("TXT", "*.txt"),
-                ("YML", "*.yml"),
-                ("All", "*.*"),
+                (tr("filetype.hoi4_files", "HOI4 files"), "*.txt *.yml"),
+                (tr("filetype.txt", "TXT"), "*.txt"),
+                (tr("filetype.yml", "YML"), "*.yml"),
+                (tr("filetype.all", "All"), "*.*"),
             ],
         )
         if not paths:
@@ -4487,15 +4515,15 @@ def open_decision_wizard(app):
         # Auto-detection selects a target but does not count as importing it.
         _first_decision = next(iter(decision_paths), None)
         if _first_decision:
-            MOD.edit_decisions_file = _first_decision
+            app.edit_decisions_file = _first_decision
             _base = os.path.basename(_first_decision)
             _folder = os.path.dirname(_first_decision)
             _cat_path = os.path.join(_folder, "categories", _base)
             if os.path.isfile(_cat_path):
-                MOD.edit_decisions_cat_file = _cat_path
+                app.edit_decisions_cat_file = _cat_path
         _first_category = next(iter(category_paths), None)
         if _first_category:
-            MOD.edit_decisions_cat_file = _first_category
+            app.edit_decisions_cat_file = _first_category
 
         def _get_block(text, key):
             """Extract inner content of first occurrence of key = { ... } in text."""
@@ -4533,7 +4561,9 @@ def open_decision_wizard(app):
             for _ in range(5):
                 loc_dir = os.path.join(folder, "localisation")
                 if os.path.isdir(loc_dir):
-                    for loc_path in find_loc_files(folder, language=MOD.loc_language):
+                    for loc_path in find_loc_files(
+                        folder, language=app.app_config.loc_language
+                    ):
                         try:
                             content, encoding = read_file_with_encoding(loc_path)
                             if content is None:
@@ -4786,7 +4816,10 @@ def open_decision_wizard(app):
                 "filedialog.import_scripted_localisation",
                 "Import scripted_localisation .txt files",
             ),
-            filetypes=[("HOI4 txt", "*.txt"), ("All", "*.*")],
+            filetypes=[
+                (tr("filetype.hoi4_txt", "HOI4 txt"), "*.txt"),
+                (tr("filetype.all", "All"), "*.*"),
+            ],
         )
         if not paths:
             return
@@ -4852,7 +4885,10 @@ def open_decision_wizard(app):
             title=tr(
                 "filedialog.import_localisation_yml", "Import localisation .yml files"
             ),
-            filetypes=[("YML localisation", "*.yml"), ("All", "*.*")],
+            filetypes=[
+                (tr("filetype.yml_localisation", "YML localisation"), "*.yml"),
+                (tr("filetype.all", "All"), "*.*"),
+            ],
         )
         if not paths:
             return
@@ -4902,7 +4938,10 @@ def open_decision_wizard(app):
             parent=win,
             title=tr("filedialog.export_decisions", "Export decisions .txt"),
             defaultextension=".txt",
-            filetypes=[("HOI4 decisions", "*.txt"), ("All", "*.*")],
+            filetypes=[
+                (tr("filetype.hoi4_decisions", "HOI4 decisions"), "*.txt"),
+                (tr("filetype.all", "All"), "*.*"),
+            ],
         )
         if not path:
             return
@@ -4941,8 +4980,8 @@ def open_decision_wizard(app):
                 parent=win,
             )
             return
-        if MOD.root and os.path.isdir(MOD.root):
-            mod_root = MOD.root
+        if app.index.root and os.path.isdir(app.index.root):
+            mod_root = app.index.root
         else:
             mod_root = filedialog.askdirectory(
                 parent=win,
@@ -4954,15 +4993,15 @@ def open_decision_wizard(app):
             dm_cats[0]["cat_id"].split("_")[0] if dm_cats else "TAG", fallback="TAG"
         )
         # Prefer the imported/user-set edit target so we overwrite the source file in place
-        if MOD.edit_decisions_file:
-            dec_path = MOD.edit_decisions_file
+        if app.edit_decisions_file:
+            dec_path = app.edit_decisions_file
         else:
             dec_path = os.path.join(
                 mod_root, "common", "decisions", f"{ns}_decisions.txt"
             )
         # Confirm both paired targets before writing either file.
-        if MOD.edit_decisions_cat_file:
-            cat_path = MOD.edit_decisions_cat_file
+        if app.edit_decisions_cat_file:
+            cat_path = app.edit_decisions_cat_file
         else:
             cat_path = os.path.join(
                 mod_root, "common", "decisions", "categories", f"{ns}_categories.txt"
@@ -4998,7 +5037,7 @@ def open_decision_wizard(app):
         ):
             return
         sloc_blocks = []
-        if MOD.edit_scripted_loc_file:
+        if app.edit_scripted_loc_file:
             for cat in dm_cats:
                 cid = cat["cat_id"].strip()
                 if cid:
@@ -5012,8 +5051,11 @@ def open_decision_wizard(app):
                             {"name": f"GET_{did}_name", "texts": [], "default": did}
                         )
         saved, errs = save_decisions(
-            MOD,
+            app.index,
+            app.app_config,
+            app,
             mod_root,
+            on_written=app.note_mod_file_written,
             ns=ns,
             dec_path=dec_path,
             cat_path=cat_path,

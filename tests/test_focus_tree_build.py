@@ -1,8 +1,11 @@
 """Tests for hoi4cm.focus_tree.build — parsed data -> Focus objects."""
 
+import pytest
 from test_focus_tree_parse import WRAPPED
+from test_focus_tree_roundtrip import _info, raw_block_renderer
 
 from hoi4cm.focus_tree.build import BuildContext, build_focuses
+from hoi4cm.focus_tree.export import export_focus_tree
 from hoi4cm.focus_tree.parse import parse_focus_tree
 from hoi4cm.models import Focus
 
@@ -331,3 +334,108 @@ def test_duplicate_reference_resolution_keeps_lookup_winner_policy():
     deferred_context.add_focuses([deferred], reconcile=False)
     deferred_context.add_focuses([first, last])
     assert deferred.prereqs == [[last.id]]
+
+
+def _tree_with_ai(ai_clause):
+    return (
+        "focus_tree = {\n"
+        "\tid = AI_tree\n"
+        "\tfocus = {\n"
+        "\t\tid = TST_alpha\n"
+        "\t\tx = 1\n"
+        "\t\ty = 1\n"
+        f"\t\t{ai_clause}\n"
+        "\t}\n"
+        "}\n"
+    )
+
+
+@pytest.mark.parametrize("literal", ["inf", "-inf", "nan", "1e999", "-1e999"])
+@pytest.mark.parametrize("form", ["scalar", "factor", "base"])
+def test_nonfinite_ai_will_do_falls_back_to_one(literal, form):
+    if form == "scalar":
+        ai_clause = f"ai_will_do = {literal}"
+    elif form == "factor":
+        ai_clause = f"ai_will_do = {{ factor = {literal} }}"
+    else:
+        ai_clause = f"ai_will_do = {{ base = {literal} }}"
+    parsed = parse_focus_tree(_tree_with_ai(ai_clause), "/tmp/ai.txt")
+    # Non-finite literals (±inf, ±1e999) must not abort an otherwise usable import.
+    focuses = build_focuses(parsed, tree_idx=1)
+    assert _by_name(focuses)["TST_alpha"].ai_will_do == 1
+
+
+@pytest.mark.parametrize(
+    "ai_clause,expected",
+    [
+        ("ai_will_do = -2", -2),
+        ("ai_will_do = 1.75", 1),
+        ("ai_will_do = { factor = 0.5 }", 0),
+        ("ai_will_do = { base = -3.5 }", -3),
+        ("ai_will_do = { base = 4 }", 4),
+        ("ai_will_do = { factor = 2 base = 9 }", 2),
+        ("ai_will_do = { modifier = { factor = 2 } }", 1),
+    ],
+)
+def test_finite_ai_will_do_precedence_and_values(ai_clause, expected):
+    parsed = parse_focus_tree(_tree_with_ai(ai_clause), "/tmp/ai.txt")
+    focuses = build_focuses(parsed, tree_idx=1)
+    assert _by_name(focuses)["TST_alpha"].ai_will_do == expected
+
+
+def _export_ai_tree(parsed, focuses):
+    return export_focus_tree(
+        focuses,
+        _info(parsed, "shared"),
+        focus_lookup={f.id: f for f in focuses},
+        effect_renderer=raw_block_renderer,
+    )
+
+
+@pytest.mark.parametrize("key", ["factor", "base"])
+@pytest.mark.parametrize(
+    "literal,expected",
+    [
+        ("inf", 1),
+        ("-inf", 1),
+        ("nan", 1),
+        ("1e999", 1),
+        ("-1e999", 1),
+        ("-3", -3),
+        ("0.5", 0),
+        ("1e308", int(1e308)),
+    ],
+)
+def test_ai_will_do_block_text_round_trips(key, literal, expected):
+    entry = f"{key} = {literal}"
+    ai_clause = (
+        "completion_reward = {\n"
+        "\t\t\tadd_political_power = 120\n"
+        "\t\t}\n"
+        f"\t\tai_will_do = {{ {entry} modifier = {{ factor = 2 has_war = yes }} }}"
+    )
+    parsed = parse_focus_tree(_tree_with_ai(ai_clause), "/tmp/ai.txt")
+    focuses = build_focuses(parsed, tree_idx=1)
+    alpha = _by_name(focuses)["TST_alpha"]
+    assert alpha.ai_will_do == expected
+    assert entry in alpha.ai_will_do_raw
+
+    t1 = _export_ai_tree(parsed, focuses)
+    for needle in (entry, "has_war = yes", "add_political_power = 120"):
+        assert needle in t1
+    reparsed = parse_focus_tree(t1, "/tmp/ai.txt")
+    assert (
+        reparsed.focuses_data[0]["ai_will_do"] == parsed.focuses_data[0]["ai_will_do"]
+    )
+    rebuilt = build_focuses(reparsed, tree_idx=1)
+    rebuilt_alpha = _by_name(rebuilt)["TST_alpha"]
+    assert rebuilt_alpha.ai_will_do == expected
+    assert entry in rebuilt_alpha.ai_will_do_raw
+    assert _export_ai_tree(parsed, rebuilt) == t1
+
+
+@pytest.mark.parametrize("literal", ["inf", "-inf", "nan", "1e999", "-1e999"])
+def test_nonfinite_scalar_ai_will_do_exports_the_fallback(literal):
+    parsed = parse_focus_tree(_tree_with_ai(f"ai_will_do = {literal}"), "/tmp/ai.txt")
+    text = _export_ai_tree(parsed, build_focuses(parsed, tree_idx=1))
+    assert "ai_will_do = {\n\t\t\tbase = 1\n\t\t}" in text

@@ -53,6 +53,7 @@ from hoi4cm.script import (
     normalize_effect_fields,
 )
 
+from .app_config import AppConfig
 from .config import CONFIG_PATH, cfg_load, cfg_save
 from .i18n import (
     I18N_LANG,
@@ -86,6 +87,7 @@ from .undo import UndoStack
 
 __all__ = [
     "CONFIG_PATH",
+    "AppConfig",
     "BuildContext",
     "EFFECT_CATS",
     "EFFECT_DEFS",

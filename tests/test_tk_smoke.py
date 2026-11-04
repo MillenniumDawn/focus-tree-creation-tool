@@ -24,15 +24,16 @@ from ui_fakes import AppFake
 import hoi4_content_maker as main_mod
 from hoi4cm.editor.project_codec import read_project
 from hoi4cm.editor.workspace_autosave import sibling_autosave_path
-from hoi4cm.mod import MOD
 from hoi4cm.models import Focus
 from hoi4cm.ui import settings_dialog
+from hoi4cm.ui.canvas import CanvasMixin
 from hoi4cm.ui.canvas_scheduler import RedrawChannel
 from hoi4cm.ui.gfx_browser import (
     open_focus_icon_browser,
     open_gfx_placement_editor,
     open_universal_gfx_browser,
 )
+from hoi4cm.ui.theme import XGRID, YGRID
 from hoi4cm.ui.widgets import grab_when_visible
 from hoi4cm.wizards._shared import open_effect_picker, open_trigger_picker
 
@@ -92,7 +93,7 @@ def test_app_builds_its_chrome(app):
     assert app._errlog_btn.winfo_exists()
     assert not app._focus_editor.window.winfo_ismapped()
     assert not hasattr(app, "_sash")
-    assert all(button._line.winfo_exists() for button, _panel in app._tab_btns.values())
+    assert all(line.winfo_exists() for _button, _panel, line in app._tab_btns.values())
     assert app._project_sidebar.empty.winfo_ismapped()
     assert list(app._editor_chrome.navigation_buttons) == [
         "Focus Trees",
@@ -100,7 +101,18 @@ def test_app_builds_its_chrome(app):
         "Events",
         "Ideas",
         "Dynamic Modifiers",
+        "Character Editor",
+        "Add Income",
     ]
+    income = app._editor_chrome.navigation_buttons["Add Income"]
+    assert app._project_sidebar._income_row.winfo_manager() == ""
+    app.index.is_md = True
+    app._apply_md_visibility()
+    app.update_idletasks()
+    assert income.winfo_ismapped()
+    app.index.is_md = False
+    app._apply_md_visibility()
+    assert app._project_sidebar._income_row.winfo_manager() == ""
 
 
 def test_validation_preserves_sidebar_theme_and_style(app, opened):
@@ -333,8 +345,8 @@ def test_project_resource_discovery_is_cached_and_reveals_existing_sources(
         done(work())
 
     monkeypatch.setattr(sidebar_module, "run_bg", immediate)
-    monkeypatch.setattr(MOD, "root", str(tmp_path))
-    monkeypatch.setattr(MOD, "mod_name", "Resource test")
+    monkeypatch.setattr(app.index, "root", str(tmp_path))
+    monkeypatch.setattr(app.index, "mod_name", "Resource test")
     sidebar = app._project_sidebar
     sidebar.refresh()
     assert len(calls) == 1
@@ -423,8 +435,8 @@ def test_all_mod_tree_files_are_cached_searchable_and_open_explicitly(
         done(work())
 
     monkeypatch.setattr(sidebar_module, "run_bg", immediate)
-    monkeypatch.setattr(MOD, "root", str(tmp_path))
-    monkeypatch.setattr(MOD, "mod_name", "Tree catalog")
+    monkeypatch.setattr(app.index, "root", str(tmp_path))
+    monkeypatch.setattr(app.index, "mod_name", "Tree catalog")
     sidebar = app._project_sidebar
     sidebar.refresh()
     assert {item.path for item in sidebar.catalog if item.kind == "tree_file"} == {
@@ -869,15 +881,47 @@ def test_app_command_opens_its_dialog(app, opened, command):
     _assert_built(opened())
 
 
+def _close_wizard_window(win: tk.Toplevel, app: tk.Tk) -> None:
+    """Run the window's registered close handler like the window manager does."""
+    handler = win.protocol("WM_DELETE_WINDOW")
+    win.tk.call(handler)
+    app.update()
+    assert not win.winfo_exists()
+
+
+def test_decision_wizard_releases_its_preview_cache_when_closed(app, opened):
+    """Repeated open/close cycles must not grow the app's cache registry."""
+    baseline = len(app.wiz_img_caches.window_caches)
+    for _ in range(2):
+        app._decision_wizard()
+        windows = opened()
+        assert len(windows) == 1
+        assert len(app.wiz_img_caches.window_caches) == baseline + 1
+        _close_wizard_window(windows[0], app)
+        assert len(app.wiz_img_caches.window_caches) == baseline
+
+
+def test_destroyed_decision_wizard_releases_its_preview_cache(app, opened):
+    """Direct win.destroy() without the WM protocol must still release."""
+    baseline = len(app.wiz_img_caches.window_caches)
+    app._decision_wizard()
+    windows = opened()
+    assert len(windows) == 1
+    assert len(app.wiz_img_caches.window_caches) == baseline + 1
+    windows[0].destroy()
+    app.update()
+    assert len(app.wiz_img_caches.window_caches) == baseline
+
+
 def test_additional_income_wizard_opens_in_md_mode(app, opened, monkeypatch):
-    monkeypatch.setattr(MOD, "is_md", True)
+    monkeypatch.setattr(app.index, "is_md", True)
     app._additional_income_wizard()
     _assert_built(opened())
 
 
 def test_character_wizard_opens_with_a_loaded_mod(app, opened, tmp_path, monkeypatch):
-    monkeypatch.setattr(MOD, "loaded", True)
-    monkeypatch.setattr(MOD, "root", str(tmp_path))
+    monkeypatch.setattr(app.index, "loaded", True)
+    monkeypatch.setattr(app.index, "root", str(tmp_path))
     app._character_wizard()
     _assert_built(opened())
 
@@ -889,8 +933,8 @@ def test_edit_targets_prompt_opens_with_a_loaded_mod(
         path = tmp_path / rel
         path.parent.mkdir(parents=True)
         path.write_text("", encoding="utf-8")
-    monkeypatch.setattr(MOD, "loaded", True)
-    monkeypatch.setattr(MOD, "root", str(tmp_path))
+    monkeypatch.setattr(app.index, "loaded", True)
+    monkeypatch.setattr(app.index, "root", str(tmp_path))
     app._show_post_load_prompt()
     _assert_built(opened())
 
@@ -905,19 +949,35 @@ def test_script_picker_opens(app, opened, picker):
         target.destroy()
 
 
-def test_gfx_browsers_open(app, opened, tmp_path, monkeypatch):
+def test_gfx_browsers_open(app, opened, tmp_path, monkeypatch) -> None:
     image = pytest.importorskip("PIL.Image")
     goals = tmp_path / "gfx" / "interface" / "goals"
     goals.mkdir(parents=True)
     # A real image: a failed decode would log from a worker thread (#319).
     image.new("RGBA", (8, 8), "#123456").save(goals / "icon.png")
     monkeypatch.setattr("tkinter.filedialog.askdirectory", lambda **kw: str(goals))
-    monkeypatch.setattr(MOD, "root", str(tmp_path))
-    monkeypatch.setattr(MOD, "path_goals", os.path.join("gfx", "interface", "goals"))
+    monkeypatch.setattr(app.index, "root", str(tmp_path))
+    monkeypatch.setattr(
+        app.app_config, "path_goals", os.path.join("gfx", "interface", "goals")
+    )
 
-    open_universal_gfx_browser(app, on_select=lambda *a: None)
-    open_gfx_placement_editor(app, initial_items=[], on_confirm=lambda *a: None)
-    open_focus_icon_browser(app, on_select=lambda *a: None, current_gfx="")
+    open_universal_gfx_browser(
+        app, on_select=lambda *a: None, index=app.index, config=app.app_config
+    )
+    open_gfx_placement_editor(
+        app,
+        initial_items=[],
+        on_confirm=lambda *a: None,
+        index=app.index,
+        config=app.app_config,
+    )
+    open_focus_icon_browser(
+        app,
+        on_select=lambda *a: None,
+        current_gfx="",
+        index=app.index,
+        config=app.app_config,
+    )
 
     windows = opened()
     assert len(windows) == 3
@@ -974,6 +1034,122 @@ def test_tutorial_steps_highlight_widgets_that_are_on_screen(app):
         assert len(targets) == len(step.widget_keys), step.title_key
 
 
+def test_canvas_state_initializes_and_pools_recover(app):
+    """#167: canvas-owned state is ready once and pools recover after a sweep."""
+    cv = tk.Canvas(app)
+    try:
+        fake = AppFake(cv=cv)
+        # One shared initializer must have produced the whole contract.
+        for attribute in (
+            "_canvas_probe",
+            "_scene_index",
+            "_redraw_state",
+            "_lines",
+            "_lines_used",
+            "_lines_key",
+            "_grid_pool",
+            "_grid_used",
+            "_grid_key",
+            "_legend_pool",
+            "_legend_used",
+            "_legend_key",
+            "_legend_stack_key",
+            "_coord_label_pools",
+            "_coord_label_key",
+            "_mm_visible",
+            "_mm_canvas",
+            "_image_broker",
+            "_image_poll_job",
+            "_focus_bounds_cache",
+        ):
+            assert hasattr(fake, attribute), attribute
+        assert fake._mm_visible is False and fake._mm_canvas is None
+        assert fake._cfp_x is None and fake._cfp_y is None
+
+        # Immediate first render: schedulers, scene index and pools all live.
+        CanvasMixin._redraw_now(
+            fake, RedrawChannel.VIEW | RedrawChannel.SCENE, reason="test"
+        )
+        assert fake._rendering_frame is False
+        probe = fake._canvas_probe
+        assert fake._canvas_item_exists(probe)
+
+        # An external cv.delete("all") sweep invalidates pooled item ids; the
+        # sentinel probe recovers and the pools reset without re-initializing.
+        cv.delete("all")
+        fake._validate_canvas_probe()
+        assert fake._canvas_probe != probe
+        assert fake._canvas_item_exists(fake._canvas_probe)
+        assert fake._lines == [] and fake._lines_used == 0
+        assert fake._grid_pool == [] and fake._grid_used == 0
+        assert fake._legend_pool == [] and fake._legend_used == 0
+    finally:
+        cv.destroy()
+        gc.collect()
+
+
+def test_minimap_toggle_and_cfp_are_optional_handles(app):
+    """#167: genuinely optional handles stay optional but typed."""
+    cv = tk.Canvas(app)
+    try:
+        fake = AppFake(cv=cv)
+        assert fake._mm_scale is None  # geometry only after a visible render
+        fake._toggle_minimap()
+        assert fake._mm_visible is True
+        assert fake._mm_canvas is not None
+        assert fake._mm_canvas in cv.winfo_children()
+        fake._draw_minimap()  # no focuses: overlay cleared, no geometry yet
+        assert fake._mm_scale is None or fake._mm_scale > 0
+        fake._toggle_minimap()
+        assert fake._mm_visible is False
+
+        # CFP values are host-owned document state drawn only when set.
+        fake._cfp_x, fake._cfp_y = 96, 260
+        fake.zoom = 1.0
+        fake._draw_cfp_markers()
+        assert cv.find_withtag("cfp_marker")
+    finally:
+        cv.destroy()
+        gc.collect()
+
+
+def test_real_app_recovers_a_populated_canvas_after_external_delete(monkeypatch):
+    monkeypatch.setattr(main_mod.App, "_run_startup_prompts", lambda self: None)
+    root = main_mod.App()
+    try:
+        parent = Focus(id=1, x=1, y=1)
+        child = Focus(id=2, x=2, y=2)
+        child.tree_idx = 1
+        child.prereqs = [[parent.id]]
+        root.focuses.extend([parent, child])
+        root._extra_trees = [
+            {"type": "shared", "tree_id": "EXTRA", "focus_ids": {child.id}}
+        ]
+        root.update_idletasks()
+        root._redraw_now(RedrawChannel.VIEW | RedrawChannel.SCENE, reason="test")
+        assert root._lines and root._grid_pool and root._legend_pool
+        assert set(root._focus_bundles) == {parent.id, child.id}
+        old_line = root._lines[0]
+        scene = root._scene_index
+        scheduler = root._redraw_state
+
+        root.cv.delete("all")
+        root._redraw_now(RedrawChannel.VIEW | RedrawChannel.SCENE, reason="test")
+
+        assert not root.cv.type(old_line)
+        assert root._scene_index is scene
+        assert root._redraw_state is scheduler
+        assert set(root._focus_bundles) == {parent.id, child.id}
+        assert root.focuses[child.id].prereqs == [[parent.id]]
+        for pool in (root._lines, root._grid_pool, root._legend_pool):
+            assert pool and all(root.cv.type(item) for item in pool)
+    finally:
+        assert root._lifecycle is not None
+        root._lifecycle.finish_close()
+        root.destroy()
+        gc.collect()
+
+
 def test_entry_point_smoke_check(tmp_path):
     # The real entry point in a fresh process, as the frozen build runs it.
     entry = Path(main_mod.__file__).resolve()
@@ -985,11 +1161,62 @@ def test_entry_point_smoke_check(tmp_path):
     )
 
 
+def test_minimap_first_show_uses_requested_size_before_geometry_settles(monkeypatch):
+    monkeypatch.setattr(main_mod.App, "_run_startup_prompts", lambda self: None)
+    root = main_mod.App()
+    try:
+        parent = Focus(id=1, x=1, y=1)
+        child = Focus(id=2, x=2, y=2)
+        child.prereqs = [[parent.id]]
+        root.focuses.extend([parent, child])
+        root.update_idletasks()
+
+        root._toggle_minimap()
+
+        mm = root._mm_canvas
+        assert mm is not None and mm.winfo_exists()
+        assert root._mm_world_bounds == (0.0, 0.0, 3.0, 3.0)
+        assert root._mm_scale is not None
+        assert root._mm_scale > 0
+        assert root._mm_scale == pytest.approx(min(200 / 3, 130 / 3))
+        assert len(root._mm_dot_pool) == 2
+        for item in root._mm_dot_pool:
+            left, top, right, bottom = mm.coords(item)
+            assert 0 <= left < right <= 220
+            assert 0 <= top < bottom <= 150
+
+        scale = root._mm_scale
+        root.update_idletasks()
+        assert (mm.winfo_width(), mm.winfo_height()) == (220, 150)
+        root._draw_minimap()
+        assert root._mm_scale == scale
+
+        root._mm_click(SimpleNamespace(x=110, y=75))
+        assert root.offset[0] == pytest.approx(
+            root.cv.winfo_width() / 2 - 1.5 * XGRID * root.zoom
+        )
+        assert root.offset[1] == pytest.approx(
+            root.cv.winfo_height() / 2 - 1.5 * YGRID * root.zoom
+        )
+        root._toggle_minimap()
+        assert root._mm_visible is False
+        root._toggle_minimap()
+        assert root._mm_canvas is mm
+        assert root._mm_scale is not None
+        assert root._mm_scale > 0
+    finally:
+        assert root._lifecycle is not None
+        root._lifecycle.finish_close()
+        root.destroy()
+        gc.collect()
+
+
 _FAR_RECT = (0.0, 0.0, 10.0, 10.0)
 
 
-def _registered_commands(widget: tk.Misc) -> set[str]:
-    return set(vars(widget)["_tclCommands"] or ())
+def _tcl_commands(cv: tk.Canvas) -> set[str]:
+    """tk.Canvas._tclCommands is a private Tk attribute (not in stubs)."""
+    return set(getattr(cv, "_tclCommands", None) or ())
 
 
 def test_focus_callbacks_released_on_cull_lod_and_external_delete(app):
@@ -997,25 +1224,25 @@ def test_focus_callbacks_released_on_cull_lod_and_external_delete(app):
     try:
         fake = AppFake(cv=cv)
         focus = Focus(id=1, x=1, y=1)
-        baseline = _registered_commands(cv)
+        baseline = _tcl_commands(cv)
         for _ in range(3):
             fake.zoom = 1.0
             fake._draw_focus(focus, _FAR_RECT)
-            full_commands = _registered_commands(cv) - baseline
+            full_commands = _tcl_commands(cv) - baseline
             assert len(full_commands) == 70
             fake.zoom = 0.3
             fake._draw_focus(focus, _FAR_RECT)
-            assert len(_registered_commands(cv) - baseline) == 15
+            assert len(_tcl_commands(cv) - baseline) == 15
             # Tkinter names use Python object IDs, which can be reused after free.
-            retired = full_commands - _registered_commands(cv)
+            retired = full_commands - _tcl_commands(cv)
             assert not any(cv.tk.call("info", "commands", cmd) for cmd in retired)
             cv.delete("all")
             fake._validate_canvas_probe()
-            assert _registered_commands(cv) == baseline
+            assert _tcl_commands(cv) == baseline
             fake.zoom = 1.0
             fake._draw_focus(focus, _FAR_RECT)
             fake._reclaim_focus_bundles(set())
-            assert _registered_commands(cv) == baseline
+            assert _tcl_commands(cv) == baseline
             fake._reclaim_focus_bundles(set())
     finally:
         cv.destroy()
@@ -1026,7 +1253,6 @@ def test_scroll_burst_coalesces_and_keeps_pointer_anchor(app, monkeypatch):
     cv = tk.Canvas(app)
     try:
         fake = AppFake(cv=cv)
-        fake._canvas_runtime()
         jobs = []
         frames = []
         monkeypatch.setattr(cv, "after", lambda delay, cb: jobs.append(cb) or "job")

@@ -10,11 +10,12 @@ the version by hand. See `AGENTS.md`.
 
 - Replace the right-hand focus form and the left focus list with a resizable
   content sidebar and a searchable project explorer. Switch between Focus Trees,
-  Decisions, Events, Ideas and Dynamic Modifiers, browse the loaded trees and
-  their focuses, and see the mod's localisation, graphics and scripted-effect
-  files. Enter on a source file reveals its folder. Unopened tree files under
-  `common/national_focus` open through the usual import prompts, and New Focus
-  Tree is one click.
+  Decisions, Events, Ideas, Dynamic Modifiers and Character Editor. Add Income
+  stays with those tools when a Millennium Dawn mod is loaded, not on the canvas
+  toolbar. Browse the loaded trees and their focuses, and see the mod's
+  localisation, graphics and scripted-effect files. Enter on a source file
+  reveals its folder. Unopened tree files under `common/national_focus` open
+  through the usual import prompts, and New Focus Tree is one click.
 - Click a focus to open a Spotlight with six actions: Edit Focus, Add
   Prerequisite, Add Effect, Add Child, Duplicate and Delete. Edit Focus opens the
   existing form in its own window, with Conditions and Code under Advanced
@@ -23,11 +24,52 @@ the version by hand. See `AGENTS.md`.
   surface; Windows keeps color-key transparency.
 - Keep Save Project, Validate, Export and the Saved and Validation status in
   view, wrap the canvas tools in narrow windows, and move the loaded trees, tree
-  ID and continuous focus position into Tree Settings. The German, Spanish and
-  Chinese strings added for this are machine translations and need native review.
+  ID and continuous focus position into Tree Settings. The French, German,
+  Spanish and Chinese strings added for this are machine translations and need
+  native review.
 - Opening Validate no longer switches the whole app to the clam ttk theme.
-- Importing events whose id, picture or options are written as blocks no longer
-  raises an error.
+- Importing events whose title or description is written as a block no longer
+  raises an error. A non-text event id or picture is still ignored.
+
+- Preserve comments inside imported focus reward and condition blocks
+  (`completion_reward`, `available`, `cancel`, and the other raw keys)
+  through parse, build, export and repeated round trips. Comments used to be
+  stripped before the verbatim block capture. Keep commented war-target blocks
+  braced so their comments cannot become target assignments.
+
+- Skip repeated background validation for unchanged inputs. Coalesce edits during
+  a running pass, keep detached snapshots, and refresh after localisation-file,
+  graphics-catalog, or language changes. Explicit Refresh still forces a pass.
+
+- Make wizard image caches App-owned, invalidate them on mod reload, and
+  release each decision window's preview cache when that window is destroyed.
+
+- Import focus trees containing non-finite `ai_will_do` values (`inf`,
+  `-inf`, `1e999`, `-1e999`) instead of aborting the load: the field falls
+  back to the existing default of 1 in both scalar and block form, and the
+  original block content is preserved for round-trips.
+
+- Finish the UI strings left in English after language discovery: the effects
+  hover hint, the edit-target menubar label, the event-picture profile line,
+  and the wizard, Draw.io and Set Edit Targets file-type filters. Inline
+  `tr()` defaults now match `en.json`, and the key-drift test checks that. The
+  settings hint on how Millennium Dawn is detected names `00_money_system.txt`
+  again in every language. The German, Spanish and Chinese strings added here
+  are machine translations and need native review.
+- Separate mod scan results, saved preferences, and Tk image caches. Scans
+  receive frozen settings instead of sharing live UI data; image eviction
+  and shutdown cleanup stay on the Tk thread.
+- Report unreadable folders in the fallback focus-icon picker instead of
+  failing its Tk callback.
+- Remember the window size and position between launches. Every config save
+  used to overwrite the stored geometry with an empty string, so it never
+  restored.
+- Ignore a non-text event `id` or `picture` when importing events, and report a
+  failed events or localisation folder in the Save to Mod summary instead of
+  raising.
+
+- Share mod-file discovery, image enumeration, wizard localisation lookup and
+  test helpers without changing file selection or export behavior.
 - Add a UI language by dropping `locales/<code>.json` into the folder: the
   language list is read from the files, each naming itself in `_meta`. Wrap the
   wizard, settings, undo, canvas and validation text that bypassed `tr()`, and
@@ -36,6 +78,26 @@ the version by hand. See `AGENTS.md`.
   test now fails when a `tr()` key is missing from `en.json` or a locale drifts.
 - Record a failed sibling autosave once in the error log, including its path.
   Repeated ticks for the same failure do not add another entry.
+- Draw the minimap at its requested size on first show so its dots and
+  click-to-pan use a positive scale before Tk finishes laying it out.
+- Keep unsaved sidebar edits when you press Ctrl+Z or Ctrl+Y. The edit becomes
+  its own undo step first, so Ctrl+Y can bring it back. An untouched imported
+  focus no longer adds an undo entry or clears redo when you select away from
+  it, undo, or redo. That covers ids with characters outside letters, digits
+  and underscores, nested, duplicate or negative `ai_will_do` values, and
+  conditions, offsets or localization text with surrounding whitespace.
+- Fix renaming a key on a raw effect. The full typed name is now stored as one
+  undo step, the field keeps its place, and editing the value afterward writes
+  the renamed key instead of adding the old one back. A name that is already
+  used, empty, or starts with `_` stays pending and changes nothing. Add field
+  now picks an unused `keyN` instead of overwriting one.
+- Add French (Français) as an interface language. The strings are machine
+  translations and need native review.
+- Offer the field marshal role in the Character Editor's role list, next to
+  corps commander and navy leader.
+- Make the raw effect block editor, raw key rename, raw field add and the icon
+  picker undoable. Typing in a raw block is one undo step, and a key release or
+  icon pick that changes nothing adds no entry.
 
 ---
 

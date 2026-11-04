@@ -10,21 +10,42 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
+from hoi4cm.script.syntax import parse_script
+
 from .focus import Focus
 
 _DEFAULT_GFX = "GFX_goal_generic_political_pressure"
 _DEFAULT_SEARCH = "FOCUS_FILTER_POLITICAL"
-_AI_BASE_RE = re.compile(r"^\s*base\s*=\s*([\d.]+)", re.MULTILINE)
-_AI_FACTOR_RE = re.compile(r"^\s*factor\s*=\s*([\d.]+)", re.MULTILINE)
+_ID_SANITIZE_RE = re.compile(r"[^A-Za-z0-9_]")
+
+
+def form_focus_id(raw: str, current: str | None) -> str:
+    """The focus id the sidebar writes for the name field's ``raw`` text.
+
+    An untouched field keeps an imported id verbatim; sanitizing it would
+    read the untouched form as a rename on every select-away.
+    """
+    if current is not None and raw == current:
+        return raw
+    return _ID_SANITIZE_RE.sub("_", raw)
 
 
 def parse_ai_will_do(raw_ai: str) -> int:
     """Top-level numeric ai_will_do value from a raw block body.
 
-    Accepts either ``base`` (MD top-level) or ``factor`` (modifier blocks).
+    Reuses the import parser: a top-level ``factor`` wins over ``base``,
+    duplicated keys parse as lists and, like any other non-numeric value,
+    fall back to 1.
     """
-    match = _AI_BASE_RE.search(raw_ai) or _AI_FACTOR_RE.search(raw_ai)
-    return int(float(match.group(1))) if match else 1
+    parsed = parse_script(raw_ai)
+    value = parsed.get("factor", parsed.get("base", 1))
+    if not isinstance(value, str | int | float):
+        return 1
+    try:
+        return int(float(value))
+    except ValueError, OverflowError:
+        # OverflowError: infinite float tokens (inf, 1e999) are not int()-able.
+        return 1
 
 
 def parse_focus_cost(raw: str) -> int | float:
@@ -68,8 +89,22 @@ def _ai_raw_text(focus: Focus) -> str:
     return raw or f"base = {focus.ai_will_do}"
 
 
+def _shown_offsets(focus: Focus) -> tuple[dict[str, Any], ...]:
+    """The offsets the sidebar shows for ``focus``, trigger text stripped."""
+    return tuple(
+        {**offset, "trigger": str(offset.get("trigger", "")).strip()}
+        for offset in getattr(focus, "offsets", [])
+    )
+
+
 def sidebar_values_match_focus(focus: Focus, values: FocusSidebarValues) -> bool:
-    """True when writing ``values`` onto ``focus`` would change nothing."""
+    """True when writing ``values`` onto ``focus`` would change nothing.
+
+    Imported condition blocks, offset triggers and localisation text keep
+    their surrounding whitespace, but the form reads every text widget back
+    stripped. Compare them stripped so an untouched form never reads as an
+    edit.
+    """
     return (
         focus.name == values.name
         and focus.icon == values.icon
@@ -79,16 +114,16 @@ def sidebar_values_match_focus(focus: Focus, values: FocusSidebarValues) -> bool
         and focus.ai_will_do == values.ai_will_do
         and focus.x == values.x
         and focus.y == values.y
-        and getattr(focus, "loc_name", "") == values.loc_name
-        and focus.desc == values.desc
+        and getattr(focus, "loc_name", "").strip() == values.loc_name
+        and focus.desc.strip() == values.desc
         and getattr(focus, "search_filters", _DEFAULT_SEARCH) == values.search_filters
-        and getattr(focus, "available_cond", "") == values.available_cond
-        and getattr(focus, "bypass_cond", "") == values.bypass_cond
-        and getattr(focus, "cancel_cond", "") == values.cancel_cond
+        and getattr(focus, "available_cond", "").strip() == values.available_cond
+        and getattr(focus, "bypass_cond", "").strip() == values.bypass_cond
+        and getattr(focus, "cancel_cond", "").strip() == values.cancel_cond
         and focus.cancel_if_invalid == values.cancel_if_invalid
         and focus.continue_if_invalid == values.continue_if_invalid
         and focus.available_if_capitulated == values.available_if_capitulated
-        and tuple(getattr(focus, "offsets", [])) == values.offsets
+        and _shown_offsets(focus) == values.offsets
     )
 
 

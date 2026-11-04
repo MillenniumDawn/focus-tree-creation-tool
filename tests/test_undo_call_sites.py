@@ -1,3 +1,5 @@
+import copy
+from collections.abc import Callable
 from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import Mock
@@ -23,7 +25,7 @@ def test_clear_all_pushes_full_snapshot_after_confirmation(monkeypatch):
 
     app_module.App._clear_all(_as_app(app))
 
-    app._push_undo.assert_called_once_with("clear all", tree_state=True)
+    app.mock("_push_undo").assert_called_once_with("clear all", tree_state=True)
     assert not app.focuses
 
 
@@ -34,7 +36,7 @@ def test_clear_all_cancel_keeps_document_without_undo(monkeypatch):
 
     app_module.App._clear_all(_as_app(app))
 
-    app._push_undo.assert_not_called()
+    app.mock("_push_undo").assert_not_called()
     assert app.focuses[focus.id] is focus
 
 
@@ -43,9 +45,9 @@ def test_clear_all_round_trips_through_real_undo_stack(monkeypatch):
     app = AppFake([focus])
     app._undo_stack = UndoStack()
 
-    def push_undo(label="action", touched_ids=None, *, tree_state=False):
+    def push_undo(label="action", touched_ids=None, run=None, *, tree_state=False):
         app_module.App._push_undo(
-            _as_app(app), label, touched_ids, tree_state=tree_state
+            _as_app(app), label, touched_ids, run, tree_state=tree_state
         )
 
     app._push_undo = push_undo
@@ -75,7 +77,7 @@ def test_undo_and_redo_refresh_selected_focus():
     app._populate.assert_called_once_with(app.selected)
     app._refresh_prereqs.assert_called_once_with()
     app._refresh_mutex.assert_called_once_with()
-    app._refresh_effects.assert_called_once_with()
+    app.mock("_refresh_effects").assert_called_once_with()
 
     app_module.App._redo(_as_app(app))
 
@@ -83,7 +85,7 @@ def test_undo_and_redo_refresh_selected_focus():
     assert app._populate.call_count == 2
     assert app._refresh_prereqs.call_count == 2
     assert app._refresh_mutex.call_count == 2
-    assert app._refresh_effects.call_count == 2
+    assert app.mock("_refresh_effects").call_count == 2
 
 
 def test_bulk_rename_ui_undo_redo_restores_anchor_only_child():
@@ -131,7 +133,9 @@ def test_make_prereq_pushes_child_id():
 
     app_module.App._make_prereq(_as_app(app), child, parent)
 
-    app._push_undo.assert_called_once_with("add prerequisite", touched_ids=(child.id,))
+    app.mock("_push_undo").assert_called_once_with(
+        "add prerequisite", touched_ids=(child.id,)
+    )
     assert child.prereqs == [[parent.id]]
 
 
@@ -143,7 +147,7 @@ def test_duplicate_prereq_does_not_push_undo():
 
     app_module.App._make_prereq(_as_app(app), child, parent)
 
-    app._push_undo.assert_not_called()
+    app.mock("_push_undo").assert_not_called()
     assert child.prereqs == [[parent.id]]
 
 
@@ -152,7 +156,7 @@ def test_remove_prereq_without_selection_does_not_push_undo():
 
     app_module.App._rm_prereq(_as_app(app), 0)
 
-    app._push_undo.assert_not_called()
+    app.mock("_push_undo").assert_not_called()
 
 
 def test_remove_prereq_group_pushes_child_id():
@@ -164,7 +168,7 @@ def test_remove_prereq_group_pushes_child_id():
 
     app_module.App._rm_prereq(_as_app(app), 0)
 
-    app._push_undo.assert_called_once_with(
+    app.mock("_push_undo").assert_called_once_with(
         "remove prerequisite group", touched_ids=(child.id,)
     )
     assert child.prereqs == []
@@ -175,7 +179,7 @@ def test_remove_mutex_without_selection_does_not_push_undo():
 
     app_module.App._rm_mutex(_as_app(app), 0)
 
-    app._push_undo.assert_not_called()
+    app.mock("_push_undo").assert_not_called()
 
 
 def test_make_mutex_pushes_both_focus_ids():
@@ -185,7 +189,7 @@ def test_make_mutex_pushes_both_focus_ids():
 
     app_module.App._make_mutex(_as_app(app), first, second)
 
-    app._push_undo.assert_called_once_with(
+    app.mock("_push_undo").assert_called_once_with(
         "add mutex", touched_ids=(first.id, second.id)
     )
     assert first.mutex == [second.id]
@@ -202,7 +206,7 @@ def test_remove_mutex_pushes_selected_and_partner_ids():
 
     app_module.App._rm_mutex(_as_app(app), 0)
 
-    app._push_undo.assert_called_once_with(
+    app.mock("_push_undo").assert_called_once_with(
         "remove mutex", touched_ids=(selected.id, partner.id)
     )
     assert selected.mutex == []
@@ -229,7 +233,9 @@ def test_rm_effect_pushes_focus_id():
 
     app_module.App._rm_effect(_as_app(app), 0)
 
-    app._push_undo.assert_called_once_with("remove effect", touched_ids=(focus.id,))
+    app.mock("_push_undo").assert_called_once_with(
+        "remove effect", touched_ids=(focus.id,)
+    )
     assert focus.effects == []
 
 
@@ -240,8 +246,10 @@ def test_rm_effect_round_trip_through_real_undo_stack():
     app.selected = focus
     app._undo_stack = UndoStack()
 
-    def push_undo(label="action", touched_ids=None):
-        app_module.App._push_undo(_as_app(app), label, touched_ids)
+    def push_undo(label="action", touched_ids=None, run=None, *, tree_state=False):
+        app_module.App._push_undo(
+            _as_app(app), label, touched_ids, run, tree_state=tree_state
+        )
 
     app._push_undo = push_undo
 
@@ -261,7 +269,9 @@ def test_add_offset_pushes_focus_id_and_appends_offset():
 
     app_module.App._add_offset(_as_app(app))
 
-    app._push_undo.assert_called_once_with("add offset", touched_ids=(focus.id,))
+    app.mock("_push_undo").assert_called_once_with(
+        "add offset", touched_ids=(focus.id,)
+    )
     assert focus.offsets == [
         {"x": 1, "y": 2, "trigger": "has_war = yes"},
         {"x": 0, "y": 0, "trigger": ""},
@@ -275,8 +285,10 @@ def test_add_offset_round_trip_through_real_undo_stack():
     app.selected = focus
     app._undo_stack = UndoStack()
 
-    def push_undo(label="action", touched_ids=None):
-        app_module.App._push_undo(_as_app(app), label, touched_ids)
+    def push_undo(label="action", touched_ids=None, run=None, *, tree_state=False):
+        app_module.App._push_undo(
+            _as_app(app), label, touched_ids, run, tree_state=tree_state
+        )
 
     app._push_undo = push_undo
 
@@ -296,7 +308,9 @@ def test_del_offset_pushes_focus_id_and_removes_offset():
 
     app_module.App._del_offset(_as_app(app), 0)
 
-    app._push_undo.assert_called_once_with("remove offset", touched_ids=(focus.id,))
+    app.mock("_push_undo").assert_called_once_with(
+        "remove offset", touched_ids=(focus.id,)
+    )
     assert focus.offsets == [{"x": 3, "y": 4, "trigger": ""}]
 
 
@@ -307,8 +321,10 @@ def test_del_offset_round_trip_through_real_undo_stack():
     app.selected = focus
     app._undo_stack = UndoStack()
 
-    def push_undo(label="action", touched_ids=None):
-        app_module.App._push_undo(_as_app(app), label, touched_ids)
+    def push_undo(label="action", touched_ids=None, run=None, *, tree_state=False):
+        app_module.App._push_undo(
+            _as_app(app), label, touched_ids, run, tree_state=tree_state
+        )
 
     app._push_undo = push_undo
 
@@ -332,7 +348,7 @@ def test_drag_click_without_grid_move_does_not_push_undo():
     app._foc_pr(focus.id, SimpleNamespace(x=0, y=0, state=0))
     app._foc_mv(focus.id, SimpleNamespace(x=3, y=3))
 
-    app._push_undo.assert_not_called()
+    app.mock("_push_undo").assert_not_called()
     assert (focus.x, focus.y) == (0, 0)
 
 
@@ -346,7 +362,7 @@ def test_drag_into_occupied_cell_does_not_push_undo():
     app._foc_pr(focus.id, SimpleNamespace(x=0, y=0, state=0))
     app._foc_mv(focus.id, SimpleNamespace(x=XGRID, y=YGRID))
 
-    app._push_undo.assert_not_called()
+    app.mock("_push_undo").assert_not_called()
     assert (focus.x, focus.y) == (0, 0)
 
 
@@ -360,7 +376,7 @@ def test_drag_event_for_other_focus_does_not_push_undo():
     app._foc_pr(focus.id, SimpleNamespace(x=0, y=0, state=0))
     app._foc_mv(other.id, SimpleNamespace(x=XGRID, y=YGRID))
 
-    app._push_undo.assert_not_called()
+    app.mock("_push_undo").assert_not_called()
     assert (focus.x, focus.y) == (0, 0)
 
 
@@ -374,7 +390,7 @@ def test_drag_in_mutex_mode_does_not_push_undo():
     app.mutex_mode = True
     app._foc_mv(focus.id, SimpleNamespace(x=XGRID, y=YGRID))
 
-    app._push_undo.assert_not_called()
+    app.mock("_push_undo").assert_not_called()
     assert (focus.x, focus.y) == (0, 0)
 
 
@@ -390,7 +406,7 @@ def test_drag_move_pushes_once_with_moved_focus_id():
 
     app._foc_pr(focus.id, SimpleNamespace(x=0, y=0, state=0))
     app._foc_mv(focus.id, SimpleNamespace(x=3, y=3))
-    app._push_undo.assert_not_called()
+    app.mock("_push_undo").assert_not_called()
 
     app._foc_mv(focus.id, SimpleNamespace(x=XGRID, y=YGRID))
     app._foc_mv(focus.id, SimpleNamespace(x=XGRID, y=YGRID))
@@ -399,7 +415,9 @@ def test_drag_move_pushes_once_with_moved_focus_id():
         SimpleNamespace(x=2 * XGRID, y=2 * YGRID),
     )
 
-    app._push_undo.assert_called_once_with("move focus", touched_ids=(focus.id,))
+    app.mock("_push_undo").assert_called_once_with(
+        "move focus", touched_ids=(focus.id,)
+    )
     assert (focus.x, focus.y) == (2, 2)
 
 
@@ -418,25 +436,25 @@ def test_drag_start_snapshots_occupied_positions():
 def test_rmb_on_occupied_cell_does_not_place(monkeypatch: pytest.MonkeyPatch):
     focus = Focus(id=30, x=2, y=3)
     app = AppFake([focus])
-    app._new_focus_at = Mock()
+    monkeypatch.setattr(app, "_new_focus_at", Mock())
     monkeypatch.setattr(app, "c2w", lambda _x, _y: (2, 3))
     app.cv.find_overlapping.return_value = ()
 
     app._rmb(SimpleNamespace(x=10, y=10))
 
-    app._new_focus_at.assert_not_called()
+    app.mock("_new_focus_at").assert_not_called()
 
 
 def test_rmb_on_free_cell_places(monkeypatch: pytest.MonkeyPatch):
     focus = Focus(id=31, x=2, y=3)
     app = AppFake([focus])
-    app._new_focus_at = Mock()
+    monkeypatch.setattr(app, "_new_focus_at", Mock())
     monkeypatch.setattr(app, "c2w", lambda _x, _y: (5, 5))
     app.cv.find_overlapping.return_value = ()
 
     app._rmb(SimpleNamespace(x=10, y=10))
 
-    app._new_focus_at.assert_called_once_with(5, 5)
+    app.mock("_new_focus_at").assert_called_once_with(5, 5)
 
 
 def _code_app(focus: Focus) -> AppFake:
@@ -564,7 +582,7 @@ def test_add_focus_picks_first_free_cell_without_repairing_indexes():
 
     app_module.App._add_focus(_as_app(app))
 
-    app._new_focus_at.assert_called_once_with(4, 0)
+    app.mock("_new_focus_at").assert_called_once_with(4, 0)
     app.focuses.validate_indexes.assert_not_called()
     app.focuses.rebuild_indexes.assert_not_called()
 
@@ -577,9 +595,265 @@ def test_new_focus_at_keeps_indexes_exact_without_a_rebuild():
 
     app_module.App._new_focus_at(_as_app(app), 2, 0)
 
-    created = app._select.call_args.args[0]
+    created = app.mock("_select").call_args.args[0]
     assert created.name == f"tag_focus_{created.id}"
     assert app.focuses.occupied_positions[(2, 0)] == {created.id}
     assert app.focuses.first_by_name[created.name] == created.id
     app.focuses.rebuild_indexes.assert_not_called()
     assert app.focuses.validate_indexes()
+
+
+class _TextFake:
+    def __init__(self, text: str) -> None:
+        self.text = text
+
+    def get(self, _start: str, _end: str) -> str:
+        return self.text
+
+
+class _TraceVar:
+    """A StringVar stand-in whose set() fires the write trace, as Tk does."""
+
+    def __init__(self, value: str, on_write: Callable[[], None]) -> None:
+        self._value = value
+        self._on_write = on_write
+
+    def get(self) -> str:
+        return self._value
+
+    def set(self, value: str) -> None:
+        self._value = value
+        self._on_write()
+
+
+def _live_undo_app(focus: Focus, *others: Focus) -> AppFake:
+    """A host that selects ``focus`` and pushes onto a real UndoStack."""
+    app = AppFake([focus, *others])
+    cast(Any, app).selected = focus
+    app._undo_stack = UndoStack()
+    cast(Any, app)._push_undo = lambda *args, **kwargs: app_module.App._push_undo(
+        _as_app(app), *args, **kwargs
+    )
+    return app
+
+
+def _raw_focus(raw: str) -> Focus:
+    focus = Focus(id=40)
+    focus.effects = [{"type": "_raw_block", "fields": {"raw": raw}}]
+    return focus
+
+
+def _fields_of(app: AppFake, focus_id: int) -> dict[str, str]:
+    return cast(dict[str, str], app.focuses[focus_id].effects[0]["fields"])
+
+
+def _raw_of(app: AppFake) -> str:
+    return _fields_of(app, 40)["raw"]
+
+
+def test_raw_edit_pushes_before_writing_and_undo_restores_the_imported_text():
+    imported = "add_political_power = 5  \n"
+    app = _live_undo_app(_raw_focus(imported))
+    revision = app.focuses.content_revision
+
+    app._live_raw_block(0, _TextFake("add_political_power = 50\n"))
+
+    assert _raw_of(app) == "add_political_power = 50"
+    assert app.focuses.content_revision > revision
+    assert len(app._undo_stack) == 1
+    app_module.App._undo(_as_app(app))
+    assert _raw_of(app) == imported
+
+
+def test_raw_edit_typing_coalesces_into_one_entry():
+    imported = "a = 1\n"
+    app = _live_undo_app(_raw_focus(imported))
+
+    for text in ("a = 1x", "a = 1xy", "a = 1xyz"):
+        app._live_raw_block(0, _TextFake(text))
+
+    assert _raw_of(app) == "a = 1xyz"
+    assert len(app._undo_stack) == 1
+    app_module.App._undo(_as_app(app))
+    assert _raw_of(app) == imported
+
+
+def test_raw_edit_bare_key_release_pushes_nothing_and_keeps_redo():
+    app = _live_undo_app(_raw_focus("a = 1  \n"))
+    app._live_raw_block(0, _TextFake("a = 2"))
+    app_module.App._undo(_as_app(app))
+    imported = _raw_of(app)
+
+    app._live_raw_block(0, _TextFake(imported))
+
+    assert imported == "a = 1  \n"
+    assert _raw_of(app) == imported
+    assert len(app._undo_stack) == 0
+    app_module.App._redo(_as_app(app))
+    assert _raw_of(app) == "a = 2"
+
+
+def test_rename_effect_key_pushes_and_undo_restores_the_key():
+    focus = Focus(id=41)
+    focus.effects = [{"type": "mine", "fields": {"amount": "1", "tag": "GER"}}]
+    app = _live_undo_app(focus)
+    app._effects_sig = "built"
+    revision = app.focuses.content_revision
+
+    app._rename_effect_key(0, "amount", "value")
+
+    assert _fields_of(app, 41) == {"value": "1", "tag": "GER"}
+    assert app.focuses.content_revision > revision
+    assert app._effects_sig is None
+    assert len(app._undo_stack) == 1
+    app_module.App._undo(_as_app(app))
+    assert _fields_of(app, 41) == {"amount": "1", "tag": "GER"}
+
+
+def test_rename_effect_key_onto_an_existing_key_is_undoable():
+    focus = Focus(id=41)
+    focus.effects = [{"type": "mine", "fields": {"amount": "1", "tag": "GER"}}]
+    app = _live_undo_app(focus)
+
+    app._rename_effect_key(0, "amount", "tag")
+
+    assert _fields_of(app, 41) == {"tag": "1"}
+    app_module.App._undo(_as_app(app))
+    assert _fields_of(app, 41) == {"amount": "1", "tag": "GER"}
+
+
+@pytest.mark.parametrize(
+    ("old", "new"), [("amount", "amount"), ("missing", "value")], ids=["same", "gone"]
+)
+def test_rename_effect_key_without_a_change_pushes_nothing(old, new):
+    focus = Focus(id=41)
+    focus.effects = [{"type": "mine", "fields": {"amount": "1", "tag": "GER"}}]
+    app = _live_undo_app(focus)
+    app._effects_sig = "built"
+    revision = app.focuses.content_revision
+
+    app._rename_effect_key(0, old, new)
+
+    assert list(_fields_of(app, 41).items()) == [("amount", "1"), ("tag", "GER")]
+    assert app.focuses.content_revision == revision
+    assert app._effects_sig == "built"
+    assert len(app._undo_stack) == 0
+
+
+@pytest.mark.parametrize(
+    ("effect", "added"),
+    [
+        ({"type": "mine", "fields": {"a": "1"}}, {"a": "1", "key0": "value"}),
+        ({"type": "mine"}, {"key0": "value"}),
+    ],
+    ids=["with-fields", "no-fields"],
+)
+def test_add_raw_field_pushes_and_undo_removes_it(effect, added):
+    focus = Focus(id=42)
+    focus.effects = [effect]
+    before = copy.deepcopy(effect)
+    app = _live_undo_app(focus)
+    revision = app.focuses.content_revision
+
+    app._add_raw_effect_field(0)
+
+    assert _fields_of(app, 42) == added
+    assert app.focuses.content_revision > revision
+    assert len(app._undo_stack) == 1
+    cast(Any, app)._refresh_effects.assert_called_once_with()
+    app_module.App._undo(_as_app(app))
+    assert app.focuses[42].effects == [before]
+
+
+@pytest.mark.parametrize(
+    ("selected", "index"), [(False, 0), (True, 3)], ids=["no-selection", "stale-index"]
+)
+def test_raw_effect_edits_ignore_a_missing_selection_or_stale_index(selected, index):
+    focus = _raw_focus("a = 1")
+    app = _live_undo_app(focus)
+    if not selected:
+        cast(Any, app).selected = None
+
+    app._live_raw_block(index, _TextFake("b"))
+    app._rename_effect_key(index, "raw", "other")
+    app._add_raw_effect_field(index)
+
+    assert focus.effects == [{"type": "_raw_block", "fields": {"raw": "a = 1"}}]
+    assert len(app._undo_stack) == 0
+
+
+def _icon_app(focus: Focus, *others: Focus) -> tuple[AppFake, _TraceVar]:
+    """A host wired like the sidebar: the icon var's trace calls the handler."""
+    app = _live_undo_app(focus, *others)
+    host = cast(Any, app)
+    host._redraw_now = Mock()
+    icon_var = _TraceVar(
+        focus.icon, lambda: app_module.App._on_icon_change(_as_app(app))
+    )
+    host._fv_icon = icon_var
+    app._populate = Mock(side_effect=lambda f: icon_var.set(f.icon))
+    return app, icon_var
+
+
+def _icon_focus(focus_id: int, icon: str) -> Focus:
+    focus = Focus(id=focus_id)
+    focus.icon = icon
+    return focus
+
+
+def test_icon_change_pushes_before_writing_and_round_trips_through_undo_redo():
+    focus = _icon_focus(43, "A")
+    app, icon_var = _icon_app(focus)
+    revision = app.focuses.content_revision
+
+    icon_var.set("B")
+
+    assert focus.icon == "B"
+    assert app.focuses.content_revision > revision
+    assert len(app._undo_stack) == 1
+    cast(Any, app)._redraw_now.assert_called_once_with()
+    app_module.App._undo(_as_app(app))
+    assert app.focuses[43].icon == "A"
+    assert len(app._undo_stack) == 0
+    app_module.App._redo(_as_app(app))
+    assert app.focuses[43].icon == "B"
+
+
+def test_icon_repick_of_the_current_icon_pushes_nothing():
+    focus = _icon_focus(43, "A")
+    app, icon_var = _icon_app(focus)
+    revision = app.focuses.content_revision
+
+    icon_var.set("A")
+
+    assert focus.icon == "A"
+    assert app.focuses.content_revision == revision
+    assert len(app._undo_stack) == 0
+    cast(Any, app)._redraw_now.assert_not_called()
+
+
+def test_icon_change_without_a_selected_focus_writes_nothing():
+    focus = _icon_focus(43, "A")
+    app, icon_var = _icon_app(focus)
+    cast(Any, app).selected = None
+
+    icon_var.set("B")
+
+    assert focus.icon == "A"
+    assert len(app._undo_stack) == 0
+
+
+def test_select_populates_the_icon_without_pushing_or_writing_the_previous_focus():
+    first = _icon_focus(44, "A")
+    second = _icon_focus(45, "B")
+    app, icon_var = _icon_app(first, second)
+    host = cast(Any, app)
+    host._autosave = Mock()
+    host._show_form = Mock()
+    host._update_focus_list_selection = Mock()
+
+    app_module.App._select(_as_app(app), second)
+
+    assert icon_var.get() == "B"
+    assert (first.icon, second.icon) == ("A", "B")
+    assert len(app._undo_stack) == 0

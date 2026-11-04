@@ -72,6 +72,10 @@ schema and workload determinism on a tiny preset (under a second). Example
 
 ## Hot-path ledger
 
+Issue #182 moved the scanner from `mod/context.py` to `mod/index.py` and
+its PhotoImage LRU to `ui/sprite_images.py`. Older measurements below retain
+the paths from the measured revision.
+
 Mod-load cancellation (#186) was compared with `origin/main` at `f3a6ce1`
 using the same warm synthetic mod: 64,000 images, 800 focus files, 20,000
 focuses, Python 3.14, and 14 interleaved pairs after warmup. Median worker
@@ -101,7 +105,7 @@ the regression test also forbids calling the old catalog's flush on adoption.
 | Every wizard file write rebuilt the whole graphics state: image/gfx list copies, two full goal/idea `_is_under` passes, a full `_derive_references`, a 64k-entry `_image_stamps` rebuild, a whole-snapshot SQLite store, and a flush of the decoded-image LRU | `mod/graphics_catalog.py` (`note_written`/`note_deleted`), `mod/context.py` (`_apply_graphics_maps`) | `note_written`/`note_deleted` patch `PathReference`-keyed dicts in place, re-derive only the affected sprite-map entries (per-file declaration diffs plus disk-derived claims), defer the SQLite store to the next refresh or shutdown, and evict only the changed names from the decoded-image LRU | fixed in issue #29 | 50k-image synthetic tree (Python 3.14): in-place image overwrite 1609ms -> 0.07ms, new image 1607ms -> 0.06ms, `.gfx` append+write 1324ms -> 0.84ms, image delete 3216ms -> 77ms. A reload after writes now pays the deferred store once (~0.7s) instead of once per write |
 | Every launch imported all five wizards and `_wiz_shared` at monolith import time, pulling in ~12k lines of wizard code whether or not a wizard is ever opened | `hoi4_content_maker.py` (module header), `wizards/__init__.py`, `ui/mod_loading.py:28` | Imports moved into the five `_*_wizard` callbacks and `_close_app_caches`, *and* `wizards/__init__.py` made lazy through a module-level `__getattr__`. Moving the monolith's imports alone did nothing: `ui/mod_loading.py` pulls `_shared` in at module scope, and an eager package `__init__` turned that into all five wizards. `test_startup_does_not_import_wizard_modules` pins it | fixed in issue #34 | not yet measured, needs a display session against the real mod |
 | `_scan_files_cached` did one `SELECT` per file against `ScanCache` and one `INSERT OR REPLACE` per miss, so a domain covering the reference mod's ~790 focus files paid ~790 round trips | `mod/context.py` (`_scan_files_cached`), `mod/scan_cache.py` (`get_many`/`put_many`) | `get_many` pulls a domain's rows in one `SELECT` and matches them against the caller's `{path: (mtime, size)}` map; `put_many` writes the misses with one `executemany`. `prune` already holds the table to the current path set, so the whole-domain read stays proportional to the mod | fixed in issue #34 | not yet measured, needs a display session against the real mod |
-| `_populate` tore down and recreated the offsets, prerequisites, mutex and effects sidebar sections on every call, even when the focus's data was unchanged. Saving a focus re-populates, so a save on a focus with a dozen effects rebuilt every card | `hoi4_content_maker.py` (`_refresh_offsets`, `_refresh_prereqs`, `_refresh_mutex`), `ui/effects_panel.py` (`_refresh_effects`) | Each section caches a signature of what it last rendered and returns early on a match, gated on `MOD.sidebar_refresh_skip`. `_refresh_effects(force=True)` bypasses it after a mod load, since effect cards carry mod-aware dropdowns | fixed in issue #34 | not yet measured, needs a display session against the real mod |
+| `_populate` tore down and recreated the offsets, prerequisites, mutex and effects sidebar sections on every call, even when the focus's data was unchanged. Saving a focus re-populates, so a save on a focus with a dozen effects rebuilt every card | `hoi4_content_maker.py` (`_refresh_offsets`, `_refresh_prereqs`, `_refresh_mutex`), `ui/effects_panel.py` (`_refresh_effects`) | Each section caches a signature of what it last rendered and returns early on a match, gated on `App.app_config.sidebar_refresh_skip`. `_refresh_effects(force=True)` bypasses it after a mod load, since effect cards carry mod-aware dropdowns | fixed in issue #34 | not yet measured, needs a display session against the real mod |
 | `strip_comments`, `tokenize`, `match_brace`, `find_blocks` and `extract_named_block` were all `while position < len(source)` per-character Python loops, and `find_blocks`/`extract_named_block` additionally tried a regex match at *every* character. `_extract_raw_rewards` then ran eleven independent `re.search` scans of each focus block (one per raw key), most of which found nothing and paid a full scan to say so, and `parse_focus_tree` scanned the whole file three separate times for the same `focus = {` block list | `script/syntax.py`, `focus_tree/parse.py` (`_extract_raw_rewards`, `parse_focus_tree`) | Compiled alternations scanned with `findall`/`finditer`, so the character walk runs in C; the raw keys became one alternation pass per focus block; the focus-block scan is done once in `focus_block_starts` and shared. See the scanner rewrite note below | fixed in issue #28 | synthetic 776-focus / 23.3k-line tree (Python 3.14, interleaved A/B in one process): `strip_comments` 27.3ms -> 8.5ms, `tokenize` 41.1ms -> 23.1ms, whole-file `match_brace` 44.9ms -> 15.0ms, `parse_focus_tree` end to end 208.9ms -> 118.4ms (-43%). At 5,000 focuses / 150k lines the end-to-end delta holds at -40% (1494ms -> 901ms) |
 | A malformed file with deeply nested `focus = {` blocks made both raw-reward extraction and the robust fallback rescan the same suffix once per block, so an 8,000-block input could turn one parse into quadratic work | `focus_tree/parse.py` (`_RawRescanBudget`, `parse_focus_tree`) | Share a 4,096-scan / 8,000,000-character budget across every raw-reward and fallback brace scan. This preserves raw fields for the documented largest real tree (776 focuses / 40,790 lines) while bounding the 8,000 nested-block case. Exhausting the budget rejects the current parse instead of returning a partial model, so no raw fields are silently dropped. Poll an optional event/callback throughout both passes; the batch loader drops a cancelled file instead of returning partial model data | fixed in issue #159 | regression tests use 8,000 nested blocks and forced raw/fallback budget exhaustion to assert bounded scans and parse rejection; no broad timing assertion |
 | Validation read and parsed the localisation file on Tk before dispatch; a shallow focus mapping also shared mutable focuses and discarded the position index | `hoi4_content_maker.py` (`_run_validation`), `focus_tree/validate.py` | Capture the localisation path and validator-only detached focus records on Tk; read the file and validate against the snapshot in the worker, retaining collision buckets from the position index | fixed in issue #161 | Python 3.14, 41 interleaved pairs against `origin/main` at `f3a6ce1`, warm 20k-key localisation file, no sprites: pre-dispatch medians at 800 / 8,000 / 20,000 focuses were 9.85 / 10.24 / 11.23ms -> 0.48 / 4.81 / 11.84ms. With no localisation file, 20k focuses cost 1.02ms -> 11.61ms median (p95 1.12ms -> 20.55ms, max 1.16ms -> 22.02ms). With 64k sprites and localisation, 20k-focus median / p95 / max were 12.78 / 13.68 / 15.22ms -> 13.49 / 24.36 / 27.37ms. The detached copy avoids live-data races but can add Tk time, especially without localisation; this is not an unconditional speedup |
@@ -110,6 +114,7 @@ the regression test also forbids calling the old catalog's flush on adoption.
 | After Load All, seven leftover O(F) walks still ran on common actions: code-tab restore, drag-start occupancy, RMB occupancy, per-tree export lookup copies, the prereq Listbox, universal GFX `query()` with no `under`, and single extra-tree parse on the Tk thread | `hoi4_content_maker.py` (`_apply_focus_code`, `_pick_prereq`, `_load_extra_tree`), `ui/canvas.py` (`_foc_pr`, `_rmb`), `focus_tree/export_plan.py`, `ui/gfx_browser.py`, `mod/graphics_catalog.py` (`directory_paths`) | Code-tab restore calls `_redraw_now` (visible set). Drag start and RMB use `occupied_positions` / `position_free`. Export plans share one lookup mapping. Prereq picker reuses `VirtualFocusList`. GFX folder list comes from catalog directory records. `_load_extra_tree` uses the same `run_bg` shape as `_import_txt` | fixed in issue #118 | not yet measured, needs a display session against the real mod |
 | Visible full focus bundles were probed item-by-item, and unchanged line frames still updated pooled items | `ui/canvas.py` (`_render_frame`, `_draw_focus`, `_draw_lines`) | Validate one sentinel canvas item per frame and skip line redraw work when zoom, offset, scene revision and viewport are unchanged | fixed in issue #157 | Same workload (4,000 focuses, 663 visible, 680 visible edges / 1,360 line items, 1600x900, zoom 0.45, 21 no-op frames): origin/main 9,283 `cv.type` calls/frame, 12.970 ms median; branch 1 call/frame, 1.578 ms median |
 | Coordinate rulers rebuilt roughly 61 canvas objects on every pan motion, and the canvas legend deleted/recreated its visible row per redraw | `ui/canvas.py` (`_draw_coord_labels`, `_draw_canvas_legend`) | Pool ruler rectangle/text/marker items and legend text rows; hide surplus, recover stale ids after `cv.delete("all")`, and key unchanged views/legend rows to skip canvas updates | fixed in issue #163 | Tk on Linux, 1600x900, 100 extra trees; isolated `_pan_mv` (bounds drawing stubbed), 750 motions: median 3.0826ms → 0.0995ms each (20,840 rectangles / 21,590 texts / 1,500 lines created, 750 deletes → zero creates/deletes); 750 unchanged legend renders: 1.8978ms → 0.0132ms each (47,250 text creates / 750 deletes → zero canvas mutations) |
+| Every render-path entry re-probed for canvas-state presence: `_canvas_runtime()` (a `hasattr` chain per frame) ran at the top of `_redraw`, `_do_redraw`, `_redraw_now`, `_render_frame`, `_draw_lines`, `_draw_focus`, `_do_draw_lines_throttled` and `_draw_minimap`, and the grid, line, coordinate-label, legend and minimap pools were re-checked with `hasattr`/`getattr`-default guards on every use | `ui/canvas.py` (`_canvas_runtime` and the pool guards) | Canvas-owned state is declared as the typed `CanvasHost` contract and created exactly once by `_init_canvas_state` (production call: `_bind_canvas`; `AppFake` calls the same initializer), so render paths read attributes directly; genuinely optional handles (`_mm_canvas`, the lazily computed minimap geometry) are typed as optional (`None` until first use) and checked with plain `None` comparisons rather than `hasattr`/`getattr` probing, and Tk-content staleness still goes through the sentinel probe | fixed in issue #167 | interleaved same-workload A/B (10-focus synthetic, Tk on Linux, 30 render/reclaim cycles per run, 3 runs per arm, `scripts/bench_canvas_callbacks.py` workload): median-of-medians 8.32ms → 8.26ms (no-cleanup arm), 8.39ms → 8.39ms (cleanup arm) — parity within run-to-run noise; registered Tcl-callback increase 0 in both arms |
 | `FocusDocument.add`, `extend`, `delete_many`, `link_*`/`unlink_*` and `set_tree(s)` each rebuilt all seven indexes (O(F+E)), and `delete_many` also rewrote every survivor's prereqs and mutex. Add Focus ran `validate_indexes(rebuild=True)` and then `add()`, so three full passes ran before a pixel moved | `models/document.py`, `hoi4_content_maker.py` (`_add_focus`) | These methods patch the indexes in place, as `move()` does. `delete_many` cleans references by reading `reverse_prerequisites`/`reverse_mutex` instead of scanning survivors. `_add_focus` no longer repairs indexes first. `touch()` and `load()` still rebuild in full. See the index maintenance note below | fixed in issue #160 | 20,000 focuses / 19,999 edges (Python 3.14.4, Linux, interleaved A/B in one process, median of 31 runs): `add()` + `delete_many()` round trip 42.2ms -> 0.015ms, Add Focus path (repair + `add()`) 44.9ms -> 0.007ms, `delete_many(clean_references=True)` of one focus with a child 24.5ms -> 0.006ms, `link_prerequisite` 17.9ms -> 0.002ms, `extend` of 100 focuses 23.2ms -> 0.12ms. Unchanged by design: `touch()` 18.4ms -> 18.0ms, `extend` of 20,000 into an empty document 20.5ms -> 20.1ms. Document level only; Tk end to end not measured |
 The `_draw_key`/state-key check in `_draw_focus` (`ui/canvas.py:486`) already
 makes an unchanged focus close to free to redraw, but every `_redraw()` call
@@ -131,7 +136,9 @@ are pooled the same way `_draw_lines`' line pool already was (reuse +
 hide-surplus instead of delete-and-recreate every call), and above 2,000
 focuses the minimap buckets to one dot per occupied pixel cell and skips
 prereq lines, since individual dots/edges aren't legible at that density
-anyway. The low-zoom level-of-detail pass (one pooled rectangle per focus
+anyway. Each minimap axis uses its requested size until Tk reports realized
+geometry; the first draw does not run a nested event loop. The low-zoom
+level-of-detail pass (one pooled rectangle per focus
 below `_FOCUS_LOD_ZOOM` at 0.4 zoom, instead of the full multi-item card)
 is implemented in `ui/canvas.py`: `_draw_focus` selects `lod = "compact"`
 based on the zoom threshold, and the compact branch renders a single
@@ -275,6 +282,20 @@ did: `custom_available = {` still registers as `available`. Regex
 alternation backtracks at each start position, so listing `bypass` before
 `bypass_effect` does not shadow the longer key.
 
+Since issue #372, raw-block extraction scans a comment **mask**
+(`script/syntax.py`'s `mask_comments`, the same `_COMMENT_RE` with each
+comment blanked to same-length spaces) instead of the comment-stripped
+text, then slices the aligned comment-bearing source. This keeps imported
+`completion_reward` comments while making commented-out keys unmatchable —
+slicing the raw text directly would let `# completion_reward = { ...`
+register as a real raw key. `match_brace` already skips `#` comments and
+strings, so brace bounds are identical in all three texts; the extra cost
+is one `mask_comments` substitution plus a second `focus_block_starts`
+pass per parse. War-target rendering uses `strip_comments` to recognize
+comment-bearing content and keep it in a block; comment lines must not be
+classified as repeated bare country tags. Comment-only blocks measure their
+indentation from the original lines because their mask has no content.
+
 The rewrite was validated by differential fuzzing against the pre-rewrite
 implementations — 200k randomized inputs across all five scanners, 60k
 across `_extract_raw_rewards`, and 40k whole-file `parse_focus_tree` runs,
@@ -333,12 +354,11 @@ positions/prerequisites need to resolve against earlier files' newly-built
 focuses, and parallelizing pure-Python parsing wouldn't help anyway per the
 GIL point above.
 
-Multiprocessing was considered and rejected: pickling `MOD` and parsed
-focus trees across process boundaries costs more than the parse itself at
-this scale, PyInstaller-frozen builds have their own multiprocessing
-quirks per platform, and `MOD` is a shared singleton that every wizard
-reads from. Splitting it across processes would need a much bigger
-redesign than the performance problem justifies.
+Multiprocessing was considered and rejected when mod state lived in `MOD`.
+Issue #182 separates scan data from configuration and Tk images, but does
+not add multiprocessing or claim a performance improvement. Cross-process
+serialization and PyInstaller-frozen worker startup remain unmeasured; the
+existing thread model stays in place.
 
 ### Cross-step scan parallelism: considered and skipped
 
@@ -393,6 +413,37 @@ the in-memory snapshot (dicts keyed by `PathReference`) and mark it dirty; the
 SQLite store runs at the next refresh or at shutdown (`flush_cache`), so a
 wizard save that writes an image plus a `.gfx` entry pays nothing per file and
 the decoded-image LRU is evicted per changed sprite name, not wholesale.
+
+### Validation deduplication (#383)
+
+Background validation now keys dispatches on current document content and the
+external validation inputs, rather than treating every scene redraw as a change.
+It retains detached snapshots, bounds work to one running pass, and checks the
+inputs again on completion. A changed input gets one coalesced follow-up. A
+one-second metadata poll detects localisation-file changes without reading file
+contents on Tk. Explicit Refresh still forces a pass.
+
+Controlled same-workload comparison on Linux, Python 3.14.4, baseline `0d7ef48`:
+20,000 focuses, 64,000 sprite entries, a warm 20,000-key localisation file, and 11
+sequential unchanged validation requests. Each scheduled callback was executed
+immediately and its worker completed before the next request. No GUI, coverage,
+or concurrent validators ran. This isolates dispatch/copy cost, not actual Tk
+timer gaps or presented-frame latency.
+
+| Metric | Baseline | Patched |
+| --- | ---: | ---: |
+| Full snapshot / localisation read / validation passes | 11 | 1 |
+| Median pre-dispatch request time, including copies | 9.497 ms | 0.0015 ms |
+| First request, which still copies a snapshot | 12.936 ms | 10.379 ms |
+| Median worker time per executed pass | 78.492 ms (11 passes) | 68.306 ms (1 pass) |
+
+The reduced work count is the optimization. Snapshot construction is unchanged,
+and the single patched worker sample does not establish a throughput improvement.
+Regression tests cover content-only edits, replacement documents at equal
+revisions, catalog changes, localisation file creation/replacement/deletion,
+language changes, coalesced in-flight requests, stale completions, explicit
+refresh, failure recovery, and shutdown. The existing detached-snapshot and
+sprite-copy tests remain in place at the extracted worker seam.
 
 ### Callback lifetime follow-up (#322)
 

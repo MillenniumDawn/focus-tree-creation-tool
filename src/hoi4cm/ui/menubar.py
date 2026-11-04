@@ -5,7 +5,6 @@ import tkinter as tk
 from collections.abc import Callable
 
 from hoi4cm.core.i18n import tr
-from hoi4cm.mod import MOD
 from hoi4cm.ui.theme import BG_CARD, BG_DARK, BORDER_G, TEXT, TEXT_DIM, YELLOW
 from hoi4cm.ui.widgets import Tooltip
 
@@ -350,10 +349,10 @@ def build_menubar(app, toolbar, tutorial_command=None) -> MenuController:
             tr("menu.section.recent", "Recent"),
             *(
                 [(tr("menu.no_recent_files", "  (no recent files)"), None)]
-                if not getattr(MOD, "_recent_mods", [])
+                if not app.app_config.recent_mods
                 else [
                     (f"  {r}", lambda p=r: app._load_mod_path(p))
-                    for r in (getattr(MOD, "_recent_mods", []) or [])
+                    for r in app.app_config.recent_mods
                 ]
             ),
             None,

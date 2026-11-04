@@ -1,4 +1,4 @@
-"""SQLite-backed per-file cache for ``ModContext`` scans.
+"""SQLite-backed per-file cache for ``ModIndex`` scans.
 
 A warm mod reload still walks the directory tree, but only re-parses files
 whose ``(mtime, size)`` changed since the last scan. Everything unchanged is

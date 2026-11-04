@@ -3,7 +3,6 @@
 import tkinter as tk
 
 from hoi4cm.core.i18n import tr
-from hoi4cm.mod import MOD
 from hoi4cm.ui.editor_chrome import EditorChrome
 from hoi4cm.ui.theme import BG_CARD, BLUE, BORDER_G, ORANGE, TEXT, TEXT_DIM
 from hoi4cm.ui.widgets import Tooltip
@@ -146,21 +145,6 @@ def build_canvas_toolbar(app, toolbar):
         tr("toolbar.tree_settings", "Tree Settings"),
         lambda: app._focus_editor.open_tree_settings(),
     )
-    app._additional_income_btn = button(
-        tools,
-        tr("toolbar.add_income", "Add Income"),
-        app._additional_income_wizard,
-        fg="#4ade80",
-        bg="#0d2b1a",
-        tip=tr(
-            "toolbar.add_income.tip",
-            "MD Additional Income Wizard - creates/links a spirit and wires up "
-            "all money system files automatically.",
-        ),
-    )
-    app._additional_income_separator = separator(tools)
-    if not MOD.is_md:
-        app._additional_income_btn.pack_forget()
 
     view = row()
     button(view, tr("toolbar.fit", "Fit"), app._fit_all)
@@ -223,7 +207,7 @@ def _wrap_commands(app, frame):
 
     def reflow(event=None):
         nonlocal previous
-        signature = frame.winfo_width(), MOD.is_md
+        signature = frame.winfo_width()
         if signature == previous:
             return
         previous = signature
@@ -231,8 +215,6 @@ def _wrap_commands(app, frame):
         for widget in widgets:
             widget.pack_forget()
             widget.place_forget()
-            if widget is app._additional_income_btn and not MOD.is_md:
-                continue
             width = widget.winfo_reqwidth()
             if x > 3 and x + width + 3 > frame.winfo_width():
                 x, y, height = 3, y + height + 6, 0
@@ -242,8 +224,7 @@ def _wrap_commands(app, frame):
         frame.configure(height=y + height + 3)
 
     frame.bind("<Configure>", reflow)
-    if app._additional_income_btn in widgets:
-        app._refresh_canvas_commands = reflow
+    app._refresh_canvas_commands = reflow
 
 
 __all__ = ["build_canvas_toolbar", "build_toolbar_row2"]

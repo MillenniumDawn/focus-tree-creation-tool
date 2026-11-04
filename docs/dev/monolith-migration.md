@@ -24,6 +24,12 @@
 - **#14**: the big one: `ModContext`/`MOD`, all five wizards, and the three
   UI mixins (`CanvasMixin`, `EffectsMixin`, `ModLoadingMixin`) extracted.
   This is most of what's left in `src/hoi4cm/` today.
+- **#182**: split the extracted `MOD` singleton into the Tk-free
+  `mod/index.py` (`ModIndex` and frozen `ScanSettings`), saved preferences in
+  `core/app_config.py`, and the App-owned PhotoImage LRU in
+  `ui/sprite_images.py`. Edit targets remain session fields on App. The canvas
+  and effects mixins also declare their host fields and type-only callbacks;
+  no protocol was added to App's runtime inheritance.
 - **#17**: security hardening pass: `core/safe_path.py`, `core/safe_xml.py`,
   read/write caps on `core/paths.py` and `core/config.py`, and the O(F^2)
   fixes in `focus_tree/export.py` and the monolith's duplicate-name check.
@@ -183,8 +189,8 @@ and `class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk)`
 - **Validation** (#132): `_validate_tree`, `_refresh_validation_dialog`,
   and the debounced background pass (`_schedule_validation`,
   `_run_validation`, `_apply_validation_result` plus
-  `_validation_sprites`/`_validation_loc_keys` snapshotting the `MOD`
-  bits); the pure logic lives in `focus_tree/validate.py`
+  `_validation_sprites`/`_validation_loc_keys` snapshotting the App's index
+  and edit target); the pure logic lives in `focus_tree/validate.py`
   (`validate_document`, `worst_severity_per_focus`).
 - **New-tree dialog**: `_new_tree_dialog`.
 - **Bulk rename**: `_bulk_rename_dialog`.
@@ -270,7 +276,7 @@ monolith wires these controllers to its existing form and command callbacks.
 | Canvas image pipeline + lifecycle / scene index / scheduler | n/a | `ui/image_broker.py`, `ui/lifecycle.py`, `ui/scene_index.py`, `ui/thumbnail_grid.py`, `ui/focus_list.py`, `ui/canvas_scheduler.py` | **done** (modernization) |
 | Wizard GFX helpers + async image loader | n/a | `wizards/_graphics.py`, `wizards/_image_loader.py` | **done** (modernization) |
 | `_load_all_trees` row-building loop | ~4327-4638 (~312, was ~4349-4755/407) | `ui/checklist.py` (`VirtualChecklist`, `ChecklistItem`, `apply_select_mode`, `default_tree_type`, `is_loadable`), reusing `_PooledList` factored out of `ui/focus_list.py` | **done** (#31), dialog shell stays in `_load_all_trees` |
-| `_read_sidebar_values` (+ `_coerce_numeric`, `_set_field_error`) | ~2376-2444 (~69) | `models/sidebar_form.py` (`FocusSidebarValues`, `sidebar_values_match_focus`, `parse_ai_will_do`, `parse_focus_cost`) | **done** (#73, issue #25) |
+| `_read_sidebar_values` (+ `_coerce_numeric`, `_set_field_error`) | ~2376-2444 (~69) | `models/sidebar_form.py` (`FocusSidebarValues`, `sidebar_values_match_focus`, `form_focus_id`, `parse_ai_will_do`, `parse_focus_cost`) | **done** (#73, issue #25; #343 added `form_focus_id`) |
 | Workspace autosave / crash recovery | n/a | `editor/workspace_autosave.py` (`workspace_autosave_path`, `sibling_autosave_path`, `clear_workspace_autosave`), decoded via `editor/project_codec.py` | **done** (#96) |
 | `_validate_tree` + background validation pass (`_schedule_validation`, `_run_validation`, `_apply_validation_result`, `_refresh_validation_dialog`, `_validation_sprites`, `_validation_loc_keys`) | ~1036-1110 + ~6109-6386 (~353) | `focus_tree/validate.py` (`validate_document`, `worst_severity_per_focus`), off the Tk thread via `run_bg` with a lifecycle scope | **done** (#94, #132) |
 | `_refresh_loaded_trees_panel` row loop | ~4688-4716 (~29) | `ui/loaded_trees.py` (`VirtualLoadedTreesList`, `LoadedTreeRowItem`), over `_PooledList` | **done** (#138) |

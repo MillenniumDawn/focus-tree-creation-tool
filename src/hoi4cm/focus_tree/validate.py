@@ -190,7 +190,7 @@ def validate_document(
     """Validate a focus document.
 
     doc: FocusDocument, ValidationSnapshot, or plain mapping id->Focus.
-    sprites: MOD.sprites dict (gfx_name -> path) or None to skip GFX check.
+    sprites: gfx_name -> path mapping, or None to skip GFX checks.
     loc_keys: set of localisation keys present in the .yml or None to skip.
     max_issues: cap on the returned list; excess issues are dropped and
         replaced with one trailing "issues_truncated" info issue.

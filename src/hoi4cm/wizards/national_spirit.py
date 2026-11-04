@@ -7,7 +7,6 @@
 """National Spirit / Idea builder wizard."""
 
 import copy
-import glob
 import json
 import os
 import re
@@ -28,7 +27,7 @@ from hoi4cm.core import (
     sanitize_component,
     tr,
 )
-from hoi4cm.mod import MOD, find_loc_files
+from hoi4cm.mod import glob_script_paths, lookup_localisation
 from hoi4cm.script.syntax import parse_script, serialize_block
 from hoi4cm.ui import (
     BG_CARD,
@@ -456,15 +455,17 @@ def open_national_spirit_wizard(app):
     # ── Idea GFX picker row  (identical UX to focus GFX picker) ──
     def _open_idea_gfx_browser():
         ideas_root = (
-            os.path.join(MOD.root, MOD.path_ideas_gfx)
-            if MOD.loaded and MOD.root
+            os.path.join(app.index.root, app.app_config.path_ideas_gfx)
+            if app.index.loaded and app.index.root
             else None
         )
         catalog = (
-            MOD.graphics_catalog if ideas_root and os.path.isdir(ideas_root) else None
+            app.index.graphics_catalog
+            if ideas_root and os.path.isdir(ideas_root)
+            else None
         )
 
-        if not MOD.loaded or not ideas_root or not os.path.isdir(ideas_root):
+        if not app.index.loaded or not ideas_root or not os.path.isdir(ideas_root):
             # Fallback: let user pick a folder manually
             folder = filedialog.askdirectory(
                 title=tr("filedialog.select_idea_gfx_folder", "Select idea GFX folder")
@@ -922,7 +923,9 @@ def open_national_spirit_wizard(app):
             },
             spirit_modifiers,
         )
-        return build_national_spirit_output(**state, loc_language=MOD.loc_language)
+        return build_national_spirit_output(
+            **state, loc_language=app.app_config.loc_language
+        )
 
     def _refresh_preview(*_):
         """Rebuild preview from form fields (no-op in edit mode or raw override)."""
@@ -1314,11 +1317,11 @@ def open_national_spirit_wizard(app):
         ideas_block = full_txt[:split_idx].strip() if split_idx > 0 else full_txt
 
         # ── Determine ideas file ──────────────────────────────────────────
-        if MOD.edit_ideas_file:
-            ideas_path = MOD.edit_ideas_file
-            mod_root = MOD.root or os.path.dirname(os.path.dirname(ideas_path))
-        elif MOD.root:
-            mod_root = MOD.root
+        if app.edit_ideas_file:
+            ideas_path = app.edit_ideas_file
+            mod_root = app.index.root or os.path.dirname(os.path.dirname(ideas_path))
+        elif app.index.root:
+            mod_root = app.index.root
             ideas_path = os.path.join(mod_root, "common", "ideas", f"{sid}.txt")
         else:
             mod_root = filedialog.askdirectory(
@@ -1332,9 +1335,12 @@ def open_national_spirit_wizard(app):
             ideas_path = os.path.join(mod_root, "common", "ideas", f"{sid}.txt")
 
         saved, warnings, errs = save_spirit(
-            MOD,
+            app.index,
+            app.app_config,
+            app,
             mod_root,
             ideas_path,
+            on_written=app.note_mod_file_written,
             sid=sid,
             slot=v_slot.get().strip() or "country",
             ideas_block=ideas_block,
@@ -1347,7 +1353,7 @@ def open_national_spirit_wizard(app):
         )
 
     def _browse_existing_spirits():
-        if not MOD.loaded or not MOD.root:
+        if not app.index.loaded or not app.index.root:
             messagebox.showinfo(
                 tr("dialog.no_mod_loaded.title", "No Mod Loaded"),
                 tr(
@@ -1358,7 +1364,7 @@ def open_national_spirit_wizard(app):
             )
             return
 
-        ideas_dir = os.path.join(MOD.root, "common", "ideas")
+        ideas_dir = os.path.join(app.index.root, "common", "ideas")
         if not os.path.isdir(ideas_dir):
             messagebox.showinfo(
                 tr("dialog.not_found.title", "Not Found"),
@@ -1372,7 +1378,7 @@ def open_national_spirit_wizard(app):
 
         # Scan all .txt files for spirit/idea IDs
         spirits = []  # list of (spirit_id, slot, file_path)
-        for fp in sorted(glob.glob(os.path.join(ideas_dir, "*.txt"))):
+        for fp in glob_script_paths(ideas_dir):
             try:
                 src, encoding = read_file_with_encoding(fp)
                 if not src:
@@ -1563,30 +1569,14 @@ def open_national_spirit_wizard(app):
                     spirit_modifiers.append({"key": mk, "value": str(mv)})
             _refresh_mod_cards()
 
-            # Look up loc strings
-            loc_name = loc_desc = ""
-            for loc_path in find_loc_files(MOD.root, language=MOD.loc_language):
-                try:
-                    loc_src, encoding = read_file_with_encoding(loc_path)
-                    if loc_src is None:
-                        continue
-                    for m in re.finditer(
-                        r'^\s+(\S+?)(?::\d+)?\s+"(.*)"', loc_src, re.MULTILINE
-                    ):
-                        k, v = m.group(1), m.group(2)
-                        if k == spirit_id and not loc_name:
-                            loc_name = v
-                        elif k == f"{spirit_id}_desc" and not loc_desc:
-                            loc_desc = v
-                    if loc_name and loc_desc:
-                        break
-                except OSError, ValueError, UnicodeDecodeError:
-                    pass
+            loc_name, loc_desc = lookup_localisation(
+                app.index.root, spirit_id, language=app.app_config.loc_language
+            )
             v_loc_name.set(loc_name)
             v_loc_desc.set(loc_desc)
 
             # Set edit target file so Save to Mod updates the correct file
-            MOD.edit_ideas_file = fp
+            app.edit_ideas_file = fp
 
             _refresh_preview()
             dlg.destroy()
@@ -1632,7 +1622,7 @@ def open_national_spirit_wizard(app):
         pady=6,
         cursor="hand2",
     ).pack(side="left", padx=4)
-    if MOD.loaded:
+    if app.index.loaded:
         tk.Button(
             bot,
             text=tr("common.browse_existing", "Browse Existing"),

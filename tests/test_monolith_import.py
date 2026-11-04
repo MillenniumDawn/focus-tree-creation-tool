@@ -4,6 +4,8 @@ from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import Mock
 
+import pytest
+
 import hoi4_content_maker as m
 import hoi4cm.focus_tree.parse as parse_module
 from hoi4cm.models import Focus, FocusDocument
@@ -90,18 +92,17 @@ def _write_tree(path):
     )
 
 
-def _configure_mod(monkeypatch, tmp_path, old_focus, old_loc):
+def _configure_mod(monkeypatch, tmp_path, app, old_focus, old_loc):
     focus_path = tmp_path / "new.txt"
     _write_tree(focus_path)
     loc_path = tmp_path / "localisation" / "english" / "MD_focus_TST_l_english.yml"
     loc_path.parent.mkdir(parents=True)
     loc_path.write_text("l_english:\n", encoding="utf-8")
     monkeypatch.setattr(m, "detect_loc_file", lambda *_args, **_kwargs: str(loc_path))
-    monkeypatch.setattr(m.MOD, "loaded", True)
-    monkeypatch.setattr(m.MOD, "root", str(tmp_path))
-    monkeypatch.setattr(m.MOD, "loc_language", "english")
-    monkeypatch.setattr(m.MOD, "edit_focus_file", str(old_focus))
-    monkeypatch.setattr(m.MOD, "edit_loc_file", str(old_loc))
+    app.index = SimpleNamespace(loaded=True, root=str(tmp_path))
+    app.app_config = SimpleNamespace(loc_language="english")
+    app.edit_focus_file = str(old_focus)
+    app.edit_loc_file = str(old_loc)
     return focus_path, loc_path
 
 
@@ -109,7 +110,9 @@ def test_import_budget_failure_preserves_targets_and_model(tmp_path, monkeypatch
     old_focus = tmp_path / "old.txt"
     old_loc = tmp_path / "old.yml"
     app, old_model_focus = _shell()
-    focus_path, _loc_path = _configure_mod(monkeypatch, tmp_path, old_focus, old_loc)
+    focus_path, _loc_path = _configure_mod(
+        monkeypatch, tmp_path, app, old_focus, old_loc
+    )
     warnings: list[tuple[Any, ...]] = []
     infos: list[tuple[Any, ...]] = []
     _patch_import_ui(monkeypatch, warnings, infos)
@@ -120,8 +123,8 @@ def test_import_budget_failure_preserves_targets_and_model(tmp_path, monkeypatch
 
     m.App._import_txt(cast(m.App, app))
 
-    assert m.MOD.edit_focus_file == str(old_focus)
-    assert m.MOD.edit_loc_file == str(old_loc)
+    assert app.edit_focus_file == str(old_focus)
+    assert app.edit_loc_file == str(old_loc)
     assert list(app.focuses.values()) == [old_model_focus]
     assert app._last_project_path == "old-project.json"
     assert warnings and "parse budget exhausted" in warnings[0][1]
@@ -132,7 +135,9 @@ def test_import_success_assigns_targets_after_build(tmp_path, monkeypatch):
     old_focus = tmp_path / "old.txt"
     old_loc = tmp_path / "old.yml"
     app, _old_model_focus = _shell()
-    focus_path, loc_path = _configure_mod(monkeypatch, tmp_path, old_focus, old_loc)
+    focus_path, loc_path = _configure_mod(
+        monkeypatch, tmp_path, app, old_focus, old_loc
+    )
     warnings: list[tuple[Any, ...]] = []
     infos: list[tuple[Any, ...]] = []
     _patch_import_ui(monkeypatch, warnings, infos)
@@ -142,9 +147,47 @@ def test_import_success_assigns_targets_after_build(tmp_path, monkeypatch):
 
     m.App._import_txt(cast(m.App, app))
 
-    assert m.MOD.edit_focus_file == str(focus_path)
-    assert m.MOD.edit_loc_file == str(loc_path)
+    assert app.edit_focus_file == str(focus_path)
+    assert app.edit_loc_file == str(loc_path)
     assert [focus.name for focus in app.focuses.values()] == ["TST_new_focus"]
     assert app._last_project_path is None
     assert warnings == []
     assert infos
+
+
+@pytest.mark.parametrize(
+    "ai_clause",
+    [
+        "ai_will_do = 1e999",
+        "ai_will_do = { base = -1e999 modifier = { factor = 2 has_war = yes } }",
+    ],
+)
+def test_import_nonfinite_ai_commits_the_built_document(
+    tmp_path, monkeypatch, ai_clause
+):
+    app, _old_model_focus = _shell()
+    focus_path, loc_path = _configure_mod(
+        monkeypatch, tmp_path, app, tmp_path / "old.txt", tmp_path / "old.yml"
+    )
+    focus_path.write_text(
+        "focus_tree = { id = NEW_tree focus = { id = TST_new_focus "
+        f"{ai_clause} }} }}",
+        encoding="utf-8",
+    )
+    warnings: list[tuple[Any, ...]] = []
+    infos: list[tuple[Any, ...]] = []
+    _patch_import_ui(monkeypatch, warnings, infos)
+    monkeypatch.setattr(
+        m.filedialog, "askopenfilename", lambda **_kwargs: str(focus_path)
+    )
+
+    m.App._import_txt(cast(m.App, app))
+
+    [focus] = app.focuses.values()
+    assert focus.name == "TST_new_focus"
+    assert focus.ai_will_do == 1
+    assert app.edit_focus_file == str(focus_path)
+    assert app.edit_loc_file == str(loc_path)
+    assert app._last_project_path is None
+    assert warnings == []
+    assert len(infos) == 1

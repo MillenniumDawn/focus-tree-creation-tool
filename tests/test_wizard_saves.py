@@ -8,14 +8,13 @@ import pytest
 
 import hoi4cm.core.logger as logmod
 import hoi4cm.wizards._saves as saves
-from hoi4cm.mod.context import ModContext
+from hoi4cm.core.app_config import AppConfig
+from hoi4cm.mod.index import ModIndex
 
 BOM = bytes((0xEF, 0xBB, 0xBF))
 SID = "TAG_my_spirit"
 SPIRIT_BLOCK = (
-    "ideas = {\n\tcountry = {\n"
-    f"\t\t{SID} = {{\n\t\t\tname = {SID}\n\t\t}}\n"
-    "\t}\n}"
+    f"ideas = {{\n\tcountry = {{\n\t\t{SID} = {{\n\t\t\tname = {SID}\n\t\t}}\n\t}}\n}}"
 )
 MID = "TAG_my_dynamic_modifier"
 MOD_ENTRIES = [
@@ -26,7 +25,16 @@ MOD_ENTRIES = [
 
 @pytest.fixture
 def mod():
-    return ModContext()
+    return SimpleNamespace(
+        index=ModIndex(),
+        config=AppConfig(),
+        edit_ideas_file="",
+        edit_events_file="",
+        edit_loc_file="",
+        edit_decisions_file="",
+        edit_decisions_cat_file="",
+        edit_scripted_loc_file="",
+    )
 
 
 @pytest.fixture
@@ -52,6 +60,8 @@ def _spirit_files(tmp_path, mod, ideas: bytes, loc: bytes):
 
 def _save_spirit(mod, root, ideas_path, name="My National Spirit", desc="A desc."):
     return saves.save_spirit(
+        mod.index,
+        mod.config,
         mod,
         str(root),
         str(ideas_path),
@@ -132,7 +142,7 @@ def test_spirit_new_files_are_created_under_the_mod_root(tmp_path, mod):
     saved, warnings, errs = _save_spirit(mod, root, ideas_path)
 
     assert ideas_path.read_text(encoding="utf-8") == SPIRIT_BLOCK
-    loc_path = root / "localisation" / "english" / mod.loc_target.filename(SID)
+    loc_path = root / "localisation" / "english" / mod.config.loc_target.filename(SID)
     assert loc_path.read_bytes().startswith(BOM)
     assert f' {SID}: "My National Spirit"' in loc_path.read_text(encoding="utf-8-sig")
     assert len(saved) == 2
@@ -305,6 +315,8 @@ def _event_files(tmp_path, mod, events: bytes, loc: bytes):
 
 def _save_event(mod, root, event_path, eid="my_namespace.1"):
     return saves.save_events(
+        mod.index,
+        mod.config,
         mod,
         str(root),
         str(event_path),
@@ -373,8 +385,8 @@ def test_new_event_file_starts_with_its_namespace(tmp_path, mod):
     loc_path = (
         root
         / "localisation"
-        / mod.loc_target.dirname()
-        / mod.loc_target.filename("my_namespace")
+        / mod.config.loc_target.dirname()
+        / mod.config.loc_target.filename("my_namespace")
     )
     loc = loc_path.read_bytes()
     assert loc.startswith(BOM)
@@ -405,6 +417,8 @@ def test_event_render_failure_is_reported_and_leaves_the_file(tmp_path, mod):
         raise ValueError("cannot render")
 
     _saved, _warnings, errs = saves.save_events(
+        mod.index,
+        mod.config,
         mod,
         str(root),
         str(event_path),
@@ -423,6 +437,8 @@ def test_event_render_failure_is_reported_and_leaves_the_file(tmp_path, mod):
 
 def _save_dyn_mod(mod, root, icon=""):
     return saves.save_dyn_mod(
+        mod.index,
+        mod.config,
         mod,
         str(root),
         mid=MID,
@@ -441,7 +457,7 @@ def _dm_path(root):
 
 
 def _dm_loc_rel(mod):
-    target = mod.loc_target
+    target = mod.config.loc_target
     return os.path.join("localisation", target.dirname(), target.filename(MID))
 
 
@@ -594,6 +610,8 @@ def test_dyn_mod_save_appends_only_missing_localisation_keys(tmp_path, mod):
 
 def _save_decisions(mod, root, dec_path, cat_path):
     return saves.save_decisions(
+        mod.index,
+        mod.config,
         mod,
         str(root),
         ns="TAG",
@@ -656,8 +674,8 @@ def test_decision_save_creates_new_files(tmp_path, mod):
     loc_path = (
         root
         / "localisation"
-        / mod.loc_target.dirname()
-        / mod.loc_target.filename("TAG_decisions")
+        / mod.config.loc_target.dirname()
+        / mod.config.loc_target.filename("TAG_decisions")
     )
     assert loc_path.read_bytes().startswith(BOM)
 

@@ -23,7 +23,6 @@ def _assert_child_imports_are_isolated(sentinel_home: Path) -> None:
 
     import hoi4cm.core.config as config
     import hoi4cm.core.logger as logger
-    import hoi4cm.mod as mod
     import hoi4cm.mod.scan_cache as scan_cache
     from hoi4cm.core.paths import autosave_path
 
@@ -50,8 +49,7 @@ def _assert_child_imports_are_isolated(sentinel_home: Path) -> None:
     for handler in file_handlers:
         assert_under_home(handler.baseFilename)
 
-    # Importing MOD before conftest isolation would load the sentinel config.
-    assert mod.MOD.custom_mod_path == ""
+    # Importing config before conftest isolation would load the sentinel file.
     assert config.cfg_load() == {}
 
 

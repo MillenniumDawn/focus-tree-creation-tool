@@ -15,9 +15,15 @@ per-run home before test modules are collected, then restores the original
 environment and removes the temporary tree at session end. On Windows it also
 sets USERPROFILE because that is what `expanduser("~")` prefers. The same
 module forbids Tk construction (see "The headless rule"). Plain helpers
-shared by several test files live in `tests/builders.py` (`make_focus`,
-`default_decision`) and `tests/ui_fakes.py` (`AppFake`), imported by bare
-name. Everything else lives in the file that uses it.
+shared by several test files are imported by bare name: `tests/builders.py`
+holds sample records, `tests/ui_fakes.py` holds `AppFake`, and
+`tests/focus_tree_helpers.py` holds the raw-effect renderer and structural
+summary used by both exporter suites. `tests/source_scan.py` shares the sorted
+package-plus-monolith source inventory and caches each file's AST call nodes
+for the translation and undo-label guards. The guards keep separate assertions.
+Mypy and Pyright also include `tests/` on their search paths so standalone
+benchmarks can import these doubles. Everything else lives in the file that
+uses it.
 
 ## Two suites
 
@@ -46,7 +52,11 @@ shapes cover what is here:
   `relativize_to_mod_root` in `ui/settings_dialog.py`.
 - **App and mixin methods** run unbound against a fake host. `AppFake` in
   `tests/ui_fakes.py` hosts the canvas, effects and mod-loading mixins with
-  mocked widgets; monolith methods are called as `App._save(fake)`.
+  mocked widgets and gets its canvas-owned state from the same shared
+  initializer production uses (`CanvasMixin._init_canvas_state`), so the
+  fake's contract matches the real host (defaults pinned by
+  `tests/test_canvas_state.py`); monolith methods are called as
+  `App._save(fake)`.
   `hoi4cm.ui.app_contracts` checks the real `App` against the mixin protocols.
 
 `tests/test_tk_smoke.py` is the one file marked `tk`. It builds the real `App`
@@ -124,6 +134,10 @@ that:
   translation;
 - every literal key is in `locales/en.json`, and every key in `en.json` is used
   by some call (orphans fail);
+- every string-literal default matches the `en.json` value for its key. A
+  default that is not a string literal is not compared;
+- every file-dialog filter label, a `("label", "*.ext")` pair, goes through
+  `tr()`;
 - every locale file has exactly the keys of `en.json`, apart from `_meta`, with
   the same named placeholders;
 - every call supplies the placeholders its English text names, and none passes
@@ -138,7 +152,7 @@ labels work the same way: the stack keeps English identifiers, and
 ## Fixture / isolation patterns
 
 Every module with import-time or process-lifetime state needs isolation, or
-state leaks between tests. Six patterns cover what's here today:
+state leaks between tests. The patterns here are:
 
 - **Pytest-startup HOME isolation.** `tests/conftest.py` installs a temporary
   HOME while the conftest is imported, before collection imports application
@@ -153,14 +167,17 @@ state leaks between tests. Six patterns cover what's here today:
   the error buffer. Use this shape for anything that mutates a module
   global as a side effect (see "Module-level singletons" in
   `architecture.md`).
-- **MOD singleton isolation.** Tests that mutate the process-wide `MOD`
-  context opt in to `mod_state_isolation` from `tests/conftest.py`. It restores
-  added/removed attributes and nested built-in containers, `GraphicsCatalog`
-  state, scan diagnostics, and the `sprite_imgs` LRU while retaining the
-  catalog, cache, and cached image object identities. It is deliberately not
-  autouse: modules opt in where needed and keep scenario-specific setup.
-  Tests that only use `monkeypatch.setattr` on MOD have their changes restored
-  by monkeypatch teardown and do not need this fixture.
+- **Per-app mod state.** Construct a fresh `ModIndex`, `AppConfig`, and
+  `SpriteImageCache`, or use `tests/ui_fakes.py`'s `AppFake`, rather than
+  patching a singleton. `tests/test_mod_isolation.py` checks independent
+  owners, frozen scan settings, and worker scans that cannot import Pillow
+  or Tk. Cancellation and image-lifetime tests keep cached images on the Tk
+  thread through success, failure, supersession, and shutdown. The old
+  `mod_state_isolation` snapshot fixture is gone.
+- **Missing Pillow.** Image-gate tests opt in to `missing_pillow` from
+  `tests/conftest.py`. It intercepts Pillow imports through monkeypatch and
+  restores the import function at teardown. Tests still control install opt-in
+  and installer outcomes themselves.
 - **Monkeypatch of module path constants.** `tests/test_config.py` points
   `config.CONFIG_PATH` at a `tmp_path` file via `monkeypatch.setattr`
   before calling `cfg_load`/`cfg_save`, so no test ever touches the real
@@ -169,7 +186,8 @@ state leaks between tests. Six patterns cover what's here today:
 - **`tmp_path` mod trees.** `tests/test_mod_context.py`'s `mod_tree`
   fixture writes a small but realistic directory tree (`common/national_focus/...`,
   `gfx/interface/...`) under `tmp_path`, then scans it and asserts on the
-  resulting `MOD.*` fields. It also carries an autouse `isolate_scan_cache`
+  resulting fields on an injected `mod_index` fixture. It also carries an
+  autouse `isolate_scan_cache`
   fixture so the scanner's SQLite cache never touches `~/.hoi4cm`.
 - **Parametrized round-trips.** `tests/test_focus_tree_roundtrip.py` checks
   parse -> build -> export -> reparse stability: the exporter normalizes

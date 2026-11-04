@@ -9,7 +9,7 @@ from typing import Literal
 
 from hoi4cm.models import Focus
 from hoi4cm.script.effects import render_effect
-from hoi4cm.script.syntax import emit_scalar, serialize_block
+from hoi4cm.script.syntax import emit_scalar, serialize_block, strip_comments
 
 from .build import build_focuses
 from .identifiers import focus_identifier
@@ -236,10 +236,15 @@ def render_focus_body(
     war_target = getattr(focus, "will_lead_to_war_with", "").strip()
     if war_target:
         lines = [ln.strip() for ln in war_target.splitlines() if ln.strip()]
-        if len(lines) > 1 and all(not re.search(r"[\s{=]", ln) for ln in lines):
+        has_comments = strip_comments(war_target) != war_target
+        if (
+            not has_comments
+            and len(lines) > 1
+            and all(not re.search(r"[\s{=]", ln) for ln in lines)
+        ):
             # repeated bare tags (vanilla GER_weserubung form): one line each
             out.extend(f"{indent}will_lead_to_war_with = {ln}" for ln in lines)
-        elif re.search(r"[\s{=]", war_target):
+        elif has_comments or re.search(r"[\s{=]", war_target):
             # block content (e.g. tag = GER) gets re-wrapped; a bare vanilla
             # tag (will_lead_to_war_with = VEN) stays inline
             _emit_preserved_block(

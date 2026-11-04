@@ -8,11 +8,14 @@ from unittest.mock import Mock
 import hoi4_content_maker as m
 from hoi4cm.core.undo import UndoStack
 from hoi4cm.editor.extra_tree_undo import ExtraTreeUndoHistory
+from hoi4cm.mod.index import ModIndex
 from hoi4cm.models import Focus, FocusDocument
 
 
 def _app(focuses=()):
     app = SimpleNamespace(
+        index=ModIndex(),
+        edit_focus_file="",
         _extra_trees=[],
         _shared_focuses=[],
         _joint_focuses=[],
@@ -436,7 +439,7 @@ def test_batch_load_is_one_undo_redo_action(monkeypatch, tmp_path):
             return lambda *args, **kwargs: None
 
     class Variable:
-        def __init__(self, value=""):
+        def __init__(self, value: str | bool = "") -> None:
             self.value = value
 
         def get(self):
@@ -534,8 +537,7 @@ def test_batch_load_is_one_undo_redo_action(monkeypatch, tmp_path):
         ),
     )
     monkeypatch.setattr(m, "run_bg", lambda _app, work, done, **_k: done(work()))
-    monkeypatch.setattr(m.MOD, "loaded", False)
-    monkeypatch.setattr(m.MOD, "root", None)
+
     app = _app([pending])
     app._batch_load_trees_worker = lambda *_a, **_k: payload
 

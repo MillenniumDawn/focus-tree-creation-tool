@@ -8,10 +8,10 @@ import sys
 import tkinter as tk
 from pathlib import Path
 from tkinter import ttk
+from typing import Any
 
 from hoi4cm.core.i18n import tr
 from hoi4cm.core.logger import add_error
-from hoi4cm.mod import MOD
 from hoi4cm.ui.project_index import (
     ExplorerItem,
     discover_focus_files,
@@ -152,6 +152,26 @@ class ProjectSidebar:
                     app._dyn_mod_wizard,
                     tr("toolbar.dyn_mod.tip", "Dynamic Modifier wizard."),
                 ),
+                (
+                    "Character Editor",
+                    tr("menu.character_editor", "Character Editor"),
+                    app._character_wizard,
+                    tr(
+                        "menu.character_editor.tip",
+                        "Create and edit character definitions, roles, "
+                        "portraits, and traits.",
+                    ),
+                ),
+                (
+                    "Add Income",
+                    tr("toolbar.add_income", "Add Income"),
+                    app._additional_income_wizard,
+                    tr(
+                        "toolbar.add_income.tip",
+                        "MD Additional Income Wizard - creates/links a spirit "
+                        "and wires up all money system files automatically.",
+                    ),
+                ),
             )
         ):
             row = tk.Frame(self.panel, bg=NAVY)
@@ -164,6 +184,8 @@ class ProjectSidebar:
                 "nav_events",
                 "nav_ideas",
                 "nav_dynamic_modifiers",
+                "file_generic",
+                "nav_ideas",
             )[index]
             icon = sidebar_icon(app, icon_name, 36, scale)
             self.icons.append(icon)
@@ -196,9 +218,11 @@ class ProjectSidebar:
             chrome.navigation_buttons[label] = button
             chrome.titles[label] = display
             self.accents[label] = accent
-        tk.Frame(self.panel, bg=DIVIDER, height=1).pack(
-            fill="x", padx=14, pady=(16, 12)
-        )
+            if label == "Add Income":
+                self._income_row = row
+        self._content_divider = tk.Frame(self.panel, bg=DIVIDER, height=1)
+        self._content_divider.pack(fill="x", padx=14, pady=(16, 12))
+        self.set_income_visible(app.index.is_md)
         project_header = tk.Frame(self.panel, bg=NAVY)
         project_header.pack(fill="x", padx=16)
         tk.Label(
@@ -405,31 +429,30 @@ class ProjectSidebar:
                 style.element_create(
                     element, "from", "clam", f"Vertical.Scrollbar.{part}"
                 )
-        style.layout(
-            "Project.Vertical.TScrollbar",
-            [
-                (
-                    "Project.Vertical.Scrollbar.trough",
-                    {
-                        "sticky": "ns",
-                        "children": [
-                            (
-                                "Project.Vertical.Scrollbar.uparrow",
-                                {"side": "top", "sticky": ""},
-                            ),
-                            (
-                                "Project.Vertical.Scrollbar.downarrow",
-                                {"side": "bottom", "sticky": ""},
-                            ),
-                            (
-                                "Project.Vertical.Scrollbar.thumb",
-                                {"sticky": "nswe", "expand": True},
-                            ),
-                        ],
-                    },
-                )
-            ],
-        )
+        # Tk's layout spec includes a boolean expand flag the stubs reject.
+        scrollbar_layout: Any = [
+            (
+                "Project.Vertical.Scrollbar.trough",
+                {
+                    "sticky": "ns",
+                    "children": [
+                        (
+                            "Project.Vertical.Scrollbar.uparrow",
+                            {"side": "top", "sticky": ""},
+                        ),
+                        (
+                            "Project.Vertical.Scrollbar.downarrow",
+                            {"side": "bottom", "sticky": ""},
+                        ),
+                        (
+                            "Project.Vertical.Scrollbar.thumb",
+                            {"sticky": "nswe", "expand": True},
+                        ),
+                    ],
+                },
+            )
+        ]
+        style.layout("Project.Vertical.TScrollbar", scrollbar_layout)
         style.configure(
             "Project.Vertical.TScrollbar",
             background=DIVIDER,
@@ -516,8 +539,8 @@ class ProjectSidebar:
             getattr(app, "_navigation_started", False),
             getattr(app, "_navigation_source", ""),
             app.workspace.main_tree.file_path,
-            MOD.root,
-            MOD.edit_focus_file,
+            app.index.root,
+            app.edit_focus_file,
             tuple(
                 (t.get("tree_id"), t.get("file_path"), t.get("type"))
                 for t in app._extra_trees
@@ -526,8 +549,8 @@ class ProjectSidebar:
         rebuild = signature != self._signature
         if rebuild:
             self._signature = signature
-            self.items = project_items(app, MOD)
-        root = MOD.root
+            self.items = project_items(app, app.index)
+        root = app.index.root
         if self._resource_root != root:
             self._resource_root = root
             rebuild = True
@@ -584,7 +607,7 @@ class ProjectSidebar:
             )
 
         def done(results):
-            if MOD.root != root or generation != self._discovery_generation:
+            if self.app.index.root != root or generation != self._discovery_generation:
                 return
             entries = []
             for category, (paths, errors) in results:
@@ -907,6 +930,15 @@ class ProjectSidebar:
                     part for part in (item.label, item.detail, item.path) if part
                 )
                 self.tip._schedule()
+
+    def set_income_visible(self, visible: bool) -> None:
+        """Keep the Millennium Dawn income wizard with the other content tools."""
+        row = self._income_row
+        if visible:
+            if row.winfo_manager() != "pack":
+                row.pack(fill="x", pady=2, before=self._content_divider)
+        elif row.winfo_manager() == "pack":
+            row.pack_forget()
 
     def toggle(self):
         app = self.app

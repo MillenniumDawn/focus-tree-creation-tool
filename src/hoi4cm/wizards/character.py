@@ -9,7 +9,7 @@ from tkinter import filedialog, messagebox, ttk
 from typing import Any
 
 from hoi4cm.core import read_file_with_encoding, safe_join, sanitize_component, tr
-from hoi4cm.mod import MOD, notifying_workspace_files
+from hoi4cm.mod import notifying_workspace_files
 from hoi4cm.script.syntax import match_brace
 from hoi4cm.ui import BG_DARK, BG_PANEL, BLUE, BORDER_G, TEXT, TEXT_DIM, report_error
 from hoi4cm.ui.gfx_browser import open_universal_gfx_browser
@@ -18,6 +18,7 @@ from hoi4cm.wizards.character_codec import new_character_script, parse_character
 ROLE_NAMES = (
     "country_leader",
     "advisor",
+    "field_marshal",
     "corps_commander",
     "navy_leader",
     "operative",
@@ -28,9 +29,9 @@ ROLE_NAMES = (
 class CharacterWizard:
     """Own the dialog state and keep widget callbacks small and isolated."""
 
-    def __init__(self, app: tk.Tk) -> None:
+    def __init__(self, app: Any) -> None:
         self.app = app
-        self.mod_root = MOD.root or ""
+        self.mod_root = app.index.root or ""
         self.win: Any = None
         self.editor: Any = None
         self.tag_var: Any = None
@@ -43,7 +44,7 @@ class CharacterWizard:
         self.character_close_indent = "\t"
 
     def open(self) -> None:
-        if not MOD.loaded or not self.mod_root:
+        if not self.app.index.loaded or not self.mod_root:
             messagebox.showinfo(
                 tr("wizard.character.title", "Character Editor"),
                 tr(
@@ -83,7 +84,7 @@ class CharacterWizard:
         ttk.Combobox(
             header,
             textvariable=self.id_var,
-            values=tuple(getattr(MOD, "character_ids", ())),
+            values=tuple(self.app.index.character_ids),
             width=32,
         ).grid(row=0, column=3, padx=4, pady=8, sticky="ew")
         header.columnconfigure(3, weight=1)
@@ -189,7 +190,10 @@ class CharacterWizard:
             parent=self.win,
             title=tr("wizard.character.open_title", "Open character file"),
             initialdir=os.path.join(self.mod_root, "common", "characters"),
-            filetypes=(("HOI4 script", "*.txt"), ("All files", "*")),
+            filetypes=(
+                (tr("filetype.hoi4_script", "HOI4 script"), "*.txt"),
+                (tr("filetype.all_files", "All files"), "*"),
+            ),
         )
         if not path:
             return
@@ -279,7 +283,7 @@ class CharacterWizard:
         role = self.role_var.get()
         if role not in ROLE_NAMES:
             return
-        row = int(self.editor.index("insert").split(".")[0])
+        row = int(self.editor.index("insert").split(".", maxsplit=1)[0])
         role_indent = self.body_indent + "\t"
         snippet = (
             f"\n{self.body_indent}{role} = {{\n{role_indent}\n"
@@ -321,7 +325,8 @@ class CharacterWizard:
             selected,
             title=tr("wizard.character.select_portrait", "Select portrait"),
             gfx_hints=["interface"],
-            mod=MOD,
+            index=self.app.index,
+            config=self.app.app_config,
         )
 
     def _save(self) -> None:
@@ -344,9 +349,9 @@ class CharacterWizard:
             return
         try:
             target = self._safe_character_path(selected_target)
-            notifying_workspace_files(MOD, self.mod_root).write_text(
-                target, source, encoding=self.current_encoding
-            )
+            notifying_workspace_files(
+                self.app.index, self.mod_root, self.app.note_mod_file_written
+            ).write_text(target, source, encoding=self.current_encoding)
         except (OSError, ValueError) as exc:
             report_error(
                 tr("wizard.character.write_error", "Could not save character file."),

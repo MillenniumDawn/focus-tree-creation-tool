@@ -27,6 +27,7 @@ if not os.environ.get("DISPLAY"):
 sys.path[:0] = [str(args.repo / "src"), str(args.repo / "tests")]
 import tkinter as tk
 
+# Reuse the headless suite's host double for the canvas benchmark.
 from ui_fakes import AppFake
 
 from hoi4cm.core.paths import read_file

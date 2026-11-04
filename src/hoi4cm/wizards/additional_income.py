@@ -12,7 +12,6 @@ import tkinter as tk
 from tkinter import messagebox
 
 from hoi4cm.core import read_file_with_encoding, sanitize_component, tr
-from hoi4cm.mod import MOD
 from hoi4cm.ui import (
     BG_CARD,
     BG_DARK,
@@ -59,7 +58,7 @@ def collect_additional_income_state(svars):
 
 def open_additional_income_wizard(app):
     """MD Additional Income Wizard — creates/links a spirit and wires up all 3 money system files."""
-    if not MOD.is_md:
+    if not app.index.is_md:
         return
     win = tk.Toplevel(app)
     win.title(tr("wizard.additional_income.title", "MD Additional Income Wizard"))
@@ -83,7 +82,7 @@ def open_additional_income_wizard(app):
         text=tr(
             "wizard.additional_income.subtitle",
             "Wires up 00_money_system.txt · money_scripted_localization.txt · {filename}",
-            filename=MOD.loc_target.filename("MD_money"),
+            filename=app.app_config.loc_target.filename("MD_money"),
         ),
         bg="#0d2b1a",
         fg=TEXT_DIM,
@@ -374,7 +373,7 @@ def open_additional_income_wizard(app):
     status_lbl.pack(fill="x", padx=6, pady=4)
 
     def _refresh_status():
-        if not MOD.loaded or not MOD.root:
+        if not app.index.loaded or not app.index.root:
             status_lbl.config(
                 text=tr(
                     "income.status.no_mod_loaded",
@@ -383,18 +382,23 @@ def open_additional_income_wizard(app):
                 fg=ORANGE,
             )
             return
-        MOD._scan_md_money_files()
+        app.index.rescan_md_money(app.app_config.loc_language)
         lines = []
-        lines.append(f"  Mod: {MOD.root}")
+        lines.append(f"  Mod: {app.index.root}")
         lines.append(
-            f"  00_money_system.txt       {'✅ found' if MOD.md_money_system_file else '❌ not found'}"
+            f"  00_money_system.txt       {'✅ found' if app.index.md_money_system_file else '❌ not found'}"
         )
         lines.append(
-            f"  money_scripted_loc.txt    {'✅ found  — ' + os.path.basename(MOD.md_money_scripted_loc_file) if MOD.md_money_scripted_loc_file else '❌ not found (will create)'}"
+            "  money_scripted_loc.txt    "
+            + (
+                "✅ found  — " + os.path.basename(app.index.md_money_scripted_loc_file)
+                if app.index.md_money_scripted_loc_file
+                else "❌ not found (will create)"
+            )
         )
         lines.append(
-            f"  {MOD.loc_target.filename('MD_money')}    "
-            f"{'✅ found' if MOD.md_money_yml_file else '❌ not found (will create)'}"
+            f"  {app.app_config.loc_target.filename('MD_money')}    "
+            f"{'✅ found' if app.index.md_money_yml_file else '❌ not found (will create)'}"
         )
         status_lbl.config(text="\n".join(lines), fg=TEXT_DIM)
 
@@ -521,7 +525,7 @@ def open_additional_income_wizard(app):
         # idea_id becomes an output filename below — keep it a safe segment.
         idea_id = sanitize_component(idea_id, fallback="new_idea")
 
-        if not MOD.loaded or not MOD.root:
+        if not app.index.loaded or not app.index.root:
             messagebox.showwarning(
                 tr("dialog.no_mod_loaded.title", "No Mod Loaded"),
                 tr(
@@ -547,13 +551,13 @@ def open_additional_income_wizard(app):
 
         # ── Also write localisation for tooltip ──────────────────────
         if tooltip_text and tooltip_key:
-            loc_target = MOD.loc_target
-            selected_loc = bool(MOD.edit_loc_file)
+            loc_target = app.app_config.loc_target
+            selected_loc = bool(app.edit_loc_file)
             loc_path = (
-                MOD.edit_loc_file
+                app.edit_loc_file
                 if selected_loc
                 else os.path.join(
-                    MOD.root,
+                    app.index.root,
                     "localisation",
                     loc_target.dirname(),
                     loc_target.filename(idea_id),
@@ -574,7 +578,9 @@ def open_additional_income_wizard(app):
                         if m:
                             existing_keys.add(m.group(1))
                 os.makedirs(os.path.dirname(loc_path), exist_ok=True)
-                wf = notifying_workspace_files(MOD, MOD.root)
+                wf = notifying_workspace_files(
+                    app.index, app.index.root, app.note_mod_file_written
+                )
                 to_write = {}
                 if tooltip_key not in existing_keys:
                     to_write[tooltip_key] = (
@@ -594,7 +600,7 @@ def open_additional_income_wizard(app):
                         encoding=loc_encoding,
                     )
                     output_lines.append(
-                        f"✅ {os.path.relpath(loc_path, MOD.root)}  — wrote tooltip localisation"
+                        f"✅ {os.path.relpath(loc_path, app.index.root)}  — wrote tooltip localisation"
                     )
             except (OSError, ValueError, UnicodeDecodeError, RuntimeError) as exc:
                 output_lines.append(f"❌ Tooltip localisation: {exc}")
