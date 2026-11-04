@@ -56,6 +56,12 @@ class _Var:
     def set(self, v):
         self._v = v
 
+    def delete(self, *_args):
+        self._v = ""
+
+    def insert(self, _index, value):
+        self._v = value
+
 
 class _ManualTimer:
     def __init__(self):
@@ -569,6 +575,48 @@ def test_invalid_ai_input_marks_field_and_corrected_input_clears_it(raw):
     values = app._read_sidebar_values()
     assert values.ai_will_do == -20
     assert app._fv_ai_raw.configured["highlightbackground"] == m.BORDER_G
+
+
+def test_selection_recomputes_sidebar_validation_borders():
+    invalid = Focus(id=1)
+    invalid.ai_will_do_raw = "base = nope"
+    valid = Focus(id=2, x=1)
+    app = _sidebar_read_app(invalid)
+    app.focuses.add(valid)
+    app._extra_trees = []
+    for name in ("_select", "_populate"):
+        setattr(app, name, getattr(m.App, name).__get__(app))
+    for name in (
+        "_redraw",
+        "_show_form",
+        "_update_focus_list_selection",
+        "_update_statusbar",
+        "_refresh_offsets",
+        "_refresh_prereqs",
+        "_refresh_mutex",
+        "_refresh_effects",
+        "_refresh_code_tab",
+    ):
+        setattr(app, name, Mock())
+    app._populate(invalid)
+    app._read_sidebar_values()
+    assert app._fv_ai_raw.configured["highlightbackground"] == m.RED
+    for variable in (app._fv_cost, app._fv_x, app._fv_y):
+        variable.set("invalid")
+
+    app._select(valid)
+
+    for entry in (
+        app._fv_ai_raw,
+        app._fv_cost_entry,
+        app._fv_x_entry,
+        app._fv_y_entry,
+    ):
+        assert entry.configured["highlightbackground"] == m.BORDER_G
+    app._select(invalid)
+    assert app._fv_ai_raw.get() == "base = nope"
+    assert app._fv_ai_raw.configured["highlightbackground"] == m.RED
+    assert app._fv_cost_entry.configured["highlightbackground"] == m.BORDER_G
 
 
 def populate_sidebar(app, focus):

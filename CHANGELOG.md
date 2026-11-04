@@ -9,7 +9,8 @@ the version by hand. See `AGENTS.md`.
 ## Unreleased
 
 - Keep unrelated focus sidebar edits when a cost is non-finite, and highlight
-  invalid `ai_will_do` input until it is corrected.
+  invalid `ai_will_do` input until it is corrected. Refresh validation borders
+  when switching focuses so they match the displayed values.
 
 ---
 
