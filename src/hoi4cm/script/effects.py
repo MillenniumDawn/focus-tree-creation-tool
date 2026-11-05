@@ -16,7 +16,7 @@ def _unwrap_scope_body(source: str, *, allow_list: bool = False) -> str:
     if not source or source[0] not in ("{[" if allow_list else "{"):
         return source
     stack: list[str] = []
-    for match in re.finditer(r'"[^"]*"?|#[^\n]*|[{}\[\]]', source):
+    for match in re.finditer(r'"[^"]*"?|#[^\r\n]*|[{}\[\]]', source):
         token = match.group()
         if token in pairs:
             stack.append(pairs[token])
@@ -30,7 +30,7 @@ def _unwrap_scope_body(source: str, *, allow_list: bool = False) -> str:
 
 def _normalize_scope_quotes(source: str) -> str:
     return re.sub(
-        r"\"[^\"]*\"?|#[^\n]*|'[^'\n]*'",
+        r"\"[^\"]*\"?|#[^\r\n]*|'[^'\n]*'",
         lambda match: (
             '"' + match.group()[1:-1] + '"'
             if match.group().startswith("'")

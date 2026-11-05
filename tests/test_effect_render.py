@@ -81,6 +81,16 @@ def test_scope_quotes_preserve_apostrophes_and_normalize_legacy_strings():
     assert parse_script(rendered)["if"] == {"a": "}", "b": "owner's {"}
 
 
+def test_scope_wrapper_with_carriage_return_comments():
+    assert _unwrap_scope_body("{ # comment\r foo = yes\r }") == (
+        " # comment\r foo = yes\r "
+    )
+    rendered = render_effect(
+        {"type": "if", "fields": {"effect": "{ # comment\r foo = yes\r }"}}
+    )
+    assert parse_script(rendered)["if"] == {"foo": "yes"}
+
+
 def test_scope_preserves_multiline_double_quoted_content():
     rendered = render_effect(
         {"type": "if", "fields": {"effect": "{ text = \"first\n' } '\nlast\" }"}}
