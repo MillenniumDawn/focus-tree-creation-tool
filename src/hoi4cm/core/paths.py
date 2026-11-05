@@ -81,6 +81,17 @@ def convert_newlines(text: str, style: str) -> str:
     return text.replace("\r\n", "\n").replace("\r", "\n").replace("\n", style)
 
 
+def separate_line_append(existing: str, body: str) -> str:
+    """Separate appended lines from an unterminated last line, if needed."""
+    if (
+        existing
+        and not existing.endswith(("\n", "\r"))
+        and not body.startswith(("\n", "\r"))
+    ):
+        return "\n" + body
+    return body
+
+
 def autosave_path(name):
     """Return a per-user autosave path under ``~/.hoi4cm/autosave/``.
 
