@@ -10,6 +10,36 @@ from hoi4cm.data import EFFECT_DEFS
 __all__ = ["render_effect"]
 
 
+def _unwrap_scope_body(source: str, *, allow_list: bool = False) -> str:
+    """Remove one wrapper only when it encloses the entire balanced body."""
+    pairs = {"{": "}", "[": "]"}
+    if not source or source[0] not in ("{[" if allow_list else "{"):
+        return source
+    stack: list[str] = []
+    for match in re.finditer(r'"[^"]*"?|#[^\n]*|[{}\[\]]', source):
+        token = match.group()
+        if token in pairs:
+            stack.append(pairs[token])
+        elif token in pairs.values():
+            if not stack or stack.pop() != token:
+                return source
+            if not stack:
+                return source[1:-1] if match.start() == len(source) - 1 else source
+    return source
+
+
+def _normalize_scope_quotes(source: str) -> str:
+    return re.sub(
+        r"\"[^\"]*\"?|#[^\n]*|'[^'\n]*'",
+        lambda match: (
+            '"' + match.group()[1:-1] + '"'
+            if match.group().startswith("'")
+            else match.group()
+        ),
+        source,
+    )
+
+
 def render_effect(eff: Mapping[str, object]) -> str:
     """Render a single effect as HOI4 code (3-tab indent, in completion_reward)."""
     t = eff.get("type", "")
@@ -723,7 +753,7 @@ def render_effect(eff: Mapping[str, object]) -> str:
         limit_raw = str(g("limit", "")).strip()
         if limit_raw:
             out.append(f"{IND}\tlimit = {{")
-            inner = limit_raw.strip("{}").replace("'", '"')
+            inner = _unwrap_scope_body(_normalize_scope_quotes(limit_raw))
             for ln in inner.splitlines():
                 ln = ln.strip().strip(",").strip()
                 if ln:
@@ -731,7 +761,9 @@ def render_effect(eff: Mapping[str, object]) -> str:
             out.append(f"{IND}\t}}")
         effect_raw = str(g("effect", "")).strip()
         if effect_raw:
-            inner = effect_raw.strip("{}[]").replace("'", '"')
+            inner = _unwrap_scope_body(
+                _normalize_scope_quotes(effect_raw), allow_list=True
+            )
             for ln in inner.splitlines():
                 ln = ln.strip().strip(",")
                 if ln:
