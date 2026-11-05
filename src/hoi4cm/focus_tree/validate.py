@@ -390,10 +390,22 @@ def validate_document(
     stack: list[int] = []
     cycles_reported: set[tuple[int, ...]] = set()
 
-    def dfs(node: int):
-        visited[node] = 1
-        stack.append(node)
-        for parent in adjacency.get(node, []):
+    for nid in list(id_set):
+        if visited.get(nid, 0) != 0:
+            continue
+        visited[nid] = 1
+        stack.append(nid)
+        # Keep each node's iterator on the explicit call stack, preserving the
+        # recursive DFS's parent and diagnostic order without a depth limit.
+        frames = [iter(adjacency[nid])]
+        while frames:
+            node = stack[-1]
+            parent = next(frames[-1], None)
+            if parent is None:
+                frames.pop()
+                stack.pop()
+                visited[node] = 2
+                continue
             state = visited.get(parent, 0)
             if state == 1:
                 # found cycle
@@ -403,7 +415,9 @@ def validate_document(
                 key = tuple(sorted(cycle))
                 if key not in cycles_reported:
                     cycles_reported.add(key)
-                    names = " → ".join(doc[c].name for c in stack[idx:] + [parent])
+                    cycle_names = " → ".join(
+                        doc[c].name for c in stack[idx:] + [parent]
+                    )
                     pending.append(
                         _Pending(
                             "error",
@@ -411,18 +425,14 @@ def validate_document(
                             node,
                             doc[node].name,
                             _msg_prereq_cycle,
-                            (names,),
+                            (cycle_names,),
                             "prereqs",
                         )
                     )
             elif state == 0:
-                dfs(parent)
-        stack.pop()
-        visited[node] = 2
-
-    for nid in list(id_set):
-        if visited.get(nid, 0) == 0:
-            dfs(nid)
+                visited[parent] = 1
+                stack.append(parent)
+                frames.append(iter(adjacency[parent]))
 
     pending.sort(key=_Pending.sort_key)
     hidden = len(pending) - max_issues
