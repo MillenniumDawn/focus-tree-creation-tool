@@ -16,7 +16,6 @@ from hoi4cm.core.app_config import AppConfig
 from hoi4cm.core.undo import UndoStack
 from hoi4cm.mod.index import ModIndex
 from hoi4cm.models import Focus, FocusDocument
-from hoi4cm.ui.focus_list import FocusListCache
 from hoi4cm.ui.theme import (
     BG_CARD,
     BG_DARK,
@@ -147,7 +146,6 @@ class EffectsMixin:
     selected: Focus | None
     focuses: FocusDocument
     _undo_stack: UndoStack
-    _focus_list_cache: FocusListCache
     _eb_win: tk.Toplevel | None
     _effects_sig: object | None
 
@@ -613,7 +611,6 @@ class EffectsMixin:
         self.selected.effects.append({"type": etype, "fields": dict(fields)})
         self.focuses.mark_content_changed()
         self._refresh_effects()
-        self._focus_list_cache.invalidate()
         self._invalidate_focus_list_structure()
 
     def _refresh_effects(self, force=False):
@@ -968,7 +965,6 @@ class EffectsMixin:
         self.selected.effects.pop(idx)
         self.focuses.mark_content_changed()
         self._refresh_effects()
-        self._focus_list_cache.invalidate()
         self._invalidate_focus_list_structure()
 
     def _live_eff_field(self, idx, fname, var):

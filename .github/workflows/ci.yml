@@ -62,9 +62,18 @@ jobs:
           pytest
           --cov
           --cov-report=term-missing
+      - name: Tk smoke
+        # Keep Tk objects in their own process; measure the widget modules that
+        # only the smoke builds without adding to the headless monolith measurement.
+        run: >
+          xvfb-run -a pytest -m tk
+          --cov=hoi4cm.ui.project_sidebar
+          --cov=hoi4cm.ui.focus_editor
+          --cov=hoi4cm.ui.editor_chrome
+          --cov-append
+          --cov-report=term-missing
       - name: Coverage gate (hoi4cm package)
-        # Ratchet one point below the measured 92%. The Tk widget modules
-        # are omitted in pyproject.toml's [tool.coverage.report].
+        # Keep those modules measured alongside the headless package logic.
         run: coverage report --include='src/hoi4cm/*' --fail-under=91
       - name: Coverage gate (monolith)
         # Independent floor, one point below the measured 35%. Keeps existing
@@ -78,10 +87,6 @@ jobs:
           --cov=hoi4cm.wizards._generators
           --cov-fail-under=95
           --cov-report=term-missing
-      - name: Tk smoke
-        # Builds the real App and each dialog. Its own process, so Tk objects
-        # never share an interpreter with the headless suite.
-        run: xvfb-run -a pytest -m tk
 
   windows-permissions:
     runs-on: windows-latest
@@ -97,11 +102,28 @@ jobs:
         run: pip install --require-hashes -r dev-requirements.txt
       - name: Check native cache permissions
         run: pytest tests/test_cache_permissions.py -v
+      - name: Tk smoke (native Spotlight compositor)
+        run: pytest -m tk
+
+  macos-tk:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        # v6.3.0
+        with:
+          python-version: "3.14"
+      - name: Install dev dependencies
+        run: pip install --require-hashes -r dev-requirements.txt
+      - name: Tk smoke (native macOS)
+        run: pytest -m tk
 
   # Runs on PRs and v* tags, not on pushes to main (pre-release.yml builds and
   # smoke-tests those), so a PyInstaller break shows up in the PR that caused it.
   build:
-    needs: [lint, test, windows-permissions]
+    needs: [lint, test, windows-permissions, macos-tk]
     if: github.event_name == 'pull_request' || startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: read

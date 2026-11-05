@@ -8,6 +8,29 @@ the version by hand. See `AGENTS.md`.
 
 ## Unreleased
 
+- Replace the right-hand focus form and the left focus list with a resizable
+  content sidebar and a searchable project explorer. Switch between Focus Trees,
+  Decisions, Events, Ideas, Dynamic Modifiers and Character Editor. Add Income
+  stays with those tools when a Millennium Dawn mod is loaded, not on the canvas
+  toolbar. Browse the loaded trees and their focuses, and see the mod's
+  localisation, graphics and scripted-effect files. Enter on a source file
+  reveals its folder. Unopened tree files under `common/national_focus` open
+  through the usual import prompts, and New Focus Tree is one click.
+- Click a focus to open a Spotlight with six actions: Edit Focus, Add
+  Prerequisite, Add Effect, Add Child, Duplicate and Delete. Edit Focus opens the
+  existing form in its own window, with Conditions and Code under Advanced
+  settings. Escape, closing that window or quitting offers to discard an edit
+  that cannot be applied. On Linux and macOS the Spotlight sits on a solid dark
+  surface; Windows keeps color-key transparency.
+- Keep Save Project, Validate, Export and the Saved and Validation status in
+  view, wrap the canvas tools in narrow windows, and move the loaded trees, tree
+  ID and continuous focus position into Tree Settings. The French, German,
+  Spanish and Chinese strings added for this are machine translations and need
+  native review.
+- Opening Validate no longer switches the whole app to the clam ttk theme.
+- Importing events whose title or description is written as a block no longer
+  raises an error. A non-text event id or picture is still ignored.
+
 - Preserve comments inside imported focus reward and condition blocks
   (`completion_reward`, `available`, `cancel`, and the other raw keys)
   through parse, build, export and repeated round trips. Comments used to be

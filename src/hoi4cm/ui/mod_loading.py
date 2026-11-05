@@ -86,9 +86,9 @@ class ModLoadingMixin:
     _mod_label_base: str
     cv: tk.Canvas
     _focus_bundles: dict[int, FocusCanvasBundle]
-    _lifecycle: ApplicationLifecycle | None
     _mod_image_resource_registered: bool
     _config_write_warned: bool
+    _lifecycle: ApplicationLifecycle | None
     app_config: AppConfig
     index: ModIndex
     images: SpriteImageCache

@@ -1,3 +1,5 @@
+from ui_fakes import AppFake
+
 from hoi4cm.ui.canvas_scheduler import DirtyRedrawState, RedrawChannel
 
 
@@ -19,3 +21,14 @@ def test_focus_list_channel_is_explicit():
     state.request(RedrawChannel.VIEW, "pan")
 
     assert not state.consume().channels & RedrawChannel.FOCUS_LIST
+
+
+def test_image_poll_does_not_schedule_a_released_broker():
+    app = AppFake()
+    app._image_poll_job = None
+
+    app._poll_images()
+    app._start_image_poll()
+
+    app.cv.after.assert_not_called()
+    assert app._image_poll_job is None

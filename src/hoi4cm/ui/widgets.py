@@ -12,6 +12,12 @@ from typing import Any
 from hoi4cm.ui.theme import BG_CARD, BORDER_G, SEL_BG, TEXT
 
 
+class UnderlinedTabButton(tk.Button):
+    """Tab button with an app-owned underline widget."""
+
+    _line: tk.Frame
+
+
 def grab_when_visible(window: Any) -> bool:
     """Set a local grab once mapped, unless the caller's window was destroyed.
 
@@ -405,6 +411,7 @@ class Tooltip:
 
 __all__ = [
     "Tooltip",
+    "UnderlinedTabButton",
     "grab_when_visible",
     "_safe_after",
     "_safe_after_idle",

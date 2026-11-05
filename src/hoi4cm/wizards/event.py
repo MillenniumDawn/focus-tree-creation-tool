@@ -71,6 +71,22 @@ def _scalar_text(value, default: str) -> str:
     return value if isinstance(value, str) else default
 
 
+def _event_text(value: object, default: str = "") -> str:
+    """Read scalar or conditional text without returning a script block."""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict):
+        text = value.get("text", default)
+        return text if isinstance(text, str) else default
+    if isinstance(value, list):
+        for item in value:
+            if isinstance(item, dict) and isinstance(item.get("text"), str):
+                return item["text"]
+            if isinstance(item, str):
+                return item
+    return default
+
+
 def collect_event_state(events):
     """Snapshot the wizard's event list for headless generator calls.
 
@@ -276,6 +292,8 @@ def open_event_wizard(app):
 
     # ── Preview scheduler (defined early so all callbacks can reference it) ──
     _prev_job: list[str | None] = [None]
+    # Keep the displayed image alive while cache invalidation starts a reload.
+    current_preview_image: object | None = None
     _prev_img_cache = {}  # (gfx_key, w, h) -> PhotoImage or None
     _prev_img_pending = set()
 
@@ -286,6 +304,7 @@ def open_event_wizard(app):
 
     # ── Preview renderer (forward-references canvas widget, safe as lambda'd) ──
     def _render_preview():
+        nonlocal current_preview_image
         _prev_job[0] = None
         cv = cast("_PreviewCanvas", preview_cv)
         cv.delete("all")
@@ -384,6 +403,7 @@ def open_event_wizard(app):
         if cache_key in _prev_img_cache:
             cached = _prev_img_cache[cache_key]
             if cached is not None:
+                current_preview_image = cached
                 cv.create_image(cx, cy, image=cached, anchor="center")
                 pic_shown = True
             # else: already tried and failed, show placeholder
@@ -392,7 +412,8 @@ def open_event_wizard(app):
             # Draw placeholder immediately, then load image in background
             def _decode_preview_image(item):
                 path, wpw, wph = item
-                if not PIL_OK:
+                image_module = PILImage
+                if not PIL_OK or image_module is None:
                     return (
                         ("tk", path, wpw, wph)
                         if path.lower().endswith(".png")
@@ -403,7 +424,9 @@ def open_event_wizard(app):
                     image_mod = cast(ModuleType, PILImage)
                     with image_mod.open(path_to_decode) as source:
                         pil = source.convert("RGBA")
-                    rs = getattr(PILImage, "LANCZOS", getattr(PILImage, "ANTIALIAS", 1))
+                    rs = getattr(
+                        image_module, "LANCZOS", getattr(image_module, "ANTIALIAS", 1)
+                    )
                     pw, ph = pil.size
                     ratio = min(wpw / max(pw, 1), wph / max(ph, 1))
                     return pil.resize(
@@ -1222,21 +1245,6 @@ def open_event_wizard(app):
             )
             return
 
-        def _str_val(v, default=""):
-            """Extract a plain string from a value that may be a str, dict, or list
-            (HOI4 supports block-format title/desc with conditional triggers)."""
-            if isinstance(v, str):
-                return v
-            if isinstance(v, dict):
-                return v.get("text", default)
-            if isinstance(v, list):
-                for item in v:
-                    if isinstance(item, dict) and "text" in item:
-                        return item["text"]
-                    if isinstance(item, str):
-                        return item
-            return default
-
         tokens = tokenize(raw)
         blk: dict[str, Any]
         imported = []
@@ -1252,8 +1260,8 @@ def open_event_wizard(app):
                 ev = _Ev()
                 ev.etype = etype
                 ev.eid = _scalar_text(blk.get("id"), ev.eid)
-                ev.title_text = _str_val(blk.get("title", "")).replace(".", " ")
-                ev.desc_text = _str_val(blk.get("desc", "")).replace(".", " ")
+                ev.title_text = _event_text(blk.get("title", "")).replace(".", " ")
+                ev.desc_text = _event_text(blk.get("desc", "")).replace(".", " ")
                 ev.picture = _scalar_text(
                     blk.get("picture"), "GFX_report_event_generic_handshake"
                 )
@@ -1268,6 +1276,8 @@ def open_event_wizard(app):
                 opts_raw = blk.get("option", [])
                 if not isinstance(opts_raw, list):
                     opts_raw = [opts_raw]
+                elif not isinstance(opts_raw, list):
+                    opts_raw = []
                 ev.options = []
                 for ob in opts_raw:
                     if not isinstance(ob, dict):

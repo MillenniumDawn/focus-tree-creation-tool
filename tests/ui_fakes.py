@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any
+from itertools import count
+from typing import Any, Literal
 from unittest.mock import Mock
 
 from hoi4cm.core.app_config import AppConfig
@@ -114,7 +115,9 @@ class AppFake(CanvasMixin, ModLoadingMixin, EffectsMixin):
 
         self.save_user_config = save_user_config
         self._reset_canvas_bounds()
-        self.callbacks: list[Callable[[], None]] = []
+        self.callbacks: list[Callable[[], object]] = []
+        self._after_callbacks: dict[str, Callable[[], object]] = {}
+        self._after_ids = count()
         self.loaded_roots: list[str] = []
         self.after_calls: list[tuple[int, Callable[[], None]]] = []
         self.visibility_updates = 0
@@ -133,15 +136,29 @@ class AppFake(CanvasMixin, ModLoadingMixin, EffectsMixin):
     def _schedule_validation(self) -> None:
         self.validation_schedules += 1
 
-    def after(self, _milliseconds: int, callback: Callable[[], None]) -> object:
+    def after[**P](
+        self,
+        ms: int | Literal["idle"],
+        func: Callable[P, object],
+        *args: P.args,
+        **kwargs: P.kwargs,
+    ) -> str:
+        identifier = f"after-{next(self._after_ids)}"
+
+        def callback() -> object:
+            self._after_callbacks.pop(identifier, None)
+            return func(*args, **kwargs)
+
         self.callbacks.append(callback)
-        return callback
+        self._after_callbacks[identifier] = callback
+        return identifier
 
     def _count_validation(self) -> None:
         self.validation_schedules += 1
 
     def after_cancel(self, identifier: object) -> None:
-        self.callbacks = [cb for cb in self.callbacks if cb is not identifier]
+        callback = self._after_callbacks.pop(str(identifier), None)
+        self.callbacks = [cb for cb in self.callbacks if cb is not callback]
 
     def winfo_exists(self) -> int:
         return 1

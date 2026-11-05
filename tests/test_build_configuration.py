@@ -1,7 +1,9 @@
 """Regression coverage for the generated PyInstaller spec and build pins."""
 
+import ast
 import importlib.util
 import re
+from importlib import import_module
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -60,8 +62,59 @@ def test_generated_spec_is_windowless_and_bundles_runtime_assets(tmp_path, monke
     assert "    console=False," in content
     assert "    console=True," not in content
     locales_path = str(tmp_path / "locales").replace("\\", "/")
-    assert f"datas=[({locales_path!r}, 'locales')]," in content
+    assets_path = str(tmp_path / "src" / "hoi4cm" / "ui" / "assets").replace("\\", "/")
+    analysis = next(
+        node
+        for node in ast.walk(ast.parse(content))
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "Analysis"
+    )
+    datas = next(
+        keyword.value for keyword in analysis.keywords if keyword.arg == "datas"
+    )
+    assert ast.literal_eval(datas) == [
+        (locales_path, "locales"),
+        (assets_path, "hoi4cm/ui/assets"),
+    ]
     assert all(f"'hoi4cm.wizards.{name}'" in content for name in WIZARD_MODULES)
+
+
+def test_bundled_focus_actions_have_png_assets():
+    assets = ROOT / "src" / "hoi4cm" / "ui" / "assets"
+    for action in import_module("hoi4cm.ui.focus_actions").ACTIONS:
+        image = assets / f"{action}.png"
+        assert image.read_bytes().startswith(b"\x89PNG\r\n\x1a\n"), image
+
+
+def test_bundled_sidebar_symbols_have_transparent_png_assets():
+    import struct
+
+    assets = ROOT / "src" / "hoi4cm" / "ui" / "assets" / "sidebar"
+    names = (
+        "nav_focus_trees",
+        "nav_decisions",
+        "nav_events",
+        "nav_ideas",
+        "nav_dynamic_modifiers",
+        "project_folder_closed",
+        "project_folder_open",
+        "file_focus_tree",
+        "item_focus",
+        "file_localization",
+        "file_graphics",
+        "file_scripted_effects",
+        "file_generic",
+        "chevron_down",
+        "chevron_right",
+        "sidebar_collapse",
+        "sidebar_expand",
+    )
+    for name in names:
+        data = (assets / f"{name}.png").read_bytes()
+        assert data.startswith(b"\x89PNG\r\n\x1a\n")
+        assert struct.unpack(">II", data[16:24]) == (256, 256)
+        assert data[25] == 6  # RGBA; UI backgrounds are not baked into symbols.
 
 
 def test_encrypted_build_path_is_removed_and_cipher_stays_disabled():
@@ -108,3 +161,15 @@ def test_stable_build_checks_tag_against_project_before_compiling():
     assert "shell: bash" in check_step
     assert '"$RELEASE_TAG"' in check_step
     assert build.index(check) < build.index("python build/build.py")
+
+
+def test_build_waits_for_native_macos_tk_smoke():
+    workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    macos = workflow.split("\n  macos-tk:\n", 1)[1].split("\n  build:\n", 1)[0]
+    build = workflow.split("\n  build:\n", 1)[1].split("\n  release:\n", 1)[0]
+
+    assert "runs-on: macos-latest" in macos
+    assert 'python-version: "3.14"' in macos
+    assert "pip install --require-hashes -r dev-requirements.txt" in macos
+    assert "run: pytest -m tk" in macos
+    assert "needs: [lint, test, windows-permissions, macos-tk]" in build

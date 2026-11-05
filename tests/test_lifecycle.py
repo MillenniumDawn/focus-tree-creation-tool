@@ -5,6 +5,8 @@ from collections.abc import Callable
 from concurrent.futures import Executor, Future
 from typing import cast
 
+from ui_fakes import AppFake
+
 from hoi4cm.ui.lifecycle import (
     ApplicationLifecycle,
     DaemonThreadPoolExecutor,
@@ -21,15 +23,15 @@ class FakeTkOwner:
     def __init__(self) -> None:
         self.exists = True
         self.tk = cast(TclInterpreter, _FakeTk())
-        self.callbacks: dict[object, Callable[[], None]] = {}
-        self.cancelled: list[object] = []
+        self.callbacks: dict[str, Callable[[], None]] = {}
+        self.cancelled: list[str] = []
 
-    def after(self, milliseconds: int, callback: Callable[[], None]) -> object:
+    def after(self, milliseconds: int, callback: Callable[[], None]) -> str:
         identifier = f"after-{len(self.callbacks)}"
         self.callbacks[identifier] = callback
         return identifier
 
-    def after_cancel(self, identifier: object) -> None:
+    def after_cancel(self, identifier: str) -> None:
         self.cancelled.append(identifier)
         self.callbacks.pop(identifier, None)
 
@@ -56,6 +58,22 @@ class FakeExecutor(Executor):
 
     def shutdown(self, wait=True, *, cancel_futures=False) -> None:
         self.shutdown_calls.append((wait, cancel_futures))
+
+
+def test_shared_host_after_uses_unique_tk_ids_and_callback_arguments() -> None:
+    owner = AppFake()
+    called: list[str] = []
+    first = AppFake.after(owner, 0, called.append, "cancelled")
+    second = AppFake.after(owner, 0, called.append, "kept")
+    owner.after_cancel(first)
+    third = AppFake.after(owner, 0, called.append, "last")
+    assert len({first, second, third}) == 3
+    assert all(isinstance(identifier, str) for identifier in (first, second, third))
+
+    owner.flush()
+
+    assert called == ["kept", "last"]
+    assert not owner._after_callbacks
 
 
 def test_stale_generation_callback_is_not_applied() -> None:

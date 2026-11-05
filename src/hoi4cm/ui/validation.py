@@ -125,6 +125,10 @@ class ValidationController:
             if not self._closed and key == self._key():
                 self._completed = key
                 owner._apply_validation_result(issues)
+                if getattr(owner, "_editor_chrome", None) is not None:
+                    from hoi4cm.ui.editor_chrome import validation_completed
+
+                    validation_completed(owner)
             self._continue()
 
         def failed(_error):

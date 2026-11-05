@@ -53,6 +53,10 @@ _CFP_MARKER_MIN_ZOOM = 0.3
 _GRID_MARGIN_SCREENS = 1
 
 
+def _spotlight_blocks_input(app):
+    return getattr(getattr(app, "_focus_actions", None), "blocks_canvas", False) is True
+
+
 if TYPE_CHECKING:
 
     class _CanvasState(CanvasHost):
@@ -173,7 +177,8 @@ class CanvasMixin(_CanvasState):
     def _poll_images(self):
         self._image_poll_job = None
         lifecycle = self._lifecycle
-        if lifecycle is not None and not lifecycle.accepting:
+        broker = self._image_broker
+        if broker is None or (lifecycle is not None and not lifecycle.accepting):
             return
         image_broker = self._image_broker
         if image_broker is None:
@@ -425,6 +430,9 @@ class CanvasMixin(_CanvasState):
             if channels & RedrawChannel.FOCUS_LIST:
                 self._update_focus_list_selection()
             self._draw_minimap()
+            actions = getattr(self, "_focus_actions", None)
+            if actions is not None:
+                actions.reflow()
         finally:
             self._rendering_frame = False
 
@@ -1299,7 +1307,12 @@ class CanvasMixin(_CanvasState):
         return None
 
     def _lmb_dn(self, e):
+        if _spotlight_blocks_input(self):
+            return "break"
         self.cv.focus_set()
+        actions = getattr(self, "_focus_actions", None)
+        if actions is not None:
+            actions.dismiss()
         if self.mutex_mode:
             tid = self._focus_id_at(e.x, e.y)
             if tid is not None:
@@ -1307,10 +1320,11 @@ class CanvasMixin(_CanvasState):
                 if src and tid != src.id:
                     self._make_mutex(src, self.focuses[tid])
                 self._end_mutex()
-            return
+            return None
         hits = self.cv.find_overlapping(e.x - 2, e.y - 2, e.x + 2, e.y + 2)
         if not any("focus" in self.cv.gettags(i) for i in hits):
             self._deselect()
+        return None
 
     def _lmb_mv(self, e):
         pass
@@ -1319,12 +1333,20 @@ class CanvasMixin(_CanvasState):
         pass
 
     def _pan_pr(self, e):
+        if _spotlight_blocks_input(self):
+            return "break"
+        actions = getattr(self, "_focus_actions", None)
+        if actions is not None:
+            actions.dismiss()
         self._pan_start = (e.x, e.y)
         self.cv.config(cursor="sizing")
+        return None
 
     def _pan_mv(self, e):
+        if _spotlight_blocks_input(self):
+            return "break"
         if not self._pan_start:
-            return
+            return None
         dx = e.x - self._pan_start[0]
         dy = e.y - self._pan_start[1]
         self.offset[0] += dx
@@ -1341,34 +1363,49 @@ class CanvasMixin(_CanvasState):
         # these two is cheap (a handful of items) and keeps them crisp.
         self._draw_canvas_bounds()
         self._draw_coord_labels()
+        return None
 
     def _pan_rl(self, e):
+        if _spotlight_blocks_input(self):
+            return "break"
         self._pan_start = None
         self.cv.config(cursor="fleur")
         # One clean redraw on release snaps everything to exact positions.
         self._redraw_now(RedrawChannel.VIEW, reason="pan-release")
+        return None
 
     def _scroll(self, e):
+        if _spotlight_blocks_input(self):
+            return "break"
         f = 1.1 if (e.num == 4 or e.delta > 0) else 0.9
         old = self.zoom
         self.zoom = max(0.10, min(4.0, self.zoom * f))
         if self.zoom == old:
-            return
+            return None
         self.offset[0] = e.x - (e.x - self.offset[0]) * (self.zoom / old)
         self.offset[1] = e.y - (e.y - self.offset[1]) * (self.zoom / old)
         # Preserve every pointer-anchored transform; render the latest view once.
         self._redraw(RedrawChannel.VIEW, reason="wheel")
+        return None
 
     def _rmb(self, e):
+        if _spotlight_blocks_input(self):
+            return "break"
+        actions = getattr(self, "_focus_actions", None)
+        if actions is not None:
+            actions.dismiss()
         hits = self.cv.find_overlapping(e.x - 2, e.y - 2, e.x + 2, e.y + 2)
         if any("focus" in self.cv.gettags(i) for i in hits):
-            return
+            return None
         gx, gy = self.c2w(e.x, e.y)
         if not self.focuses.position_free(gx, gy):
-            return
+            return None
         self._new_focus_at(gx, gy)
+        return None
 
     def _motion(self, e):
+        if _spotlight_blocks_input(self):
+            return "break"
         if not self._drag:
             gx, gy = self.c2w(e.x, e.y)
             self._coord_lbl.config(text=f"  x={gx}  y={gy}  ")
@@ -1385,13 +1422,19 @@ class CanvasMixin(_CanvasState):
                 else:
                     tx, ty = e.x, e.y
                 self.cv.coords(self._temp_line, cx, cy, tx, ty)
+        return None
 
     def _foc_pr(self, fid, e):
+        if _spotlight_blocks_input(self):
+            return "break"
         self.cv.focus_set()
+        actions = getattr(self, "_focus_actions", None)
+        if actions is not None:
+            actions.dismiss()
         if self.mutex_mode:
             # Completion is handled at the canvas level (_lmb_dn); swallow the
             # click here so it never starts a drag or selection.
-            return
+            return None
         f = self.focuses[fid]
         # Ctrl+click = toggle multi-select
         if self._multisel_mode or (e.state & 0x0004):  # 0x0004 = Ctrl held
@@ -1400,7 +1443,7 @@ class CanvasMixin(_CanvasState):
             else:
                 self._multi_sel.add(fid)
             self._redraw()
-            return
+            return None
         self._drag = {
             "id": fid,
             "sx": f.x,
@@ -1418,25 +1461,29 @@ class CanvasMixin(_CanvasState):
                 if any(occupant != fid for occupant in ids)
             },
         }
-        self._select(f)
+        if self._select(f) is False:
+            self._drag = {}
+        return None
 
     def _foc_mv(self, fid, e):
+        if _spotlight_blocks_input(self):
+            return "break"
         d = self._drag
         if not d or d.get("id") != fid or self.mutex_mode:
-            return
+            return None
         dx = e.x - d["cx"]
         dy = e.y - d["cy"]
         if abs(dx) > 4 or abs(dy) > 4:
             d["moved"] = True
         if not d["moved"]:
-            return
+            return None
         f = self.focuses[fid]
         ngx = round(d["sx"] + dx / (XGRID * self.zoom))
         ngy = round(d["sy"] + dy / (YGRID * self.zoom))
         if (ngx, ngy) == d["last_snap"]:
-            return
+            return None
         if (ngx, ngy) in d.get("occupied", ()):
-            return
+            return None
         if not d["undo_pushed"]:
             self._push_undo("move focus", touched_ids=(fid,))
             d["undo_pushed"] = True
@@ -1460,11 +1507,17 @@ class CanvasMixin(_CanvasState):
             )
         )
         self._draw_lines_throttled()
+        return None
 
     def _foc_rl(self, fid):
-        if self._drag.get("moved"):
+        drag = self._drag
+        clicked = drag.get("id") == fid and not drag.get("moved")
+        if drag.get("moved"):
             self._redraw()  # final clean redraw on release
         self._drag = {}
+        actions = getattr(self, "_focus_actions", None)
+        if clicked and not self.mutex_mode and actions is not None:
+            actions.show(fid)
 
     def _foc_en(self, fid):
         f = self.focuses[fid]

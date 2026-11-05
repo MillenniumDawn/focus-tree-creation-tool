@@ -18,7 +18,6 @@ from hoi4cm.mod.index import ModIndex
 from hoi4cm.models import Focus, FocusDocument
 from hoi4cm.ui.canvas_renderer import FocusCanvasBundle
 from hoi4cm.ui.canvas_scheduler import DirtyRedrawState
-from hoi4cm.ui.focus_list import FocusListCache
 from hoi4cm.ui.image_broker import ImageBroker
 from hoi4cm.ui.lifecycle import ApplicationLifecycle
 from hoi4cm.ui.scene_index import SceneIndex
@@ -126,7 +125,7 @@ class CanvasHost(Protocol):
     _fv_y: tk.StringVar
     _coord_lbl: tk.Label
     # Host-provided callbacks (methods on the host, Mocks in test doubles).
-    _select: Callable[..., None]
+    _select: Callable[..., bool | None]
     _deselect: Callable[..., None]
     _make_mutex: Callable[..., None]
     _end_mutex: Callable[..., None]
@@ -144,7 +143,6 @@ class EffectsHost(Protocol):
     app_config: AppConfig
     focuses: FocusDocument
     _undo_stack: UndoStack
-    _focus_list_cache: FocusListCache
     selected: Focus | None
     _eb_win: tk.Toplevel | None
     _effects_sig: object | None
