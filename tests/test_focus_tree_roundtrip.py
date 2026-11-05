@@ -48,8 +48,9 @@ def _info(parsed, tree_type):
     }
 
 
-def _load_and_export_default(src, tree_type, path="/tmp/x.txt"):
-    parsed = parse_focus_tree(src, path)
+def _load_and_export_default(src, tree_type="shared"):
+    """parse -> build -> export with the production default renderer."""
+    parsed = parse_focus_tree(src, "/tmp/issue-358.txt")
     focuses = build_focuses(parsed, tree_idx=1)
     lookup = {f.id: f for f in focuses}
     text = export_focus_tree(focuses, _info(parsed, tree_type), focus_lookup=lookup)
@@ -854,16 +855,6 @@ focus_tree = {
 	}
 }
 """
-
-
-def _load_and_export_default(src, tree_type="shared"):
-    """parse -> build -> export with the production default renderer."""
-    parsed = parse_focus_tree(src, "/tmp/issue-358.txt")
-    focuses = build_focuses(parsed, tree_idx=1)
-    lookup = {f.id: f for f in focuses}
-    return focuses, export_focus_tree(
-        focuses, _info(parsed, tree_type), focus_lookup=lookup
-    )
 
 
 def test_empty_completion_reward_export_is_idempotent_issue_358():
