@@ -18,6 +18,7 @@ from hoi4cm.core import (
     newline_style,
     read_file_with_encoding,
 )
+from hoi4cm.core.paths import separate_line_append
 from hoi4cm.mod import append_sprite_types, find_loc_files, notifying_workspace_files
 from hoi4cm.script.syntax import match_brace
 from hoi4cm.wizards._generators import build_event_scripted_loc_blocks
@@ -159,6 +160,7 @@ def save_spirit(
         new_entries = {sid: loc_name, f"{sid}_desc": loc_desc}
         existing_keys = set()
         loc_encoding = "utf-8-sig"
+        loc_text = ""
         loc_exists = os.path.isfile(loc_path)
         if selected_loc and not loc_exists:
             raise OSError("selected localisation file no longer exists")
@@ -183,7 +185,11 @@ def save_spirit(
                 f" {k}: {json.dumps(v, ensure_ascii=False)}\n"
                 for k, v in to_add.items()
             )
-            wf.append_text(loc_path, loc_body, encoding=loc_encoding)
+            wf.append_text(
+                loc_path,
+                separate_line_append(loc_text, loc_body),
+                encoding=loc_encoding,
+            )
             rel = os.path.relpath(loc_path, mod_root)
             saved.append(rel + f"  (+{len(to_add)} keys)")
         else:
@@ -350,7 +356,11 @@ def save_events(
             if needs_hdr:
                 loc_body += f"\n ##########Events - {ns}##########\n"
             loc_body += "\n".join(to_add) + "\n"
-            wf.append_text(loc_file, loc_body, encoding=yml_encoding)
+            wf.append_text(
+                loc_file,
+                separate_line_append(existing_yml_text, loc_body),
+                encoding=yml_encoding,
+            )
             rel = os.path.relpath(loc_file, mod_root)
             saved.append(f"{rel}  (+{len(to_add)} keys)")
         else:
@@ -714,6 +724,7 @@ def save_decisions(
         existing_loc_keys = set()
         yml_exists = os.path.isfile(yml_path)
         yml_encoding = "utf-8-sig"
+        existing_yml = ""
         if selected_loc and not yml_exists:
             raise OSError("selected localisation file no longer exists")
         if yml_exists:
@@ -739,7 +750,11 @@ def save_decisions(
                 continue
             to_write.append(ln)
         if to_write:
-            wf.append_text(yml_path, "\n".join(to_write) + "\n", encoding=yml_encoding)
+            wf.append_text(
+                yml_path,
+                separate_line_append(existing_yml, "\n".join(to_write) + "\n"),
+                encoding=yml_encoding,
+            )
         saved.append(os.path.relpath(yml_path, mod_root) + f"  (+{len(to_write)} keys)")
     except OSError as e:
         errs.append(str(e))
