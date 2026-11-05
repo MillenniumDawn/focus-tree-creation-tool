@@ -8,6 +8,9 @@ the version by hand. See `AGENTS.md`.
 
 ## Unreleased
 
+- Stop focus-tree export before writing when an existing localisation file
+  cannot be read, and report its path in the export failure.
+
 - Preserve comments inside imported focus reward and condition blocks
   (`completion_reward`, `available`, `cancel`, and the other raw keys)
   through parse, build, export and repeated round trips. Comments used to be
