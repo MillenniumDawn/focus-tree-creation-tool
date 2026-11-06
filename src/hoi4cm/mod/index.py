@@ -71,6 +71,7 @@ _SCAN_CONTAINERS = (
     "failed_steps",
     "unparsable_files",
     "_script_contributions",
+    "_script_aliases",
 )
 
 _SCRIPT_DIRECTORIES = {
@@ -148,6 +149,7 @@ class ModIndex:
         self.md_money_yml_file = ""
         self._settings: ScanSettings | None = None
         self._script_contributions: dict[str, dict] = {}
+        self._script_aliases: set[tuple[str, str]] = set()
 
     def _scan_settings(self) -> ScanSettings:
         if self._settings is None:
@@ -216,6 +218,12 @@ class ModIndex:
             self._cache.commit()
         results = {path: contrib[path] for path in paths}
         self._script_contributions[domain] = results
+        self._script_aliases = {
+            alias for alias in self._script_aliases if alias[0] != domain
+        }
+        self._script_aliases.update(
+            (domain, path) for path in paths if os.path.islink(path)
+        )
         return results
 
     @staticmethod
@@ -266,38 +274,50 @@ class ModIndex:
             return
         root = Path(self.root).resolve()
         target = Path(path).resolve()
-        if target.suffix != ".txt" or not target.is_relative_to(root):
+        if not target.is_relative_to(root):
             return
-        spec = next(
-            (
-                spec
-                for folder, spec in _SCRIPT_DIRECTORIES.items()
-                if (root / folder).resolve() == target.parent
-            ),
-            None,
-        )
-        if spec is None:
-            return
-        domain, attr, extractor = spec
-        filename = str(target)
-        if self.use_cache or os.path.exists(database_path(self.root)):
-            cache = ScanCache(self.root)
-            try:
-                cache.invalidate(domain, filename)
-            finally:
-                cache.close()
-        contributions = self._script_contributions.setdefault(domain, {})
-        if deleted:
-            contributions.pop(filename, None)
-        else:
-            source = self._read(filename)
-            if source is None:
-                return
-            try:
-                contributions[filename] = getattr(self, extractor)(source)
-            except (ValueError, TypeError, RuntimeError, OSError) as exc:
-                _log.warning("could not parse %s: %s", filename, exc)
-                return
+        matches: dict[tuple[str, str, str], set[str]] = {
+            spec: set() for spec in _SCRIPT_DIRECTORIES.values()
+        }
+        for folder, spec in _SCRIPT_DIRECTORIES.items():
+            if target.suffix == ".txt" and (root / folder).resolve() == target.parent:
+                matches[spec].add(str(target))
+        # Keep the scan's alias names, particularly event filename groups. Only
+        # inspect known file symlinks, rather than resolving every scanned file.
+        for domain, filename in self._script_aliases:
+            if Path(filename).resolve() == target:
+                for spec, filenames in matches.items():
+                    if spec[0] == domain:
+                        filenames.add(filename)
+        for (domain, attr, extractor), filenames in matches.items():
+            if not filenames:
+                continue
+            if self.use_cache or os.path.exists(database_path(self.root)):
+                cache = ScanCache(self.root)
+                try:
+                    for filename in filenames:
+                        cache.invalidate(domain, filename)
+                finally:
+                    cache.close()
+            contributions = self._script_contributions.setdefault(domain, {})
+            if deleted:
+                for filename in filenames:
+                    contributions.pop(filename, None)
+            else:
+                source = self._read(str(target))
+                if source is None:
+                    continue
+                try:
+                    contribution = getattr(self, extractor)(source)
+                except (ValueError, TypeError, RuntimeError, OSError) as exc:
+                    _log.warning("could not parse %s: %s", target, exc)
+                    continue
+                for filename in filenames:
+                    contributions[filename] = contribution
+            self._rebuild_script_ids(root, domain, attr)
+
+    def _rebuild_script_ids(self, root: Path, domain: str, attr: str) -> None:
+        contributions = self._script_contributions[domain]
         directories = [
             (root / folder).resolve()
             for folder, (other_domain, _, _) in _SCRIPT_DIRECTORIES.items()
@@ -681,6 +701,7 @@ class ModIndex:
         self.country_tags.clear()
         self.variables.clear()
         self._script_contributions.clear()
+        self._script_aliases.clear()
         self.md_money_system_file = ""
         self.md_money_scripted_loc_file = ""
         self.md_money_yml_file = ""
