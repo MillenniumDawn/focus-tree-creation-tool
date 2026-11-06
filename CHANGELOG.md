@@ -10,8 +10,8 @@ the version by hand. See `AGENTS.md`.
 
 - Refresh script-ID suggestions after a successful mod save without reloading
   the mod. Replacing or removing IDs keeps definitions from other files and
-  invalidates the saved file's scan cache, including when the domain directory
-  is a symlink to another directory inside the mod.
+  invalidates the saved file's scan cache, including in-mod file and directory
+  symlinks and files contributing to several script domains.
 
 ---
 

@@ -246,3 +246,132 @@ def test_symlink_outside_mod_does_not_mutate_script_ids(tmp_path):
     index.note_file_written(target)
 
     assert index.character_ids == []
+
+
+@pytest.mark.parametrize("deleted", [False, True])
+def test_change_refreshes_all_domains_sharing_a_directory(tmp_path, deleted):
+    root = tmp_path / "mod"
+    directory = root / "common" / "scripted_effects"
+    directory.mkdir(parents=True)
+    try:
+        (root / "common" / "scripted_triggers").symlink_to(
+            directory, target_is_directory=True
+        )
+    except OSError:
+        pytest.skip("directory symlinks are unavailable")
+    target = directory / "a.txt"
+    target.write_text("OLD = {}")
+    stamp = target.stat()
+    index = ModIndex()
+    index.scan(str(root))
+
+    if deleted:
+        target.unlink()
+        index.note_file_deleted(target)
+    else:
+        notifying_workspace_files(index, root).write_text(
+            target, "NEW = {}", encoding="utf-8"
+        )
+        os.utime(target, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
+
+    warm = ModIndex()
+    warm.scan(str(root))
+    cold = ModIndex()
+    cold.scan(str(root), ScanSettings(use_cache=False))
+    expected = [] if deleted else ["NEW"]
+    for current in (index, warm, cold):
+        assert current.scripted_effect_ids == expected
+        assert current.scripted_trigger_ids == expected
+
+
+@pytest.mark.parametrize("deleted", [False, True])
+@pytest.mark.parametrize("warm_scan", [False, True])
+def test_change_refreshes_file_symlink_contributions(tmp_path, deleted, warm_scan):
+    root = tmp_path / "mod"
+    directory = root / "events"
+    directory.mkdir(parents=True)
+    shared = root / "shared"
+    shared.mkdir()
+    target = shared / "source.txt"
+    target.write_text("country_event = { id = old.1 }")
+    try:
+        (directory / "alias.txt").symlink_to(target)
+        (directory / "second.txt").symlink_to(target)
+    except OSError:
+        pytest.skip("symlinks are unavailable")
+    stamp = target.stat()
+    candidate = ModIndex()
+    candidate.scan(str(root))
+    if warm_scan:
+        candidate = ModIndex()
+        candidate.scan(str(root))
+    index = ModIndex()
+    index.adopt_scan(candidate)
+
+    if deleted:
+        target.unlink()
+        index.note_file_deleted(target)
+    else:
+        notifying_workspace_files(index, root).write_text(
+            target, "country_event = { id = new.1 }", encoding="utf-8"
+        )
+        os.utime(target, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
+
+    warm = ModIndex()
+    warm.scan(str(root))
+    cold = ModIndex()
+    cold.scan(str(root), ScanSettings(use_cache=False))
+    expected = {} if deleted else {"alias": ["new.1"], "second": ["new.1"]}
+    for current in (index, warm, cold):
+        assert current.event_ids == expected
+
+
+def test_replacing_file_symlink_detaches_its_former_target(tmp_path):
+    root = tmp_path / "mod"
+    directory = root / "events"
+    directory.mkdir(parents=True)
+    shared = root / "shared"
+    shared.mkdir()
+    target = shared / "source.txt"
+    target.write_text("country_event = { id = old.1 }")
+    alias = directory / "alias.txt"
+    try:
+        alias.symlink_to(target)
+    except OSError:
+        pytest.skip("symlinks are unavailable")
+    index = ModIndex()
+    index.scan(str(root))
+    writer = notifying_workspace_files(index, root)
+
+    writer.write_text(alias, "country_event = { id = alias.1 }", encoding="utf-8")
+    writer.write_text(target, "country_event = { id = source.1 }", encoding="utf-8")
+
+    assert index.event_ids == {"alias": ["alias.1"]}
+    fresh = ModIndex()
+    fresh.scan(str(root))
+    assert fresh.event_ids == index.event_ids
+
+
+def test_rescan_discards_former_file_symlink_contributions(tmp_path, monkeypatch):
+    root = tmp_path / "mod"
+    directory = root / "events"
+    directory.mkdir(parents=True)
+    shared = root / "shared"
+    shared.mkdir()
+    target = shared / "source.txt"
+    target.write_text("country_event = { id = old.1 }")
+    try:
+        (directory / "alias.txt").symlink_to(target)
+    except OSError:
+        pytest.skip("symlinks are unavailable")
+    index = ModIndex()
+    index.scan(str(root))
+    # The old mod is now nested content outside the newly loaded mod's domains.
+    index.scan(str(tmp_path))
+    reads = []
+    monkeypatch.setattr(index, "_read", lambda path: reads.append(path))
+
+    index.note_file_written(target)
+
+    assert reads == []
+    assert index.event_ids == {}
