@@ -389,6 +389,8 @@
   "dialog.parse_error.body": "无法解析你的编辑内容：\n{error}\n\n请查看错误日志了解详情。",
   "dialog.parse_error.title": "解析错误",
   "dialog.project_saved": "项目已保存：\n{path}",
+  "dialog.recovery_close_error.body": "无法丢弃恢复数据；应用程序将保持打开：\n{error}",
+  "dialog.recovery_save_error.body": "项目已保存到 {path}，但无法丢弃恢复数据。\n工作区仍标记为未保存：\n{error}",
   "dialog.read_file_error": "无法读取文件：\n{error}",
   "dialog.saved.title": "已保存",
   "dialog.write_failed.body": "无法写入 {file}：\n{error}\n\n该文件未被修改 —— 没有任何内容被覆盖。",

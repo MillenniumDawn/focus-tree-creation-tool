@@ -452,4 +452,5 @@ changes, and canvas reset. See [the reproducible callback benchmark](perf-322-ca
 
 Follow-up measured fixes and controls: [recovery serialization](perf-323-recovery.md),
 [wheel coalescing](perf-324-wheel.md), [optional scene fingerprints](perf-325-scene.md),
-[worker/GC investigation](perf-326-worker.md), and [structured icon correctness](perf-327-icons.md).
+[worker/GC investigation](perf-326-worker.md), [structured icon correctness](perf-327-icons.md),
+and [changed recovery callbacks](perf-385-recovery.md).

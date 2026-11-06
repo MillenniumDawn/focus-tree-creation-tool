@@ -1,5 +1,6 @@
-"""Per-area performance tracking (stdlib only, no tkinter)."""
+"""Performance tracking and standalone responsiveness probes."""
 
+from hoi4cm.perf.recovery_callback import run_recovery_callback_benchmark
 from hoi4cm.perf.tracking import (
     AREAS,
     AreaResult,
@@ -16,4 +17,5 @@ __all__ = [
     "focus_tree_text",
     "run_all",
     "run_area",
+    "run_recovery_callback_benchmark",
 ]

@@ -384,6 +384,8 @@
   "dialog.parse_error.body": "Impossible d'analyser vos modifications :\n{error}\n\nConsultez le journal d'erreurs pour plus de détails.",
   "dialog.parse_error.title": "Erreur d'analyse",
   "dialog.project_saved": "Projet enregistré :\n{path}",
+  "dialog.recovery_close_error.body": "Impossible d’abandonner la récupération ; l’application reste ouverte :\n{error}",
+  "dialog.recovery_save_error.body": "Projet enregistré dans {path}, mais impossible d’abandonner la récupération.\nL’espace de travail reste marqué comme non enregistré :\n{error}",
   "dialog.read_file_error": "Impossible de lire le fichier :\n{error}",
   "dialog.saved.title": "Enregistré",
   "dialog.write_failed.body": "Impossible d'écrire {file} :\n{error}\n\nLe fichier est resté inchangé — rien n'a été écrasé.",

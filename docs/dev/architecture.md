@@ -120,10 +120,14 @@
   `project_codec.py` (`write_project`/`read_project`/`encode_project`/
   `decode_project`, plus project-file-path validation) and
   `workspace_autosave.py` (the `~/.hoi4cm/autosave/workspace.json` primary
-  and sibling `.autosave.json` paths, and their clearing).
+  and sibling `.autosave.json` paths, and their clearing). `recovery.py` captures
+  compact immutable UTF-8 recovery bytes and checks generation and durable
+  eligibility, with no live workspace objects passed to workers.
 - **`perf/`**: the deterministic profiling harness (`tracking.py`, stdlib
   only, no tkinter) that `scripts/track_perf.py` drives; see
-  `performance.md` for the areas and how to read a report.
+  `performance.md` for the areas and how to read a report. The separate
+  `recovery_callback.py` probe measures full recovery callbacks and Tk timer gaps
+  under an isolated display; it is not part of the headless tracking harness.
 
 ## Dataflow
 
@@ -327,6 +331,53 @@ A one-second metadata poll catches external localisation changes and changes
 without a redraw. It reads no file contents on Tk. The existing explicit Refresh
 bypasses deduplication, coalescing repeated refreshes during a running pass. The
 controller cancels its pending timer and poll when the App lifecycle closes.
+
+### Recovery saves
+
+`ui/recovery.py` owns the App's recovery scheduling and error streaks. It captures
+one immutable UTF-8 snapshot on Tk, dispatches file work through `run_bg`, and
+coalesces ticks during primary writes into one latest-state follow-up. The sibling
+writer runs independently, retaining at most one running and one latest pending
+snapshot, so a stalled sibling cannot starve primary saves. The successful primary
+token holds detached metadata and document identity/revision, not another focus
+snapshot. Completion does not change the manual-save dirty state.
+
+`editor/recovery.py` stages each destination through `WorkspaceFiles.stage_bytes`.
+No destination I/O runs under the generation lock, so a blocked sibling rename
+cannot block primary writes or invalidation. Each destination retains one worker
+across invalidation; its next generation waits for that worker to finish.
+
+Recovery payloads carry an opaque eligibility token. `recovery_eligibility.py`
+keeps one local SQLite row under `~/.hoi4cm/autosave/`, with the current token and
+at most one previously committed token while a replacement is attempted. First
+capture serialization completes before registration; failed capture or writing
+leaves the previous recovery readable. Successful primary publication retires
+the previous token. Repeated captures reuse the generation's token. Registry
+transactions have a process-local lock independent of destination I/O, and zero
+SQLite busy timeout for external contention.
+
+Manual save, document replacement, declined restore, and clean shutdown revoke
+eligibility before clearing or abandoning recovery. Even a rename already inside
+the OS can therefore only leave an ineligible file after revocation. We do not
+unlink that late output, which could race another process's newer publication.
+`decode_project` and `read_project` reject revoked payloads, including manually
+opened sibling files and reads after restart. Startup silently skips revoked
+recovery. A crash preserves eligibility; a clean close intentionally discards
+the current generation, including already completed recovery files. Ordinary
+project files remain portable: decoding strips recovery metadata, and manual
+saves do not inherit eligibility. Recovery eligibility is machine-local; copy an
+ordinary saved project to transfer it. Loading a recovery decodes it before
+revoking its generation and leaves it dirty with no ordinary save destination.
+Startup restore also explicitly marks the recovered document dirty.
+If revocation fails, normal close/save abort their state change
+and report the failure; document replacement also fails before adoption.
+
+Primary and sibling destinations share identical bytes, and partial failure
+retries the complete pair. The asynchronous writer rejects tokenless payloads.
+The existing bounded daemon executor lets process shutdown finish even if a
+destination syscall never returns. See
+[the callback measurements](perf-385-recovery.md) for the remaining snapshot pause
+and memory cost.
 
 ### The `run_bg` contract
 
