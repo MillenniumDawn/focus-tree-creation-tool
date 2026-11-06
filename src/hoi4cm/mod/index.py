@@ -12,6 +12,7 @@ import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, replace
+from pathlib import Path
 
 from hoi4cm.core.concurrency import DaemonThreadPoolExecutor
 from hoi4cm.core.logger import get_logger
@@ -23,7 +24,7 @@ from hoi4cm.mod.graphics_catalog import (
     GraphicsScanConfig,
     ScanCancelled,
 )
-from hoi4cm.mod.scan_cache import ScanCache
+from hoi4cm.mod.scan_cache import ScanCache, database_path
 from hoi4cm.script.syntax import parse_script
 
 _log = get_logger("mod")
@@ -69,7 +70,37 @@ _SCAN_CONTAINERS = (
     "variables",
     "failed_steps",
     "unparsable_files",
+    "_script_contributions",
+    "_script_aliases",
 )
+
+_SCRIPT_DIRECTORIES = {
+    "common/national_focus": ("focus", "focus_ids", "_extract_national_focus"),
+    "events": ("events", "event_ids", "_extract_events"),
+    "common/ideas": ("ideas", "idea_ids", "_extract_ideas"),
+    "common/characters": ("characters", "character_ids", "_extract_characters"),
+    "decisions": ("decisions", "decision_ids", "_extract_decision_ids"),
+    "common/decisions": ("decisions", "decision_ids", "_extract_decision_ids"),
+    "decisions/categories": ("decision_cats", "decision_cats", "_extract_block_names"),
+    "common/decisions/categories": (
+        "decision_cats",
+        "decision_cats",
+        "_extract_block_names",
+    ),
+    "common/scripted_effects": (
+        "scripted_effects",
+        "scripted_effect_ids",
+        "_extract_scripted_names",
+    ),
+    "common/scripted_triggers": (
+        "scripted_triggers",
+        "scripted_trigger_ids",
+        "_extract_scripted_names",
+    ),
+    "common/on_actions": ("on_actions", "on_action_ids", "_extract_on_actions"),
+    "common/dynamic_modifiers": ("dyn_mods", "dyn_mod_ids", "_extract_block_names"),
+    "common/country_tags": ("tags", "country_tags", "_extract_tags"),
+}
 
 
 @dataclass(frozen=True)
@@ -117,6 +148,8 @@ class ModIndex:
         self.md_money_scripted_loc_file = ""
         self.md_money_yml_file = ""
         self._settings: ScanSettings | None = None
+        self._script_contributions: dict[str, dict] = {}
+        self._script_aliases: set[tuple[str, str]] = set()
 
     def _scan_settings(self) -> ScanSettings:
         if self._settings is None:
@@ -183,7 +216,15 @@ class ModIndex:
             )
             self._cache.prune(domain, paths)
             self._cache.commit()
-        return {path: contrib[path] for path in paths}
+        results = {path: contrib[path] for path in paths}
+        self._script_contributions[domain] = results
+        self._script_aliases = {
+            alias for alias in self._script_aliases if alias[0] != domain
+        }
+        self._script_aliases.update(
+            (domain, path) for path in paths if os.path.islink(path)
+        )
+        return results
 
     @staticmethod
     def _parse_text(src):
@@ -213,7 +254,8 @@ class ModIndex:
         self.decision_sprites.update(maps.decision_sprites)
 
     def note_file_written(self, path) -> set[str]:
-        """Update the catalog and return sprite names whose images are stale."""
+        """Refresh one script contribution or graphics record after a write."""
+        self._note_script_changed(path, deleted=False)
         maps = self.graphics_catalog.note_written(path, read_text=self._read)
         if maps is None:
             return set()
@@ -221,10 +263,101 @@ class ModIndex:
 
     def note_file_deleted(self, path) -> set[str]:
         """Update the catalog and return sprite names whose images are stale."""
+        self._note_script_changed(path, deleted=True)
         maps = self.graphics_catalog.note_deleted(path)
         if maps is None:
             return set()
         return self._apply_graphics_maps(maps)
+
+    def _note_script_changed(self, path, *, deleted: bool) -> None:
+        if not self.loaded or not self.root:
+            return
+        root = Path(self.root).resolve()
+        target = Path(path).resolve()
+        if not target.is_relative_to(root):
+            return
+        matches: dict[tuple[str, str, str], set[str]] = {
+            spec: set() for spec in _SCRIPT_DIRECTORIES.values()
+        }
+        for folder, spec in _SCRIPT_DIRECTORIES.items():
+            if target.suffix == ".txt" and (root / folder).resolve() == target.parent:
+                matches[spec].add(str(target))
+        # Keep the scan's alias names, particularly event filename groups. Only
+        # inspect known file symlinks, rather than resolving every scanned file.
+        for domain, filename in self._script_aliases:
+            if Path(filename).resolve() == target:
+                for spec, filenames in matches.items():
+                    if spec[0] == domain:
+                        filenames.add(filename)
+        for (domain, attr, extractor), filenames in matches.items():
+            if not filenames:
+                continue
+            if self.use_cache or os.path.exists(database_path(self.root)):
+                cache = ScanCache(self.root)
+                try:
+                    for filename in filenames:
+                        cache.invalidate(domain, filename)
+                finally:
+                    cache.close()
+            contributions = self._script_contributions.setdefault(domain, {})
+            if deleted:
+                for filename in filenames:
+                    contributions.pop(filename, None)
+            else:
+                source = self._read(str(target))
+                if source is None:
+                    continue
+                try:
+                    contribution = getattr(self, extractor)(source)
+                except (ValueError, TypeError, RuntimeError, OSError) as exc:
+                    _log.warning("could not parse %s: %s", target, exc)
+                    continue
+                for filename in filenames:
+                    contributions[filename] = contribution
+            self._rebuild_script_ids(root, domain, attr)
+
+    def _rebuild_script_ids(self, root: Path, domain: str, attr: str) -> None:
+        contributions = self._script_contributions[domain]
+        directories = [
+            (root / folder).resolve()
+            for folder, (other_domain, _, _) in _SCRIPT_DIRECTORIES.items()
+            if other_domain == domain
+        ]
+        paths = [
+            filename
+            for directory in directories
+            for filename in sorted(contributions)
+            if Path(filename).parent == directory
+        ]
+        if domain == "focus":
+            self.focus_ids = list(
+                dict.fromkeys(
+                    item
+                    for filename in paths
+                    for item in contributions[filename]["focus_ids"]
+                )
+            )
+            self.variables = {
+                item
+                for filename in paths
+                for item in contributions[filename]["variables"]
+            }
+        elif domain == "events":
+            self.event_ids = {
+                Path(filename).stem: contributions[filename]
+                for filename in paths
+                if contributions[filename]
+            }
+        else:
+            setattr(
+                self,
+                attr,
+                list(
+                    dict.fromkeys(
+                        item for filename in paths for item in contributions[filename]
+                    )
+                ),
+            )
 
     def _apply_graphics_maps(self, maps) -> set[str]:
         for target, source, removed in (
@@ -342,7 +475,7 @@ class ModIndex:
         directory = os.path.join(root, "common", "national_focus")
         if not os.path.isdir(directory):
             return
-        paths = script_paths(directory)
+        paths = script_paths(os.path.realpath(directory))
         results = self._scan_files_cached("focus", paths, self._extract_national_focus)
         focus_seen = dict.fromkeys(self.focus_ids)
         for path in paths:
@@ -359,7 +492,7 @@ class ModIndex:
         directory = os.path.join(root, "events")
         if not os.path.isdir(directory):
             return
-        paths = script_paths(directory)
+        paths = script_paths(os.path.realpath(directory))
         results = self._scan_files_cached("events", paths, self._extract_events)
         for path in paths:
             ids = results[path]
@@ -374,7 +507,7 @@ class ModIndex:
         directory = os.path.join(root, *subdir)
         if not os.path.isdir(directory):
             return
-        paths = script_paths(directory)
+        paths = script_paths(os.path.realpath(directory))
         results = self._scan_files_cached(domain, paths, extract_fn)
         seen = dict.fromkeys(item for path in paths for item in results[path])
         setattr(self, attr, list(seen))
@@ -401,10 +534,10 @@ class ModIndex:
             directory = os.path.join(root, sub.replace("/", os.sep))
             if not os.path.isdir(directory):
                 continue
-            dec_paths.extend(script_paths(directory))
+            dec_paths.extend(script_paths(os.path.realpath(directory)))
             cats_dir = os.path.join(directory, "categories")
             if os.path.isdir(cats_dir):
-                cat_paths.extend(script_paths(cats_dir))
+                cat_paths.extend(script_paths(os.path.realpath(cats_dir)))
         dec_res = self._scan_files_cached(
             "decisions", dec_paths, self._extract_decision_ids
         )
@@ -567,6 +700,8 @@ class ModIndex:
         self.character_ids.clear()
         self.country_tags.clear()
         self.variables.clear()
+        self._script_contributions.clear()
+        self._script_aliases.clear()
         self.md_money_system_file = ""
         self.md_money_scripted_loc_file = ""
         self.md_money_yml_file = ""
