@@ -60,7 +60,7 @@ def run_recovery_callback_benchmark(argv: list[str] | None = None) -> None:
     sys.path.insert(0, str(args.repo / "src"))
 
     import hoi4_content_maker as app_module
-    from hoi4cm.editor.project_codec import encode_project
+    from hoi4cm.editor.project_codec import decode_project, encode_project
     from hoi4cm.focus_tree.batch_load import batch_load_trees
     from hoi4cm.models import EditorWorkspace, FocusDocument
     from hoi4cm.ui.lifecycle import ApplicationLifecycle
@@ -221,7 +221,7 @@ def run_recovery_callback_benchmark(argv: list[str] | None = None) -> None:
             actual = json.loads(primary.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as error:
             raise AssertionError("recovery output missing or invalid") from error
-        assert actual == encode_project(app.workspace)
+        assert encode_project(decode_project(actual)) == encode_project(app.workspace)
         if app._last_project_path:
             sibling = Path(app_module.sibling_autosave_path(app._last_project_path))
             assert primary.read_bytes() == sibling.read_bytes()

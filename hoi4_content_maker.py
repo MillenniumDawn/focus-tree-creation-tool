@@ -91,6 +91,8 @@ from hoi4cm.core import (  # noqa: E402
 from hoi4cm.editor import (  # noqa: E402
     ExtraTreeState,
     ExtraTreeUndoHistory,
+    RecoveryEligibilityError,
+    RevokedRecoveryError,
     choose_project_save_path,
     clear_workspace_autosave,
     read_project,
@@ -392,6 +394,22 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             if ans and not self._save():
                 return
         assert self._lifecycle is not None
+        controller = vars(self).get("_recovery")
+        if controller is not None:
+            try:
+                controller.close()
+            except RecoveryEligibilityError as error:
+                report_error(
+                    tr(
+                        "dialog.recovery_close_error.body",
+                        "Recovery could not be discarded; "
+                        "the application remains open:\n{error}",
+                        error=error,
+                    ),
+                    error,
+                    parent=self,
+                )
+                return
         if not self._lifecycle.begin_close():
             return
         try:
@@ -557,6 +575,8 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             return
         try:
             autosaved = read_project(path)
+        except RevokedRecoveryError:
+            return
         except Exception as ex:
             log.exception("autosave restore read failed")
             self._log_error(f"Could not read autosave {path}: {ex}")
@@ -623,8 +643,9 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         self.images.clear()
         self.wiz_img_caches.clear()
 
-    def _begin_document_generation(self):
-        invalidate_recovery(self)
+    def _begin_document_generation(self, *, preserve_recovery=False):
+        if not preserve_recovery:
+            invalidate_recovery(self)
         assert self._lifecycle is not None
         self._lifecycle.begin("document")
         self._invalidate_canvas_images()
@@ -5822,6 +5843,10 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         self._canvas_min = list(workspace.canvas_min)
         self._canvas_max = list(workspace.canvas_max)
         self._default_focus_prefix = workspace.default_focus_prefix
+        if workspace.__dict__.pop("_loaded_from_recovery", False):
+            self._saved_revision = -1
+            self._saved_fingerprint = None
+            self._last_project_path = None
 
     def _save(self, *, save_as=False):
         path = choose_project_save_path(
@@ -5851,7 +5876,21 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             log.error("project save failed: %s", e, exc_info=True)
             report_write_failure(self, path, e)
             return False
-        invalidate_recovery(self)
+        try:
+            invalidate_recovery(self)
+        except RecoveryEligibilityError as error:
+            report_error(
+                tr(
+                    "dialog.recovery_save_error.body",
+                    "Project saved to {path}, but recovery could not be discarded.\n"
+                    "The workspace remains marked as unsaved:\n{error}",
+                    path=path,
+                    error=error,
+                ),
+                error,
+                parent=self,
+            )
+            return False
         self._last_project_path = path
         try:
             self._mark_clean()
@@ -5917,7 +5956,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         if not path:
             return
 
-        self._begin_document_generation()
+        self._begin_document_generation(preserve_recovery=True)
         modal = progress_modal(
             self, tr("dialog.load_project.title", "Load Project"), determinate=False
         )
@@ -5926,6 +5965,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             return read_project(path)
 
         def on_done(workspace):
+            recovered = getattr(workspace, "_loaded_from_recovery", False)
             self.cv.delete("all")
             self.selected = None
             self._lines.clear()
@@ -5933,11 +5973,14 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             self._grid_key = None
             self._grid_img = None
             self._install_workspace(workspace)
-            self._last_project_path = path
-            try:
-                self._mark_clean()
-            except Exception as e:
-                add_error(f"Failed to mark workspace clean: {e}")
+            self._last_project_path = None if recovered else path
+            if recovered:
+                self._update_title()
+            else:
+                try:
+                    self._mark_clean()
+                except Exception as e:
+                    add_error(f"Failed to mark workspace clean: {e}")
             try:
                 clear_workspace_autosave()
             except Exception:

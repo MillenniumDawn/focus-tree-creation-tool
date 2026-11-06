@@ -23,12 +23,28 @@ retries the complete pair, even after a metadata revert. Primary and sibling
 failures still have separate,
 deduplicated error reporting. Completion never marks the manual-save state clean.
 
-`WorkspaceFiles.stage_bytes` stages and fsyncs outside the commit gate. Only the
-final replacement is guarded, with an independent gate per destination. Manual
-save, document replacement, declined restore, and shutdown advance both gates
-before clearing or abandoning recovery state. An older staged write cannot replace a cleared file afterward. This avoids
-waiting for a worker's fsync on Tk when invalidating it. Each destination retains
-atomic replacement and both successful destinations use the same bytes.
+`WorkspaceFiles.stage_bytes` stages, fsyncs and atomically replaces outside the
+generation lock. Manual save, document replacement, declined restore, and clean
+shutdown revoke the generation's durable eligibility in a separate local SQLite
+store. Invalidation never waits for a destination's staging or final rename.
+A rename already inside the OS cannot be cancelled; its late file remains
+ineligible to `read_project`/`decode_project`, even after restart or when manually
+opening a sibling. Startup skips it quietly. Workers never unlink late output,
+avoiding a race with another process's publication. Each destination keeps its
+worker slot across invalidation, so newer snapshots for that destination wait
+for the old worker, while the other destination can continue.
+
+There is one registry row and at most two accepted tokens: the generation being
+written and a previously committed recovery until primary publication succeeds.
+Failed initial capture or writing preserves the previous recovery. New snapshots
+within a generation reuse one token. A crash preserves eligibility; clean close
+intentionally revokes completed as well as pending recovery from that generation.
+Metadata is stripped on decode so ordinary manual project saves remain readable
+without the registry. Local transactions are serialized independently of
+destination I/O; external SQLite contention fails immediately and is reported.
+Normal save/close do not claim success if revocation fails. Both destinations
+still use identical snapshot bytes. These eligibility changes have not been
+included in the latency measurements below.
 
 ## Workload and results
 
@@ -98,6 +114,11 @@ The probe records all samples in `measurements.json` and isolates its home under
 the output directory. `tests/test_background_recovery.py` covers ownership,
 bounded follow-ups, complete-pair retries, manual save, replacement documents,
 restore dismissal, shutdown, and cancellation during staging of either target.
+`tests/test_recovery_eligibility.py` additionally blocks final replacement at
+either target, verifies prompt invalidation and close, rejects late files in a
+fresh process, preserves newer snapshots and prior good recovery on failure,
+tests SQLite contention and parallel destinations, and verifies process exit
+with a permanently stalled daemon worker.
 The existing sidebar persistence and failure-streak regressions use the extracted
 worker seam. No pending-sidebar behavior from #365 or import-worker scheduling
 from #326 is changed.

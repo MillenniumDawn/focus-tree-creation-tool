@@ -389,6 +389,8 @@
   "dialog.parse_error.body": "No se pudieron analizar tus cambios:\n{error}\n\nConsulta el registro de errores para más detalles.",
   "dialog.parse_error.title": "Error de análisis",
   "dialog.project_saved": "Proyecto guardado:\n{path}",
+  "dialog.recovery_close_error.body": "No se pudo descartar la recuperación; la aplicación permanece abierta:\n{error}",
+  "dialog.recovery_save_error.body": "Proyecto guardado en {path}, pero no se pudo descartar la recuperación.\nEl espacio de trabajo sigue marcado como no guardado:\n{error}",
   "dialog.read_file_error": "No se pudo leer el archivo:\n{error}",
   "dialog.saved.title": "Guardado",
   "dialog.write_failed.body": "No se pudo escribir {file}:\n{error}\n\nEl archivo quedó intacto — no se sobrescribió nada.",

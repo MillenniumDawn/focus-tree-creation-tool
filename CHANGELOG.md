@@ -8,6 +8,9 @@ the version by hand. See `AGENTS.md`.
 
 ## Unreleased
 
+- Revoke recovery eligibility without waiting for a stalled filesystem rename;
+  reject discarded recovery files after restart and when opened manually.
+
 - Preserve raw focus content when imported focus IDs are quoted.
 
 - Ignore comments and quoted braces when reading GFX sprite declarations,

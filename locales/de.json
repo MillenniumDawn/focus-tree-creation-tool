@@ -389,6 +389,8 @@
   "dialog.parse_error.body": "Deine Änderungen konnten nicht gelesen werden:\n{error}\n\nPrüfe das Fehlerprotokoll auf Details.",
   "dialog.parse_error.title": "Analysefehler",
   "dialog.project_saved": "Projekt gespeichert:\n{path}",
+  "dialog.recovery_close_error.body": "Die Wiederherstellung konnte nicht verworfen werden; die Anwendung bleibt geöffnet:\n{error}",
+  "dialog.recovery_save_error.body": "Projekt unter {path} gespeichert, aber die Wiederherstellung konnte nicht verworfen werden.\nDer Arbeitsbereich bleibt als ungespeichert markiert:\n{error}",
   "dialog.read_file_error": "Datei konnte nicht gelesen werden:\n{error}",
   "dialog.saved.title": "Gespeichert",
   "dialog.write_failed.body": "{file} konnte nicht geschrieben werden:\n{error}\n\nDie Datei blieb unverändert. Nichts wurde überschrieben.",
