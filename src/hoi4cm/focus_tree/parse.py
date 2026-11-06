@@ -229,6 +229,30 @@ def block_to_str(block, depth=1):
     return serialize_block(block, indent="\t" * depth, strip_strings=True)
 
 
+_RAW_ID_TOKEN = re.compile(r'"[^"]*"?|[{}=]|[^\s{}="\#]+')
+
+
+def _top_level_focus_id(source: str) -> str | None:
+    """Find the focus's own ID, ignoring nested blocks and quoted text."""
+    tokens = [match.group() for match in _RAW_ID_TOKEN.finditer(source)]
+    depth = 0
+    index = 0
+    while index < len(tokens):
+        token = tokens[index]
+        if token == "{":
+            depth += 1
+        elif token == "}":
+            depth -= 1
+        elif depth == 0 and index + 2 < len(tokens) and tokens[index + 1] == "=":
+            value = tokens[index + 2]
+            if tokenize(token) == ["id"] and value not in ("{", "}", "="):
+                return tokenize(value)[0]
+            if value != "{":
+                index += 2
+        index += 1
+    return None
+
+
 def _extract_raw_rewards(
     source, block_starts=None, cancelled=None, budget=None, raw_source=None
 ):
@@ -255,10 +279,9 @@ def _extract_raw_rewards(
             break
         mask_block = source[fs + 1 : block_end]
         fblock = raw_source[fs + 1 : block_end]
-        id_m = re.search(r"\bid\s*=\s*(\S+)", mask_block)
-        if not id_m:
+        fid = _top_level_focus_id(mask_block)
+        if fid is None:
             continue
-        fid = id_m.group(1)
         blocks = _extract_raw_key_blocks(
             mask_block, cancelled, budget, raw_source=fblock
         )

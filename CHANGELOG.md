@@ -8,6 +8,8 @@ the version by hand. See `AGENTS.md`.
 
 ## Unreleased
 
+- Preserve raw focus content when imported focus IDs are quoted.
+
 - Preserve comments inside imported focus reward and condition blocks
   (`completion_reward`, `available`, `cancel`, and the other raw keys)
   through parse, build, export and repeated round trips. Comments used to be
