@@ -45,6 +45,17 @@ class FakeTkOwner:
         return None
 
 
+class _RecordingTk(_FakeTk):
+    def __init__(self) -> None:
+        self.calls: list[tuple[object, ...]] = []
+
+    def call(self, *args: object) -> object:
+        self.calls.append(args)
+        if args[:2] == ("after", "info"):
+            return ("after-7",)
+        return ()
+
+
 class FakeExecutor(Executor):
     def __init__(self) -> None:
         self.shutdown_calls: list[tuple[bool, bool]] = []
@@ -56,6 +67,18 @@ class FakeExecutor(Executor):
 
     def shutdown(self, wait=True, *, cancel_futures=False) -> None:
         self.shutdown_calls.append((wait, cancel_futures))
+
+
+def test_close_sweep_cancels_untracked_after_jobs_at_interpreter_level() -> None:
+    tk_ = _RecordingTk()
+    owner = FakeTkOwner()
+    owner.tk = cast(TclInterpreter, tk_)
+    lifecycle = ApplicationLifecycle(owner)
+
+    lifecycle.close()
+
+    assert ("after", "cancel", "after-7") in tk_.calls
+    assert owner.cancelled == []
 
 
 def test_stale_generation_callback_is_not_applied() -> None:

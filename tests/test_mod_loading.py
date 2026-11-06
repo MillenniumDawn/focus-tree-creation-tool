@@ -14,6 +14,7 @@ import hoi4cm.core.logger as logmod
 from hoi4cm.mod.index import ModIndex
 from hoi4cm.ui import mod_loading
 from hoi4cm.ui.mod_loading import ModLoadingMixin
+from hoi4cm.wizards._shared import WizardImageCaches
 
 
 @pytest.fixture
@@ -196,14 +197,18 @@ def test_on_mod_loaded_invalidates_canvas_and_wizard_images_on_ui_thread(
             self.configurations.append(kwargs)
 
     cache = {"old-gfx": object()}
-    monkeypatch.setattr(mod_loading._wiz_shared, "_app_img_caches", [cache])
+    image_loads: list[tuple[str, int]] = []
+
+    app = AppFake()
+    caches = WizardImageCaches()
+    caches.window_caches.append(cache)
+    caches.event_gfx["stale-gfx"] = "/mod/gfx/stale.png"
+    caches.event_imgsize["/mod/gfx/stale.png"] = (64, 64)
+    app.wiz_img_caches = caches
     monkeypatch.setattr(
         mod_loading.messagebox, "showinfo", lambda *args, **kwargs: None
     )
     monkeypatch.setattr(mod_loading.os.path, "exists", lambda path: True)
-    image_loads: list[tuple[str, int]] = []
-
-    app = AppFake()
     app.index.is_md = False
     app.index.sprites = {"GFX_sample": "/mod/gfx/sample.dds"}
     monkeypatch.setattr(
@@ -258,6 +263,8 @@ def test_on_mod_loaded_invalidates_canvas_and_wizard_images_on_ui_thread(
     assert app.cv.deleted == ["focus"]
     assert app.redraws == 1
     assert cache == {}
+    assert app.wiz_img_caches.event_gfx == {}
+    assert app.wiz_img_caches.event_imgsize == {}
     assert image_loads == [("GFX_sample", ui_thread)]
     assert len(app.after_calls) == 1
     assert app.after_calls[0][0] == 150
@@ -298,8 +305,8 @@ def _mod_loaded_app(monkeypatch: pytest.MonkeyPatch) -> tuple[AppFake, list[str]
         "showinfo",
         lambda _title, message, **_kwargs: dialogs.append(message),
     )
-    monkeypatch.setattr(mod_loading._wiz_shared, "_app_img_caches", [])
     app = AppFake()
+    app.wiz_img_caches = WizardImageCaches()
     app.index.is_md = False
     app.index.sprites = {}
     app.index.failed_steps = []

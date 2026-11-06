@@ -17,6 +17,7 @@ import sys
 import tkinter as tk
 from pathlib import Path
 from types import SimpleNamespace
+from typing import cast
 
 import pytest
 from ui_fakes import AppFake
@@ -31,6 +32,7 @@ from hoi4cm.ui.gfx_browser import (
     open_gfx_placement_editor,
     open_universal_gfx_browser,
 )
+from hoi4cm.ui.lifecycle import TkOwner
 from hoi4cm.ui.theme import BORDER_G, RED, TEXT_DIM, XGRID, YGRID
 from hoi4cm.ui.widgets import grab_when_visible
 from hoi4cm.wizards._shared import open_effect_picker, open_trigger_picker
@@ -166,6 +168,38 @@ def test_settings_builder_survives_dialog_destroy_during_idle(app, monkeypatch):
 def test_app_command_opens_its_dialog(app, opened, command):
     getattr(app, command)()
     _assert_built(opened())
+
+
+def _close_wizard_window(win: tk.Toplevel, app: tk.Tk) -> None:
+    """Run the window's registered close handler like the window manager does."""
+    handler = win.protocol("WM_DELETE_WINDOW")
+    win.tk.call(handler)
+    app.update()
+    assert not win.winfo_exists()
+
+
+def test_decision_wizard_releases_its_preview_cache_when_closed(app, opened):
+    """Repeated open/close cycles must not grow the app's cache registry."""
+    baseline = len(app.wiz_img_caches.window_caches)
+    for _ in range(2):
+        app._decision_wizard()
+        windows = opened()
+        assert len(windows) == 1
+        assert len(app.wiz_img_caches.window_caches) == baseline + 1
+        _close_wizard_window(windows[0], app)
+        assert len(app.wiz_img_caches.window_caches) == baseline
+
+
+def test_destroyed_decision_wizard_releases_its_preview_cache(app, opened):
+    """Direct win.destroy() without the WM protocol must still release."""
+    baseline = len(app.wiz_img_caches.window_caches)
+    app._decision_wizard()
+    windows = opened()
+    assert len(windows) == 1
+    assert len(app.wiz_img_caches.window_caches) == baseline + 1
+    windows[0].destroy()
+    app.update()
+    assert len(app.wiz_img_caches.window_caches) == baseline
 
 
 def test_additional_income_wizard_opens_in_md_mode(app, opened, monkeypatch):
@@ -358,6 +392,73 @@ def test_real_app_recovers_a_populated_canvas_after_external_delete(monkeypatch)
         assert root._lifecycle is not None
         root._lifecycle.finish_close()
         root.destroy()
+        gc.collect()
+
+
+def test_close_with_pending_canvas_after_jobs_destroys_cleanly(monkeypatch):
+    """Close sweeps widget-scheduled canvas timers and leaves their commands
+    destroyable."""
+    monkeypatch.setattr(main_mod.App, "_run_startup_prompts", lambda self: None)
+    root = main_mod.App()
+    nested = tk.Canvas(root.cv)
+    tracked_owner = tk.Canvas(root.cv)
+    try:
+        root.cv.after(500, lambda: None)
+        root.cv.after_idle(lambda: None)
+        nested.after(500, lambda: None)
+        nested.after_idle(lambda: None)
+        assert root._lifecycle is not None
+        # Canvas matches TkOwner at runtime; the stub signatures differ.
+        root._lifecycle.after(cast(TkOwner, tracked_owner), 500, lambda: None)
+        assert root.tk.call("after", "info"), "no pending jobs were scheduled"
+
+        root._lifecycle.finish_close()
+        assert not root.tk.call("after", "info"), "pending jobs survived close"
+        for canvas in (root.cv, nested, tracked_owner):
+            for name in _tcl_commands(canvas):
+                assert canvas.tk.call(
+                    "info", "commands", name
+                ), "stale command left in a widget registry by close"
+        root.destroy()
+        gc.collect()
+    finally:
+        for window in (nested, tracked_owner):
+            try:
+                window.destroy()
+            except tk.TclError:
+                pass
+        try:
+            root.destroy()
+        except tk.TclError:
+            pass
+        gc.collect()
+
+
+def test_close_tolerates_owner_cancelled_and_destroyed_jobs(monkeypatch):
+    """Close sweeps past jobs already cancelled or left by destroyed owners."""
+    monkeypatch.setattr(main_mod.App, "_run_startup_prompts", lambda self: None)
+    root = main_mod.App()
+    dead = tk.Canvas(root.cv)
+    try:
+        job = root.cv.after(500, lambda: None)
+        root.cv.after_cancel(job)
+        assert root._lifecycle is not None
+        assert root._lifecycle.after(cast(TkOwner, dead), 500, lambda: None)
+        dead.destroy()
+
+        root._lifecycle.finish_close()
+        assert not root.tk.call("after", "info")
+        root.destroy()
+        gc.collect()
+    finally:
+        try:
+            dead.destroy()
+        except tk.TclError:
+            pass
+        try:
+            root.destroy()
+        except tk.TclError:
+            pass
         gc.collect()
 
 
