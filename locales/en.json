@@ -389,6 +389,8 @@
   "dialog.parse_error.body": "Could not parse your edits:\n{error}\n\nCheck Error Log for details.",
   "dialog.parse_error.title": "Parse Error",
   "dialog.project_saved": "Project saved:\n{path}",
+  "dialog.recovery_close_error.body": "Recovery could not be discarded; the application remains open:\n{error}",
+  "dialog.recovery_save_error.body": "Project saved to {path}, but recovery could not be discarded.\nThe workspace remains marked as unsaved:\n{error}",
   "dialog.read_file_error": "Could not read file:\n{error}",
   "dialog.saved.title": "Saved",
   "dialog.write_failed.body": "Could not write {file}:\n{error}\n\nThe file was left unchanged — nothing was overwritten.",

@@ -74,7 +74,8 @@ def test_load_reports_a_corrupt_project(shown, monkeypatch):
 
     monkeypatch.setattr(m, "read_project", boom)
     shell = SimpleNamespace(
-        _begin_document_generation=lambda: None, _confirm_discard=lambda **_kw: True
+        _begin_document_generation=lambda **_kw: None,
+        _confirm_discard=lambda **_kw: True,
     )
 
     m.App._load(cast(m.App, shell))
@@ -112,7 +113,7 @@ def test_load_reports_out_of_range_ids_before_touching_live_state(
     existing = Focus(id=1)
     shell = SimpleNamespace(
         focuses=FocusDocument([existing]),
-        _begin_document_generation=lambda: None,
+        _begin_document_generation=lambda **_kw: None,
         _confirm_discard=lambda **_kw: True,
     )
 
@@ -164,7 +165,7 @@ def test_load_warns_when_stored_export_paths_are_dropped(shown, monkeypatch):
         "Shell",
         (),
         {
-            "_begin_document_generation": lambda self: None,
+            "_begin_document_generation": lambda self, **_kw: None,
             "_confirm_discard": lambda self, **_kw: True,
             "cv": type("Canvas", (), {"delete": lambda self, *_args: None})(),
             "selected": None,
@@ -201,7 +202,7 @@ def test_load_parses_on_worker_before_installing_workspace(monkeypatch):
     events = []
     parse_threads = []
     shell = SimpleNamespace(
-        _begin_document_generation=lambda: events.append("begin"),
+        _begin_document_generation=lambda **_kw: events.append("begin"),
         _confirm_discard=lambda **_kw: True,
         cv=SimpleNamespace(delete=lambda *_args: events.append("delete")),
         selected=None,

@@ -8,6 +8,9 @@ the version by hand. See `AGENTS.md`.
 
 ## Unreleased
 
+- Revoke recovery eligibility without waiting for a stalled filesystem rename;
+  reject discarded recovery files after restart and when opened manually.
+
 - Preserve comments inside imported focus reward and condition blocks
   (`completion_reward`, `available`, `cancel`, and the other raw keys)
   through parse, build, export and repeated round trips. Comments used to be

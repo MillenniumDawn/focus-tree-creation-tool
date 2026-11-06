@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 
 from hoi4cm.core.paths import autosave_path
+from hoi4cm.editor.recovery_eligibility import revoke_recovery_path
 
 AUTOSAVE_NAME = "workspace.json"
 
@@ -22,6 +23,7 @@ def sibling_autosave_path(project_path: str) -> str:
 
 def clear_workspace_autosave(path: str | None = None) -> None:
     p = path or workspace_autosave_path()
+    revoke_recovery_path(p)
     try:
         os.unlink(p)
     except OSError:

@@ -13,6 +13,7 @@ import pytest
 import hoi4_content_maker as app_module
 from hoi4cm.editor import recovery as recovery_editor
 from hoi4cm.editor.project_codec import encode_project, read_project
+from hoi4cm.editor.recovery_eligibility import RECOVERY_KEY
 from hoi4cm.editor.workspace_autosave import clear_workspace_autosave
 from hoi4cm.mod import workspace_files
 from hoi4cm.models import EditorWorkspace, Focus, FocusDocument
@@ -85,8 +86,9 @@ def test_snapshot_owns_all_serialized_state(tmp_path):
     expected_text = json.dumps(expected)
     gate = recovery_editor.RecoveryCommitGate()
     snapshot = recovery_editor.capture_recovery_snapshot(
-        workspace, paths, gate.generation
+        workspace, paths, gate.generation, eligibility=gate.eligibility()
     )
+    gate.activate(paths)
     assert isinstance(snapshot.content, bytes)
     nested.append("later")
     focus.name = "edited later"
@@ -96,9 +98,9 @@ def test_snapshot_owns_all_serialized_state(tmp_path):
     result = recovery_editor.write_recovery(snapshot, gate)
 
     assert result == recovery_editor.RecoveryResult()
-    assert json.loads((tmp_path / "primary.json").read_text()) == json.loads(
-        expected_text
-    )
+    actual = json.loads((tmp_path / "primary.json").read_text())
+    actual.pop(RECOVERY_KEY)
+    assert actual == json.loads(expected_text)
     assert (tmp_path / "primary.json").read_bytes() == (
         tmp_path / "sibling.json"
     ).read_bytes()
@@ -390,8 +392,9 @@ def test_invalidation_during_staging_prevents_recreation_after_clear(
     paths = tuple(str(tmp_path / name) for name in ("primary.json", "sibling.json"))
     gate = recovery_editor.RecoveryCommitGate()
     snapshot = recovery_editor.capture_recovery_snapshot(
-        EditorWorkspace(), paths, gate.generation
+        EditorWorkspace(), paths, gate.generation, eligibility=gate.eligibility()
     )
+    gate.activate(paths)
     ready = threading.Event()
     release = threading.Event()
     original = workspace_files._stage_bytes

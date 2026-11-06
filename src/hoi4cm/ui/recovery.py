@@ -28,7 +28,6 @@ class RecoveryController:
     def __init__(self, owner) -> None:
         self._owner = owner
         self._gate = RecoveryCommitGate()
-        self._sibling_gate = RecoveryCommitGate()
         self._document: object = None
         self._token: object = None
         self._busy = False
@@ -43,15 +42,20 @@ class RecoveryController:
         return self._busy or self._sibling_busy
 
     def invalidate(self) -> None:
-        self._gate.invalidate()
-        self._sibling_gate.invalidate()
+        try:
+            self._gate.invalidate()
+        except Exception as error:
+            self._owner._log_error(f"Recovery could not be invalidated: {error}")
+            raise
         self._document = self._token = None
         self._pending = False
         self._sibling_pending = None
 
     def close(self) -> None:
-        self._closed = True
+        if self._closed:
+            return
         self.invalidate()
+        self._closed = True
 
     def tick(self) -> None:
         if self._closed:
@@ -80,7 +84,11 @@ class RecoveryController:
                 key: value for key, value in vars(workspace).items() if key != "focuses"
             }
             token = (document.content_revision, metadata, paths)
-            if self._document is document and self._token == token:
+            if (
+                self._document is document
+                and self._token == token
+                and self._gate.is_eligible()
+            ):
                 if Path(primary).is_file() and (
                     not sibling or self._sibling_busy or Path(sibling).is_file()
                 ):
@@ -88,9 +96,13 @@ class RecoveryController:
                     return
             self._token = None
             snapshot = capture_recovery_snapshot(
-                workspace, paths, self._gate.generation
+                workspace,
+                paths,
+                self._gate.generation,
+                eligibility=self._gate.eligibility(),
             )
             token = deepcopy(token)
+            self._gate.activate(paths)
             self._busy = True
 
             def done(result):
@@ -154,7 +166,7 @@ class RecoveryController:
 
         run_bg(
             self._owner,
-            partial(write_recovery, snapshot, self._sibling_gate),
+            partial(write_recovery, snapshot, self._gate),
             done,
             on_error=lambda error: done(RecoveryResult(primary_error=error)),
         )

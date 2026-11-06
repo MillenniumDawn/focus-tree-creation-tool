@@ -16,6 +16,7 @@ from .recovery import (
     write_recovery,
     write_recovery_bytes,
 )
+from .recovery_eligibility import RecoveryEligibilityError, RevokedRecoveryError
 from .workspace_autosave import (
     AUTOSAVE_NAME,
     clear_workspace_autosave,
@@ -29,8 +30,10 @@ __all__ = [
     "ExtraTreeState",
     "ExtraTreeUndoHistory",
     "RecoveryCommitGate",
+    "RecoveryEligibilityError",
     "RecoveryResult",
     "RecoverySnapshot",
+    "RevokedRecoveryError",
     "capture_recovery_snapshot",
     "write_recovery",
     "write_recovery_bytes",

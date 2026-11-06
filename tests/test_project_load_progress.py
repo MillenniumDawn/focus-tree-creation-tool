@@ -63,7 +63,7 @@ class LoadShell(SimpleNamespace):
         )
         self._lifecycle = ApplicationLifecycle(executor_factory=lambda: executor)
 
-    def _begin_document_generation(self):
+    def _begin_document_generation(self, *, preserve_recovery=False):
         self._lifecycle.begin("document")
 
     def winfo_exists(self):
