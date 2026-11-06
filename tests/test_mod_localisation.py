@@ -56,14 +56,50 @@ def test_lookup_localisation_preserves_raw_values_and_versioned_keys(tmp_path):
     )
 
 
-def test_lookup_localisation_keeps_unversioned_colon_keys_unmatched(tmp_path):
+def test_lookup_localisation_reads_unversioned_colon_keys(tmp_path):
     folder = tmp_path / "localisation" / "english"
     folder.mkdir(parents=True)
     (folder / "unversioned.yml").write_text(
         'l_english:\n TST: "Title"\n TST_desc: "Description"\n', encoding="utf-8"
     )
 
-    assert localisation.lookup_localisation(str(tmp_path), "TST") == ("", "")
+    assert localisation.lookup_localisation(str(tmp_path), "TST") == (
+        "Title",
+        "Description",
+    )
+
+
+@pytest.mark.parametrize("title_suffix,desc_suffix", [(":", ":12"), (":7", ":")])
+def test_lookup_localisation_mixes_versioned_and_unversioned_entries(
+    tmp_path, title_suffix, desc_suffix
+):
+    folder = tmp_path / "localisation" / "english"
+    folder.mkdir(parents=True)
+    (folder / "values.yml").write_text(
+        f'l_english:\n TST{title_suffix} "First"\n'
+        f' TST:0 "Later"\n TST_desc{desc_suffix} "Description"\n',
+        encoding="utf-8",
+    )
+
+    assert localisation.lookup_localisation(str(tmp_path), "TST") == (
+        "First",
+        "Description",
+    )
+
+
+def test_lookup_localisation_does_not_confuse_similar_unversioned_keys(tmp_path):
+    folder = tmp_path / "localisation" / "english"
+    folder.mkdir(parents=True)
+    (folder / "values.yml").write_text(
+        'l_english:\n TST_extra: "Wrong"\n TST_desc_extra: "Wrong"\n'
+        ' TST: "A \\"quoted\\" title"\n TST_desc: "Line\\nnext"\n',
+        encoding="utf-8",
+    )
+
+    assert localisation.lookup_localisation(str(tmp_path), "TST") == (
+        r"A \"quoted\" title",
+        r"Line\nnext",
+    )
 
 
 def test_lookup_localisation_only_reads_the_configured_language(tmp_path):
