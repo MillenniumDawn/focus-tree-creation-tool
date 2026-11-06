@@ -126,8 +126,10 @@ def import_decision_record(dec_name, dec_inner, cat_uid, loc):
         d["is_mission"] = True
     if isinstance(fields.get("days_mission_timeout"), str):
         d["mission_timeout"] = fields["days_mission_timeout"]
-    if fields.get("selectable_mission") in ("yes", "no"):
-        d["selectable_mission"] = fields["selectable_mission"] == "yes"
+    # An omitted selectable_mission is false for imported missions in HOI4.
+    # Ordinary decisions retain the wizard default if converted later.
+    if d["is_mission"]:
+        d["selectable_mission"] = fields.get("selectable_mission") == "yes"
     if fields.get("is_good") in ("yes", "no"):
         d["is_good"] = fields["is_good"] == "yes"
     if _get_yes_no(dec_inner, "cancel_if_not_visible"):

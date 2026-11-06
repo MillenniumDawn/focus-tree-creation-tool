@@ -59,6 +59,30 @@ def test_generated_mission_round_trip():
 
 
 @pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        ("days_mission_timeout = 10", False),
+        ("days_mission_timeout = 10\nselectable_mission = yes", True),
+        ("days_mission_timeout = 10\nselectable_mission = no", False),
+    ],
+)
+def test_imported_mission_selectability_round_trip(source, expected):
+    assert new_decision_record("category")["selectable_mission"] is True
+    imported = _import(source)
+    restored, output = _round_trip(imported)
+    assert imported["is_mission"] is True
+    assert imported["selectable_mission"] is expected
+    assert restored["selectable_mission"] is expected
+    assert f"selectable_mission = {'yes' if expected else 'no'}" in output
+
+
+def test_imported_ordinary_decision_keeps_conversion_default():
+    imported = _import("cost = 10")
+    assert imported["is_mission"] is False
+    assert imported["selectable_mission"] is True
+
+
+@pytest.mark.parametrize(
     "field",
     [
         "days_mission_timeout = 10",
