@@ -139,16 +139,46 @@ def format_save_summary(saved, warnings, errs):
     return "\n\n".join(sections) or "Nothing to save."
 
 
-# ── Image cache registry ──────────────────────────────────────────
-# Wizards register their own caches here so the App can invalidate
-# everything on mod reload without poking into each module.
-_app_img_caches = []
+# ── App-owned image caches ────────────────────────────────────────
 
 
-# ── Per-wizard caches (event wizard) ───────────────────────────────
-_ev_gfx_cache: dict = {}  # gfx_name -> file path
-_ev_imgsize_cache: dict = {}  # file path -> (w, h)
-_app_img_caches.extend([_ev_gfx_cache, _ev_imgsize_cache])
+class WizardImageCaches:
+    """Image caches owned by one App instance.
+
+    ``event_gfx`` and ``event_imgsize`` serve the event wizard for the
+    App's lifetime. The decision wizard registers each window's preview
+    dict in ``window_caches`` and must release it when the window is
+    destroyed, so closed windows stop keeping PhotoImages alive and
+    repeated opens do not grow any retained registry.
+    """
+
+    def __init__(self) -> None:
+        self.event_gfx: dict[str, str | None] = {}
+        self.event_imgsize: dict[str, tuple[int, int] | None] = {}
+        self.window_caches: list[dict] = []
+
+    def register_window_cache(self, cache: dict) -> None:
+        """Start tracking a wizard window's preview cache."""
+        self.window_caches.append(cache)
+
+    def release_window_cache(self, cache: dict) -> None:
+        """Untrack a closed window's preview cache and drop its images.
+
+        Matching is by identity: two empty dicts are different windows'
+        caches, so an equal dict must never be released instead.
+        """
+        for index, tracked in enumerate(self.window_caches):
+            if tracked is cache:
+                del self.window_caches[index]
+                break
+        cache.clear()
+
+    def clear(self) -> None:
+        """Invalidate every cache on mod reload; registration is kept."""
+        self.event_gfx.clear()
+        self.event_imgsize.clear()
+        for cache in self.window_caches:
+            cache.clear()
 
 
 # ── Pre-compiled regex used by the additional-income wizard ────────
@@ -685,10 +715,8 @@ def open_trigger_picker(parent, target_text, on_insert=None):
 
 
 __all__ = [
-    "_app_img_caches",
-    "_ev_gfx_cache",
-    "_ev_imgsize_cache",
     "_LOC_KEY_RE",
+    "WizardImageCaches",
     "format_save_summary",
     "make_scrolled_listbox",
     "notifying_workspace_files",
