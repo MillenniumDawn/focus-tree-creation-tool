@@ -21,6 +21,10 @@ the version by hand. See `AGENTS.md`.
 - Make wizard image caches App-owned, invalidate them on mod reload, and
   release each decision window's preview cache when that window is destroyed.
 
+- Keep the graphics path index when overwriting an already indexed image,
+  while refreshing its stamp and dependent previews. New images and deletions
+  still update path queries.
+
 - Import focus trees containing non-finite `ai_will_do` values (`inf`,
   `-inf`, `1e999`, `-1e999`) instead of aborting the load: the field falls
   back to the existing default of 1 in both scalar and block form, and the
