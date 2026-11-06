@@ -247,6 +247,30 @@ def test_gfx_pick_undoes_before_pending_sidebar_name_edit():
     ]
 
 
+@pytest.mark.parametrize("picked_gfx", ["GFX_A", "GFX_B"])
+def test_gfx_pick_refreshes_pending_sidebar_name_and_position(picked_gfx: str):
+    app = _app(make_focus(name="original", gfx="GFX_A", x=0))
+    app._pending_values = replace(app._read_sidebar_values(), name="renamed", x=10)
+    app._fv_gfx = Mock()
+    app._redraw_now = Mock()
+    rendered: list[tuple[str, int, str]] = []
+    listed: list[str] = []
+    app._redraw_now.side_effect = lambda: rendered.append(
+        (app.selected.name, app.selected.x, app.selected.gfx)
+    )
+    app._invalidate_focus_list_structure.side_effect = lambda: listed.append(
+        app.selected.name
+    )
+
+    m.App._set_gfx(cast(m.App, app), picked_gfx)
+
+    assert rendered == [("renamed", 10, picked_gfx)]
+    assert listed == ["renamed"]
+    assert [entry[0] for entry in app._undo_stack._stack] == (
+        ["edit focus"] if picked_gfx == "GFX_A" else ["edit focus", "change gfx"]
+    )
+
+
 def test_redo_does_not_replay_stale_redo_across_a_fresh_pending_edit():
     focus = make_focus(desc="old")
     app = _app(focus)
