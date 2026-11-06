@@ -8,6 +8,8 @@ the version by hand. See `AGENTS.md`.
 
 ## Unreleased
 
+- Preserve mission settings and repeatable decisions when importing decisions.
+
 - Preserve comments inside imported focus reward and condition blocks
   (`completion_reward`, `available`, `cancel`, and the other raw keys)
   through parse, build, export and repeated round trips. Comments used to be
