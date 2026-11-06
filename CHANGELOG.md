@@ -18,6 +18,12 @@ the version by hand. See `AGENTS.md`.
   a running pass, keep detached snapshots, and refresh after localisation-file,
   graphics-catalog, or language changes. Explicit Refresh still forces a pass.
 
+- Flag unsafe raw-effect key renames in red on the key entry until a usable
+  name commits: taken, empty and `_` names, and a rename to `raw` while
+  sibling fields exist, since the exporter would drop them. Dict and list
+  values in raw rows are read-only so an edit cannot store a flat string
+  that exports as invalid script.
+
 - Make wizard image caches App-owned, invalidate them on mod reload, and
   release each decision window's preview cache when that window is destroyed.
 
