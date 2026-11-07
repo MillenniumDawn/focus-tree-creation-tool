@@ -414,6 +414,27 @@ SQLite store runs at the next refresh or at shutdown (`flush_cache`), so a
 wizard save that writes an image plus a `.gfx` entry pays nothing per file and
 the decoded-image LRU is evicted per changed sprite name, not wholesale.
 
+### Sprite rewrite invalidation (#394)
+
+A visible full-detail card kept its old pixels after an in-app overwrite or
+sprite remap, because `_draw_focus` returns on an unchanged state key before it
+reaches the image broker. The fix runs at write time, not per frame, and adds
+nothing to the state key or the per-frame path.
+
+`App.note_mod_file_written` hands the changed sprite names from
+`ModIndex.note_file_written` to `CanvasMixin._invalidate_canvas_sprites`. It
+clears `draw_key` on the visible full-detail bundles that use those names and
+schedules one `VIEW` redraw, which coalesces across the writes of one wizard
+save. It also calls `ImageBroker.evict_paths` for the resolved paths, so an
+overwrite that leaves the file stamp unchanged cannot be served from the cache.
+A write that changes no sprite name (a focus or localisation export) clears
+nothing and requests no redraw. Unrelated cards keep their `draw_key` and their
+warm images.
+
+Stale decodes need no new mechanism. Every catalog write bumps the generation,
+the refreshed request carries it, and the broker discards completions that
+belong to an older generation or to a request the owner has replaced.
+
 ### Validation deduplication (#383)
 
 Background validation now keys dispatches on current document content and the

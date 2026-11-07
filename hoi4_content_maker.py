@@ -411,8 +411,10 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         return saved
 
     def note_mod_file_written(self, path: str):
-        """Update the index, then drop stale PhotoImages on the Tk thread."""
-        return self.images.evict(self.index.note_file_written(path))
+        """Update the index, then refresh stale icons on the Tk thread."""
+        names = self.index.note_file_written(path)
+        self._invalidate_canvas_sprites(names)
+        return self.images.evict(names)
 
     def _workspace_fingerprint(self):
         try:

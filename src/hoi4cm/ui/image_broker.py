@@ -4,7 +4,7 @@ import os
 import queue
 import threading
 from collections import OrderedDict
-from collections.abc import Callable, Hashable
+from collections.abc import Callable, Collection, Hashable
 from concurrent.futures import Executor, Future
 from dataclasses import dataclass
 
@@ -210,6 +210,17 @@ class ImageBroker:
         with self._lock:
             self._forget_request_locked(owner)
             self._pins.pop(owner, None)
+
+    def evict_paths(self, paths: Collection[str]) -> None:
+        """Drop cached images for *paths* so an unchanged stamp cannot serve old bytes.
+
+        Pending work and pins are left alone: a catalog generation bump already
+        discards older completions, and a pin only holds the image on screen.
+        """
+        normalized = {os.path.normcase(os.path.abspath(path)) for path in paths}
+        with self._lock:
+            for key in [key for key in self._cache if key.path in normalized]:
+                del self._cache[key]
 
     def clear(self) -> None:
         with self._lock:
