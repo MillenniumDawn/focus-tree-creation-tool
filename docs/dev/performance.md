@@ -116,33 +116,61 @@ the regression test also forbids calling the old catalog's flush on adoption.
 | Coordinate rulers rebuilt roughly 61 canvas objects on every pan motion, and the canvas legend deleted/recreated its visible row per redraw | `ui/canvas.py` (`_draw_coord_labels`, `_draw_canvas_legend`) | Pool ruler rectangle/text/marker items and legend text rows; hide surplus, recover stale ids after `cv.delete("all")`, and key unchanged views/legend rows to skip canvas updates | fixed in issue #163 | Tk on Linux, 1600x900, 100 extra trees; isolated `_pan_mv` (bounds drawing stubbed), 750 motions: median 3.0826ms → 0.0995ms each (20,840 rectangles / 21,590 texts / 1,500 lines created, 750 deletes → zero creates/deletes); 750 unchanged legend renders: 1.8978ms → 0.0132ms each (47,250 text creates / 750 deletes → zero canvas mutations) |
 | Every render-path entry re-probed for canvas-state presence: `_canvas_runtime()` (a `hasattr` chain per frame) ran at the top of `_redraw`, `_do_redraw`, `_redraw_now`, `_render_frame`, `_draw_lines`, `_draw_focus`, `_do_draw_lines_throttled` and `_draw_minimap`, and the grid, line, coordinate-label, legend and minimap pools were re-checked with `hasattr`/`getattr`-default guards on every use | `ui/canvas.py` (`_canvas_runtime` and the pool guards) | Canvas-owned state is declared as the typed `CanvasHost` contract and created exactly once by `_init_canvas_state` (production call: `_bind_canvas`; `AppFake` calls the same initializer), so render paths read attributes directly; genuinely optional handles (`_mm_canvas`, the lazily computed minimap geometry) are typed as optional (`None` until first use) and checked with plain `None` comparisons rather than `hasattr`/`getattr` probing, and Tk-content staleness still goes through the sentinel probe | fixed in issue #167 | interleaved same-workload A/B (10-focus synthetic, Tk on Linux, 30 render/reclaim cycles per run, 3 runs per arm, `scripts/bench_canvas_callbacks.py` workload): median-of-medians 8.32ms → 8.26ms (no-cleanup arm), 8.39ms → 8.39ms (cleanup arm) — parity within run-to-run noise; registered Tcl-callback increase 0 in both arms |
 | `FocusDocument.add`, `extend`, `delete_many`, `link_*`/`unlink_*` and `set_tree(s)` each rebuilt all seven indexes (O(F+E)), and `delete_many` also rewrote every survivor's prereqs and mutex. Add Focus ran `validate_indexes(rebuild=True)` and then `add()`, so three full passes ran before a pixel moved | `models/document.py`, `hoi4_content_maker.py` (`_add_focus`) | These methods patch the indexes in place, as `move()` does. `delete_many` cleans references by reading `reverse_prerequisites`/`reverse_mutex` instead of scanning survivors. `_add_focus` no longer repairs indexes first. `touch()` and `load()` still rebuild in full. See the index maintenance note below | fixed in issue #160 | 20,000 focuses / 19,999 edges (Python 3.14.4, Linux, interleaved A/B in one process, median of 31 runs): `add()` + `delete_many()` round trip 42.2ms -> 0.015ms, Add Focus path (repair + `add()`) 44.9ms -> 0.007ms, `delete_many(clean_references=True)` of one focus with a child 24.5ms -> 0.006ms, `link_prerequisite` 17.9ms -> 0.002ms, `extend` of 100 focuses 23.2ms -> 0.12ms. Unchanged by design: `touch()` 18.4ms -> 18.0ms, `extend` of 20,000 into an empty document 20.5ms -> 20.1ms. Document level only; Tk end to end not measured |
-The `_draw_key`/state-key check in `_draw_focus` (`ui/canvas.py:486`) already
-makes an unchanged focus close to free to redraw, but every `_redraw()` call
-still iterates the full focus dict to find that out. That per-redraw
-**iteration** is still O(total loaded focuses) after phase 8 — culling
-changes the *cost per offscreen focus* (a bbox check instead of ~14
-create/coords/itemconfig calls), not the loop count. What actually caps
-memory on a huge load is **item count**: before phase 8 every loaded focus
-had 14 canvas items whether on screen or not (776 focuses = ~10.9k items,
-23,524 focuses = ~329k items, which Tk cannot handle); after phase 8 a
-focus that has never been on screen has zero items, so item count scales
-with what's visible, not with what's loaded. That cap doesn't apply at
-fit-all zoom on a huge load, since fit-all sizes the zoom so every focus is
-simultaneously in-viewport — culling has nothing to cull there, and the
-329k-item case at fit-all is unchanged. It's normal (zoomed-in) work on a
-huge load — the common case, and the one that used to allocate all 329k
-items up front regardless of zoom — that phase 8 fixes. Minimap dots/edges
-are pooled the same way `_draw_lines`' line pool already was (reuse +
-hide-surplus instead of delete-and-recreate every call), and above 2,000
-focuses the minimap buckets to one dot per occupied pixel cell and skips
-prereq lines, since individual dots/edges aren't legible at that density
-anyway. Each minimap axis uses its requested size until Tk reports realized
-geometry; the first draw does not run a nested event loop. The low-zoom
-level-of-detail pass (one pooled rectangle per focus
-below `_FOCUS_LOD_ZOOM` at 0.4 zoom, instead of the full multi-item card)
-is implemented in `ui/canvas.py`: `_draw_focus` selects `lod = "compact"`
-based on the zoom threshold, and the compact branch renders a single
-rectangle per focus instead of the full 14-item bundle.
+
+Which focuses `_render_frame` draws depends on the viewport. It asks
+`_visible_rect()` for the world-coordinate view rect plus a card margin. With
+a rect, the focus IDs come from `SceneIndex.query_focus_ids(vis_rect)`, which
+walks the grid cells (8 world units on a side) that overlap the rect and
+filters by position. `_draw_lines` queries edges the same way. The draw loop
+therefore visits the focuses near the view, not every loaded focus. The
+query cost follows the number of cells the rect covers and the focuses in
+them, so it grows at low zoom. It does not follow the loaded count, and no
+latency or memory figure is claimed for it here. `_reclaim_focus_bundles`
+then deletes the bundle (canvas items, Tcl callbacks and image pin) of every
+focus that left the visible set, so a focus outside the current view has no
+focus items, whether it was never drawn or panned away. For a focus that
+stays visible, `_draw_focus` returns early when its `bundle.draw_key` equals
+the freshly computed `state_key`.
+
+Two cases still touch the whole document:
+
+- A document change bumps `FocusDocument.revision`, and the next
+  `SceneIndex.ensure` pays one full O(F+E) `rebuild`.
+- Before the canvas is mapped, `_visible_rect()` returns `None` (width or
+  height of 1 or less). That frame draws `list(self.focuses)` and
+  `_draw_lines` uses `all_edges()`, so nothing is culled. Frames after the
+  canvas has a real size cull normally.
+
+Item count is what bounds canvas size. A full card (zoom at or above
+`_FOCUS_LOD_ZOOM`, 0.4) is 14 items: nine rectangles, four text items and one
+image. Below 0.4, `_draw_focus` builds a compact bundle of three rectangles
+(shadow, box and center dot) instead. Each visible edge adds two pooled
+items in `_draw_lines`, a line and an arrow. The focus items on screen are
+therefore 14 or 3 times the number of visible focuses, depending on zoom. A
+zoom that crosses 0.4 deletes and recreates every visible bundle, because
+`_draw_focus` drops a bundle whose `lod` differs from the current one.
+
+Fit-all does not put every focus in view. `_fit_all` clamps the zoom to 0.3
+through 2.0, so a document that does not fit the viewport at 0.3 is still
+culled. The `0` key calls it for every loaded focus. Load All Trees calls
+`_fit_all(tree_idx=0)`, which fits the main tree only, so the fit does not
+defeat culling (#113). When a view does cover the whole document (any zoom
+whose viewport spans it, down to the wheel's floor of 0.10), the visible
+count equals the loaded count. The item count is then 14 or 3 per loaded
+focus, by zoom, plus two per edge. That case has not been measured.
+
+Historical, before phase 8: every loaded focus had a full 14-item card
+whether or not it was on screen. That is about 10.9k items for the largest
+real tree (776 focuses) and about 329k when loading all trees (23,524
+focuses). Those figures are the focus count times 14, not timings, and they
+were not re-measured against the current code.
+
+Minimap dots/edges are pooled the same way `_draw_lines`' line pool already
+was (reuse + hide-surplus instead of delete-and-recreate every call), and
+above 2,000 focuses the minimap buckets to one dot per occupied pixel cell
+and skips prereq lines, since individual dots/edges aren't legible at that
+density anyway. Each minimap axis uses its requested size until Tk reports
+realized geometry; the first draw does not run a nested event loop.
 
 ### Drag-snap step
 
@@ -232,8 +260,9 @@ with the viewport. Five rules now hold on the frame path:
 
 A wheel notch at moderate zoom remains the notable churn in the same loop:
 `_reclaim_focus_bundles` plus `_draw_focus` changes the visible set and every
-surviving focus's `draw_key`, so bundles churn (14 canvas items created and
-deleted per focus crossing the edge) and every visible card recomputes. The
+surviving focus's `draw_key`, so bundles churn (14 canvas items at full
+detail, or 3 below `_FOCUS_LOD_ZOOM`, created and deleted per focus crossing
+the edge) and every visible card recomputes. The
 coordinate ruler and legend are now pooled and unchanged keys skip their Tk
 updates. Ruler pool growth restores retained axis text above its new chip;
 visible CFP marker recreation invalidates legend stacking so the unchanged-row
@@ -413,6 +442,27 @@ the in-memory snapshot (dicts keyed by `PathReference`) and mark it dirty; the
 SQLite store runs at the next refresh or at shutdown (`flush_cache`), so a
 wizard save that writes an image plus a `.gfx` entry pays nothing per file and
 the decoded-image LRU is evicted per changed sprite name, not wholesale.
+
+### Sprite rewrite invalidation (#394)
+
+A visible full-detail card kept its old pixels after an in-app overwrite or
+sprite remap, because `_draw_focus` returns on an unchanged state key before it
+reaches the image broker. The fix runs at write time, not per frame, and adds
+nothing to the state key or the per-frame path.
+
+`App.note_mod_file_written` hands the changed sprite names from
+`ModIndex.note_file_written` to `CanvasMixin._invalidate_canvas_sprites`. It
+clears `draw_key` on the visible full-detail bundles that use those names and
+schedules one `VIEW` redraw, which coalesces across the writes of one wizard
+save. It also calls `ImageBroker.evict_paths` for the resolved paths, so an
+overwrite that leaves the file stamp unchanged cannot be served from the cache.
+A write that changes no sprite name (a focus or localisation export) clears
+nothing and requests no redraw. Unrelated cards keep their `draw_key` and their
+warm images.
+
+Stale decodes need no new mechanism. Every catalog write bumps the generation,
+the refreshed request carries it, and the broker discards completions that
+belong to an older generation or to a request the owner has replaced.
 
 ### Validation deduplication (#383)
 

@@ -189,7 +189,8 @@ truncate-in-place write destroys it if the process dies mid-write (issue #46).
 `notifying_workspace_files(index, mod_root, on_written=None)` (same module,
 re-exported from `hoi4cm.wizards._shared`) builds a writer that updates only
 its loaded mod. UI callers pass `App.note_mod_file_written`, which updates
-that index and evicts affected names from the App's image cache on Tk.
+that index, evicts affected names from the App's image cache, and makes visible
+canvas cards re-request their icons, all on Tk.
 Writing elsewhere never touches live state.
 
 `mod.gfx_writer.append_sprite_types` renders declarations into new or existing
@@ -314,6 +315,10 @@ on Tk, then scans that candidate off-thread. Only the Tk completion callback
 adopts the candidate into `App.index`.
 
 ### Validation inputs
+
+Prerequisite cycle detection uses an explicit depth-first traversal stack, so
+deep chains do not depend on Python's recursion limit. Parent traversal and
+cycle diagnostic ordering follow the existing depth-first order.
 
 `ui/validation.py` owns the App's background validation scheduling. It compares
 document identity and `content_revision`, catalog identity and generation, loaded
