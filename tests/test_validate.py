@@ -306,6 +306,58 @@ def test_prereq_cycle_deduped():
     assert len(cycles) == 1
 
 
+def test_branched_cycles_preserve_diagnostic_order_and_cap():
+    a, b, c, d = list(set(range(4)))
+    doc = {
+        a: _focus(a, name="A", x=0, prereqs=[[b, d]]),
+        b: _focus(b, name="B", x=1, prereqs=[[c]]),
+        c: _focus(c, name="C", x=2, prereqs=[[a, b, a]]),
+        d: _focus(d, name="D", x=3, prereqs=[[a]]),
+    }
+    issues = validate_document(doc)
+    assert [(issue.focus_id, issue.message) for issue in issues] == [
+        (c, "prerequisite cycle: A → B → C → A"),
+        (c, "prerequisite cycle: B → C → B"),
+        (d, "prerequisite cycle: A → D → A"),
+    ]
+    capped = validate_document(doc, max_issues=2)
+    assert capped[:2] == issues[:2]
+    assert capped[2].code == "issues_truncated"
+    assert "1 more issue(s)" in capped[2].message
+
+
+def test_long_prereq_chain_validates_without_recursion_error():
+    size = 2000
+    ids = list(set(range(size)))
+    doc = {
+        fid: _focus(fid, x=i, prereqs=[[ids[i + 1]]] if i + 1 < size else [])
+        for i, fid in enumerate(ids)
+    }
+    assert validate_document(doc) == []
+
+
+def test_long_prereq_cycle_preserves_diagnostic_path_and_owner():
+    size = 2000
+    ids = list(set(range(size)))
+    doc = {
+        fid: _focus(fid, x=i, prereqs=[[ids[(i + 1) % size]]])
+        for i, fid in enumerate(ids)
+    }
+    issues = validate_document(doc)
+    assert len(issues) == 1
+    cycle = issues[0]
+    assert (
+        cycle.severity,
+        cycle.code,
+        cycle.focus_id,
+        cycle.focus_name,
+        cycle.field,
+    ) == ("error", "prereq_cycle", ids[-1], f"focus_{ids[-1]}", "prereqs")
+    assert cycle.message == "prerequisite cycle: " + " → ".join(
+        [*(f"focus_{fid}" for fid in ids), f"focus_{ids[0]}"]
+    )
+
+
 def test_loc_missing_when_keys_supplied():
     a = _focus(1, name="my_focus")
     doc = FocusDocument([a])

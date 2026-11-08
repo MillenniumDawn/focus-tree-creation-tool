@@ -696,3 +696,100 @@ def test_decision_save_reports_an_unreadable_selected_file(tmp_path, mod, monkey
     assert "selected decisions file could not be read" in errs
     assert cat_path.is_file()
     assert len(saved) == 2
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "country_event = { id = my_namespace.99 immediate = { "
+        "country_event = { id = my_namespace.1 days = 1 } } }\n",
+        "# country_event = { id = my_namespace.1 }\n",
+        'country_event = { id = my_namespace.99 desc = "id = my_namespace.1" }\n',
+    ],
+)
+def test_event_save_ignores_references_comments_and_strings(tmp_path, mod, body):
+    original = ("# café\n" + body).encode("utf-8-sig")
+    root, event_path, _ = _event_files(tmp_path, mod, original, b"l_english:\n")
+
+    saved, warnings, errs = _save_event(mod, root, event_path)
+
+    assert event_path.read_bytes().startswith(original)
+    assert b"id = my_namespace.1\n" in event_path.read_bytes()[len(original) :]
+    assert len(saved) == 2
+    assert not warnings
+    assert not errs
+
+
+@pytest.mark.parametrize(
+    "event_type",
+    [
+        "country_event",
+        "news_event",
+        "state_event",
+        "unit_leader_event",
+        "character_event",
+        "operative_leader_event",
+    ],
+)
+@pytest.mark.parametrize("value", ["my_namespace.1", '"my_namespace.1"'])
+def test_event_save_skips_definition_ids(tmp_path, mod, event_type, value):
+    original = f"{event_type} = {{ id = {value} }}\n".encode()
+    root, event_path, _ = _event_files(tmp_path, mod, original, b"l_english:\n")
+
+    _saved, warnings, errs = _save_event(mod, root, event_path)
+
+    assert event_path.read_bytes() == original
+    assert any("my_namespace.1" in warning for warning in warnings)
+    assert not errs
+
+
+def test_event_save_recognizes_id_after_quoted_braces(tmp_path, mod):
+    original = b'country_event = { desc = "{\ncontinued }" id = "my_namespace.1" }\n'
+    root, event_path, _ = _event_files(tmp_path, mod, original, b"l_english:\n")
+    _saved, warnings, errs = _save_event(mod, root, event_path)
+    assert event_path.read_bytes() == original
+    assert any("my_namespace.1" in warning for warning in warnings)
+    assert not errs
+
+
+def test_event_save_recognizes_definition_after_cr_comment(tmp_path, mod):
+    original = b"# comment\rcountry_event = { id = my_namespace.1 }\r"
+    root, event_path, _ = _event_files(tmp_path, mod, original, b"l_english:\n")
+    _saved, warnings, errs = _save_event(mod, root, event_path)
+    assert event_path.read_bytes() == original
+    assert any("my_namespace.1" in warning for warning in warnings)
+    assert not errs
+
+
+def test_event_save_preserves_legacy_encoding_on_duplicate(tmp_path, mod):
+    original = '# café\ncountry_event = { id = "my_namespace.1" }\n'.encode("cp1252")
+    root, event_path, _ = _event_files(tmp_path, mod, original, b"l_english:\n")
+    _saved, warnings, errs = _save_event(mod, root, event_path)
+    assert event_path.read_bytes() == original
+    assert any("my_namespace.1" in warning for warning in warnings)
+    assert not errs
+
+
+@pytest.mark.parametrize(
+    "original",
+    [b"country_event = { id = other.1\n", b'country_event = { desc = "unfinished\n'],
+)
+def test_event_save_rejects_unbalanced_script(tmp_path, mod, original):
+    root, event_path, _ = _event_files(tmp_path, mod, original, b"l_english:\n")
+    _saved, _warnings, errs = _save_event(mod, root, event_path)
+    assert event_path.read_bytes() == original
+    assert any(error.startswith("Events file:") for error in errs)
+
+
+def test_event_append_after_legacy_encoded_forward_reference(tmp_path, mod):
+    original = (
+        "# café\ncountry_event = { id = my_namespace.99 "
+        "immediate = { country_event = { id = my_namespace.1 days = 1 } } }\n"
+    ).encode("latin-1")
+    root, event_path, _ = _event_files(tmp_path, mod, original, b"l_english:\n")
+    _saved, warnings, errs = _save_event(mod, root, event_path)
+    after = event_path.read_bytes()
+    assert after.startswith(original)
+    assert b"id = my_namespace.1\n" in after[len(original) :]
+    assert not warnings
+    assert not errs

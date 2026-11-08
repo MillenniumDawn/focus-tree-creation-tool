@@ -5,6 +5,10 @@ import pytest
 
 from hoi4cm.mod import discovery
 
+NO_WILDCARD_NAMES = pytest.mark.skipif(
+    os.name == "nt", reason="Windows forbids * and ? in file names"
+)
+
 
 @pytest.mark.parametrize("case_sensitive", [True, False])
 def test_script_paths_preserves_direct_listing_policy(tmp_path, case_sensitive):
@@ -60,16 +64,26 @@ def test_glob_script_paths_keeps_platform_matching_and_hidden_policy(tmp_path):
     assert discovery.glob_script_paths(str(tmp_path / "missing")) == []
 
 
-def test_glob_script_paths_keeps_pattern_characters_in_directory(tmp_path):
-    literal = tmp_path / "mod[12]"
+@pytest.mark.parametrize(
+    "folder_name",
+    [
+        "mod[12]",
+        pytest.param("mod*", marks=NO_WILDCARD_NAMES),
+        pytest.param("mod?", marks=NO_WILDCARD_NAMES),
+    ],
+)
+def test_glob_script_paths_treats_directory_pattern_characters_literally(
+    tmp_path, folder_name
+):
+    literal = tmp_path / folder_name
     literal.mkdir()
     (literal / "literal.txt").touch()
-    matching = tmp_path / "mod1"
-    matching.mkdir()
-    (matching / "matched.txt").touch()
+    sibling = tmp_path / "mod1"
+    sibling.mkdir()
+    (sibling / "sibling.txt").touch()
 
     assert discovery.script_paths(str(literal)) == [str(literal / "literal.txt")]
-    assert discovery.glob_script_paths(str(literal)) == [str(matching / "matched.txt")]
+    assert discovery.glob_script_paths(str(literal)) == [str(literal / "literal.txt")]
 
 
 @pytest.mark.parametrize("recursive", [True, False])
