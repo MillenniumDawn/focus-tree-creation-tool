@@ -21,6 +21,13 @@ the version by hand. See `AGENTS.md`.
 - Make wizard image caches App-owned, invalidate them on mod reload, and
   release each decision window's preview cache when that window is destroyed.
 
+- Make a pick in the Focus Icon GFX browser undoable: confirming a pick that
+  changes the GFX now pushes a `change gfx` undo entry before writing, so
+  Ctrl+Z reverts it and Ctrl+Y reapplies it. Save pending sidebar edits first
+  so Undo reverses the GFX pick before those earlier edits. Picking the current
+  value adds no GFX history entry. Refresh the canvas and focus list for flushed
+  sidebar edits even when confirming the current GFX.
+
 - Import focus trees containing non-finite `ai_will_do` values (`inf`,
   `-inf`, `1e999`, `-1e999`) instead of aborting the load: the field falls
   back to the existing default of 1 in both scalar and block form, and the
