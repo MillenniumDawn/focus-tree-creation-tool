@@ -30,6 +30,58 @@ _READ_MISSING = "missing"
 _READ_FAILED = "read-failed"
 _READ_CONTENT = "content"
 
+_EVENT_TYPES = (
+    "country_event",
+    "news_event",
+    "state_event",
+    "unit_leader_event",
+    "character_event",
+    "operative_leader_event",
+)
+_EVENT_TOKEN = re.compile(r'#[^\r\n]*|"[^"]*"?|[{}=]|[^\s{}="#]+')
+
+
+def _event_tokens(source):
+    """Tokenize and reject incomplete script before allowing an append."""
+    tokens = [
+        m.group()
+        for m in _EVENT_TOKEN.finditer(source)
+        if not m.group().startswith("#")
+    ]
+    depth = 0
+    for token in tokens:
+        if token.startswith('"') and not token.endswith('"', 1):
+            raise ValueError("events file contains an unterminated quoted string")
+        if token == "{":
+            depth += 1
+        elif token == "}":
+            depth -= 1
+            if depth < 0:
+                raise ValueError("events file contains unbalanced braces")
+    if depth:
+        raise ValueError("events file contains unbalanced braces")
+    return tokens
+
+
+def _event_definition_ids(source):
+    """Collect direct IDs of top-level event definitions, preserving quotes."""
+    tokens = _event_tokens(source)
+    ids = set()
+    depth = 0
+    in_event = False
+    for i, token in enumerate(tokens):
+        if token == "{":
+            if depth == 0 and i >= 2 and tokens[i - 1] == "=":
+                in_event = tokens[i - 2] in _EVENT_TYPES
+            depth += 1
+        elif token == "}":
+            depth -= 1
+        elif in_event and depth == 1 and token == "id" and i + 2 < len(tokens):
+            value = tokens[i + 2]
+            if tokens[i + 1] == "=" and value not in ("{", "}", "="):
+                ids.add(value[1:-1] if value.startswith('"') else value)
+    return ids
+
 
 def _read_existing_file_with_encoding(path):
     if not os.path.exists(path):
@@ -271,9 +323,7 @@ def save_events(
             raw, event_encoding = read_file_with_encoding(ev_file)
             if raw is None or event_encoding is None:
                 raise OSError("events file could not be read")
-            # Collect every id = X already in the file
-            for m in re.finditer(r"\bid\s*=\s*(\S+)", raw):
-                existing_ids.add(m.group(1).strip())
+            existing_ids = _event_definition_ids(raw)
 
         to_append = [ev for ev in events if ev.eid not in existing_ids]
         skipped = [ev.eid for ev in events if ev.eid in existing_ids]
@@ -288,10 +338,15 @@ def save_events(
                 lines.append("")
             else:
                 lines.append("")
-                lines.append(
+                banner = (
                     "# ── Appended by HOI4 Content Maker "
                     "─────────────────────────────────"
                 )
+                try:
+                    banner.encode(event_encoding)
+                except UnicodeEncodeError:
+                    banner = "# Appended by HOI4 Content Maker"
+                lines.append(banner)
             for ev in to_append:
                 lines.append("")
                 lines.append(render_event(ev))

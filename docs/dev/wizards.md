@@ -63,8 +63,8 @@ Tk-handling block, plus the picker popups shared across wizards:
   (`is_trigger=True` switches to the trigger insertion shapes).
 - `notifying_workspace_files(index, mod_root, on_written=None)`: the
   `WorkspaceFiles` factory the wizards save through. UI callers pass
-  `app.note_mod_file_written` to update the catalog and evict stale Tk
-  images (see `architecture.md`'s "Writing mod files").
+  `app.note_mod_file_written` to update the catalog, evict stale Tk images,
+  and refresh visible canvas icons (see `architecture.md`'s "Writing mod files").
 - `svar_get(var, default)`: safe variable read — coerces to `str` and
   returns `default` when the variable is missing or its read raises.
 - `make_scrolled_listbox(parent, **options)` and
