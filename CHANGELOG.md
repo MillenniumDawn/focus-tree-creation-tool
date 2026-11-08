@@ -8,6 +8,9 @@ the version by hand. See `AGENTS.md`.
 
 ## Unreleased
 
+- Separate appended wizard localisation entries when the existing file has no
+  final newline, preserving its encoding and line endings.
+
 - Stop focus-tree export before writing when an existing localisation file
   cannot be read, and report its path in the export failure.
 

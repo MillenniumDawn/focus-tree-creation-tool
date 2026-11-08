@@ -259,3 +259,76 @@ def test_apply_income_appends_to_existing_tooltip(tmp_path):
     txt = _read(yml)
     assert "[additional_income_summary_SPIRIT_A]" in txt
     assert "[additional_income_summary_SPIRIT_B]" in txt
+
+
+@pytest.mark.parametrize("newline", ["\n", "\r\n"])
+@pytest.mark.parametrize("terminated", [False, True])
+@pytest.mark.parametrize("encoding", ["utf-8-sig", "latin-1"])
+@pytest.mark.parametrize("path_kind", ["wizard_tooltip", "money_tooltip"])
+def test_income_localisation_append_separates_entries(
+    tmp_path, newline, terminated, encoding, path_kind
+):
+    from hoi4cm.focus_tree.loc import parse_loc_values
+    from hoi4cm.wizards.additional_income import _save_tooltip_localisation
+
+    root = str(tmp_path)
+    app = _md_app(root)
+    path = tmp_path / "localisation" / "english" / "MD_money_l_english.yml"
+    path.parent.mkdir(parents=True)
+    original_text = f'l_english:{newline} OLD: "Café"' + (newline if terminated else "")
+    original = original_text.encode(encoding)
+    path.write_bytes(original)
+    if path_kind == "wizard_tooltip":
+        app.edit_loc_file = str(path)
+        result = _save_tooltip_localisation(app, "TAG_spirit", "var_test", "TAG_tt")
+        assert not any(line.startswith("❌") for line in result)
+        key = "TAG_tt"
+    else:
+        app.index.md_money_system_file = _money_system_with_block(root)
+        sloc = tmp_path / "common" / "scripted_localisation" / "money.txt"
+        sloc.parent.mkdir(parents=True)
+        sloc.write_text("", encoding="utf-8")
+        app.index.md_money_scripted_loc_file = str(sloc)
+        app.index.md_money_yml_file = str(path)
+        _saved, errors = app._apply_md_additional_income(
+            "TAG_spirit", "var_test", "0.5", "TAG_tt"
+        )
+        assert not errors
+        key = "ADDITIONAL_INCOME_REVENUES_TOOLTIP"
+    after = path.read_bytes()
+    assert after.startswith(original)
+    assert after.count(b"\xef\xbb\xbf") == (1 if encoding == "utf-8-sig" else 0)
+    text = after.decode(encoding)
+    assert text.startswith(original_text + ("" if terminated else newline))
+    assert key in parse_loc_values(text)
+    if newline == "\r\n":
+        assert "\n" not in text.replace("\r\n", "")
+    else:
+        assert "\r" not in text
+
+
+def test_wizard_tooltip_existing_key_is_unchanged(tmp_path):
+    from hoi4cm.wizards.additional_income import _save_tooltip_localisation
+
+    app = _md_app(str(tmp_path))
+    path = tmp_path / "existing.yml"
+    original = b'l_english:\n TAG_tt:0 "Keep me"'
+    path.write_bytes(original)
+    app.edit_loc_file = str(path)
+    assert not _save_tooltip_localisation(app, "TAG_spirit", "var_test", "TAG_tt")
+    assert path.read_bytes() == original
+
+
+def test_wizard_tooltip_creates_file_and_reports_missing_selection(tmp_path):
+    from hoi4cm.wizards.additional_income import _save_tooltip_localisation
+
+    app = _md_app(str(tmp_path))
+    app.edit_loc_file = str(tmp_path / "missing.yml")
+    errors = _save_tooltip_localisation(app, "TAG_spirit", "var_test", "TAG_tt")
+    assert any("no longer exists" in error for error in errors)
+    assert not os.path.exists(app.edit_loc_file)
+    app.edit_loc_file = ""
+    result = _save_tooltip_localisation(app, "TAG_spirit", "var_test", "TAG_tt")
+    target = tmp_path / "localisation" / "english" / "TAG_spirit_l_english.yml"
+    assert any("wrote tooltip localisation" in line for line in result)
+    assert target.read_bytes().startswith(b"\xef\xbb\xbfl_english:\n TAG_tt:")
