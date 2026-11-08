@@ -28,7 +28,8 @@ WIZARD_COMPLEXITY_BUDGETS = {
     "src/hoi4cm/wizards/_shared.py:open_script_picker": 34,
     "src/hoi4cm/wizards/additional_income.py:open_additional_income_wizard": 26,
     "src/hoi4cm/wizards/additional_income.py:_apply": 15,
-    "src/hoi4cm/wizards/decision.py:open_decision_wizard": 496,
+    "src/hoi4cm/wizards/decision.py:import_decision_record": 34,
+    "src/hoi4cm/wizards/decision.py:open_decision_wizard": 467,
     "src/hoi4cm/wizards/decision.py:_rebuild_tree": 18,
     "src/hoi4cm/wizards/decision.py:_collect": 24,
     "src/hoi4cm/wizards/decision.py:_build_dec_editor": 47,
@@ -40,7 +41,7 @@ WIZARD_COMPLEXITY_BUDGETS = {
     "src/hoi4cm/wizards/decision.py:_build_code": 52,
     "src/hoi4cm/wizards/decision.py:_apply_code_edits": 34,
     "src/hoi4cm/wizards/decision.py:_browse_mod_decisions": 14,
-    "src/hoi4cm/wizards/decision.py:_import_txt": 70,
+    "src/hoi4cm/wizards/decision.py:_import_txt": 41,
     "src/hoi4cm/wizards/decision.py:_import_scripted_loc": 13,
     "src/hoi4cm/wizards/decision.py:_import_yml_loc": 13,
     "src/hoi4cm/wizards/decision.py:_save_to_mod": 13,
@@ -107,4 +108,4 @@ def test_wizard_c901_has_fixed_function_budgets():
 
 
 def test_complexity_budget_covers_the_existing_wizard_baseline():
-    assert len(WIZARD_COMPLEXITY_BUDGETS) == 42
+    assert len(WIZARD_COMPLEXITY_BUDGETS) == 43

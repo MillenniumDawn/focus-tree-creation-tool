@@ -23,6 +23,7 @@ from hoi4cm.core import (
 from hoi4cm.core.app_config import AppConfig
 from hoi4cm.core.config import CONFIG_PATH
 from hoi4cm.core.logger import add_error, get_logger
+from hoi4cm.core.paths import separate_line_append
 from hoi4cm.mod import find_loc_files, notifying_workspace_files
 from hoi4cm.mod.discovery import script_paths
 from hoi4cm.mod.index import ModIndex
@@ -1050,7 +1051,11 @@ class ModLoadingMixin:
                     entry = f' {tooltip_loc_key}: "{summary_token}\\n"\n'
                     if not yml_text:
                         entry = loc_target.header() + "\n" + entry
-                    wf.append_text(yml, entry, encoding=yml_encoding)
+                    wf.append_text(
+                        yml,
+                        separate_line_append(yml_text, entry),
+                        encoding=yml_encoding,
+                    )
                     rel = os.path.relpath(yml, self.index.root)
                     saved.append(
                         f"✅ {rel}  — appended new '{tooltip_loc_key}' entry "

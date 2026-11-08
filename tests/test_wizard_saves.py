@@ -696,3 +696,175 @@ def test_decision_save_reports_an_unreadable_selected_file(tmp_path, mod, monkey
     assert "selected decisions file could not be read" in errs
     assert cat_path.is_file()
     assert len(saved) == 2
+
+
+@pytest.mark.parametrize("kind", ["spirit", "decision", "event"])
+@pytest.mark.parametrize("newline", ["\n", "\r\n"])
+@pytest.mark.parametrize("terminated", [False, True])
+@pytest.mark.parametrize("encoding", ["utf-8-sig", "latin-1"])
+def test_localisation_append_separates_lines_and_preserves_format(
+    tmp_path, mod, kind, newline, terminated, encoding
+):
+    from hoi4cm.focus_tree.loc import parse_loc_values
+
+    header = " ##########Events - my_namespace##########\n" if kind == "event" else ""
+    original_text = "l_english:\n" + header + ' OLD:0 "Café"'
+    original_text = original_text.replace("\n", newline)
+    if terminated:
+        original_text += newline
+    original = original_text.encode(encoding)
+    if kind == "spirit":
+        root, path, loc_path = _spirit_files(
+            tmp_path, mod, b"ideas = { country = { } }\n", original
+        )
+        _saved, _warnings, errors = _save_spirit(mod, root, path, name="Café")
+        expected = {SID: "Café", f"{SID}_desc": "A desc."}
+    elif kind == "decision":
+        root = tmp_path / "mod"
+        path = root / "common" / "decisions" / "new.txt"
+        cat_path = root / "common" / "decisions" / "categories" / "new.txt"
+        loc_path = root / "localisation" / "english" / "old.yml"
+        loc_path.parent.mkdir(parents=True)
+        loc_path.write_bytes(original)
+        mod.edit_loc_file = str(loc_path)
+        _saved, errors = _save_decisions(mod, root, path, cat_path)
+        expected = {"TAG_decision": "Decision"}
+    else:
+        root, path, loc_path = _event_files(
+            tmp_path, mod, b"add_namespace = my_namespace\n", original
+        )
+        _saved, _warnings, errors = _save_event(mod, root, path)
+        assert not errors
+        _saved, _warnings, errors = _save_event(mod, root, path, "my_namespace.2")
+        expected = {
+            "my_namespace.1.t": "Title",
+            "my_namespace.1.d": "Description",
+            "my_namespace.1.a": "OK",
+            "my_namespace.2.t": "Title",
+            "my_namespace.2.d": "Description",
+            "my_namespace.2.a": "OK",
+        }
+    assert not errors
+    after = loc_path.read_bytes()
+    assert after.startswith(original)
+    assert after.count(BOM) == (1 if encoding == "utf-8-sig" else 0)
+    text = after.decode(encoding)
+    assert text.startswith(original_text + ("" if terminated else newline))
+    assert (
+        "\n" not in text.replace("\r\n", "") if newline == "\r\n" else "\r" not in text
+    )
+    assert parse_loc_values(text).items() >= expected.items()
+
+
+@pytest.mark.parametrize("loc", [b"", BOM, b'l_english:\n OLD: "Previous"'])
+def test_event_append_with_new_header_and_empty_localisation(tmp_path, mod, loc):
+    from hoi4cm.focus_tree.loc import parse_loc_values
+
+    root, event_path, loc_path = _event_files(
+        tmp_path, mod, b"add_namespace = my_namespace\n", loc
+    )
+    _saved, _warnings, errors = _save_event(mod, root, event_path)
+    assert not errors
+    after = loc_path.read_bytes()
+    assert after.startswith(loc)
+    assert after.count(BOM) == (1 if loc == BOM else 0)
+    values = parse_loc_values(after.decode("utf-8-sig"))
+    assert values["my_namespace.1.t"] == "Title"
+    assert after.count(b"##########Events - my_namespace##########") == 1
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "country_event = { id = my_namespace.99 immediate = { "
+        "country_event = { id = my_namespace.1 days = 1 } } }\n",
+        "# country_event = { id = my_namespace.1 }\n",
+        'country_event = { id = my_namespace.99 desc = "id = my_namespace.1" }\n',
+    ],
+)
+def test_event_save_ignores_references_comments_and_strings(tmp_path, mod, body):
+    original = ("# café\n" + body).encode("utf-8-sig")
+    root, event_path, _ = _event_files(tmp_path, mod, original, b"l_english:\n")
+
+    saved, warnings, errs = _save_event(mod, root, event_path)
+
+    assert event_path.read_bytes().startswith(original)
+    assert b"id = my_namespace.1\n" in event_path.read_bytes()[len(original) :]
+    assert len(saved) == 2
+    assert not warnings
+    assert not errs
+
+
+@pytest.mark.parametrize(
+    "event_type",
+    [
+        "country_event",
+        "news_event",
+        "state_event",
+        "unit_leader_event",
+        "character_event",
+        "operative_leader_event",
+    ],
+)
+@pytest.mark.parametrize("value", ["my_namespace.1", '"my_namespace.1"'])
+def test_event_save_skips_definition_ids(tmp_path, mod, event_type, value):
+    original = f"{event_type} = {{ id = {value} }}\n".encode()
+    root, event_path, _ = _event_files(tmp_path, mod, original, b"l_english:\n")
+
+    _saved, warnings, errs = _save_event(mod, root, event_path)
+
+    assert event_path.read_bytes() == original
+    assert any("my_namespace.1" in warning for warning in warnings)
+    assert not errs
+
+
+def test_event_save_recognizes_id_after_quoted_braces(tmp_path, mod):
+    original = b'country_event = { desc = "{\ncontinued }" id = "my_namespace.1" }\n'
+    root, event_path, _ = _event_files(tmp_path, mod, original, b"l_english:\n")
+    _saved, warnings, errs = _save_event(mod, root, event_path)
+    assert event_path.read_bytes() == original
+    assert any("my_namespace.1" in warning for warning in warnings)
+    assert not errs
+
+
+def test_event_save_recognizes_definition_after_cr_comment(tmp_path, mod):
+    original = b"# comment\rcountry_event = { id = my_namespace.1 }\r"
+    root, event_path, _ = _event_files(tmp_path, mod, original, b"l_english:\n")
+    _saved, warnings, errs = _save_event(mod, root, event_path)
+    assert event_path.read_bytes() == original
+    assert any("my_namespace.1" in warning for warning in warnings)
+    assert not errs
+
+
+def test_event_save_preserves_legacy_encoding_on_duplicate(tmp_path, mod):
+    original = '# café\ncountry_event = { id = "my_namespace.1" }\n'.encode("cp1252")
+    root, event_path, _ = _event_files(tmp_path, mod, original, b"l_english:\n")
+    _saved, warnings, errs = _save_event(mod, root, event_path)
+    assert event_path.read_bytes() == original
+    assert any("my_namespace.1" in warning for warning in warnings)
+    assert not errs
+
+
+@pytest.mark.parametrize(
+    "original",
+    [b"country_event = { id = other.1\n", b'country_event = { desc = "unfinished\n'],
+)
+def test_event_save_rejects_unbalanced_script(tmp_path, mod, original):
+    root, event_path, _ = _event_files(tmp_path, mod, original, b"l_english:\n")
+    _saved, _warnings, errs = _save_event(mod, root, event_path)
+    assert event_path.read_bytes() == original
+    assert any(error.startswith("Events file:") for error in errs)
+
+
+def test_event_append_after_legacy_encoded_forward_reference(tmp_path, mod):
+    original = (
+        "# café\ncountry_event = { id = my_namespace.99 "
+        "immediate = { country_event = { id = my_namespace.1 days = 1 } } }\n"
+    ).encode("latin-1")
+    root, event_path, _ = _event_files(tmp_path, mod, original, b"l_english:\n")
+    _saved, warnings, errs = _save_event(mod, root, event_path)
+    after = event_path.read_bytes()
+    assert after.startswith(original)
+    assert b"id = my_namespace.1\n" in after[len(original) :]
+    assert not warnings
+    assert not errs

@@ -18,6 +18,7 @@ from hoi4cm.core import (
     newline_style,
     read_file_with_encoding,
 )
+from hoi4cm.core.paths import separate_line_append
 from hoi4cm.mod import append_sprite_types, find_loc_files, notifying_workspace_files
 from hoi4cm.script.syntax import match_brace
 from hoi4cm.wizards._generators import build_event_scripted_loc_blocks
@@ -28,6 +29,58 @@ _LOC_KEY = re.compile(r'\s+(\S+?)(?::\d+)?\s*[=:]?\s*"')
 _READ_MISSING = "missing"
 _READ_FAILED = "read-failed"
 _READ_CONTENT = "content"
+
+_EVENT_TYPES = (
+    "country_event",
+    "news_event",
+    "state_event",
+    "unit_leader_event",
+    "character_event",
+    "operative_leader_event",
+)
+_EVENT_TOKEN = re.compile(r'#[^\r\n]*|"[^"]*"?|[{}=]|[^\s{}="#]+')
+
+
+def _event_tokens(source):
+    """Tokenize and reject incomplete script before allowing an append."""
+    tokens = [
+        m.group()
+        for m in _EVENT_TOKEN.finditer(source)
+        if not m.group().startswith("#")
+    ]
+    depth = 0
+    for token in tokens:
+        if token.startswith('"') and not token.endswith('"', 1):
+            raise ValueError("events file contains an unterminated quoted string")
+        if token == "{":
+            depth += 1
+        elif token == "}":
+            depth -= 1
+            if depth < 0:
+                raise ValueError("events file contains unbalanced braces")
+    if depth:
+        raise ValueError("events file contains unbalanced braces")
+    return tokens
+
+
+def _event_definition_ids(source):
+    """Collect direct IDs of top-level event definitions, preserving quotes."""
+    tokens = _event_tokens(source)
+    ids = set()
+    depth = 0
+    in_event = False
+    for i, token in enumerate(tokens):
+        if token == "{":
+            if depth == 0 and i >= 2 and tokens[i - 1] == "=":
+                in_event = tokens[i - 2] in _EVENT_TYPES
+            depth += 1
+        elif token == "}":
+            depth -= 1
+        elif in_event and depth == 1 and token == "id" and i + 2 < len(tokens):
+            value = tokens[i + 2]
+            if tokens[i + 1] == "=" and value not in ("{", "}", "="):
+                ids.add(value[1:-1] if value.startswith('"') else value)
+    return ids
 
 
 def _read_existing_file_with_encoding(path):
@@ -159,6 +212,7 @@ def save_spirit(
         new_entries = {sid: loc_name, f"{sid}_desc": loc_desc}
         existing_keys = set()
         loc_encoding = "utf-8-sig"
+        loc_text = ""
         loc_exists = os.path.isfile(loc_path)
         if selected_loc and not loc_exists:
             raise OSError("selected localisation file no longer exists")
@@ -183,7 +237,11 @@ def save_spirit(
                 f" {k}: {json.dumps(v, ensure_ascii=False)}\n"
                 for k, v in to_add.items()
             )
-            wf.append_text(loc_path, loc_body, encoding=loc_encoding)
+            wf.append_text(
+                loc_path,
+                separate_line_append(loc_text, loc_body),
+                encoding=loc_encoding,
+            )
             rel = os.path.relpath(loc_path, mod_root)
             saved.append(rel + f"  (+{len(to_add)} keys)")
         else:
@@ -265,9 +323,7 @@ def save_events(
             raw, event_encoding = read_file_with_encoding(ev_file)
             if raw is None or event_encoding is None:
                 raise OSError("events file could not be read")
-            # Collect every id = X already in the file
-            for m in re.finditer(r"\bid\s*=\s*(\S+)", raw):
-                existing_ids.add(m.group(1).strip())
+            existing_ids = _event_definition_ids(raw)
 
         to_append = [ev for ev in events if ev.eid not in existing_ids]
         skipped = [ev.eid for ev in events if ev.eid in existing_ids]
@@ -282,10 +338,15 @@ def save_events(
                 lines.append("")
             else:
                 lines.append("")
-                lines.append(
+                banner = (
                     "# ── Appended by HOI4 Content Maker "
                     "─────────────────────────────────"
                 )
+                try:
+                    banner.encode(event_encoding)
+                except UnicodeEncodeError:
+                    banner = "# Appended by HOI4 Content Maker"
+                lines.append(banner)
             for ev in to_append:
                 lines.append("")
                 lines.append(render_event(ev))
@@ -350,7 +411,11 @@ def save_events(
             if needs_hdr:
                 loc_body += f"\n ##########Events - {ns}##########\n"
             loc_body += "\n".join(to_add) + "\n"
-            wf.append_text(loc_file, loc_body, encoding=yml_encoding)
+            wf.append_text(
+                loc_file,
+                separate_line_append(existing_yml_text, loc_body),
+                encoding=yml_encoding,
+            )
             rel = os.path.relpath(loc_file, mod_root)
             saved.append(f"{rel}  (+{len(to_add)} keys)")
         else:
@@ -714,6 +779,7 @@ def save_decisions(
         existing_loc_keys = set()
         yml_exists = os.path.isfile(yml_path)
         yml_encoding = "utf-8-sig"
+        existing_yml = ""
         if selected_loc and not yml_exists:
             raise OSError("selected localisation file no longer exists")
         if yml_exists:
@@ -739,7 +805,11 @@ def save_decisions(
                 continue
             to_write.append(ln)
         if to_write:
-            wf.append_text(yml_path, "\n".join(to_write) + "\n", encoding=yml_encoding)
+            wf.append_text(
+                yml_path,
+                separate_line_append(existing_yml, "\n".join(to_write) + "\n"),
+                encoding=yml_encoding,
+            )
         saved.append(os.path.relpath(yml_path, mod_root) + f"  (+{len(to_write)} keys)")
     except OSError as e:
         errs.append(str(e))

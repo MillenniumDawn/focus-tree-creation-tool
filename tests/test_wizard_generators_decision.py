@@ -661,3 +661,56 @@ def test_strip_val_normalizes_form_values(value, expected):
     # Tk vars hand back bools and ints as well as strings; a bool must not
     # render as the literal "True".
     assert _strip_val(value) == expected
+
+
+def test_generate_decisions_file_uses_each_decisions_modes():
+    decisions = [
+        _dec(uid="ordinary", dec_id="ordinary", cost="11"),
+        _dec(
+            uid="country",
+            dec_id="country",
+            targeted="country",
+            targets="GER",
+            cost="22",
+        ),
+        _dec(
+            uid="state",
+            dec_id="state",
+            targeted="state",
+            cost_type="custom",
+            custom_cost_trigger="has_country_flag = can_pay",
+            custom_cost_text="TAG_custom_cost",
+            on_map_mode="map_and_decisions_view",
+        ),
+    ]
+    output = generate_decisions_file([_cat()], decisions)
+    category = find_blocks(output)[0][1]
+    blocks = {block[0]: block[1] for block in find_blocks(category)}
+
+    assert "cost = 11" in blocks["ordinary"]
+    assert "state_target" not in blocks["ordinary"]
+    assert "targets = { GER }" in blocks["country"]
+    assert "state_target" not in blocks["country"]
+    assert "cost = 22" in blocks["country"]
+    assert "state_target = yes" in blocks["state"]
+    assert "has_country_flag = can_pay" in blocks["state"]
+    assert "custom_cost_text = TAG_custom_cost" in blocks["state"]
+    assert "cost = 25" not in blocks["state"]
+
+    # Selecting a decision or a category does not enter bulk generation;
+    # changing the order of records leaves every individual block unchanged.
+    reversed_output = generate_decisions_file([_cat()], list(reversed(decisions)))
+    assert {
+        block[0]: block[1] for block in find_blocks(find_blocks(reversed_output)[0][1])
+    } == blocks
+
+
+def test_generate_decisions_file_defaults_missing_modes():
+    decision = _dec()
+    del decision["targeted"]
+    del decision["cost_type"]
+    block = find_blocks(
+        find_blocks(generate_decisions_file([_cat()], [decision]))[0][1]
+    )
+    assert "cost = 25" in block[0][1]
+    assert "state_target" not in block[0][1]

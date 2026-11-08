@@ -5,7 +5,7 @@ import re
 from hoi4cm.core.paths import read_file_with_encoding
 from hoi4cm.mod.context import find_loc_files
 
-_VALUE_RE = re.compile(r'^\s+(\S+?)(?::\d+)?\s+"(.*)"', re.MULTILINE)
+_VALUE_RE = re.compile(r'^\s+(\S+?)(?::\d*)?\s+"(.*)"', re.MULTILINE)
 
 
 def lookup_localisation(
