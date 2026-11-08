@@ -120,12 +120,12 @@ def test_tokens_stay_bounded_and_never_resurrect_revoked_bytes(tmp_path):
     Path(primary).write_bytes(old.content)
     for _ in range(25):
         gate, snapshot = _snapshot(workspace, (primary,))
+        assert snapshot.eligibility != old.eligibility
         with pytest.raises(eligibility.RevokedRecoveryError):
             read_project(primary)
         gate.invalidate()
     with closing(sqlite3.connect(eligibility._store_path())) as connection:
         assert connection.execute("SELECT COUNT(*) FROM recovery").fetchone()[0] == 0
-    assert snapshot.eligibility != old.eligibility
     assert (
         len(list(Path(eligibility._store_path()).parent.glob("recovery-eligibility*")))
         == 1

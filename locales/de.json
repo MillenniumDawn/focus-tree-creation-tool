@@ -962,7 +962,6 @@
   "gfx_placement.category_description": "Hier steht der Beschreibungstext der Kategorie...",
   "gfx_placement.category_name": "📁  Kategoriename",
   "gfx_placement.pick_for_role": "GFX für {role} auswählen",
-  "gfx.images_count": "{count} Bilder",
   "hint.autosave_restored": "Automatisch gespeicherter Arbeitsbereich wiederhergestellt — speichern, um ihn zu behalten",
   "hint.dragging": "{name} wird gezogen  →  x={x}  y={y}",
   "hint.focus_nudged_down": "Auswahl nach unten verschoben.",

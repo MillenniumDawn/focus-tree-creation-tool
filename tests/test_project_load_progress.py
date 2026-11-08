@@ -28,6 +28,7 @@ class ControlledExecutor(Executor):
         def run():
             if self.future.set_running_or_notify_cancel():
                 try:
+                    assert self.work is not None
                     self.future.set_result(self.work())
                 except BaseException as exc:
                     self.future.set_exception(exc)
