@@ -8,6 +8,9 @@ the version by hand. See `AGENTS.md`.
 
 ## Unreleased
 
+- Ignore comments and quoted braces when reading GFX sprite declarations,
+  preventing disabled sprites and fields from overriding live graphics.
+
 - Preserve mission settings and repeatable decisions when importing decisions.
 
 - Preserve each decision’s targeting and cost modes when exporting mixed decision files.
