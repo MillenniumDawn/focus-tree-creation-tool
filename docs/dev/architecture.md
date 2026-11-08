@@ -316,6 +316,10 @@ adopts the candidate into `App.index`.
 
 ### Validation inputs
 
+Prerequisite cycle detection uses an explicit depth-first traversal stack, so
+deep chains do not depend on Python's recursion limit. Parent traversal and
+cycle diagnostic ordering follow the existing depth-first order.
+
 `ui/validation.py` owns the App's background validation scheduling. It compares
 document identity and `content_revision`, catalog identity and generation, loaded
 state, localisation path and file metadata, localisation language, and UI language

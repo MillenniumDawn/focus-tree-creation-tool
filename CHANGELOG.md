@@ -8,6 +8,8 @@ the version by hand. See `AGENTS.md`.
 
 ## Unreleased
 
+- Validate deep prerequisite chains and cycles without exceeding Python's recursion limit.
+
 - Preserve nested blocks in rendered scope effects and limits, including catalog
   defaults that previously exported with missing closing braces.
 
