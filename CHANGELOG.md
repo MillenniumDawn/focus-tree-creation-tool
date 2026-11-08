@@ -8,6 +8,8 @@ the version by hand. See `AGENTS.md`.
 
 ## Unreleased
 
+- Preserve mission settings and repeatable decisions when importing decisions.
+
 - Preserve each decision’s targeting and cost modes when exporting mixed decision files.
 
 - Read unversioned localisation keys when looking up wizard titles and descriptions.

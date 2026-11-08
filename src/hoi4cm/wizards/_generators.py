@@ -424,8 +424,8 @@ def generate_decision_block(dec, *, targeted=None, cost_type=None):
     # mission fields
     if dec.get("is_mission"):
         lines.append(f"{T2}days_mission_timeout = {dec.get('mission_timeout', '100')}")
-        if dec.get("selectable_mission"):
-            lines.append(f"{T2}selectable_mission = yes")
+        selectable = "yes" if dec.get("selectable_mission") else "no"
+        lines.append(f"{T2}selectable_mission = {selectable}")
         if dec.get("is_good"):
             lines.append(f"{T2}is_good = yes")
         if s(dec.get("activation", "")):

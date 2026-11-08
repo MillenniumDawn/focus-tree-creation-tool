@@ -26,7 +26,12 @@ from hoi4cm.core import (
 from hoi4cm.core.image import PIL_OK, PILImage, PILImageTk
 from hoi4cm.core.logger import get_logger
 from hoi4cm.mod import WorkspaceFiles, find_loc_files, glob_script_paths
-from hoi4cm.script.syntax import extract_named_block, find_blocks, tokenize
+from hoi4cm.script.syntax import (
+    extract_named_block,
+    find_blocks,
+    parse_script,
+    tokenize,
+)
 from hoi4cm.ui import (
     BG_CARD,
     BG_DARK,
@@ -59,6 +64,151 @@ from hoi4cm.wizards._shared import (
     open_trigger_picker,
     pack_action_footer,
 )
+
+
+def import_decision_record(dec_name, dec_inner, cat_uid, loc):
+    """Parse one imported decision using the same path as the wizard dialog."""
+
+    def _get_block(text, key):
+        inner = extract_named_block(text, key)
+        return inner.strip() if inner is not None else None
+
+    def _get_value(text, key):
+        m = re.search(rf"\b{re.escape(key)}\s*=\s*([^\s{{}}#\n]+)", text)
+        return m.group(1).strip() if m else None
+
+    def _get_yes_no(text, key):
+        v = _get_value(text, key)
+        return v == "yes" if v else None
+
+    fields = parse_script(dec_inner)
+    d = new_decision_record(cat_uid)
+    d["dec_id"] = dec_name
+    d["loc_name"] = loc.get(dec_name, dec_name)
+    d["loc_desc"] = loc.get(dec_name + "_desc", "")
+
+    # ── scalar fields ──
+    for _field, _key in [("priority", "priority"), ("chain", "")]:
+        pass  # handled below
+    sv_map = {
+        "cost": "cost",
+        "days_remove": "days_remove",
+        "days_re_enable": "days_re_enable",
+        "priority": "priority",
+        "icon": "icon",
+        "target_array": "target_array",
+        "war_complete_tag": "war_with_on_complete",
+        "war_remove_tag": "war_with_on_remove",
+    }
+    for dkey, hkey in sv_map.items():
+        v = _get_value(dec_inner, hkey or dkey)
+        if v and dkey in d:
+            d[dkey] = v
+    # icon direct key
+    iv = _get_value(dec_inner, "icon")
+    if iv:
+        d["icon"] = iv
+
+    # ── boolean flags ──
+    d["fire_only_once"] = fields.get("fire_only_once") == "yes"
+    if _get_yes_no(dec_inner, "fixed_random_seed") in (False,):
+        d["fixed_random_seed"] = False
+    if fields.get("is_mission") == "yes" or any(
+        key in fields
+        for key in (
+            "days_mission_timeout",
+            "selectable_mission",
+            "is_good",
+            "activation",
+            "timeout_effect",
+        )
+    ):
+        d["is_mission"] = True
+    if isinstance(fields.get("days_mission_timeout"), str):
+        d["mission_timeout"] = fields["days_mission_timeout"]
+    # An omitted selectable_mission is false for imported missions in HOI4.
+    # Ordinary decisions retain the wizard default if converted later.
+    if d["is_mission"]:
+        d["selectable_mission"] = fields.get("selectable_mission") == "yes"
+    if fields.get("is_good") in ("yes", "no"):
+        d["is_good"] = fields["is_good"] == "yes"
+    if _get_yes_no(dec_inner, "cancel_if_not_visible"):
+        d["cancel_if_not_visible"] = True
+    if _get_yes_no(dec_inner, "targets_dynamic"):
+        d["targets_dynamic"] = True
+    if _get_yes_no(dec_inner, "target_non_existing"):
+        d["target_non_existing"] = True
+    if _get_yes_no(dec_inner, "war_with_target_on_complete"):
+        d["war_target_complete"] = True
+    if _get_yes_no(dec_inner, "war_with_target_on_remove"):
+        d["war_target_remove"] = True
+
+    # ── cost type detection ──
+    if re.search(r"\bcustom_cost_trigger\b", dec_inner):
+        d["cost_type"] = "custom"
+        ccb = _get_block(dec_inner, "custom_cost_trigger")
+        if ccb:
+            d["custom_cost_trigger"] = ccb
+        cct = _get_value(dec_inner, "custom_cost_text")
+        if cct:
+            d["custom_cost_text"] = cct
+        ahp = _get_value(dec_inner, "ai_hint_pp_cost")
+        if ahp:
+            d["ai_hint_pp_cost"] = ahp
+    else:
+        cv = _get_value(dec_inner, "cost")
+        if cv:
+            d["cost"] = cv
+            d["cost_type"] = "pp"
+
+    # ── block fields ──
+    block_map = {
+        "allowed": "allowed",
+        "visible": "visible",
+        "available": "available",
+        "cancel_trigger": "cancel_trigger",
+        "complete_effect": "complete_effect",
+        "remove_effect": "remove_effect",
+        "cancel_effect": "cancel_effect",
+        "ai_will_do": "ai_will_do",
+        "modifier": "modifier",
+        "remove_trigger": "remove_trigger",
+        "highlight_states": "highlight_states",
+        "target_trigger": "target_trigger",
+        "target_root_trigger": "target_root_trigger",
+        "war_with_on_timeout": "war_with_on_timeout",
+    }
+    for dkey, hkey in block_map.items():
+        v = _get_block(dec_inner, hkey)
+        if v is not None and dkey in d:
+            d[dkey] = v
+
+    for name, inner, _ in find_blocks(dec_inner):
+        if name in ("activation", "timeout_effect"):
+            d[name] = inner.strip()
+
+    # ── targeting detection ──
+    if re.search(r"\btarget_array\b|\btargets\b", dec_inner):
+        d["targeted"] = "country"
+        tv = _get_value(dec_inner, "targets")
+        if tv:
+            d["targets"] = tv
+    if re.search(r"\bstate_target\b", dec_inner):
+        d["targeted"] = "state"
+    d["_extras"] = _generators.capture_decision_extras(dec_inner)
+
+    if d["targeted"] != "none":
+        on_mm = _get_value(dec_inner, "on_map_mode")
+        if on_mm:
+            d["on_map_mode"] = on_mm
+        st_scope = _get_value(dec_inner, "state_target")
+        if st_scope and st_scope != "yes":
+            d["state_target_scope"] = st_scope
+        ta = _get_value(dec_inner, "target_array")
+        if ta:
+            d["target_array"] = ta
+
+    return d
 
 
 def collect_decision_state(evars, dec=None):
@@ -4655,121 +4805,7 @@ def open_decision_wizard(app):
                 dm_cats.append(c)
 
                 for dec_name, dec_inner, _ in find_blocks(cat_inner):
-                    d = new_decision_record(c["uid"])
-                    d["dec_id"] = dec_name
-                    d["loc_name"] = loc.get(dec_name, dec_name)
-                    d["loc_desc"] = loc.get(dec_name + "_desc", "")
-
-                    # ── scalar fields ──
-                    for _field, _key in [("priority", "priority"), ("chain", "")]:
-                        pass  # handled below
-                    sv_map = {
-                        "cost": "cost",
-                        "days_remove": "days_remove",
-                        "days_re_enable": "days_re_enable",
-                        "priority": "priority",
-                        "icon": "icon",
-                        "mission_timeout": "days_mission_timeout",
-                        "target_array": "target_array",
-                        "war_complete_tag": "war_with_on_complete",
-                        "war_remove_tag": "war_with_on_remove",
-                    }
-                    for dkey, hkey in sv_map.items():
-                        v = _get_value(dec_inner, hkey or dkey)
-                        if v and dkey in d:
-                            d[dkey] = v
-                    # icon direct key
-                    iv = _get_value(dec_inner, "icon")
-                    if iv:
-                        d["icon"] = iv
-
-                    # ── boolean flags ──
-                    if _get_yes_no(dec_inner, "fire_only_once"):
-                        d["fire_only_once"] = True
-                    if re.search(r"\bfire_only_once\b", dec_inner):
-                        d["fire_only_once"] = True
-                    if _get_yes_no(dec_inner, "fixed_random_seed") in (False,):
-                        d["fixed_random_seed"] = False
-                    if _get_yes_no(dec_inner, "is_mission"):
-                        d["is_mission"] = True
-                    if _get_yes_no(dec_inner, "selectable_mission") in (False,):
-                        d["selectable_mission"] = False
-                    if _get_yes_no(dec_inner, "is_good"):
-                        d["is_good"] = True
-                    if _get_yes_no(dec_inner, "cancel_if_not_visible"):
-                        d["cancel_if_not_visible"] = True
-                    if _get_yes_no(dec_inner, "targets_dynamic"):
-                        d["targets_dynamic"] = True
-                    if _get_yes_no(dec_inner, "target_non_existing"):
-                        d["target_non_existing"] = True
-                    if _get_yes_no(dec_inner, "war_with_target_on_complete"):
-                        d["war_target_complete"] = True
-                    if _get_yes_no(dec_inner, "war_with_target_on_remove"):
-                        d["war_target_remove"] = True
-
-                    # ── cost type detection ──
-                    if re.search(r"\bcustom_cost_trigger\b", dec_inner):
-                        d["cost_type"] = "custom"
-                        ccb = _get_block(dec_inner, "custom_cost_trigger")
-                        if ccb:
-                            d["custom_cost_trigger"] = ccb
-                        cct = _get_value(dec_inner, "custom_cost_text")
-                        if cct:
-                            d["custom_cost_text"] = cct
-                        ahp = _get_value(dec_inner, "ai_hint_pp_cost")
-                        if ahp:
-                            d["ai_hint_pp_cost"] = ahp
-                    else:
-                        cv = _get_value(dec_inner, "cost")
-                        if cv:
-                            d["cost"] = cv
-                            d["cost_type"] = "pp"
-
-                    # ── block fields ──
-                    block_map = {
-                        "allowed": "allowed",
-                        "visible": "visible",
-                        "available": "available",
-                        "cancel_trigger": "cancel_trigger",
-                        "complete_effect": "complete_effect",
-                        "remove_effect": "remove_effect",
-                        "cancel_effect": "cancel_effect",
-                        "timeout_effect": "timeout_effect",
-                        "ai_will_do": "ai_will_do",
-                        "modifier": "modifier",
-                        "remove_trigger": "remove_trigger",
-                        "activation": "activation",
-                        "highlight_states": "highlight_states",
-                        "target_trigger": "target_trigger",
-                        "target_root_trigger": "target_root_trigger",
-                        "war_with_on_timeout": "war_with_on_timeout",
-                    }
-                    for dkey, hkey in block_map.items():
-                        v = _get_block(dec_inner, hkey)
-                        if v is not None and dkey in d:
-                            d[dkey] = v
-
-                    # ── targeting detection ──
-                    if re.search(r"\btarget_array\b|\btargets\b", dec_inner):
-                        d["targeted"] = "country"
-                        tv = _get_value(dec_inner, "targets")
-                        if tv:
-                            d["targets"] = tv
-                    if re.search(r"\bstate_target\b", dec_inner):
-                        d["targeted"] = "state"
-                    d["_extras"] = _generators.capture_decision_extras(dec_inner)
-
-                    if d["targeted"] != "none":
-                        on_mm = _get_value(dec_inner, "on_map_mode")
-                        if on_mm:
-                            d["on_map_mode"] = on_mm
-                        st_scope = _get_value(dec_inner, "state_target")
-                        if st_scope and st_scope != "yes":
-                            d["state_target_scope"] = st_scope
-                        ta = _get_value(dec_inner, "target_array")
-                        if ta:
-                            d["target_array"] = ta
-
+                    d = import_decision_record(dec_name, dec_inner, c["uid"], loc)
                     dm_decs.append(d)
                     imported += 1
 
