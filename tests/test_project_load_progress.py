@@ -28,6 +28,7 @@ class ControlledExecutor(Executor):
         def run():
             if self.future.set_running_or_notify_cancel():
                 try:
+                    assert self.work is not None
                     self.future.set_result(self.work())
                 except BaseException as exc:
                     self.future.set_exception(exc)
@@ -63,7 +64,7 @@ class LoadShell(SimpleNamespace):
         )
         self._lifecycle = ApplicationLifecycle(executor_factory=lambda: executor)
 
-    def _begin_document_generation(self):
+    def _begin_document_generation(self, *, preserve_recovery=False):
         self._lifecycle.begin("document")
 
     def winfo_exists(self):

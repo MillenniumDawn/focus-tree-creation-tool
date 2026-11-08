@@ -11,6 +11,7 @@ from hoi4cm.ui.gfx_browser import (
 from hoi4cm.ui.keyboard import nudge_selection
 from hoi4cm.ui.lifecycle import ApplicationLifecycle
 from hoi4cm.ui.menubar import build_menubar
+from hoi4cm.ui.recovery import RecoveryController, invalidate_recovery
 from hoi4cm.ui.settings_dialog import open_settings
 from hoi4cm.ui.splash import show_splash
 from hoi4cm.ui.sprite_images import SpriteImageCache
@@ -107,6 +108,8 @@ __all__ = [
     "YELLOW",
     "YGRID",
     "ApplicationLifecycle",
+    "RecoveryController",
+    "invalidate_recovery",
     "_safe_after",
     "_safe_after_idle",
     "build_menubar",

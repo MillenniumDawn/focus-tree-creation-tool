@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from hoi4cm.core.safe_path import safe_join
+from hoi4cm.editor.recovery_eligibility import RECOVERY_KEY, validate_recovery
 from hoi4cm.mod.workspace_files import WorkspaceFiles
 from hoi4cm.models import (
     EditorWorkspace,
@@ -20,7 +21,14 @@ from hoi4cm.models import (
 
 PROJECT_FORMAT = "hoi4cm-project"
 PROJECT_VERSION = 2
-_KNOWN_ROOT_KEYS = {"format", "version", "workspace", "tree_name", "focuses"}
+_KNOWN_ROOT_KEYS = {
+    "format",
+    "version",
+    "workspace",
+    "tree_name",
+    "focuses",
+    RECOVERY_KEY,
+}
 _SEMANTIC_FOCUS_ATTRS = (
     "_raw_gx",
     "_raw_gy",
@@ -38,7 +46,9 @@ _SEMANTIC_FOCUS_ATTRS = (
 
 
 def encode_project(workspace: EditorWorkspace) -> dict[str, Any]:
-    data = dict(workspace.extras)
+    data = {
+        key: value for key, value in workspace.extras.items() if key != RECOVERY_KEY
+    }
     data.update(
         {
             "format": PROJECT_FORMAT,
@@ -63,7 +73,10 @@ def encode_project(workspace: EditorWorkspace) -> dict[str, Any]:
 
 
 def decode_project(data: Mapping[str, Any]) -> EditorWorkspace:
-    return _decode_project(data)
+    validate_recovery(data)
+    workspace = _decode_project(data)
+    workspace.__dict__["_loaded_from_recovery"] = RECOVERY_KEY in data
+    return workspace
 
 
 def _decode_project(data: Mapping[str, Any]) -> EditorWorkspace:
@@ -193,7 +206,7 @@ def _decode_legacy(data: Mapping[str, Any]) -> EditorWorkspace:
         extras={
             key: value
             for key, value in data.items()
-            if key not in {"tree_name", "focuses"}
+            if key not in {"tree_name", "focuses", RECOVERY_KEY}
         },
     )
 

@@ -8,6 +8,34 @@ from hoi4cm.core.paths import read_file_with_encoding
 from hoi4cm.mod.workspace_files import WorkspaceFiles
 
 
+@pytest.mark.parametrize("commit_write", [False, True])
+def test_staged_text_notifies_only_after_commit_and_cleans_up(tmp_path, commit_write):
+    target = tmp_path / "data.txt"
+    target.write_text("old")
+    notifications = []
+    files = WorkspaceFiles(on_written=notifications.append)
+
+    with files.stage_bytes(target, b"new") as commit:
+        assert target.read_text() == "old"
+        assert notifications == []
+        if commit_write:
+            commit()
+
+    assert target.read_text() == ("new" if commit_write else "old")
+    assert notifications == ([str(target)] if commit_write else [])
+    assert list(tmp_path.glob("*.tmp")) == []
+
+
+def test_staged_text_cleans_up_when_caller_raises(tmp_path):
+    target = tmp_path / "data.txt"
+    target.write_text("old")
+    with pytest.raises(RuntimeError, match="cancel"):
+        with WorkspaceFiles().stage_bytes(target, b"new"):
+            raise RuntimeError("cancel")
+    assert target.read_text() == "old"
+    assert list(tmp_path.glob("*.tmp")) == []
+
+
 def test_write_text_replaces_file_and_notifies(tmp_path):
     target = tmp_path / "nested" / "data.txt"
     target.parent.mkdir()

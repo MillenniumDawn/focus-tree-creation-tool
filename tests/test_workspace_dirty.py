@@ -11,7 +11,7 @@ import pytest
 
 import hoi4_content_maker as m
 import hoi4cm.core.logger as logmod
-import hoi4cm.editor.autosave_writer as aw
+import hoi4cm.editor.recovery as aw
 from hoi4cm.models import (
     EditorWorkspace,
     Focus,
@@ -19,6 +19,27 @@ from hoi4cm.models import (
     TreeDocument,
     TreeMetadata,
 )
+from hoi4cm.ui import recovery as recovery_ui
+from hoi4cm.ui.lifecycle import ApplicationLifecycle
+
+
+@pytest.fixture(autouse=True)
+def immediate_recovery_worker(monkeypatch):
+    def submit(_owner, work, on_done, *, on_error, **_kwargs):
+        try:
+            result = work()
+        except Exception as error:
+            on_error(error)
+        else:
+            on_done(result)
+
+    monkeypatch.setattr(recovery_ui, "run_bg", submit)
+    monkeypatch.setattr(
+        recovery_ui, "workspace_autosave_path", lambda: m.workspace_autosave_path()
+    )
+    monkeypatch.setattr(
+        recovery_ui, "sibling_autosave_path", lambda path: m.sibling_autosave_path(path)
+    )
 
 
 class _Var:
@@ -113,6 +134,8 @@ def _fake_app(**overrides):
     fake._update_statusbar = lambda: None
     fake._capture_workspace = lambda: None
     fake.workspace = EditorWorkspace()
+    fake._lifecycle = ApplicationLifecycle(None)
+    fake._recovery = recovery_ui.RecoveryController(fake)
     fake._hint = lambda msg: setattr(fake, "_hint_msg", msg)
     for k, v in overrides.items():
         setattr(fake, k, v)
@@ -281,7 +304,9 @@ def test_autosave_tick_writes_when_dirty(monkeypatch, tmp_path):
     app = _fake_app()
     app.focuses.add(Focus(id=7, x=0, y=0))
     writes = []
-    monkeypatch.setattr(aw, "write_project_text", lambda p, ws: writes.append(p))
+    monkeypatch.setattr(
+        aw, "write_recovery_bytes", lambda p, ws, **_kwargs: writes.append(p)
+    )
     monkeypatch.setattr(
         m, "workspace_autosave_path", lambda: str(tmp_path / "autosave.json")
     )
@@ -296,7 +321,9 @@ def test_autosave_tick_writes_when_dirty(monkeypatch, tmp_path):
 def test_autosave_tick_no_write_when_clean(monkeypatch, tmp_path):
     app = _fake_app()
     writes = []
-    monkeypatch.setattr(aw, "write_project_text", lambda p, ws: writes.append(p))
+    monkeypatch.setattr(
+        aw, "write_recovery_bytes", lambda p, ws, **_kwargs: writes.append(p)
+    )
     monkeypatch.setattr(
         m, "workspace_autosave_path", lambda: str(tmp_path / "autosave.json")
     )
@@ -310,7 +337,9 @@ def test_autosave_tick_writes_sibling_when_last_path(monkeypatch, tmp_path):
     app.focuses.add(Focus(id=8, x=0, y=0))
     app._last_project_path = str(tmp_path / "project.json")
     writes = []
-    monkeypatch.setattr(aw, "write_project_text", lambda p, ws: writes.append(p))
+    monkeypatch.setattr(
+        aw, "write_recovery_bytes", lambda p, ws, **_kwargs: writes.append(p)
+    )
     monkeypatch.setattr(
         m, "workspace_autosave_path", lambda: str(tmp_path / "autosave.json")
     )
@@ -389,13 +418,13 @@ def test_autosave_timer_persists_sidebar_cost_and_description_edits(
     monkeypatch.setattr(m, "workspace_autosave_path", lambda: str(primary))
     monkeypatch.setattr(m, "sibling_autosave_path", lambda _path: str(sibling))
     writes = []
-    write = aw.write_project_text
+    write = aw.write_recovery_bytes
 
-    def record_write(path, text):
+    def record_write(path, text, **kwargs):
         writes.append(path)
-        write(path, text)
+        write(path, text, **kwargs)
 
-    monkeypatch.setattr(aw, "write_project_text", record_write)
+    monkeypatch.setattr(aw, "write_recovery_bytes", record_write)
 
     app._schedule_autosave()
     timer.tick()
@@ -483,8 +512,8 @@ def test_autosave_tick_swallows_write_error(monkeypatch, tmp_path, errors):
     app.focuses.add(Focus(id=9, x=0, y=0))
     monkeypatch.setattr(
         aw,
-        "write_project_text",
-        lambda p, ws: (_ for _ in ()).throw(OSError("disk full")),
+        "write_recovery_bytes",
+        lambda p, ws, **_kwargs: (_ for _ in ()).throw(OSError("disk full")),
     )
     monkeypatch.setattr(
         m, "workspace_autosave_path", lambda: str(tmp_path / "autosave.json")
@@ -505,12 +534,12 @@ def test_autosave_tick_records_one_entry_per_failure_streak(
     app.focuses.add(app.focuses.new_focus(0, 0))
     outcomes = [OSError("disk full"), OSError("disk full"), None, OSError("again")]
 
-    def write(_path, _workspace):
+    def write(_path, _workspace, **_kwargs):
         outcome = outcomes.pop(0)
         if outcome is not None:
             raise outcome
 
-    monkeypatch.setattr(aw, "write_project_text", write)
+    monkeypatch.setattr(aw, "write_recovery_bytes", write)
     monkeypatch.setattr(
         m, "workspace_autosave_path", lambda: str(tmp_path / "autosave.json")
     )
@@ -534,12 +563,12 @@ def test_autosave_tick_sibling_failure_records_path_once(monkeypatch, tmp_path, 
     app._last_project_path = str(project)
     calls = []
 
-    def write(path, _text):
+    def write(path, _text, **_kwargs):
         calls.append(path)
         if path == str(sibling):
             raise OSError("sibling disk full")
 
-    monkeypatch.setattr(aw, "write_project_text", write)
+    monkeypatch.setattr(aw, "write_recovery_bytes", write)
     monkeypatch.setattr(
         m, "workspace_autosave_path", lambda: str(tmp_path / "workspace.json")
     )
@@ -565,11 +594,11 @@ def test_autosave_tick_sibling_failure_streak_resets_after_success(
     app._last_project_path = str(tmp_path / "project.json")
     fail = True
 
-    def write(path, _text):
+    def write(path, _text, **_kwargs):
         if fail and path == sibling:
             raise OSError("sibling disk full")
 
-    monkeypatch.setattr(aw, "write_project_text", write)
+    monkeypatch.setattr(aw, "write_recovery_bytes", write)
     monkeypatch.setattr(
         m, "workspace_autosave_path", lambda: str(tmp_path / "workspace.json")
     )
@@ -598,11 +627,11 @@ def test_clean_tick_ends_the_sibling_autosave_failure_streak(
     sibling = str(tmp_path / "project.autosave.json")
     app._last_project_path = str(tmp_path / "project.json")
 
-    def write(path, _text):
+    def write(path, _text, **_kwargs):
         if path == sibling:
             raise OSError("sibling disk full")
 
-    monkeypatch.setattr(aw, "write_project_text", write)
+    monkeypatch.setattr(aw, "write_recovery_bytes", write)
     monkeypatch.setattr(
         m, "workspace_autosave_path", lambda: str(tmp_path / "workspace.json")
     )
@@ -650,8 +679,8 @@ def test_clean_tick_ends_the_autosave_failure_streak(monkeypatch, tmp_path, erro
     app.focuses.add(app.focuses.new_focus(0, 0))
     monkeypatch.setattr(
         aw,
-        "write_project_text",
-        lambda p, ws: (_ for _ in ()).throw(OSError("disk full")),
+        "write_recovery_bytes",
+        lambda p, ws, **_kwargs: (_ for _ in ()).throw(OSError("disk full")),
     )
     monkeypatch.setattr(
         m, "workspace_autosave_path", lambda: str(tmp_path / "autosave.json")

@@ -89,9 +89,10 @@ from hoi4cm.core import (  # noqa: E402
     worst_severity_per_focus,
 )
 from hoi4cm.editor import (  # noqa: E402
-    AutosaveWriter,
     ExtraTreeState,
     ExtraTreeUndoHistory,
+    RecoveryEligibilityError,
+    RevokedRecoveryError,
     choose_project_save_path,
     clear_workspace_autosave,
     read_project,
@@ -137,11 +138,13 @@ from hoi4cm.ui import (  # noqa: E402
     TEXT_DIM,
     YELLOW,
     ApplicationLifecycle,
+    RecoveryController,
     Tooltip,
     TutorialController,
     ValidationController,
     _safe_after,
     grab_when_visible,
+    invalidate_recovery,
     make_progress,
     progress_modal,
     report_error,
@@ -362,6 +365,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         self._autosave_job = None
         self._autosave_interval_ms = _AUTOSAVE_INTERVAL_MS
         self._last_project_path = None
+        self._recovery = RecoveryController(self)
         self.protocol("WM_DELETE_WINDOW", self._on_app_close)
         self._build_ui()
         self._redraw()
@@ -390,6 +394,22 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             if ans and not self._save():
                 return
         assert self._lifecycle is not None
+        controller = vars(self).get("_recovery")
+        if controller is not None:
+            try:
+                controller.close()
+            except RecoveryEligibilityError as error:
+                report_error(
+                    tr(
+                        "dialog.recovery_close_error.body",
+                        "Recovery could not be discarded; "
+                        "the application remains open:\n{error}",
+                        error=error,
+                    ),
+                    error,
+                    parent=self,
+                )
+                return
         if not self._lifecycle.begin_close():
             return
         try:
@@ -544,43 +564,8 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             self._autosave_job = None
 
     def _autosave_tick(self) -> None:
-        self._autosave_job = None
-        sibling_failed = False
-        try:
-            if self._is_dirty():
-                path = workspace_autosave_path()
-                self._capture_workspace()
-                writer = getattr(self, "_autosave_writer", None)
-                if writer is None:
-                    writer = self._autosave_writer = AutosaveWriter()
-                sibling = self._last_project_path
-                sibling_path = sibling_autosave_path(sibling) if sibling else None
-                paths = (path, sibling_path) if sibling_path else (path,)
-
-                def sibling_error() -> None:
-                    nonlocal sibling_failed
-                    sibling_failed = True
-                    log.exception("sibling autosave failed")
-                    if getattr(self, "_sibling_autosave_failing", None) != sibling_path:
-                        self._sibling_autosave_failing = sibling_path
-                        self._log_error(
-                            f"Sibling autosave failed for {sibling_path}: "
-                            f"{sys.exception()}"
-                        )
-
-                writer.save(self.workspace, paths, sibling_error)
-                if not sibling_failed:
-                    self._sibling_autosave_failing = None
-            else:
-                self._sibling_autosave_failing = None
-            self._autosave_failing = False
-        except Exception as ex:
-            log.exception("workspace autosave failed")
-            if not getattr(self, "_autosave_failing", False):
-                self._autosave_failing = True
-                self._log_error(f"Workspace autosave failed: {ex}")
-        finally:
-            self._schedule_autosave()
+        """Queue recovery without changing the manual-save dirty state."""
+        self._recovery.tick()
 
     def _maybe_offer_autosave_restore(self) -> None:
         path = workspace_autosave_path()
@@ -590,6 +575,8 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             return
         try:
             autosaved = read_project(path)
+        except RevokedRecoveryError:
+            return
         except Exception as ex:
             log.exception("autosave restore read failed")
             self._log_error(f"Could not read autosave {path}: {ex}")
@@ -649,13 +636,16 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
                     title=tr("dialog.autosave_restore_error.title", "Restore Failed"),
                 )
         else:
+            invalidate_recovery(self)
             clear_workspace_autosave(path)
 
     def _close_app_caches(self):
         self.images.clear()
         self.wiz_img_caches.clear()
 
-    def _begin_document_generation(self):
+    def _begin_document_generation(self, *, preserve_recovery=False):
+        if not preserve_recovery:
+            invalidate_recovery(self)
         assert self._lifecycle is not None
         self._lifecycle.begin("document")
         self._invalidate_canvas_images()
@@ -2358,7 +2348,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             flushed = self.focuses.content_revision != revision
         self._fv_gfx.set(name)
         gfx_changed = self.selected and self.selected.gfx != name
-        if gfx_changed:
+        if self.selected is not None and gfx_changed:
             self._push_undo("change gfx", touched_ids=(self.selected.id,))
             self.selected.gfx = name
             self.focuses.mark_content_changed()
@@ -5853,6 +5843,10 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         self._canvas_min = list(workspace.canvas_min)
         self._canvas_max = list(workspace.canvas_max)
         self._default_focus_prefix = workspace.default_focus_prefix
+        if workspace.__dict__.pop("_loaded_from_recovery", False):
+            self._saved_revision = -1
+            self._saved_fingerprint = None
+            self._last_project_path = None
 
     def _save(self, *, save_as=False):
         path = choose_project_save_path(
@@ -5881,6 +5875,21 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         except Exception as e:
             log.error("project save failed: %s", e, exc_info=True)
             report_write_failure(self, path, e)
+            return False
+        try:
+            invalidate_recovery(self)
+        except RecoveryEligibilityError as error:
+            report_error(
+                tr(
+                    "dialog.recovery_save_error.body",
+                    "Project saved to {path}, but recovery could not be discarded.\n"
+                    "The workspace remains marked as unsaved:\n{error}",
+                    path=path,
+                    error=error,
+                ),
+                error,
+                parent=self,
+            )
             return False
         self._last_project_path = path
         try:
@@ -5947,7 +5956,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         if not path:
             return
 
-        self._begin_document_generation()
+        self._begin_document_generation(preserve_recovery=True)
         modal = progress_modal(
             self, tr("dialog.load_project.title", "Load Project"), determinate=False
         )
@@ -5956,6 +5965,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             return read_project(path)
 
         def on_done(workspace):
+            recovered = getattr(workspace, "_loaded_from_recovery", False)
             self.cv.delete("all")
             self.selected = None
             self._lines.clear()
@@ -5963,11 +5973,14 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             self._grid_key = None
             self._grid_img = None
             self._install_workspace(workspace)
-            self._last_project_path = path
-            try:
-                self._mark_clean()
-            except Exception as e:
-                add_error(f"Failed to mark workspace clean: {e}")
+            self._last_project_path = None if recovered else path
+            if recovered:
+                self._update_title()
+            else:
+                try:
+                    self._mark_clean()
+                except Exception as e:
+                    add_error(f"Failed to mark workspace clean: {e}")
             try:
                 clear_workspace_autosave()
             except Exception:

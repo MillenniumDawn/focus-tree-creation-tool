@@ -8,6 +8,9 @@ the version by hand. See `AGENTS.md`.
 
 ## Unreleased
 
+- Revoke recovery eligibility without waiting for a stalled filesystem rename;
+  reject discarded recovery files after restart and when opened manually.
+
 - Preserve raw focus content when imported focus IDs are quoted.
 
 - Ignore comments and quoted braces when reading GFX sprite declarations,
@@ -55,6 +58,11 @@ the version by hand. See `AGENTS.md`.
   so Undo reverses the GFX pick before those earlier edits. Picking the current
   value adds no GFX history entry. Refresh the canvas and focus list for flushed
   sidebar edits even when confirming the current GFX.
+
+- Reduce blocking during changed recovery saves with compact snapshots and
+  background atomic writes. Cancel older writes before manual save, document
+  replacement, restore dismissal, or shutdown can leave stale recovery data.
+  Keep primary recovery saves running when the sibling destination stalls.
 
 - Import focus trees containing non-finite `ai_will_do` values (`inf`,
   `-inf`, `1e999`, `-1e999`) instead of aborting the load: the field falls

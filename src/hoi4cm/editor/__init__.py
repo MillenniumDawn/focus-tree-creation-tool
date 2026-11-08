@@ -8,6 +8,15 @@ from .project_codec import (
     validate_project_file_path,
     write_project,
 )
+from .recovery import (
+    RecoveryCommitGate,
+    RecoveryResult,
+    RecoverySnapshot,
+    capture_recovery_snapshot,
+    write_recovery,
+    write_recovery_bytes,
+)
+from .recovery_eligibility import RecoveryEligibilityError, RevokedRecoveryError
 from .workspace_autosave import (
     AUTOSAVE_NAME,
     clear_workspace_autosave,
@@ -20,6 +29,14 @@ __all__ = [
     "AutosaveWriter",
     "ExtraTreeState",
     "ExtraTreeUndoHistory",
+    "RecoveryCommitGate",
+    "RecoveryEligibilityError",
+    "RecoveryResult",
+    "RecoverySnapshot",
+    "RevokedRecoveryError",
+    "capture_recovery_snapshot",
+    "write_recovery",
+    "write_recovery_bytes",
     "clear_workspace_autosave",
     "choose_project_save_path",
     "decode_project",

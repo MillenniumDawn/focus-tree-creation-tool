@@ -11,7 +11,9 @@ from test_document_reset_undo import _DocumentApp, _seed_history, _workspace
 from test_project_load_progress import ControlledExecutor
 
 import hoi4_content_maker as app_module
-from hoi4cm.editor.project_codec import write_project
+from hoi4cm.editor import recovery as writer
+from hoi4cm.editor.project_codec import encode_project, read_project, write_project
+from hoi4cm.editor.recovery_eligibility import RECOVERY_KEY, RevokedRecoveryError
 from hoi4cm.models import Focus, TreeDocument, TreeMetadata
 from hoi4cm.ui.lifecycle import ApplicationLifecycle
 
@@ -23,8 +25,10 @@ class ProjectApp(_DocumentApp):
         self.callbacks: list[Callable[[], None]] = []
         self._lifecycle = ApplicationLifecycle(executor_factory=lambda: executor)
         self._invalidate_canvas_images = Mock()
-        self._begin_document_generation.side_effect = lambda: (
-            app_module.App._begin_document_generation(cast(app_module.App, self))
+        self._begin_document_generation.side_effect = lambda **kwargs: (
+            app_module.App._begin_document_generation(
+                cast(app_module.App, self), **kwargs
+            )
         )
 
     def winfo_exists(self):
@@ -152,7 +156,10 @@ def test_real_file_load_installs_document_and_resets_history(project_case, histo
     assert (app._grid_item, app._grid_key, app._grid_img) == (None, None, None)
     app.cv.delete.assert_called_once_with("all")
     app._mark_clean.assert_called_once()
-    app._begin_document_generation.assert_has_calls([(), ()])
+    assert app._begin_document_generation.call_args_list == [
+        ((), {"preserve_recovery": True}),
+        ((), {}),
+    ]
     assert len(app._undo_stack) == 0
     loaded = app.focuses[focus_id]
     app_module.App._undo(cast(app_module.App, app))
@@ -229,11 +236,12 @@ def test_real_file_load_cancellation_preserves_document_and_history(
     elif cancel == "discard":
         app._confirm_discard.return_value = False
     loaded = []
-    read_project = app_module.read_project
+    original_read_project = app_module.read_project
     monkeypatch.setattr(
         app_module,
         "read_project",
-        lambda project_path: loaded.append(read_project(project_path)) or loaded[-1],
+        lambda project_path: loaded.append(original_read_project(project_path))
+        or loaded[-1],
     )
     app_module.App._load(cast(app_module.App, app))
     if cancel == "pending":
@@ -270,3 +278,36 @@ def test_real_file_load_cancellation_preserves_document_and_history(
     app_module.App._undo(cast(app_module.App, app))
     assert app.focuses[created.id].name == "seed_created"
     assert app.focuses.validate_indexes()
+
+
+def test_manual_recovery_load_requires_an_ordinary_save(project_case, monkeypatch):
+    app, executor, path, focus_id, _modal, errors, _cleared = project_case
+    source = read_project(path)
+    gate = writer.RecoveryCommitGate()
+    paths = (str(path),)
+    snapshot = writer.capture_recovery_snapshot(
+        source, paths, gate.generation, eligibility=gate.eligibility()
+    )
+    gate.activate(paths)
+    assert writer.write_recovery(snapshot, gate) == writer.RecoveryResult()
+    app_module.App._load(cast(app_module.App, app))
+    executor.start()
+    executor.shutdown()
+    app.drain()
+    errors.assert_not_called()
+    app._mark_clean.assert_not_called()
+    assert app._last_project_path is None
+    assert app_module.App._is_dirty(cast(app_module.App, app))
+    assert "_loaded_from_recovery" not in vars(app.workspace)
+    gate.invalidate()
+    with pytest.raises(RevokedRecoveryError):
+        read_project(path)
+    manual = path.with_name("manual.json")
+    monkeypatch.setattr(
+        app_module.filedialog, "asksaveasfilename", lambda **_kw: str(manual)
+    )
+    monkeypatch.setattr(app_module.messagebox, "showinfo", Mock())
+    app._capture_workspace = lambda: app.workspace
+    assert app_module.App._save(cast(app_module.App, app))
+    assert read_project(manual).focuses[focus_id].id == focus_id
+    assert RECOVERY_KEY not in encode_project(app.workspace)
