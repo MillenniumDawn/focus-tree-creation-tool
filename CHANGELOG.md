@@ -8,6 +8,9 @@ the version by hand. See `AGENTS.md`.
 
 ## Unreleased
 
+- Stop focus-tree export before writing when an existing localisation file
+  cannot be read, and report its path in the export failure.
+
 - Validate deep prerequisite chains and cycles without exceeding Python's recursion limit.
 
 - Preserve nested blocks in rendered scope effects and limits, including catalog
