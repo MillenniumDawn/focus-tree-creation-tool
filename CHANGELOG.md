@@ -8,6 +8,8 @@ the version by hand. See `AGENTS.md`.
 
 ## Unreleased
 
+- Preserve raw focus content when imported focus IDs are quoted.
+
 - Ignore comments and quoted braces when reading GFX sprite declarations,
   preventing disabled sprites and fields from overriding live graphics.
 

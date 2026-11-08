@@ -897,3 +897,90 @@ def test_supplied_raw_block_keeps_comments_and_quoted_hash_issue_358():
     assert "# keep this comment" in text
     assert 'custom_effect_tooltip = "reward } # inside"' in text
     assert "foo_bar = 3" in text
+
+
+@pytest.mark.parametrize("quoted", [False, True])
+@pytest.mark.parametrize("tree_type", ["main", "joint"])
+def test_quoted_focus_id_preserves_raw_blocks_on_round_trip(quoted, tree_type):
+    focus_id = '"quoted_focus"' if quoted else "quoted_focus"
+    source = f"""focus_tree = {{
+        id = test
+        focus = {{
+            id = {focus_id}
+            x = 0
+            y = 0
+            cost = 1
+            available = {{ # condition comment
+                has_country_flag = ready
+            }}
+            offset = {{ x = 1 y = 2 trigger = {{ # offset comment
+                always = yes
+            }} }}
+            joint_trigger = {{ # joint comment
+                always = yes
+            }}
+            completion_reward = {{ # reward comment
+                add_political_power = 42
+            }}
+        }}
+    }}"""
+
+    def roundtrip(text):
+        parsed = parse_focus_tree(text, "/tmp/quoted-id.txt")
+        focuses = build_focuses(parsed, tree_idx=1)
+        lookup = {focus.id: focus for focus in focuses}
+        exporter = export_main_tree if tree_type == "main" else export_focus_tree
+        return focuses, exporter(focuses, _info(parsed, tree_type), focus_lookup=lookup)
+
+    focuses, first = roundtrip(source)
+    assert focuses[0].name == "quoted_focus"
+    for marker in ("# condition comment", "# offset comment", "# reward comment"):
+        assert marker in first
+    if tree_type == "joint":
+        assert "# joint comment" in first
+    assert "add_political_power = 42" in first
+    _, second = roundtrip(first)
+    assert first == second
+
+
+@pytest.mark.parametrize(
+    "decoy",
+    [
+        "prerequisite = { id = decoy }",
+        'text = "id = decoy"',
+        'text = "hello\nid = decoy\nworld"',
+    ],
+)
+def test_raw_blocks_use_top_level_focus_id(decoy):
+    source = f"""focus_tree = {{
+        id = test
+        focus = {{
+            {decoy}
+            id = "real"
+            x = 0 y = 0 cost = 1
+            completion_reward = {{ # preserved reward
+                add_political_power = 42
+            }}
+        }}
+    }}"""
+    focuses, exported = _load_and_export_default(source)
+    assert focuses[0].name == "real"
+    assert "# preserved reward" in exported
+    assert "add_political_power = 42" in exported
+
+
+def test_raw_blocks_preserved_with_quoted_id_key():
+    source = """focus_tree = {
+        id = tree
+        focus = {
+            "id" = "real"
+            x = 0 y = 0 cost = 1
+            completion_reward = { # preserved reward
+                add_political_power = 42
+            }
+        }
+    }"""
+    focuses, exported = _load_and_export_default(source)
+    assert focuses[0].name == "real"
+    assert "# preserved reward" in exported
+    assert "add_political_power = 42" in exported

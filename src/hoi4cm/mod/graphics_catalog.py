@@ -25,7 +25,7 @@ _SPRITE_BLOCK_RE = re.compile(
     r'"[^"]*"?|#[^\n]*|(?<!\w)(?P<sprite>spriteType\s*=\s*\{)'
 )
 _SPRITE_FIELD_RE = re.compile(
-    r'#[^\n]*|(?<!\w)(?P<key>name|texturefile)\s*=\s*"(?P<value>[^"]+)"' r'|"[^"]*"?'
+    r'#[^\n]*|(?<!\w)(?P<key>name|texturefile)\s*=\s*"(?P<value>[^"]+)"|"[^"]*"?'
 )
 
 
