@@ -8,6 +8,8 @@ the version by hand. See `AGENTS.md`.
 
 ## Unreleased
 
+- Read unversioned localisation keys when looking up wizard titles and descriptions.
+
 - Separate appended wizard localisation entries when the existing file has no
   final newline, preserving its encoding and line endings.
 
