@@ -8,6 +8,7 @@ lines out of ``hoi4_content_maker.py``.
 
 import math
 import tkinter as tk
+from collections.abc import Collection
 from typing import TYPE_CHECKING
 
 from hoi4cm.core.i18n import tr
@@ -197,6 +198,39 @@ class CanvasMixin(_CanvasState):
         image_broker = self._image_broker
         if image_broker is not None:
             image_broker.clear()
+
+    def _invalidate_canvas_sprites(self, names: Collection[str]) -> None:
+        """Make visible cards re-request icons whose sprite was just rewritten.
+
+        Runs once per write, not per frame: clearing ``draw_key`` is what lets
+        the next frame past ``_draw_focus``'s state-key exit to the broker. The
+        fresh request carries the catalog's new stamp and generation, so the
+        broker also discards any older in-flight decode.
+        """
+        if not names:
+            return
+        image_broker = self._image_broker
+        if image_broker is not None:
+            catalog = self.index.graphics_catalog
+            image_broker.evict_paths(
+                [
+                    catalog.path_for(asset)
+                    for asset in map(catalog.resolve, names)
+                    if asset is not None
+                ]
+            )
+        stale = False
+        for focus_id, bundle in self._focus_bundles.items():
+            focus = self.focuses.get(focus_id)
+            if (
+                bundle.lod == "full"
+                and focus is not None
+                and getattr(focus, "gfx", "") in names
+            ):
+                bundle.draw_key = None
+                stale = True
+        if stale:
+            self._redraw(RedrawChannel.VIEW, reason="sprite-written")
 
     def _close_canvas_tasks(self):
         for handle in (self._image_poll_job, self._redraw_job, self._lines_job):

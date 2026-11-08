@@ -25,7 +25,7 @@ def script_paths(
 
 def glob_script_paths(directory: str) -> list[str]:
     """Keep the platform's glob matching and error handling for wizard browsing."""
-    return sorted(glob.glob(os.path.join(directory, "*.txt")))
+    return sorted(glob.glob(os.path.join(glob.escape(directory), "*.txt")))
 
 
 def walk_image_paths(folder: str, *, recursive: bool = True) -> tuple[str, ...]:

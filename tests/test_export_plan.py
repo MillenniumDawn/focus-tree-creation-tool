@@ -7,7 +7,6 @@ from hoi4cm.focus_tree.export_plan import (
     execute_export_plans,
     make_extra_export_plan,
     make_main_export_plan,
-    render_export_plan,
 )
 from hoi4cm.mod.workspace_files import WorkspaceFiles
 from hoi4cm.models import Focus
@@ -250,17 +249,83 @@ def test_main_plan_exports_german_localisation_header(tmp_path):
     assert calls[0][1][1].startswith("l_german:\n")
 
 
-def test_unreadable_existing_localisation_is_not_replaced(tmp_path):
+def test_unreadable_localisation_fails_plan_and_batch_continues(tmp_path):
+    gfx_path = tmp_path / "TST_focus.gfx"
+    plan = _main_plan(
+        tmp_path,
+        gfx_path=str(gfx_path),
+        gfx_entries=(("GFX_focus_custom", "gfx/interface/goals/custom.dds"),),
+    )
+    focus_path = tmp_path / "05_TST.txt"
+    loc_path = tmp_path / "MD_focus_TST_l_english.yml"
+    focus_path.write_bytes(b"original focus")
+    gfx_path.write_bytes(b"original gfx")
+    with loc_path.open("wb") as loc_file:
+        loc_file.truncate(MAX_READ_BYTES + 1)
+    original = {path: path.read_bytes() for path in (focus_path, loc_path, gfx_path)}
+    second = _extra_plan(tmp_path, "TST_second")
+    calls = []
+
+    def write_texts(entries):
+        calls.append(tuple(entries))
+        WorkspaceFiles().write_texts(entries)
+
+    results = execute_export_plans([plan, second], write_texts)
+
+    assert isinstance(results[0].error, OSError)
+    assert str(loc_path) in str(results[0].error)
+    assert results[0].written_paths == ()
+    assert results[1].ok
+    assert len(calls) == 1
+    assert calls[0][0][0] == second.focus_path
+    assert {path: path.read_bytes() for path in original} == original
+    assert (tmp_path / "TST_second.txt").is_file()
+
+
+def test_localisation_read_oserror_names_path_and_skips_writer(tmp_path):
+    plan = _main_plan(tmp_path)
+    loc_path = tmp_path / "MD_focus_TST_l_english.yml"
+    loc_path.write_bytes(b"original localisation")
+    calls = []
+
+    def read_text(_path):
+        raise PermissionError("access denied")
+
+    results = execute_export_plans([plan], calls.append, read_text=read_text)
+
+    assert isinstance(results[0].error, OSError)
+    assert str(loc_path) in str(results[0].error)
+    assert calls == []
+    assert loc_path.read_bytes() == b"original localisation"
+
+
+def test_missing_localisation_is_created(tmp_path):
     plan = _main_plan(tmp_path)
 
-    writes, added_count = render_export_plan(
-        plan,
-        read_text=lambda _path: None,
-        is_file=lambda _path: True,
+    result = execute_export_plans([plan], WorkspaceFiles().write_texts)[0]
+
+    assert result.ok
+    assert plan.loc_path in result.written_paths
+    assert "TST_root" in (tmp_path / "MD_focus_TST_l_english.yml").read_text(
+        encoding="utf-8-sig"
     )
 
-    assert added_count == 0
-    assert [path for path, _text, _encoding in writes] == [plan.focus_path]
+
+def test_unchanged_localisation_is_not_written(tmp_path):
+    plan = _main_plan(tmp_path)
+    loc_path = tmp_path / "MD_focus_TST_l_english.yml"
+    original = (
+        b'\xef\xbb\xbfl_english:\r\n TST_root: "Existing"\r\n'
+        b' TST_root_desc: "Existing"\r\n'
+    )
+    loc_path.write_bytes(original)
+
+    result = execute_export_plans([plan], WorkspaceFiles().write_texts)[0]
+
+    assert result.ok
+    assert result.localisation_added == 0
+    assert result.written_paths == (plan.focus_path,)
+    assert loc_path.read_bytes() == original
 
 
 def test_batch_continues_after_one_plan_fails(tmp_path):
