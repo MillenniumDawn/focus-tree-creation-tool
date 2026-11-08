@@ -963,3 +963,64 @@ def test_incremental_fuzz_matches_full_refresh(graphics_tree, tmp_path):
                 stream.write(text)
             applied.apply(catalog.note_written(path, read_text=read_file))
         check()
+
+
+@pytest.mark.parametrize("incremental", [False, True])
+@pytest.mark.parametrize("line_ending", ["\n", "\r\n", "\r"])
+def test_gfx_declarations_ignore_comments_and_quoted_syntax(
+    graphics_tree, incremental, line_ending
+):
+    gfx_file = graphics_tree / "interface" / "assets.gfx"
+    catalog = GraphicsCatalog()
+    if incremental:
+        catalog.refresh(str(graphics_tree), _config(), read_text=read_file)
+    text = """spriteTypes = {
+    # spriteType = { name = "GFX_focus_fake" texturefile = "gfx/fake.dds" }
+    spriteType = {
+        # name = "GFX_focus_wrong" }
+        # texturefile = "gfx/interface/goals/wrong.dds" {
+        note = "} spriteType = { name = fake"
+        name = "GFX_focus_live"
+        texturefile = "gfx\\interface\\goals\\live.dds"
+    }
+    # spriteType = { name = "GFX_focus_live" texturefile = "goals/disabled.dds" }
+    spriteType = { name = "GFX_focus_path"
+        texturefile = "gfx\\interface\\goals\\path.dds" }
+    spriteType = { name = "GFX_focus_next"
+        texturefile = "gfx/interface/goals/next.dds" }
+    spriteType = { name = "GFX_focus_live"
+        texturefile = "gfx/interface/goals/winner.dds" }
+    # spriteType = { name = "GFX_focus_live" texturefile = "goals/disabled2.dds" }
+}
+"""
+    gfx_file.write_bytes(text.replace("\n", line_ending).encode())
+    if incremental:
+        maps = catalog.note_written(str(gfx_file), read_text=read_file)
+    else:
+        maps = catalog.refresh(str(graphics_tree), _config(), read_text=read_file)
+    assert maps is not None
+    assert maps.sprites["GFX_focus_live"] == str(
+        graphics_tree / "gfx/interface/goals/winner.dds"
+    )
+    assert maps.sprites["GFX_focus_path"] == str(
+        graphics_tree / "gfx/interface/goals/path.dds"
+    )
+    assert maps.sprites["GFX_focus_next"] == str(
+        graphics_tree / "gfx/interface/goals/next.dds"
+    )
+    assert "GFX_focus_fake" not in maps.sprites
+    assert "GFX_focus_wrong" not in maps.sprites
+
+
+def test_gfx_quoted_texture_path_preserves_unicode_separator(graphics_tree):
+    gfx_file = graphics_tree / "interface" / "assets.gfx"
+    gfx_file.write_text(
+        'spriteType = { name = "GFX_focus_unicode" '
+        'texturefile = "gfx/interface/goals/my\u2028icon.dds" }\n',
+        encoding="utf-8",
+    )
+    catalog = GraphicsCatalog()
+    maps = catalog.refresh(str(graphics_tree), _config(), read_text=read_file)
+    assert maps.sprites["GFX_focus_unicode"] == str(
+        graphics_tree / "gfx/interface/goals/my\u2028icon.dds"
+    )

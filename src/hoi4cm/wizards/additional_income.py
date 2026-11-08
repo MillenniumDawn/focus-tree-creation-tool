@@ -12,6 +12,7 @@ import tkinter as tk
 from tkinter import messagebox
 
 from hoi4cm.core import read_file_with_encoding, sanitize_component, tr
+from hoi4cm.core.paths import separate_line_append
 from hoi4cm.ui import (
     BG_CARD,
     BG_DARK,
@@ -54,6 +55,66 @@ def collect_additional_income_state(svars):
         "mode": _get("mode", "wire_only"),
         "formula_type": _get("formula_type", "fixed"),
     }
+
+
+def _save_tooltip_localisation(app, idea_id, variable_name, tooltip_key):
+    """Append a missing additional-income tooltip and return its status lines."""
+    output_lines = []
+    loc_target = app.app_config.loc_target
+    selected_loc = bool(app.edit_loc_file)
+    loc_path = (
+        app.edit_loc_file
+        if selected_loc
+        else os.path.join(
+            app.index.root,
+            "localisation",
+            loc_target.dirname(),
+            loc_target.filename(idea_id),
+        )
+    )
+    try:
+        existing_keys = set()
+        loc_encoding = "utf-8-sig"
+        loc_text = ""
+        loc_exists = os.path.isfile(loc_path)
+        if selected_loc and not loc_exists:
+            raise OSError("selected localisation file no longer exists")
+        if loc_exists:
+            loc_text, loc_encoding = read_file_with_encoding(loc_path)
+            if loc_text is None or loc_encoding is None:
+                raise OSError("localisation file could not be read")
+            for line in loc_text.splitlines():
+                m = _LOC_KEY_RE.match(line)
+                if m:
+                    existing_keys.add(m.group(1))
+        os.makedirs(os.path.dirname(loc_path), exist_ok=True)
+        wf = notifying_workspace_files(
+            app.index, app.index.root, app.note_mod_file_written
+        )
+        to_write = {}
+        if tooltip_key not in existing_keys:
+            to_write[tooltip_key] = f"$$[?{variable_name}|+3] from §Y${idea_id}$§!\\n"
+        if not loc_exists:
+            wf.write_text(loc_path, loc_target.header() + "\n", encoding=loc_encoding)
+        if to_write:
+            wf.append_text(
+                loc_path,
+                separate_line_append(
+                    loc_text,
+                    "".join(
+                        f" {k}: {json.dumps(v, ensure_ascii=False)}\n"
+                        for k, v in to_write.items()
+                    ),
+                ),
+                encoding=loc_encoding,
+            )
+            output_lines.append(
+                f"✅ {os.path.relpath(loc_path, app.index.root)}  — wrote tooltip localisation"
+            )
+    except (OSError, ValueError, UnicodeDecodeError, RuntimeError) as exc:
+        output_lines.append(f"❌ Tooltip localisation: {exc}")
+
+    return output_lines
 
 
 def open_additional_income_wizard(app):
@@ -551,59 +612,9 @@ def open_additional_income_wizard(app):
 
         # ── Also write localisation for tooltip ──────────────────────
         if tooltip_text and tooltip_key:
-            loc_target = app.app_config.loc_target
-            selected_loc = bool(app.edit_loc_file)
-            loc_path = (
-                app.edit_loc_file
-                if selected_loc
-                else os.path.join(
-                    app.index.root,
-                    "localisation",
-                    loc_target.dirname(),
-                    loc_target.filename(idea_id),
-                )
+            output_lines.extend(
+                _save_tooltip_localisation(app, idea_id, variable_name, tooltip_key)
             )
-            try:
-                existing_keys = set()
-                loc_encoding = "utf-8-sig"
-                loc_exists = os.path.isfile(loc_path)
-                if selected_loc and not loc_exists:
-                    raise OSError("selected localisation file no longer exists")
-                if loc_exists:
-                    loc_text, loc_encoding = read_file_with_encoding(loc_path)
-                    if loc_text is None or loc_encoding is None:
-                        raise OSError("localisation file could not be read")
-                    for line in loc_text.splitlines():
-                        m = _LOC_KEY_RE.match(line)
-                        if m:
-                            existing_keys.add(m.group(1))
-                os.makedirs(os.path.dirname(loc_path), exist_ok=True)
-                wf = notifying_workspace_files(
-                    app.index, app.index.root, app.note_mod_file_written
-                )
-                to_write = {}
-                if tooltip_key not in existing_keys:
-                    to_write[tooltip_key] = (
-                        f"$$[?{variable_name}|+3] from §Y${idea_id}$§!\\n"
-                    )
-                if not loc_exists:
-                    wf.write_text(
-                        loc_path, loc_target.header() + "\n", encoding=loc_encoding
-                    )
-                if to_write:
-                    wf.append_text(
-                        loc_path,
-                        "".join(
-                            f" {k}: {json.dumps(v, ensure_ascii=False)}\n"
-                            for k, v in to_write.items()
-                        ),
-                        encoding=loc_encoding,
-                    )
-                    output_lines.append(
-                        f"✅ {os.path.relpath(loc_path, app.index.root)}  — wrote tooltip localisation"
-                    )
-            except (OSError, ValueError, UnicodeDecodeError, RuntimeError) as exc:
-                output_lines.append(f"❌ Tooltip localisation: {exc}")
 
         # ── Generate spirit code snippet ──────────────────────────────
         if mode == "also_spirit":

@@ -13,15 +13,20 @@ from pathlib import Path
 
 from hoi4cm.mod import scan_cache
 from hoi4cm.mod.workspace_cache import WorkspaceCache
+from hoi4cm.script.syntax import match_brace
 
-_CACHE_VERSION = 1
+_CACHE_VERSION = 2
 _IMAGE_EXTENSIONS = (".dds", ".png", ".tga")
 # Pre-catalog builds dropped this JSON sidecar in the mod root. The SQLite
 # scan cache replaced it; clean the stray file up so it stops confusing users.
 _LEGACY_SIDECAR_NAME = ".hoi4cm_gfx_cache.json"
-_SPRITE_BLOCK_RE = re.compile(r"spriteType\s*=\s*\{")
-_SPRITE_NAME_RE = re.compile(r'\bname\s*=\s*"([^"]+)"')
-_SPRITE_TEXTURE_RE = re.compile(r'\btexturefile\s*=\s*"([^"]+)"')
+# Consume comments and strings before looking for declarations or fields.
+_SPRITE_BLOCK_RE = re.compile(
+    r'"[^"]*"?|#[^\n]*|(?<!\w)(?P<sprite>spriteType\s*=\s*\{)'
+)
+_SPRITE_FIELD_RE = re.compile(
+    r'#[^\n]*|(?<!\w)(?P<key>name|texturefile)\s*=\s*"(?P<value>[^"]+)"|"[^"]*"?'
+)
 
 
 class ScanCancelled(Exception):
@@ -1316,13 +1321,19 @@ def _declaration_families(declaration: SpriteDeclaration) -> tuple[str, ...]:
 def _parse_declarations(
     text: str, *, top_level: bool, strict_extension: bool
 ) -> Iterable[SpriteDeclaration]:
+    # The shared script scanners treat LF as the comment terminator.
+    # Normalize CR-only and CRLF files without changing characters in values.
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
     for block in _iter_sprite_blocks(text):
-        name_match = _SPRITE_NAME_RE.search(block)
-        texture_match = _SPRITE_TEXTURE_RE.search(block)
-        if name_match is None or texture_match is None:
+        fields: dict[str, str] = {}
+        for match in _SPRITE_FIELD_RE.finditer(block):
+            key = match.group("key")
+            if key is not None:
+                fields.setdefault(key, match.group("value"))
+        if "name" not in fields or "texturefile" not in fields:
             continue
         texture_raw = (
-            texture_match.group(1).strip().replace("\\\\", "/").replace("\\", "/")
+            fields["texturefile"].strip().replace("\\\\", "/").replace("\\", "/")
         )
         texture_path = texture_raw.replace("/", os.sep)
         reference = (
@@ -1331,7 +1342,7 @@ def _parse_declarations(
             else PathReference("mod", texture_path)
         )
         yield SpriteDeclaration(
-            name=name_match.group(1).strip(),
+            name=fields["name"].strip(),
             texture_path=reference,
             texture_path_lower=texture_raw.lower(),
             top_level=top_level,
@@ -1345,14 +1356,11 @@ def _iter_sprite_blocks(text: str) -> Iterable[str]:
         match = _SPRITE_BLOCK_RE.search(text, offset)
         if match is None:
             return
-        depth = 1
-        end = match.end()
-        while end < len(text) and depth > 0:
-            if text[end] == "{":
-                depth += 1
-            elif text[end] == "}":
-                depth -= 1
-            end += 1
+        if match.group("sprite") is None:
+            offset = match.end()
+            continue
+        close = match_brace(text, match.end() - 1)
+        end = min(close + 1, len(text))
         yield text[match.start() : end]
         offset = end
 

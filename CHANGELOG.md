@@ -10,6 +10,26 @@ the version by hand. See `AGENTS.md`.
 
 - Preserve raw focus content when imported focus IDs are quoted.
 
+- Ignore comments and quoted braces when reading GFX sprite declarations,
+  preventing disabled sprites and fields from overriding live graphics.
+
+- Preserve mission settings and repeatable decisions when importing decisions.
+
+- Preserve each decision’s targeting and cost modes when exporting mixed decision files.
+
+- Read unversioned localisation keys when looking up wizard titles and descriptions.
+
+- Separate appended wizard localisation entries when the existing file has no
+  final newline, preserving its encoding and line endings.
+
+- Stop focus-tree export before writing when an existing localisation file
+  cannot be read, and report its path in the export failure.
+
+- Validate deep prerequisite chains and cycles without exceeding Python's recursion limit.
+
+- Preserve nested blocks in rendered scope effects and limits, including catalog
+  defaults that previously exported with missing closing braces.
+
 - Preserve comments inside imported focus reward and condition blocks
   (`completion_reward`, `available`, `cancel`, and the other raw keys)
   through parse, build, export and repeated round trips. Comments used to be
@@ -20,8 +40,21 @@ the version by hand. See `AGENTS.md`.
   a running pass, keep detached snapshots, and refresh after localisation-file,
   graphics-catalog, or language changes. Explicit Refresh still forces a pass.
 
+- Flag unsafe raw-effect key renames in red on the key entry until a usable
+  name commits: taken, empty and `_` names, and a rename to `raw` while
+  sibling fields exist, since the exporter would drop them. Dict and list
+  values in raw rows are read-only so an edit cannot store a flat string
+  that exports as invalid script.
+
 - Make wizard image caches App-owned, invalidate them on mod reload, and
   release each decision window's preview cache when that window is destroyed.
+
+- Make a pick in the Focus Icon GFX browser undoable: confirming a pick that
+  changes the GFX now pushes a `change gfx` undo entry before writing, so
+  Ctrl+Z reverts it and Ctrl+Y reapplies it. Save pending sidebar edits first
+  so Undo reverses the GFX pick before those earlier edits. Picking the current
+  value adds no GFX history entry. Refresh the canvas and focus list for flushed
+  sidebar edits even when confirming the current GFX.
 
 - Import focus trees containing non-finite `ai_will_do` values (`inf`,
   `-inf`, `1e999`, `-1e999`) instead of aborting the load: the field falls
