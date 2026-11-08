@@ -411,8 +411,10 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         return saved
 
     def note_mod_file_written(self, path: str):
-        """Update the index, then drop stale PhotoImages on the Tk thread."""
-        return self.images.evict(self.index.note_file_written(path))
+        """Update the index, then refresh stale icons on the Tk thread."""
+        names = self.index.note_file_written(path)
+        self._invalidate_canvas_sprites(names)
+        return self.images.evict(names)
 
     def _workspace_fingerprint(self):
         try:
@@ -2349,10 +2351,20 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         return var
 
     def _set_gfx(self, name):
+        flushed = False
+        if self.selected:
+            revision = self.focuses.content_revision
+            self._autosave()
+            flushed = self.focuses.content_revision != revision
         self._fv_gfx.set(name)
-        if self.selected and self.selected.gfx != name:
+        gfx_changed = self.selected and self.selected.gfx != name
+        if gfx_changed:
+            self._push_undo("change gfx", touched_ids=(self.selected.id,))
             self.selected.gfx = name
             self.focuses.mark_content_changed()
+        if flushed:
+            self._invalidate_focus_list_structure()
+        if gfx_changed or flushed:
             self._redraw_now()
 
     def _attach_autocomplete(self, entry_widget, var, get_choices_fn):

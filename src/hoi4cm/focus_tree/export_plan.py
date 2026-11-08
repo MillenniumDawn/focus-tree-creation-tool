@@ -124,16 +124,23 @@ def render_export_plan(
             focus_name_lookup=plan.focus_name_lookup,
         )
         if plan.loc_path is not None and is_file(plan.loc_path):
-            existing_loc_text = read_text(plan.loc_path)
+            try:
+                existing_loc_text = read_text(plan.loc_path)
+            except OSError as error:
+                raise OSError(
+                    f"Could not read existing localisation file "
+                    f"{plan.loc_path}: {error}"
+                ) from error
             if existing_loc_text is None:
-                new_loc_text, added_count = None, 0
-            else:
-                new_loc_text, added_count = build_loc_yml(
-                    existing_loc_text,
-                    plan.focuses,
-                    str(plan.tree_info["country_tag"]),
-                    language=plan.loc_language,
+                raise OSError(
+                    f"Could not read existing localisation file: {plan.loc_path}"
                 )
+            new_loc_text, added_count = build_loc_yml(
+                existing_loc_text,
+                plan.focuses,
+                str(plan.tree_info["country_tag"]),
+                language=plan.loc_language,
+            )
         else:
             new_loc_text, added_count = build_loc_yml(
                 None,

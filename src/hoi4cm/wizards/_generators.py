@@ -892,13 +892,8 @@ def generate_decision_categories_file(cats, decs):
     return "\n".join(out)
 
 
-def generate_decisions_file(cats, decs, *, targeted=None, cost_type=None):
-    """Render the common/decisions/TAG_decisions.txt file.
-
-    `targeted`/`cost_type` are the wizard's form-level targeting/cost
-    modes, forwarded to each decision block (the closure resolves them
-    from the Tk StringVars before delegating).
-    """
+def generate_decisions_file(cats, decs):
+    """Render each decision using its stored targeting and cost modes."""
     out = [
         "# ================================================================",
         "# FILE: common/decisions/TAG_decisions.txt",
@@ -912,7 +907,9 @@ def generate_decisions_file(cats, decs, *, targeted=None, cost_type=None):
         for dec in cat_decs:
             out.append(
                 "\n"
-                + generate_decision_block(dec, targeted=targeted, cost_type=cost_type)
+                + generate_decision_block(
+                    dec, targeted=dec.get("targeted"), cost_type=dec.get("cost_type")
+                )
             )
         out.append("}\n")
     return "\n".join(out)

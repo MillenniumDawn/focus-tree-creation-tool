@@ -68,6 +68,9 @@ class _App:
     def _begin_document_generation(self):
         pass
 
+    def _invalidate_canvas_sprites(self, names):
+        pass
+
     def __init__(self, focuses, *, mod_files):
         self.index = mod_files.index
         self.app_config = AppConfig()

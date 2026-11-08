@@ -105,7 +105,9 @@ class AppFake(CanvasMixin, ModLoadingMixin, EffectsMixin):
         self._update_statusbar = Mock()
 
         def note_mod_file_written(path: str) -> None:
-            self.images.evict(self.index.note_file_written(path))
+            names = self.index.note_file_written(path)
+            self._invalidate_canvas_sprites(names)
+            self.images.evict(names)
 
         self.note_mod_file_written = note_mod_file_written
 

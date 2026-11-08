@@ -4500,13 +4500,7 @@ def open_decision_wizard(app):
 
     def _gen_decisions_file():
         _collect()
-        state = collect_decision_state(_evars)
-        return _generators.generate_decisions_file(
-            dm_cats,
-            dm_decs,
-            targeted=state["targeted"],
-            cost_type=state["cost_type"],
-        )
+        return _generators.generate_decisions_file(dm_cats, dm_decs)
 
     def _gen_categories_file():
         _collect()
