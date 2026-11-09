@@ -8,6 +8,10 @@ the version by hand. See `AGENTS.md`.
 
 ## Unreleased
 
+---
+
+## [0.4.5] — 2026-11-08
+
 - Revoke recovery eligibility without waiting for a stalled filesystem rename;
   reject discarded recovery files after restart and when opened manually.
 
