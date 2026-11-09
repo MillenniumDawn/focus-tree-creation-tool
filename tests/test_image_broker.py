@@ -399,6 +399,119 @@ def test_missing_pillow_does_not_submit_or_realize() -> None:
     assert delivered == [None]
 
 
+def test_generation_drop_reports_only_still_interested_owners() -> None:
+    """A stale completion notifies the host, released/replaced owners do not."""
+    gate = threading.Event()
+    generation = 1
+    dropped: list[object] = []
+    delivered_a: list[object] = []
+    delivered_c: list[object] = []
+
+    def decode(path: str, transform: ImageTransform) -> object:
+        gate.wait(timeout=2)
+        return object()
+
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        broker = ImageBroker(
+            executor,
+            generation=lambda: generation,
+            decoder=decode,
+            realizer=lambda image: image,
+            pillow_available=True,
+            on_dropped=dropped.extend,
+        )
+        broker.request(
+            _asset(), "/tmp/first.png", owner="a", callback=delivered_a.append
+        )
+        broker.request(_asset(), "/tmp/second.png", owner="b", callback=lambda _: None)
+        broker.request(
+            _asset(), "/tmp/third.png", owner="c", callback=delivered_c.append
+        )
+        broker.release("b")
+        generation = 2
+        broker.request(
+            _asset(generation=2),
+            "/tmp/fourth.png",
+            owner="c",
+            callback=delivered_c.append,
+        )
+        gate.set()
+        _drain_when_ready(broker)
+
+        # The retry: the reported owner re-requests under the new generation.
+        retry: list[object] = []
+        broker.request(
+            _asset(generation=2), "/tmp/first.png", owner="a", callback=retry.append
+        )
+        _drain_when_ready(broker)
+
+    assert dropped == ["a"]
+    assert delivered_a == []
+    # c's delivery is its fourth.png replacement; the dropped third.png decode
+    # is never delivered and b was released, so neither is reported for retry.
+    assert delivered_c != []
+    assert retry != []
+
+
+def test_stable_generation_delivery_does_not_report_drops() -> None:
+    dropped: list[object] = []
+    delivered: list[object] = []
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        broker = ImageBroker(
+            executor,
+            generation=lambda: 1,
+            decoder=lambda path, transform: object(),
+            realizer=lambda image: image,
+            pillow_available=True,
+            on_dropped=dropped.extend,
+        )
+        broker.request(_asset(), "/tmp/icon.png", owner="a", callback=delivered.append)
+        _drain_when_ready(broker)
+
+    assert delivered != []
+    assert dropped == []
+
+
+def test_generation_change_during_realization_reports_dropped_owner() -> None:
+    generation = 1
+    dropped: list[object] = []
+    delivered: list[object] = []
+
+    def realize(image: object) -> object:
+        nonlocal generation
+        generation = 2
+        return image
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        broker = ImageBroker(
+            executor,
+            generation=lambda: generation,
+            decoder=lambda path, transform: object(),
+            realizer=realize,
+            pillow_available=True,
+            on_dropped=dropped.extend,
+        )
+        broker.request(_asset(), "/tmp/icon.png", owner="a", callback=delivered.append)
+        _drain_when_ready(broker)
+
+        assert dropped == ["a"]
+        assert delivered == []
+        assert broker.cache_count == 0
+        assert broker.pin_count == 0
+
+        broker.request(
+            _asset(generation=2),
+            "/tmp/icon.png",
+            owner="a",
+            callback=delivered.append,
+        )
+        _drain_when_ready(broker)
+
+    assert len(delivered) == 1
+    assert dropped == ["a"]
+
+
 def test_close_drops_inflight_owner_callback_without_waiting() -> None:
     gate = threading.Event()
     started = threading.Event()
