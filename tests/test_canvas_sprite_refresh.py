@@ -23,6 +23,7 @@ from hoi4cm.mod import scan_cache as scan_cache_mod
 from hoi4cm.mod.graphics_catalog import AssetRef, FileStamp
 from hoi4cm.models import Focus
 from hoi4cm.ui.canvas_renderer import FocusCanvasBundle
+from hoi4cm.ui.canvas_scheduler import RedrawChannel
 from hoi4cm.ui.image_broker import ImageBroker, ImageTransform
 
 _REMAP_GFX = 'spriteType = {{ name = "GFX_remap" texturefile = "{texture}" }}\n'
@@ -47,6 +48,7 @@ class _Decoder:
     def __init__(self) -> None:
         self.calls: list[str] = []
         self.hold: dict[str, threading.Event] = {}
+        self.started = threading.Event()
 
     def __call__(self, path: str, transform: ImageTransform) -> object:
         data = Path(path).read_bytes()
@@ -54,6 +56,7 @@ class _Decoder:
         self.calls.append(name)
         gate = self.hold.pop(name, None)
         if gate is not None:
+            self.started.set()
             gate.wait(timeout=2)
         return data
 
@@ -78,6 +81,7 @@ class _Canvas:
             decoder=self.decoder,
             realizer=lambda image: image,
             pillow_available=True,
+            on_dropped=self.fake._on_broker_dropped,
         )
         self.fake._image_broker = self.broker
         self.fake.__dict__["_redraw"] = Mock()
@@ -199,6 +203,7 @@ def test_stale_completion_after_the_write_is_not_delivered(canvas: _Canvas) -> N
     gate = threading.Event()
     canvas.decoder.hold["alpha.dds"] = gate
     canvas.draw()  # alpha-v1 decode starts and is held open
+    assert canvas.decoder.started.wait(timeout=2)
 
     canvas.fake.note_mod_file_written(canvas.write(_ALPHA, b"alpha-v2-longer"))
     gate.set()
@@ -214,6 +219,7 @@ def test_stale_completion_cannot_replace_the_refreshed_icon(canvas: _Canvas) -> 
     gate = threading.Event()
     canvas.decoder.hold["alpha.dds"] = gate
     canvas.draw()  # alpha-v1 decode starts and is held open
+    assert canvas.decoder.started.wait(timeout=2)
 
     canvas.fake.note_mod_file_written(canvas.write(_ALPHA, b"alpha-v2-longer"))
     canvas.draw()  # refreshed request runs on the second worker
@@ -222,6 +228,64 @@ def test_stale_completion_cannot_replace_the_refreshed_icon(canvas: _Canvas) -> 
     gate.set()  # the stale decode now finishes after the refreshed one
     canvas.settle()
     assert canvas.bundle(1).image == b"alpha-v2-longer"
+
+
+def test_dropped_pending_card_re_requests_on_the_next_frame(canvas: _Canvas) -> None:
+    """An unrelated successful write must not strand a pending card."""
+    canvas.fake._draw_focus(canvas.fake.focuses[3])
+    canvas.settle()
+    warm_key = canvas.bundle(3).draw_key
+    assert canvas.bundle(3).image == b"other-v1"
+
+    gate = threading.Event()
+    canvas.decoder.hold["alpha.dds"] = gate
+    canvas.draw()  # the alpha decode starts and is held open
+    assert canvas.decoder.started.wait(timeout=2)
+
+    canvas.fake.note_mod_file_written(canvas.write(_BETA, b"beta-v2-longer"))
+    assert canvas.redraws() == 0  # no visible sprite was touched
+    gate.set()
+    canvas.settle()
+    assert canvas.bundle(1).image is None  # stale result suppressed
+    assert canvas.bundle(1).draw_key is None
+    canvas.fake.mock("_redraw").assert_any_call(
+        RedrawChannel.VIEW, reason="image-dropped"
+    )
+
+    canvas.draw()  # the retry frame
+    canvas.settle()
+    assert canvas.bundle(1).image == b"alpha-v1"
+    assert canvas.decoder.calls.count("alpha.dds") == 2
+    assert canvas.bundle(3).draw_key is warm_key
+    assert canvas.bundle(3).image == b"other-v1"
+    assert canvas.decoder.calls.count("other.dds") == 1
+
+    # Delivered-image control: later frames neither redraw nor decode again.
+    redraws, decodes = canvas.redraws(), canvas.decoder.calls.count("alpha.dds")
+    canvas.draw()
+    canvas.settle()
+    assert canvas.redraws() == redraws
+    assert canvas.decoder.calls.count("alpha.dds") == decodes
+
+
+def test_replaced_gfx_skips_the_dropped_sprite_retry(canvas: _Canvas) -> None:
+    """A card whose gfx changed while its decode was dropped retries the new gfx."""
+    canvas.fake.focuses.delete_many([1])
+    gate = threading.Event()
+    canvas.decoder.hold["alpha.dds"] = gate
+    canvas.draw()
+    assert canvas.decoder.started.wait(timeout=2)
+
+    canvas.fake.note_mod_file_written(canvas.write(_BETA, b"beta-v2-longer"))
+    gate.set()
+    canvas.settle()
+    assert canvas.bundle(2).draw_key is None
+
+    canvas.fake.focuses[2].gfx = "GFX_focus_other"
+    canvas.draw()
+    canvas.settle()
+    assert canvas.bundle(2).image == b"other-v1"
+    assert canvas.decoder.calls.count("alpha.dds") == 1
 
 
 def test_invalidation_clears_only_matching_full_detail_bundles() -> None:

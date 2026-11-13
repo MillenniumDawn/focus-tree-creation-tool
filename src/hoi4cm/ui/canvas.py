@@ -8,7 +8,7 @@ lines out of ``hoi4_content_maker.py``.
 
 import math
 import tkinter as tk
-from collections.abc import Collection
+from collections.abc import Collection, Hashable
 from typing import TYPE_CHECKING
 
 from hoi4cm.core.i18n import tr
@@ -147,6 +147,7 @@ class CanvasMixin(_CanvasState):
         self._image_broker = ImageBroker(
             get_executor(self),
             generation=lambda: self.index.graphics_catalog.generation,
+            on_dropped=self._on_broker_dropped,
         )
         lifecycle = self._lifecycle
         if lifecycle is not None:
@@ -231,6 +232,21 @@ class CanvasMixin(_CanvasState):
                 stale = True
         if stale:
             self._redraw(RedrawChannel.VIEW, reason="sprite-written")
+
+    def _on_broker_dropped(self, owners: Collection[Hashable]) -> None:
+        """Invalidate dropped requests on the owner thread, not on every frame."""
+        stale = False
+        for owner in owners:
+            if not (
+                isinstance(owner, tuple) and len(owner) == 2 and owner[0] == "canvas"
+            ):
+                continue
+            bundle = self._focus_bundles.get(owner[1])
+            if bundle is not None and bundle.lod == "full":
+                bundle.draw_key = None
+                stale = True
+        if stale:
+            self._redraw(RedrawChannel.VIEW, reason="image-dropped")
 
     def _close_canvas_tasks(self):
         for handle in (self._image_poll_job, self._redraw_job, self._lines_job):
