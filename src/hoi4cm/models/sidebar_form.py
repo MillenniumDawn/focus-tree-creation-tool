@@ -30,22 +30,25 @@ def form_focus_id(raw: str, current: str | None) -> str:
     return _ID_SANITIZE_RE.sub("_", raw)
 
 
+def parse_ai_will_do_status(raw_ai: str) -> tuple[int, bool]:
+    """Return the top-level numeric ai_will_do value and whether it is valid."""
+    parsed = parse_script(raw_ai)
+    value = parsed.get("factor", parsed.get("base", 1))
+    if not isinstance(value, str | int | float):
+        return 1, False
+    try:
+        return int(float(value)), True
+    except ValueError, OverflowError:
+        return 1, False
+
+
 def parse_ai_will_do(raw_ai: str) -> int:
     """Top-level numeric ai_will_do value from a raw block body.
 
     Reuses the import parser: a top-level ``factor`` wins over ``base``,
-    duplicated keys parse as lists and, like any other non-numeric value,
-    fall back to 1.
+    duplicated keys parse as lists and invalid values fall back to 1.
     """
-    parsed = parse_script(raw_ai)
-    value = parsed.get("factor", parsed.get("base", 1))
-    if not isinstance(value, str | int | float):
-        return 1
-    try:
-        return int(float(value))
-    except ValueError, OverflowError:
-        # OverflowError: infinite float tokens (inf, 1e999) are not int()-able.
-        return 1
+    return parse_ai_will_do_status(raw_ai)[0]
 
 
 def parse_focus_cost(raw: str) -> int | float:

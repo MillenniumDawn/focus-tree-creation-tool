@@ -289,7 +289,9 @@ def test_untouched_imported_block_padding_is_not_dirty():
     assert focus.available_cond != focus.available_cond.strip()
     assert focus.bypass_cond != focus.bypass_cond.strip()
     assert focus.cancel_cond != focus.cancel_cond.strip()
-    assert focus.offsets[0]["trigger"] != focus.offsets[0]["trigger"].strip()
+    trigger = focus.offsets[0]["trigger"]
+    assert isinstance(trigger, str)
+    assert trigger != trigger.strip()
     assert sidebar_values_match_focus(focus, _padded_form(focus)) is True
 
 
