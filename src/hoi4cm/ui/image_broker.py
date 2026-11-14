@@ -112,6 +112,7 @@ class ImageBroker:
         pillow_available: bool = PIL_OK,
         cache_size: int = 512,
         pin_size: int = 512,
+        on_dropped: Callable[[Collection[Hashable]], None] | None = None,
     ) -> None:
         if cache_size < 1 or pin_size < 1:
             raise ValueError("image cache and pin sizes must be positive")
@@ -122,6 +123,7 @@ class ImageBroker:
         self._pillow_available = pillow_available
         self._cache_size = cache_size
         self._pin_size = pin_size
+        self._on_dropped = on_dropped
         self._owner_thread = threading.get_ident()
         self._lock = threading.Lock()
         self._cache: OrderedDict[_CacheKey, object | None] = OrderedDict()
@@ -302,6 +304,7 @@ class ImageBroker:
         self, key: _ImageKey, decoded: object | None, *, realized: bool
     ) -> None:
         current_generation = self._generation()
+        dropped: list[Hashable] = []
         with self._lock:
             pending = self._pending.pop(key, None)
             if pending is None:
@@ -315,8 +318,10 @@ class ImageBroker:
             for owner in pending.subscribers.keys() - subscribers.keys():
                 if self._owner_requests.get(owner) == key:
                     self._owner_requests.pop(owner, None)
-            if not subscribers:
-                return
+                    dropped.append(owner)
+        if not subscribers:
+            self._notify_dropped(dropped)
+            return
 
         photo = decoded if realized else None
         if decoded is not None and not realized:
@@ -337,20 +342,28 @@ class ImageBroker:
                 for owner in subscribers:
                     if self._owner_requests.get(owner) == key:
                         self._owner_requests.pop(owner, None)
-                return
-            self._cache_locked(key, photo)
-            for owner, subscriber in subscribers.items():
-                if self._owner_requests.get(owner) != key:
-                    continue
-                self._owner_requests.pop(owner, None)
-                if photo is not None:
-                    self._pin_locked(owner, key, photo)
-                # Deliver failures (photo is None) too, so the subscriber can
-                # swap its loading placeholder for an error marker.
-                delivered.append(subscriber)
-
+                        dropped.append(owner)
+            else:
+                self._cache_locked(key, photo)
+                for owner, subscriber in subscribers.items():
+                    if self._owner_requests.get(owner) != key:
+                        continue
+                    self._owner_requests.pop(owner, None)
+                    if photo is not None:
+                        self._pin_locked(owner, key, photo)
+                    # Deliver failures (photo is None) too, so the subscriber can
+                    # swap its loading placeholder for an error marker.
+                    delivered.append(subscriber)
+        self._notify_dropped(dropped)
         for subscriber in delivered:
             subscriber.callback(photo)
+
+    def _notify_dropped(self, dropped: list[Hashable]) -> None:
+        if dropped and self._on_dropped is not None:
+            try:
+                self._on_dropped(dropped)
+            except Exception:
+                log.exception("drop notification failed for %d owner(s)", len(dropped))
 
     def _forget_request_locked(self, owner: Hashable) -> None:
         previous = self._owner_requests.pop(owner, None)

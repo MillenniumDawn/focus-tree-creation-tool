@@ -460,9 +460,12 @@ A write that changes no sprite name (a focus or localisation export) clears
 nothing and requests no redraw. Unrelated cards keep their `draw_key` and their
 warm images.
 
-Stale decodes need no new mechanism. Every catalog write bumps the generation,
-the refreshed request carries it, and the broker discards completions that
-belong to an older generation or to a request the owner has replaced.
+Every catalog write bumps the generation, so the broker discards older
+completions even for unrelated cards. Through `on_dropped`, `drain` reports
+still-interested owners on the Tk thread. The canvas clears those cards'
+`draw_key` and schedules a coalesced `VIEW` frame to request current sprite
+data (#416). Released or replaced requests do not trigger retries, and delivered
+images stay unchanged. No per-frame lookup or state-key field is added.
 
 ### Validation deduplication (#383)
 

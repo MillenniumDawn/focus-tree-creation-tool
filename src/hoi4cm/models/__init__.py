@@ -7,6 +7,7 @@ from .sidebar_form import (
     apply_sidebar_values,
     form_focus_id,
     parse_ai_will_do,
+    parse_ai_will_do_status,
     parse_focus_cost,
     sidebar_values_match_focus,
 )
@@ -21,6 +22,7 @@ __all__ = [
     "apply_sidebar_values",
     "form_focus_id",
     "parse_ai_will_do",
+    "parse_ai_will_do_status",
     "parse_focus_cost",
     "sidebar_values_match_focus",
 ]

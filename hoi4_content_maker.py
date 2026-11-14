@@ -117,10 +117,11 @@ from hoi4cm.models import (  # noqa: E402
     TreeMetadata,
     apply_sidebar_values,
     form_focus_id,
-    parse_ai_will_do,
+    parse_ai_will_do_status,
     parse_focus_cost,
     sidebar_values_match_focus,
 )
+from hoi4cm.models import parse_ai_will_do as parse_ai_will_do  # noqa: E402
 from hoi4cm.ui import (  # noqa: E402
     BG_CARD,
     BG_DARK,
@@ -2533,6 +2534,8 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         self._set_field_error("_fv_cost_entry", cost_err)
         self._set_field_error("_fv_x_entry", x_err)
         self._set_field_error("_fv_y_entry", y_err)
+        ai_will_do, ai_valid = parse_ai_will_do_status(raw_ai)
+        self._set_field_error("_fv_ai_raw", not ai_valid)
 
         return FocusSidebarValues(
             # An untouched field keeps the imported id verbatim; sanitizing it
@@ -2541,7 +2544,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
             icon=self._fv_icon.get(),
             gfx=self._fv_gfx.get().strip() or "GFX_goal_generic_political_pressure",
             cost=cost,
-            ai_will_do=parse_ai_will_do(raw_ai),
+            ai_will_do=ai_will_do,
             ai_will_do_raw=raw_ai,
             x=x,
             y=y,
@@ -2565,7 +2568,7 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         """
         try:
             return parser(var.get()), False
-        except ValueError, TypeError:
+        except ValueError, TypeError, OverflowError:
             self._log_error(
                 f"Invalid {field_name} value {var.get()!r}; using fallback {fallback}"
             )
@@ -2658,14 +2661,13 @@ class App(CanvasMixin, ModLoadingMixin, EffectsMixin, tk.Tk):  # type: ignore[mi
         self._fv_x.set(str(f.x))
         self._fv_y.set(str(f.y))
         self._fv_cost.set(str(f.cost))
+        for entry_attr in ("_fv_cost_entry", "_fv_x_entry", "_fv_y_entry"):
+            self._set_field_error(entry_attr, False)
         self._fv_loc_name.set(getattr(f, "loc_name", "") or "")
         self._fv_ai_raw.delete("1.0", "end")
-        raw = getattr(f, "ai_will_do_raw", "").strip()
-        if raw:
-            self._fv_ai_raw.insert("1.0", raw)
-        else:
-            # MD convention: ai_will_do uses `base = X` at top level
-            self._fv_ai_raw.insert("1.0", f"    base = {f.ai_will_do}")
+        raw = getattr(f, "ai_will_do_raw", "").strip() or f"    base = {f.ai_will_do}"
+        self._fv_ai_raw.insert("1.0", raw)
+        self._set_field_error("_fv_ai_raw", not parse_ai_will_do_status(raw)[1])
         self._fv_desc.delete("1.0", "end")
         self._fv_desc.insert("1.0", f.desc)
         self._fv_search.set(getattr(f, "search_filters", "FOCUS_FILTER_POLITICAL"))

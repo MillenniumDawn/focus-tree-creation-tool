@@ -12,6 +12,19 @@ the version by hand. See `AGENTS.md`.
   while refreshing its stamp and dependent previews. New images and deletions
   still update path queries.
 
+- Refresh script-ID suggestions after a successful mod save without reloading
+  the mod. Replacing or removing IDs keeps definitions from other files and
+  invalidates the saved file's scan cache, including in-mod file and directory
+  symlinks and files contributing to several script domains.
+
+---
+
+## [0.4.6] — 2026-11-13
+
+- Keep unrelated focus sidebar edits when a cost is non-finite, and highlight
+  invalid `ai_will_do` input until it is corrected. Refresh validation borders
+  when switching focuses so they match the displayed values.
+
 ---
 
 ## [0.4.5] — 2026-11-08
