@@ -197,6 +197,18 @@ that index, evicts affected names from the App's image cache, and makes visible
 canvas cards re-request their icons, all on Tk.
 Writing elsewhere never touches live state.
 
+Script scans retain per-file contributions on the owning `ModIndex`. A successful
+write or deletion reparses only that script file and rebuilds the affected domains'
+ID lists, including focus variables. Duplicate contributors and scan ordering are
+preserved. Domain lookup and contribution grouping resolve directory symlinks the
+same way scans do, while rejecting targets outside the mod. Notifications refresh
+every domain sharing a directory. Known file symlinks are retained with the scan
+and checked on writes so their contributions refresh under their original names
+(including event filename groups), without resolving every scanned file. The
+notification invalidates that file's persistent contribution even when its size
+and modification time did not change. Autocomplete reads these live lists when its
+popup opens; it does not need a widget rebuild or full mod scan.
+
 `mod.gfx_writer.append_sprite_types` renders declarations into new or existing
 `spriteTypes` wrappers without replacing user content. Callers still pass the
 result through `WorkspaceFiles`.
