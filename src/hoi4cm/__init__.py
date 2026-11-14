@@ -2,6 +2,6 @@
 
 from .core.logger import get_logger
 
-__version__ = "0.4.5"
+__version__ = "0.4.6"
 
 __all__ = ["get_logger", "__version__"]
