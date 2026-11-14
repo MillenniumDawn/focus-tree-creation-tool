@@ -8,6 +8,10 @@ the version by hand. See `AGENTS.md`.
 
 ## Unreleased
 
+- Keep the graphics path index when overwriting an already indexed image,
+  while refreshing its stamp and dependent previews. New images and deletions
+  still update path queries.
+
 - Refresh script-ID suggestions after a successful mod save without reloading
   the mod. Replacing or removing IDs keeps definitions from other files and
   invalidates the saved file's scan cache, including in-mod file and directory
