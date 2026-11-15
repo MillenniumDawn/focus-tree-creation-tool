@@ -402,11 +402,13 @@ class GraphicsCatalog:
             return self.note_deleted(absolute_path)
 
         if suffix_lower in _IMAGE_EXTENSIONS:
+            new_path = reference not in self._images
             self._update_directories(absolute_path)
             delta = self._apply_image_record(
                 reference, ImageRecord(reference, _stamp_from_stat(path_stat))
             )
-            self._rebuild_image_query_index()
+            if new_path:
+                self._rebuild_image_query_index()
         elif self._is_interface_file(absolute_path):
             text = read_text(absolute_path)
             if text is None:
